@@ -1,0 +1,59 @@
+
+
+asset
+temp.md
+
+# Mimo
+.mimocode/
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.app
+*.o
+*.a
+*.lib
+*.obj
+
+# Python
+__pycache__
+
+# Go
+vendor/
+go.sum
+*.test
+*.prof
+*.prof.html
+*.pprof
+cover.out
+cover.html
+
+# C++ build artifacts
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
