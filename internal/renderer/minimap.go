@@ -68,16 +68,23 @@ func NewMinimap(m *mapformat.MapData) *Minimap {
 }
 
 // Render draws the minimap to its FBO with viewport rectangle.
+// Matches C++ MapRenderer::RenderMinimap.
 func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
+	// Save GL state (C++ lines 923-925).
+	var lastFBO int32
+	var lastVP [4]int32
+	gl.GetIntegerv(gl.FRAMEBUFFER_BINDING, &lastFBO)
+	gl.GetIntegerv(gl.VIEWPORT, &lastVP[0])
+
 	gl.BindFramebuffer(gl.FRAMEBUFFER, mm.FBO)
 	gl.Viewport(0, 0, minimapSize, minimapSize)
 	gl.Clear(gl.COLOR_BUFFER_BIT)
 
-	// Draw collision texture
+	// Draw collision texture.
 	proj := OrthoProj(0, minimapSize, minimapSize, 0)
 	glState.DrawQuad(0, 0, minimapSize, minimapSize, mm.Texture, false, proj)
 
-	// Draw viewport rectangle
+	// Draw viewport rectangle.
 	worldW := float32(mapW) * TileWidth
 	worldH := float32(mapH) * TileHeight
 	x0 := float32(cam.X) / worldW * minimapSize
@@ -87,7 +94,7 @@ func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
 	x1 := (float32(cam.X) + viewW) / worldW * minimapSize
 	y1 := (float32(cam.Y) + viewH) / worldH * minimapSize
 
-	// Clamp
+	// Clamp.
 	if x0 < 0 {
 		x0 = 0
 	}
@@ -101,11 +108,11 @@ func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
 		y1 = minimapSize
 	}
 
-	// Draw white rectangle outline using grid shader
+	// Draw white rectangle outline using grid shader + grid VAO/VBO.
 	gl.UseProgram(glState.GridShader.ID)
 	gl.UniformMatrix4fv(glState.GridShader.ProjLoc, 1, false, &proj[0])
 	gl.Uniform4f(glState.GridShader.ColorLoc, 1, 1, 1, 0.8)
-	gl.BindVertexArray(glState.VAO)
+	gl.BindVertexArray(glState.GridVAO)
 
 	lines := []float32{
 		x0, y0, x1, y0, // top
@@ -113,10 +120,13 @@ func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
 		x1, y1, x0, y1, // bottom
 		x0, y1, x0, y0, // left
 	}
-	gl.BindBuffer(gl.ARRAY_BUFFER, glState.VBO)
-	gl.BufferData(gl.ARRAY_BUFFER, len(lines)*4, unsafe.Pointer(&lines[0]), gl.STREAM_DRAW)
+	gl.BindBuffer(gl.ARRAY_BUFFER, glState.GridVBO)
+	gl.BufferSubData(gl.ARRAY_BUFFER, 0, len(lines)*4, unsafe.Pointer(&lines[0]))
 	gl.DrawArrays(gl.LINES, 0, 4*2)
 
 	gl.BindVertexArray(0)
-	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+
+	// Restore GL state (C++ lines 974-975).
+	gl.BindFramebuffer(gl.FRAMEBUFFER, uint32(lastFBO))
+	gl.Viewport(lastVP[0], lastVP[1], lastVP[2], lastVP[3])
 }

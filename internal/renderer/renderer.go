@@ -152,7 +152,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		for y := bStartY; y <= bEndY; y += 2 {
 			for x := bStartX; x <= bEndX; x += 2 {
 				info := m.InfoAt(x, y)
-				if info.BackLib < 0 {
+				if info.BackLib < 0 || info.BackImage < 0 {
 					continue
 				}
 				tex := r.getTex(r.texCache, r.Tiles, info.BackImage)
@@ -172,7 +172,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		for y := startY; y <= endY; y++ {
 			for x := startX; x <= endX; x++ {
 				info := m.InfoAt(x, y)
-				if info.MiddleLib < 0 {
+				if info.MiddleLib < 0 || info.MiddleImage < 0 {
 					continue
 				}
 				tex := r.getTex(r.smTexCache, r.SmTiles, info.MiddleImage)
