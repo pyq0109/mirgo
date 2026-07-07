@@ -151,24 +151,113 @@ HumanActAttack: TActionInfo = (start:192; frame:60; skip:0; interval:80);
 
 #### 如何判断使用哪种模式？
 
-```
-判断逻辑：
-1. 打开WIL文件
-2. 查看图像内容：
-   - 如果图像是独立的图标/图块 → 浏览模式
-   - 如果图像是连续的动画帧 → 动画模式
-3. 如果不确定，先用浏览模式查看前几张图像：
-   - 看起来像同一动作的不同帧 → 切换到动画模式
-   - 看起来是独立的图像 → 保持浏览模式
+**核心原则：WIL 文件本身不存储动画/静态元数据，直接按文件名分类即可。**
+
+WIL 文件只是"图片帧的有序集合"，每张图片就是一个像素数组。是否构成动画、帧与帧之间如何排列、播放速度如何，完全由外部代码（`TActionInfo` 常量表、`btAniFrame` 字段、`AniCount` 字段）来描述。
+
+因此，**不需要自动检测**——根据文件名直接确定使用哪种模式。
+
+#### WIL 文件完整分类表
+
+根据 Delphi 源码 `Client/Share.pas` 中的常量定义：
+
+**纯动画文件（使用动画模式）**：
+
+| 文件名               | 常量名                | 内容          | 帧结构                        | 说明                       |
+| -------------------- | --------------------- | ------------- | ----------------------------- | -------------------------- |
+| Hum.wil              | HUMIMGIMAGESFILE      | 人类角色外观  | 每套装备 600 帧（8方向×75帧） | 按 TActionInfo.HA 模板组织 |
+| HumEffect.wil        | HUMWINGIMAGESFILE     | 角色翅膀/特效 | 与 Hum.wil 对应               | 叠加在角色身上的特效       |
+| Hair.wil             | HAIRIMGIMAGESFILE     | 角色发型      | 与 Hum.wil 对应               | 叠加在角色头上的发型       |
+| Weapon.wil           | WEAPONIMAGESFILE      | 武器外观      | 与 Hum.wil 对应               | 叠加在角色手中的武器       |
+| Mon1.wil ~ Mon18.wil | MONIMAGEFILE          | 怪物图像      | 每种怪物 280/360/440 帧       | 按 MA9~MA47 模板组织       |
+| Npc.wil              | NPCIMAGESFILE         | NPC 图像      | 每个 NPC 60 帧                | 站立、说话等简单动画       |
+| Magic.wil            | MAGICIMAGESFILE       | 技能特效      | 多帧序列                      | 飞行、爆炸等魔法效果       |
+| Magic2.wil           | MAGIC2IMAGESFILE      | 技能特效2     | 多帧序列                      | 扩展技能特效               |
+| Effect.wil           | EFFECTIMAGEFILE       | 通用特效      | 多帧序列                      | 爆炸、光效等               |
+| Event.wil            | EVENTEFFECTIMAGESFILE | 事件特效      | 多帧序列                      | 地图事件特效               |
+| Dragon.wil           | DRAGONIMAGEFILE       | 龙形怪物      | 特殊帧结构                    | 龙类怪物动画               |
+
+**纯静态文件（使用浏览模式）**：
+
+| 文件名        | 常量名              | 内容         | 说明                             |
+| ------------- | ------------------- | ------------ | -------------------------------- |
+| Items.wil     | BAGITEMIMAGESFILE   | 背包物品图标 | 每个图像是独立的物品，无动画关系 |
+| StateItem.wil | STATEITEMIMAGESFILE | 装备状态图标 | 角色面板中的装备图标             |
+| DnItems.wil   | DNITEMIMAGESFILE    | 地面物品图标 | 掉落在地面上的物品静态图像       |
+| Prguse.wil    | MAINIMAGEFILE       | UI 素材      | 按钮、图标、边框、血条等         |
+| Prguse2.wil   | MAINIMAGEFILE2      | UI 素材2     | 扩展 UI 元素                     |
+| Prguse3.wil   | MAINIMAGEFILE3      | UI 素材3     | 扩展 UI 元素                     |
+| ChrSel.wil    | CHRSELIMAGEFILE     | 角色选择界面 | 登录时的角色选择画面素材         |
+| mmap.wil      | MINMAPIMAGEFILE     | 小地图素材   | 小地图使用的图像                 |
+| Tiles.wil     | TITLESIMAGEFILE     | 地图图块     | 48×32 像素的地面图块             |
+| SmTiles.wil   | SMLTITLESIMAGEFILE  | 小地图图块   | 独立的地面纹理                   |
+| MagIcon.wil   | MAGICONIMAGESFILE   | 技能图标     | 技能栏中的技能图标               |
+
+**混合文件（根据上下文选择模式）**：
+
+| 文件名                     | 常量名          | 内容     | 区分机制                               |
+| -------------------------- | --------------- | -------- | -------------------------------------- |
+| Objects.wil ~ ObjectsN.wil | OBJECTIMAGEFILE | 地图物体 | 通过地图文件中的 `btAniFrame` 字段区分 |
+
+地图文件中每个格子的前方物体层有 `btAniFrame` 字段：
+
+- `btAniFrame = 0` → 静态物体（树木、建筑等）
+- `btAniFrame > 0` → 动画物体（火焰、灯光等），低 7 位为帧数
+- `btAniFrame & 0x80 != 0` → 使用透明/混合绘制模式
+
+#### 动画帧的三种区分机制
+
+**机制一：TActionInfo 硬编码表（角色/怪物）**
+
+`Actor.pas` 中硬编码了所有动作模板，定义了每个角色/怪物的动画帧布局：
+
+```pascal
+// 人类动作表 - 每 600 帧为一套角色动画
+HA: THumanAction = (
+    ActStand:  (start: 0;    frame: 4;  skip: 4;  ftime: 200);  // 站立
+    ActWalk:   (start: 64;   frame: 6;  skip: 2;  ftime: 90);   // 行走
+    ActRun:    (start: 128;  frame: 6;  skip: 2;  ftime: 120);  // 跑步
+    ActHit:    (start: 200;  frame: 6;  skip: 2;  ftime: 85);   // 攻击
+    ActSpell:  (start: 392;  frame: 6;  skip: 2;  ftime: 60);   // 施法
+    ActDie:    (start: 536;  frame: 4;  skip: 4;  ftime: 120);  // 死亡
+    ...
+);
 ```
 
-**快速判断表**：
-| 特征 | 浏览模式 | 动画模式 |
-|------|---------|---------|
-| 图像数量 | 通常较多（数百~数千） | 通常较少（几十~几百） |
-| 图像内容 | 各不相同 | 相似但有细微变化 |
-| 图像尺寸 | 多种尺寸 | 相对统一 |
-| 用途 | 图标、素材、图块 | 角色、怪物、特效 |
+帧计算公式：`实际帧 = start + 方向 × (frame + skip) + 当前帧偏移`
+
+怪物有数十种动作模板变体 (MA9~MA47)，每种定义了不同的帧布局。
+
+**机制二：btAniFrame 字段（地图物体）**
+
+地图文件中每个格子的前方物体层有 `btAniFrame` 字段：
+
+- **= 0** → 静态图像
+- **> 0** → 动画帧数（最高位 `$80` 表示透明/混合绘制）
+
+**机制三：AniCount 字段（物品）**
+
+物品结构 `TStdItem` 中有 `AniCount` 字段，表示动画帧数（通常为 0，表示静态）。
+
+#### 工具实现建议
+
+```
+打开 WIL 文件时的处理逻辑：
+
+1. 根据文件名确定模式：
+   - 文件名匹配 Hum/HumEffect/Hair/Weapon/Mon*/Npc/Magic*/Effect/Event/Dragon → 动画模式
+   - 文件名匹配 Items/StateItem/DnItems/Prguse*/ChrSel/mmap/Tiles/SmTiles/MagIcon → 浏览模式
+   - 文件名匹配 Objects* → 默认浏览模式，可手动切换
+
+2. 动画模式下，根据文件名选择动作模板：
+   - Hum.wil → 使用 HA (THumanAction) 模板
+   - Mon1~18.wil → 根据怪物类型选择 MA9~MA47 模板
+   - Npc.wil → 使用 MERCHANTFRAME (60帧) 模板
+   - 其他动画文件 → 提供通用帧序列控制
+
+3. 日志记录：
+   mlog.Logf(mlog.LevelDebug, "WIL", "文件: %s, 模式: %s, 图像数: %d", filename, mode, count)
+```
 
 ### 3.2 浏览模式功能
 
@@ -192,16 +281,13 @@ HumanActAttack: TActionInfo = (start:192; frame:60; skip:0; interval:80);
 
 ### 3.4 支持的WIL类型
 
-| 文件        | 内容     | 推荐模式 |
-| ----------- | -------- | -------- |
-| Hum.wil     | 角色外观 | 动画模式 |
-| Mon1~28.wil | 怪物图像 | 动画模式 |
-| Weapon.wil  | 武器外观 | 动画模式 |
-| Magic.wil   | 技能特效 | 动画模式 |
-| Items.wil   | 物品图标 | 浏览模式 |
-| Prguse.wil  | UI素材   | 浏览模式 |
-| Tiles.wil   | 地图图块 | 浏览模式 |
-| Objects.wil | 地图物体 | 浏览模式 |
+详见 3.1 节的"WIL 文件完整分类表"，此处为简要汇总：
+
+**动画模式**（11类）：Hum, HumEffect, Hair, Weapon, Mon1~18, Npc, Magic, Magic2, Effect, Event, Dragon
+
+**浏览模式**（11类）：Items, StateItem, DnItems, Prguse, Prguse2, Prguse3, ChrSel, mmap, Tiles, SmTiles, MagIcon
+
+**混合模式**（1类）：Objects ~ ObjectsN（通过 btAniFrame 字段区分）
 
 ---
 
@@ -392,23 +478,51 @@ func (e *Exporter) ExportAll(file *wil.File) error
 
 ---
 
-## 五、开发步骤
+## 五、开发原则
 
-### Step 1: 基础框架搭建（2天）
+### 5.1 多写 Debug 日志
+
+**核心原则：验证结果以日志输出为准**
+
+- 每个关键步骤都要输出 DEBUG 级别日志
+- 文件加载时记录：文件路径、图像数量、调色板信息
+- 动画播放时记录：当前动作、方向、帧号、帧序列
+- 用户操作时记录：点击的图像索引、切换的模式、选择的动作
+- 错误发生时记录：完整错误信息、上下文参数
+
+**日志示例**：
+
+```go
+mlog.Logf(mlog.LevelDebug, "WIL", "加载文件: %s, 图像数量: %d", path, count)
+mlog.Logf(mlog.LevelDebug, "Anim", "播放动作: %s, 方向: %d, 帧序列: %v", action, dir, frames)
+mlog.Logf(mlog.LevelDebug, "Export", "导出图像: %d, 尺寸: %dx%d", idx, w, h)
+```
+
+### 5.2 验证方式
+
+- 运行程序后检查日志输出，确认每个步骤的执行结果
+- 对比日志中的数值与预期值，确保逻辑正确
+- 错误时通过日志快速定位问题原因
+
+---
+
+## 六、开发步骤
+
+### Step 1: 基础框架搭建
 
 1. 创建 `cmd/wilviewer/` 目录
 2. 复制 `cmd/mapviewer/main.go` 作为起点
 3. 修改窗口标题和大小
 4. 验证 GLFW + ImGui 基础框架能运行
 
-### Step 2: WIL文件加载（2天）
+### Step 2: WIL文件加载
 
 1. 实现文件打开对话框
 2. 调用 `internal/wil.Load()` 加载文件
 3. 显示文件头信息（ImageCount、ColorCount等）
 4. 验证能正确加载不同类型的 .wil 文件
 
-### Step 3: 浏览模式实现（3天）
+### Step 3: 浏览模式实现
 
 1. 实现缩略图生成（缩放到固定尺寸）
 2. 实现 ImGui 列表控件
@@ -416,14 +530,14 @@ func (e *Exporter) ExportAll(file *wil.File) error
 4. 实现元数据显示面板
 5. 实现图像导出功能
 
-### Step 4: 动作模板定义（2天）
+### Step 4: 动作模板定义
 
 1. 实现 `action.go`，定义所有动作模板
 2. 参考 Delphi 源码中的 TActionInfo 定义
 3. 实现人类角色动作模板（7种）
 4. 实现怪物动作模板（14种）
 
-### Step 5: 动画播放器（3天）
+### Step 5: 动画播放器
 
 1. 实现 `animation.go`，核心播放逻辑
 2. 实现帧序列计算（考虑方向、跳帧）
@@ -431,7 +545,7 @@ func (e *Exporter) ExportAll(file *wil.File) error
 4. 实现单帧步进
 5. 实现速度调节
 
-### Step 6: 动画模式实现（3天）
+### Step 6: 动画模式实现
 
 1. 实现模式切换（浏览/动画）
 2. 实现动作选择面板
@@ -439,7 +553,7 @@ func (e *Exporter) ExportAll(file *wil.File) error
 4. 实现播放控制面板
 5. 实现帧信息显示
 
-### Step 7: 测试和优化（3天）
+### Step 7: 测试和优化
 
 1. 测试浏览模式（Items.wil、Tiles.wil等）
 2. 测试动画模式（Hum.wil、Mon1.wil等）
@@ -448,9 +562,9 @@ func (e *Exporter) ExportAll(file *wil.File) error
 
 ---
 
-## 六、关键代码参考
+## 七、关键代码参考
 
-### 6.1 从 mapviewer 复用的代码
+### 7.1 从 mapviewer 复用的代码
 
 ```go
 // 纹理上传
@@ -463,7 +577,7 @@ func DrawQuad(tex uint32, x, y, w, h float32)
 func toImGuiWindow(w *glfw.Window) *igglfw.GLFWwindow
 ```
 
-### 6.2 WIL加载器接口
+### 7.2 WIL加载器接口
 
 ```go
 // internal/wil/wil.go
@@ -479,7 +593,7 @@ type Entry struct {
 }
 ```
 
-### 6.3 帧序列计算示例
+### 7.3 帧序列计算示例
 
 ```go
 // 计算某动作某方向的帧序列
@@ -500,9 +614,9 @@ func calcFrames(action ActionInfo, direction int) []int {
 
 ---
 
-## 七、测试验证
+## 八、测试验证
 
-### 7.1 浏览模式测试
+### 8.1 浏览模式测试
 
 | 测试项       | 测试文件   | 预期结果         |
 | ------------ | ---------- | ---------------- |
@@ -512,7 +626,7 @@ func calcFrames(action ActionInfo, direction int) []int {
 | 图像查看     | 任意       | 缩放、平移正常   |
 | 图像导出     | 任意       | 导出PNG文件正确  |
 
-### 7.2 动画模式测试
+### 8.2 动画模式测试
 
 | 测试项   | 测试文件 | 预期结果         |
 | -------- | -------- | ---------------- |
@@ -525,7 +639,7 @@ func calcFrames(action ActionInfo, direction int) []int {
 | 方向切换 | 任意     | 8方向正确切换    |
 | 速度调节 | 任意     | 播放速度变化     |
 
-### 7.3 验证步骤
+### 8.3 验证步骤
 
 1. 运行 `go run cmd/wilviewer/main.go`
 2. **浏览模式测试**：
@@ -541,12 +655,16 @@ func calcFrames(action ActionInfo, direction int) []int {
    - 切换"走路"动作，验证动画流畅
    - 调整速度，验证播放速度变化
    - 测试怪物WIL（Mon1.wil）
+4. **日志验证**：
+   - 检查控制台输出，确认每个关键步骤都有 DEBUG 日志
+   - 验证日志中的数值（图像数量、帧号、方向等）与预期一致
+   - 错误时通过日志快速定位问题
 
 ---
 
-## 八、后续扩展
+## 九、后续扩展
 
-### 8.1 可选功能
+### 9.1 可选功能
 
 - **批量查看**：同时打开多个WIL文件
 - **图像对比**：对比不同WIL中的图像
