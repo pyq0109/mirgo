@@ -11,9 +11,10 @@ import (
 	"github.com/go-gl/glfw/v3.4/glfw"
 
 	"github.com/pyq0109/mirgo/internal/mapformat"
-	"github.com/pyq0109/mirgo/internal/renderer"
-	"github.com/pyq0109/mirgo/internal/ui"
 	"github.com/pyq0109/mirgo/internal/wil"
+
+	"github.com/pyq0109/mirgo/cmd/mapviewer/renderer"
+	"github.com/pyq0109/mirgo/cmd/mapviewer/ui"
 )
 
 const (
@@ -268,6 +269,7 @@ func main() {
 			mapVpW = 1
 		}
 		gl.Viewport(0, 0, mapVpW, int32(glfwH))
+		gl.ClearColor(0.1, 0.1, 0.1, 1.0)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 		ren.Render(m, cam, showBack, showMid, showFront, showCollision, showGrid)
 

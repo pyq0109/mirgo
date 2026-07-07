@@ -11,7 +11,7 @@ import (
 	igopengl3 "github.com/AllenDang/cimgui-go/impl/opengl3"
 
 	"github.com/pyq0109/mirgo/internal/mapformat"
-	"github.com/pyq0109/mirgo/internal/renderer"
+	"github.com/pyq0109/mirgo/cmd/mapviewer/renderer"
 )
 
 const (

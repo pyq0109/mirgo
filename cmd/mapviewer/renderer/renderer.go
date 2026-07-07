@@ -104,6 +104,10 @@ func (r *GLRenderer) getTex(cache map[int]uint32, file *wil.File, idx int) uint3
 // Render order matches C++ MapRenderer::Render:
 // Back -> Middle -> Front(normal) -> Front(blend) -> MapBorder -> TileHighlight -> LockedHighlight -> Grid
 func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showMid, showFront, showCollision, showGrid bool) {
+	// Re-establish GL state that ImGui may have modified.
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+
 	// Projection: orthographic Y-down
 	left := float32(cam.X)
 	top := float32(cam.Y)
@@ -187,26 +191,14 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		}
 	}
 
-	// 3. Front layer
+	// 3. Front layer — single pass with per-tile blend toggling (matches C++).
 	if showFront {
-		// Normal (non-blend) objects
 		for y := fStartY; y <= fEndY; y++ {
 			for x := fStartX; x <= fEndX; x++ {
 				info := m.InfoAt(x, y)
-				r.drawFront(info, x, y, false, proj)
+				r.drawFront(info, x, y, proj)
 			}
 		}
-		// Blend objects (additive blending)
-		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-		for y := fStartY; y <= fEndY; y++ {
-			for x := fStartX; x <= fEndX; x++ {
-				info := m.InfoAt(x, y)
-				if info.FrontAniFrame&0x80 != 0 {
-					r.drawFront(info, x, y, true, proj)
-				}
-			}
-		}
-		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		r.animCounter++
 	}
 
@@ -234,12 +226,8 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 
 // drawFront renders a single front-layer cell.
 // Matches C++ MapRenderer::RenderFrontLayer + DrawTile for layer 2.
-func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, blendOnly bool, proj [16]float32) {
+func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float32) {
 	if info.FrontLib < 0 {
-		return
-	}
-	isBlend := info.FrontAniFrame&0x80 != 0
-	if blendOnly != isBlend {
 		return
 	}
 
@@ -251,6 +239,7 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, blendOnly boo
 	cache := r.objectsCaches[area]
 
 	idx := info.FrontImage
+	isBlend := info.FrontAniFrame&0x80 != 0
 
 	// Animation
 	ani := int(info.FrontAniFrame & 0x7F)
@@ -286,18 +275,20 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, blendOnly boo
 	cellWorldX := float32(x * TileWidth)
 	cellWorldY := float32(y * TileHeight)
 
-	var wx, wy float32
 	if isBlend {
-		// Blend objects (fire, light): hotspot-based positioning.
+		// Blend objects (fire, light): hotspot-based positioning + additive blending.
 		// Delphi formula: (n + ax - 2, m + ay - 68)
-		wx = cellWorldX + float32(img.HotX) - 2
-		wy = cellWorldY + float32(img.HotY) - 68
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+		wx := cellWorldX + float32(img.HotX) - 2
+		wy := cellWorldY + float32(img.HotY) - 68
+		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	} else {
 		// Non-blend objects: bottom-aligned positioning.
-		wx = cellWorldX
-		wy = cellWorldY - float32(img.Height) + TileHeight
+		wx := cellWorldX
+		wy := cellWorldY - float32(img.Height) + TileHeight
+		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
 	}
-	r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
 }
 
 // drawGrid renders the tile grid overlay using batched line drawing.
