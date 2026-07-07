@@ -24,18 +24,12 @@ asset/
 
 ## mapviewer
 
-编译:
+运行:
 
 ```PowerShell
 $env:CGO_ENABLED=1
-go build ./cmd/mapviewer
-```
-
-运行:
-
-```bash
 # WIL 资源默认从 asset/client/Data/ 加载
-.\mapviewer.exe ".\asset\client\Map\0.map"
+go run ".\cmd\mapviewer\" ".\asset\client\Map\0.map"
 ```
 
 操作：鼠标拖拽平移、滚轮缩放、左键查看格子、右侧面板切换图层
