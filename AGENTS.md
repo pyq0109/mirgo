@@ -10,7 +10,8 @@ Module: `github.com/pyq0109/mirgo`
 ```
 main.go              # 入口（占位）
 cmd/
-└── mapviewer/       # 地图查看器（Fyne UI）
+├── mapviewer/       # 地图查看器（OpenGL + ImGui）
+└── wilviewer/       # WIL资源查看器（OpenGL + ImGui）
 internal/
 ├── mapformat/       # .map 文件解析器
 ├── wil/             # .wil/.wix 图像加载器
@@ -21,6 +22,28 @@ asset/               # 已 gitignore — 游戏资源，非 Go 代码
 ## 地图查看器
 
 编译运行参见 README.md 的"编译运行 mapviewer"章节。
+
+## WIL资源查看器
+
+用于查看热血传奇游戏专用的 .wil/.wix 图像资源文件，支持静态图像浏览和动画播放两种模式。
+
+**编译运行**：
+```bash
+go build -o cmd/wilviewer/wilviewer.exe ./cmd/wilviewer
+./cmd/wilviewer/wilviewer.exe asset/client/Data
+```
+
+**功能**：
+- 左侧目录树：列出目录中的所有 .wil 文件，点击切换查看
+- 浏览模式：以列表形式展示WIL文件中的所有图像，支持单张查看
+- 动画模式：按动作模板播放帧序列，支持8方向切换和播放控制（开发中）
+- 图像导航：使用箭头键或按钮浏览图像
+- 图像信息：显示图像索引、尺寸、热点坐标
+
+**架构**：
+- 复用 mapviewer 的 OpenGL + ImGui 架构
+- 复用 `internal/wil/` 包加载 WIL 文件
+- 支持两种模式切换（浏览/动画）
 
 ## 资源目录（已 gitignore — 需手动准备）
 
