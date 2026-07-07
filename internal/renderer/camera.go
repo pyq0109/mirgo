@@ -67,29 +67,53 @@ func (c *Camera2D) ZoomAt(factor float64, sx, sy float64) {
 	c.Y = wy - sy/c.Zoom
 }
 
-// ClampToBounds keeps the viewport within map bounds.
+// SetViewport updates the viewport dimensions.
+func (c *Camera2D) SetViewport(w, h int) {
+	c.ViewW = w
+	c.ViewH = h
+}
+
+// CenterOnContent centers the camera on the map content at zoom 1.0.
+func (c *Camera2D) CenterOnContent(contentW, contentH float64) {
+	if contentW <= 0 || contentH <= 0 {
+		return
+	}
+	c.Zoom = 1.0
+	c.X = (contentW - float64(c.ViewW)/c.Zoom) / 2.0
+	c.Y = (contentH - float64(c.ViewH)/c.Zoom) / 2.0
+}
+
+// FitToContent zooms to fit the content in the viewport and centers it.
+func (c *Camera2D) FitToContent(contentW, contentH float64) {
+	if contentW <= 0 || contentH <= 0 {
+		return
+	}
+	scaleX := float64(c.ViewW) / contentW
+	scaleY := float64(c.ViewH) / contentH
+	c.Zoom = math.Min(scaleX, scaleY)
+	c.X = (contentW - float64(c.ViewW)/c.Zoom) / 2.0
+	c.Y = (contentH - float64(c.ViewH)/c.Zoom) / 2.0
+}
+
+// ClampToBounds keeps the viewport within map bounds (with 50% overscroll margin).
 func (c *Camera2D) ClampToBounds(mapW, mapH int) {
 	worldW := float64(mapW) * TileWidth
 	worldH := float64(mapH) * TileHeight
 	viewW := float64(c.ViewW) / c.Zoom
 	viewH := float64(c.ViewH) / c.Zoom
+	marginX := viewW * 0.5
+	marginY := viewH * 0.5
 
-	if c.X < 0 {
-		c.X = 0
+	if c.X < -marginX {
+		c.X = -marginX
 	}
-	if c.Y < 0 {
-		c.Y = 0
+	if c.Y < -marginY {
+		c.Y = -marginY
 	}
-	if c.X+viewW > worldW {
-		c.X = worldW - viewW
+	if c.X+viewW > worldW+marginX {
+		c.X = worldW + marginX - viewW
 	}
-	if c.Y+viewH > worldH {
-		c.Y = worldH - viewH
-	}
-	if c.X < 0 {
-		c.X = 0
-	}
-	if c.Y < 0 {
-		c.Y = 0
+	if c.Y+viewH > worldH+marginY {
+		c.Y = worldH + marginY - viewH
 	}
 }

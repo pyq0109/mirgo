@@ -1,156 +1,212 @@
 package renderer
 
 import (
-	"image"
-	"image/color"
-	"image/draw"
+	"fmt"
+	"path/filepath"
+	"unsafe"
+
+	"github.com/go-gl/gl/v3.3-core/gl"
 
 	"github.com/pyq0109/mirgo/internal/mapformat"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
 const (
-	cullMargin     = 3  // back/middle layer viewport margin
-	frontCullMargin = 20 // front layer viewport margin (tall objects)
+	cullMargin      = 3
+	frontCullMargin = 20
 )
 
-// Renderer composites map layers into an *image.RGBA.
-type Renderer struct {
-	Tiles   *wil.File // Tiles.wil (back layer)
-	SmTiles *wil.File // SmTiles.wil (middle layer)
-	Objects *wil.File // Objects.wil (front layer)
+// GLRenderer renders the map using OpenGL.
+type GLRenderer struct {
+	Tiles   *wil.File
+	SmTiles *wil.File
+	Objects *wil.File // area 0 (Objects.wil)
 
-	collisionImg *image.RGBA
-	animCounter  int
-	dst          *image.RGBA // cached render buffer
-	dstW, dstH   int
+	glState    *GLState
+	dataDir    string
+	texCache   map[int]uint32 // Tiles.wil image index -> GL texture
+	smTexCache map[int]uint32 // SmTiles.wil image index -> GL texture
+
+	// Area system: lazy-loaded Objects{N+1}.wil files and their texture caches.
+	objectsLoaders map[int]*wil.File
+	objectsCaches  map[int]map[int]uint32
+
+	animCounter int
+
+	// Tile highlight state (set from main loop).
+	HighlightX, HighlightY int // hover tile (-1 = none)
+	LockedX, LockedY       int // locked tile (-1 = none)
 }
 
-// New creates a Renderer.
-func New(tiles, smTiles, objects *wil.File, mapW, mapH int) *Renderer {
-	ci := image.NewRGBA(image.Rect(0, 0, TileWidth, TileHeight))
-	for y := 0; y < TileHeight; y++ {
-		for x := 0; x < TileWidth; x++ {
-			ci.SetRGBA(x, y, color.RGBA{R: 255, A: 80})
-		}
+// NewGLRenderer creates a renderer with OpenGL state.
+func NewGLRenderer(tiles, smTiles, objects *wil.File, dataDir string, glState *GLState) *GLRenderer {
+	r := &GLRenderer{
+		Tiles:          tiles,
+		SmTiles:        smTiles,
+		Objects:        objects,
+		glState:        glState,
+		dataDir:        dataDir,
+		texCache:       make(map[int]uint32),
+		smTexCache:     make(map[int]uint32),
+		objectsLoaders: make(map[int]*wil.File),
+		objectsCaches:  make(map[int]map[int]uint32),
+		HighlightX:     -1,
+		HighlightY:     -1,
+		LockedX:        -1,
+		LockedY:        -1,
 	}
-
-	return &Renderer{
-		Tiles:        tiles,
-		SmTiles:      smTiles,
-		Objects:      objects,
-		collisionImg: ci,
+	if objects != nil {
+		r.objectsLoaders[0] = objects
+		r.objectsCaches[0] = make(map[int]uint32)
 	}
+	return r
 }
 
-// Render draws the visible portion of the map.
-func (r *Renderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showMid, showFront, showCollision, showGrid bool) *image.RGBA {
-	// Reuse dst buffer if size matches
-	if r.dst == nil || r.dstW != cam.ViewW || r.dstH != cam.ViewH {
-		r.dst = image.NewRGBA(image.Rect(0, 0, cam.ViewW, cam.ViewH))
-		r.dstW = cam.ViewW
-		r.dstH = cam.ViewH
+// getObjectsLoader returns the WIL loader for the given area, lazy-loading if needed.
+// Area 0 = Objects.wil, Area N = Objects{N+1}.wil.
+// Matches C++ MapRenderer::GetObjectsLoader.
+func (r *GLRenderer) getObjectsLoader(area int) *wil.File {
+	if f, ok := r.objectsLoaders[area]; ok {
+		return f
 	}
-	dst := r.dst
-	// Clear to black
-	for i := range dst.Pix {
-		dst.Pix[i] = 0
+	if area == 0 {
+		return r.Objects
 	}
+	filename := fmt.Sprintf("Objects%d.wil", area+1)
+	wilPath := filepath.Join(r.dataDir, filename)
+	f, err := wil.Load(wilPath)
+	if err != nil {
+		r.objectsLoaders[area] = nil
+		return nil
+	}
+	r.objectsLoaders[area] = f
+	r.objectsCaches[area] = make(map[int]uint32)
+	return f
+}
 
-	// Back/middle layer cull range
+func (r *GLRenderer) getTex(cache map[int]uint32, file *wil.File, idx int) uint32 {
+	if idx < 0 || file == nil || idx >= len(file.Images) {
+		return 0
+	}
+	if tex, ok := cache[idx]; ok {
+		return tex
+	}
+	img := file.Images[idx]
+	if img == nil || img.RGBA == nil {
+		return 0
+	}
+	tex := UploadTexture(img.RGBA)
+	cache[idx] = tex
+	return tex
+}
+
+// Render draws the visible portion of the map using OpenGL.
+// Render order matches C++ MapRenderer::Render:
+// Back -> Middle -> Front(normal) -> Front(blend) -> MapBorder -> TileHighlight -> LockedHighlight -> Grid
+func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showMid, showFront, showCollision, showGrid bool) {
+	// Projection: orthographic Y-down
+	left := float32(cam.X)
+	top := float32(cam.Y)
+	right := float32(cam.X + float64(cam.ViewW)/cam.Zoom)
+	bottom := float32(cam.Y + float64(cam.ViewH)/cam.Zoom)
+	proj := OrthoProj(left, right, bottom, top)
+
+	gl.UseProgram(r.glState.Shader.ID)
+	gl.Uniform1i(r.glState.Shader.TexLoc, 0)
+
+	// Back/middle cull range
 	startX, startY, endX, endY := cam.ViewportTiles(cullMargin, cullMargin)
 	startX = clamp(startX, 0, m.Width-1)
 	startY = clamp(startY, 0, m.Height-1)
 	endX = clamp(endX, 0, m.Width-1)
 	endY = clamp(endY, 0, m.Height-1)
 
-	// Front layer cull range (wider for tall objects)
+	// Front cull range (wider margin for tall objects)
 	fStartX, fStartY, fEndX, fEndY := cam.ViewportTiles(frontCullMargin, frontCullMargin)
 	fStartX = clamp(fStartX, 0, m.Width-1)
 	fStartY = clamp(fStartY, 0, m.Height-1)
 	fEndX = clamp(fEndX, 0, m.Width-1)
 	fEndY = clamp(fEndY, 0, m.Height-1)
 
-	// 1. Back layer: even x,y only
-	if showBack && r.Tiles != nil {
-		// Align to even boundaries
-		bStartX := startX
-		bStartY := startY
-		bEndX := endX
-		bEndY := endY
-		if bStartX%2 == 1 {
-			bStartX--
-		}
-		if bStartY%2 == 1 {
-			bStartY--
-		}
-		if bEndX%2 == 1 {
-			bEndX++
-		}
-		if bEndY%2 == 1 {
-			bEndY++
-		}
-		bStartX = clamp(bStartX, 0, m.Width-1)
-		bStartY = clamp(bStartY, 0, m.Height-1)
-		bEndX = clamp(bEndX, 0, m.Width-1)
-		bEndY = clamp(bEndY, 0, m.Height-1)
+	// Align to even for back layer stride-2 rendering.
+	bStartX, bStartY, bEndX, bEndY := startX, startY, endX, endY
+	if bStartX%2 == 1 {
+		bStartX--
+	}
+	if bStartY%2 == 1 {
+		bStartY--
+	}
+	if bEndX%2 == 1 {
+		bEndX++
+	}
+	if bEndY%2 == 1 {
+		bEndY++
+	}
+	bStartX = clamp(bStartX, 0, m.Width-1)
+	bStartY = clamp(bStartY, 0, m.Height-1)
+	bEndX = clamp(bEndX, 0, m.Width-1)
+	bEndY = clamp(bEndY, 0, m.Height-1)
 
+	// 1. Back layer: even x, y (2x2 tile blocks)
+	if showBack {
 		for y := bStartY; y <= bEndY; y += 2 {
 			for x := bStartX; x <= bEndX; x += 2 {
-				cell := m.At(x, y)
-				idx := int(cell.BkImg&0x7FFF) - 1
-				if idx < 0 || idx >= len(r.Tiles.Images) {
+				info := m.InfoAt(x, y)
+				if info.BackLib < 0 {
 					continue
 				}
-				img := r.Tiles.Images[idx]
-				if img == nil || img.RGBA == nil {
+				tex := r.getTex(r.texCache, r.Tiles, info.BackImage)
+				if tex == 0 {
 					continue
 				}
-				sx, sy := cam.worldToScreen(float64(x*TileWidth), float64(y*TileHeight))
-				dstRect := image.Rect(int(sx), int(sy), int(sx)+img.Width, int(sy)+img.Height)
-				draw.Draw(dst, dstRect, img.RGBA, image.Point{}, draw.Over)
+				img := r.Tiles.Images[info.BackImage]
+				wx := float32(x * TileWidth)
+				wy := float32(y * TileHeight)
+				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
 			}
 		}
 	}
 
-	// 2. Middle layer
-	if showMid && r.SmTiles != nil {
+	// 2. Middle layer: all cells
+	if showMid {
 		for y := startY; y <= endY; y++ {
 			for x := startX; x <= endX; x++ {
-				cell := m.At(x, y)
-				idx := int(cell.MidImg&0x7FFF) - 1
-				if idx < 0 || idx >= len(r.SmTiles.Images) {
+				info := m.InfoAt(x, y)
+				if info.MiddleLib < 0 {
 					continue
 				}
-				img := r.SmTiles.Images[idx]
-				if img == nil || img.RGBA == nil {
+				tex := r.getTex(r.smTexCache, r.SmTiles, info.MiddleImage)
+				if tex == 0 {
 					continue
 				}
-				sx, sy := cam.worldToScreen(float64(x*TileWidth), float64(y*TileHeight))
-				dstRect := image.Rect(int(sx), int(sy), int(sx)+img.Width, int(sy)+img.Height)
-				draw.Draw(dst, dstRect, img.RGBA, image.Point{}, draw.Over)
+				img := r.SmTiles.Images[info.MiddleImage]
+				wx := float32(x * TileWidth)
+				wy := float32(y * TileHeight)
+				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
 			}
 		}
 	}
 
-	// 3. Front layer (uses wider cull range)
-	if showFront && r.Objects != nil {
-		// Normal objects
+	// 3. Front layer
+	if showFront {
+		// Normal (non-blend) objects
 		for y := fStartY; y <= fEndY; y++ {
 			for x := fStartX; x <= fEndX; x++ {
-				cell := m.At(x, y)
-				r.drawFrontCell(dst, cell, x, y, cam, false)
+				info := m.InfoAt(x, y)
+				r.drawFront(info, x, y, false, proj)
 			}
 		}
-		// Blend objects
+		// Blend objects (additive blending)
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 		for y := fStartY; y <= fEndY; y++ {
 			for x := fStartX; x <= fEndX; x++ {
-				cell := m.At(x, y)
-				if cell.AniFrame&0x80 != 0 {
-					r.drawFrontCell(dst, cell, x, y, cam, true)
+				info := m.InfoAt(x, y)
+				if info.FrontAniFrame&0x80 != 0 {
+					r.drawFront(info, x, y, true, proj)
 				}
 			}
 		}
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		r.animCounter++
 	}
 
@@ -159,52 +215,47 @@ func (r *Renderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showMid
 		for y := startY; y <= endY; y++ {
 			for x := startX; x <= endX; x++ {
 				if m.IsCollision(x, y) {
-					sx, sy := cam.worldToScreen(float64(x*TileWidth), float64(y*TileHeight))
-					dstRect := image.Rect(int(sx), int(sy), int(sx)+TileWidth, int(sy)+TileHeight)
-					draw.Draw(dst, dstRect, r.collisionImg, image.Point{}, draw.Over)
+					wx := float32(x * TileWidth)
+					wy := float32(y * TileHeight)
+					r.glState.DrawQuadColor(wx, wy, TileWidth, TileHeight, 1, 0, 0, 0.3, proj)
 				}
 			}
 		}
 	}
 
-	// 5. Grid
+	// 5. Overlays (must render after all tile layers)
+	r.drawMapBorder(cam, m, proj)
+	r.drawTileHighlight(m, proj)
+	r.drawLockedTileHighlight(m, proj)
 	if showGrid {
-		gridColor := color.RGBA{R: 255, G: 255, B: 255, A: 40}
-		for y := startY; y <= endY; y++ {
-			for x := startX; x <= endX; x++ {
-				sx, sy := cam.worldToScreen(float64(x*TileWidth), float64(y*TileHeight))
-				ix, iy := int(sx), int(sy)
-				for px := ix; px < ix+TileWidth && px < cam.ViewW; px++ {
-					if px >= 0 {
-						setPixelSafe(dst, px, iy, gridColor)
-					}
-				}
-				for py := iy; py < iy+TileHeight && py < cam.ViewH; py++ {
-					if py >= 0 {
-						setPixelSafe(dst, ix, py, gridColor)
-					}
-				}
-			}
-		}
+		r.drawGrid(cam, startX, startY, endX, endY, proj)
 	}
-
-	return dst
 }
 
-func (r *Renderer) drawFrontCell(dst *image.RGBA, cell *mapformat.Cell, x, y int, cam *Camera2D, blendOnly bool) {
-	idx := int(cell.FrImg&0x7FFF) - 1
-	if idx < 0 || idx >= len(r.Objects.Images) {
+// drawFront renders a single front-layer cell.
+// Matches C++ MapRenderer::RenderFrontLayer + DrawTile for layer 2.
+func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, blendOnly bool, proj [16]float32) {
+	if info.FrontLib < 0 {
 		return
 	}
-	isBlend := cell.AniFrame&0x80 != 0
+	isBlend := info.FrontAniFrame&0x80 != 0
 	if blendOnly != isBlend {
 		return
 	}
 
-	// Animation frame
-	ani := int(cell.AniFrame & 0x7F)
+	area := int(info.FrontArea)
+	loader := r.getObjectsLoader(area)
+	if loader == nil {
+		return
+	}
+	cache := r.objectsCaches[area]
+
+	idx := info.FrontImage
+
+	// Animation
+	ani := int(info.FrontAniFrame & 0x7F)
 	if ani > 0 {
-		tick := int(cell.AniTick)
+		tick := int(info.FrontAniTick)
 		if tick < 1 {
 			tick = 1
 		}
@@ -215,48 +266,146 @@ func (r *Renderer) drawFrontCell(dst *image.RGBA, cell *mapformat.Cell, x, y int
 		}
 	}
 
-	if idx < 0 || idx >= len(r.Objects.Images) {
+	// Door offset (C++ RenderFrontLayer lines 456-460)
+	if info.FrontDoorOffset&0x80 != 0 {
+		if info.FrontDoorIndex&0x7F != 0 {
+			idx += int(info.FrontDoorOffset & 0x7F)
+		}
+	}
+
+	if idx < 0 || idx >= len(loader.Images) {
 		return
 	}
 
-	img := r.Objects.Images[idx]
-	if img == nil || img.RGBA == nil {
+	tex := r.getTex(cache, loader, idx)
+	if tex == 0 {
 		return
 	}
+	img := loader.Images[idx]
 
-	var sx, sy float64
+	cellWorldX := float32(x * TileWidth)
+	cellWorldY := float32(y * TileHeight)
+
+	var wx, wy float32
 	if isBlend {
-		// Blend: hotspot positioning (matches Delphi: DrawBlend(surface, n+ax-2, m+ay-68, ...))
-		sx, sy = cam.worldToScreen(
-			float64(x*TileWidth)+float64(img.HotX)-2,
-			float64(y*TileHeight)+float64(img.HotY)-68,
-		)
+		// Blend objects (fire, light): hotspot-based positioning.
+		// Delphi formula: (n + ax - 2, m + ay - 68)
+		wx = cellWorldX + float32(img.HotX) - 2
+		wy = cellWorldY + float32(img.HotY) - 68
 	} else {
-		// Normal: bottom-aligned (draw_y = cell_y - height + kTileHeight)
-		sx, sy = cam.worldToScreen(
-			float64(x*TileWidth),
-			float64(y*TileHeight)-float64(img.Height)+float64(TileHeight),
-		)
+		// Non-blend objects: bottom-aligned positioning.
+		wx = cellWorldX
+		wy = cellWorldY - float32(img.Height) + TileHeight
+	}
+	r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
+}
+
+// drawGrid renders the tile grid overlay using batched line drawing.
+// Matches C++ MapRenderer::RenderGrid.
+func (r *GLRenderer) drawGrid(cam *Camera2D, startX, startY, endX, endY int, proj [16]float32) {
+	gl.UseProgram(r.glState.GridShader.ID)
+	gl.UniformMatrix4fv(r.glState.GridShader.ProjLoc, 1, false, &proj[0])
+	gl.Uniform4f(r.glState.GridShader.ColorLoc, 0.5, 0.5, 0.5, 0.3)
+	gl.BindVertexArray(r.glState.GridVAO)
+
+	// Build all line vertices into one batch.
+	lines := make([]float32, 0, ((endX-startX+2)+(endY-startY+2))*4)
+
+	// Vertical lines
+	for x := startX; x <= endX+1; x++ {
+		wx := float32(x * TileWidth)
+		wy0 := float32(startY * TileHeight)
+		wy1 := float32((endY + 1) * TileHeight)
+		lines = append(lines, wx, wy0, wx, wy1)
+	}
+	// Horizontal lines
+	for y := startY; y <= endY+1; y++ {
+		wy := float32(y * TileHeight)
+		wx0 := float32(startX * TileWidth)
+		wx1 := float32((endX + 1) * TileWidth)
+		lines = append(lines, wx0, wy, wx1, wy)
 	}
 
-	dstRect := image.Rect(int(sx), int(sy), int(sx)+img.Width, int(sy)+img.Height)
-	draw.Draw(dst, dstRect, img.RGBA, image.Point{}, draw.Over)
-}
-
-// worldToScreen converts world coords to screen coords.
-func (c *Camera2D) worldToScreen(wx, wy float64) (sx, sy float64) {
-	return (wx - c.X) * c.Zoom, (wy - c.Y) * c.Zoom
-}
-
-func setPixelSafe(img *image.RGBA, x, y int, c color.RGBA) {
-	if x < 0 || y < 0 || x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
+	vertexCount := int32(len(lines) / 2)
+	if vertexCount == 0 {
+		gl.BindVertexArray(0)
 		return
 	}
-	off := y*img.Stride + x*4
-	img.Pix[off+0] = c.R
-	img.Pix[off+1] = c.G
-	img.Pix[off+2] = c.B
-	img.Pix[off+3] = c.A
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, r.glState.GridVBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(lines)*4, unsafe.Pointer(&lines[0]), gl.STREAM_DRAW)
+	gl.DrawArrays(gl.LINES, 0, vertexCount)
+	gl.BindVertexArray(0)
+}
+
+// drawMapBorder draws a blue rectangle around the map boundary.
+// Matches C++ MapRenderer::RenderMapBorder.
+func (r *GLRenderer) drawMapBorder(cam *Camera2D, m *mapformat.MapData, proj [16]float32) {
+	mapW := float32(m.Width * TileWidth)
+	mapH := float32(m.Height * TileHeight)
+
+	lines := []float32{
+		0, 0, mapW, 0,
+		mapW, 0, mapW, mapH,
+		mapW, mapH, 0, mapH,
+		0, mapH, 0, 0,
+	}
+
+	gl.UseProgram(r.glState.GridShader.ID)
+	gl.UniformMatrix4fv(r.glState.GridShader.ProjLoc, 1, false, &proj[0])
+	gl.Uniform4f(r.glState.GridShader.ColorLoc, 0.2, 0.5, 1.0, 1.0)
+	gl.BindVertexArray(r.glState.GridVAO)
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, r.glState.GridVBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(lines)*4, unsafe.Pointer(&lines[0]), gl.STREAM_DRAW)
+	gl.DrawArrays(gl.LINES, 0, 8)
+	gl.BindVertexArray(0)
+}
+
+// drawTileHighlight draws a white rectangle around the tile under the cursor.
+// Matches C++ MapRenderer::RenderTileHighlight.
+func (r *GLRenderer) drawTileHighlight(m *mapformat.MapData, proj [16]float32) {
+	if r.HighlightX < 0 || r.HighlightY < 0 {
+		return
+	}
+	if r.HighlightX >= m.Width || r.HighlightY >= m.Height {
+		return
+	}
+	r.drawRect(float32(r.HighlightX*TileWidth), float32(r.HighlightY*TileHeight),
+		TileWidth, TileHeight, 1, 1, 1, 0.8, proj)
+}
+
+// drawLockedTileHighlight draws a red rectangle around the locked tile.
+// Matches C++ MapRenderer::RenderLockedTileHighlight.
+func (r *GLRenderer) drawLockedTileHighlight(m *mapformat.MapData, proj [16]float32) {
+	if r.LockedX < 0 || r.LockedY < 0 {
+		return
+	}
+	if r.LockedX >= m.Width || r.LockedY >= m.Height {
+		return
+	}
+	r.drawRect(float32(r.LockedX*TileWidth), float32(r.LockedY*TileHeight),
+		TileWidth, TileHeight, 1, 0.3, 0.3, 1.0, proj)
+}
+
+// drawRect draws a rectangle outline using the grid shader.
+func (r *GLRenderer) drawRect(x, y, w, h float32, red, green, blue, alpha float32, proj [16]float32) {
+	lines := []float32{
+		x, y, x + w, y,
+		x + w, y, x + w, y + h,
+		x + w, y + h, x, y + h,
+		x, y + h, x, y,
+	}
+
+	gl.UseProgram(r.glState.GridShader.ID)
+	gl.UniformMatrix4fv(r.glState.GridShader.ProjLoc, 1, false, &proj[0])
+	gl.Uniform4f(r.glState.GridShader.ColorLoc, red, green, blue, alpha)
+	gl.BindVertexArray(r.glState.GridVAO)
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, r.glState.GridVBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(lines)*4, unsafe.Pointer(&lines[0]), gl.STREAM_DRAW)
+	gl.DrawArrays(gl.LINES, 0, 8)
+	gl.BindVertexArray(0)
 }
 
 func clamp(v, min, max int) int {

@@ -2,28 +2,32 @@ package main
 
 import (
 	"fmt"
-	"image"
+	"log"
 	"os"
 	"path/filepath"
-	"time"
+	"runtime"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/widget"
+	"github.com/go-gl/gl/v3.3-core/gl"
+	"github.com/go-gl/glfw/v3.4/glfw"
 
 	"github.com/pyq0109/mirgo/internal/mapformat"
 	"github.com/pyq0109/mirgo/internal/renderer"
+	"github.com/pyq0109/mirgo/internal/ui"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
+const (
+	windowW = 1280
+	windowH = 800
+)
+
+func init() {
+	runtime.LockOSThread()
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "用法: mapviewer <map文件路径> [资源目录]")
-		fmt.Fprintln(os.Stderr, "  map文件路径: .map 文件路径")
-		fmt.Fprintln(os.Stderr, "  资源目录:    包含 Tiles.wil, SmTiles.wil, Objects.wil 的目录（默认 asset/client/Data）")
+		fmt.Fprintln(os.Stderr, "Usage: mapviewer <mapfile> [datadir]")
 		os.Exit(1)
 	}
 
@@ -33,238 +37,259 @@ func main() {
 		dataDir = os.Args[2]
 	}
 
-	// Parse map
+	// Parse map.
 	m, err := mapformat.Parse(mapPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "解析地图失败: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to parse map: %v", err)
 	}
-	fmt.Printf("地图: %dx%d, 标题: %s\n", m.Width, m.Height, string(m.Header.Title[:m.Header.TitleLen]))
+	fmt.Printf("Map: %dx%d, title: %s\n", m.Width, m.Height, string(m.Header.Title[:m.Header.TitleLen]))
 
-	// Load WIL files
-	fmt.Println("加载 Tiles.wil ...")
+	// Load WIL files.
+	fmt.Println("Loading Tiles.wil ...")
 	tiles, err := wil.Load(filepath.Join(dataDir, "Tiles.wil"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "加载 Tiles.wil 失败: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to load Tiles.wil: %v", err)
 	}
-
-	fmt.Println("加载 SmTiles.wil ...")
+	fmt.Println("Loading SmTiles.wil ...")
 	smTiles, err := wil.Load(filepath.Join(dataDir, "SmTiles.wil"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "加载 SmTiles.wil 失败: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to load SmTiles.wil: %v", err)
 	}
-
-	fmt.Println("加载 Objects.wil ...")
+	fmt.Println("Loading Objects.wil ...")
 	objects, err := wil.Load(filepath.Join(dataDir, "Objects.wil"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "加载 Objects.wil 失败: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to load Objects.wil: %v", err)
+	}
+	fmt.Printf("Tiles: %d, SmTiles: %d, Objects: %d\n", tiles.Count, smTiles.Count, objects.Count)
+
+	// Init GLFW.
+	if err := glfw.Init(); err != nil {
+		log.Fatal(err)
+	}
+	defer glfw.Terminate()
+
+	glfw.WindowHint(glfw.ContextVersionMajor, 3)
+	glfw.WindowHint(glfw.ContextVersionMinor, 3)
+	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
+	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
+
+	window, err := glfw.CreateWindow(windowW, windowH, "Map Viewer - "+filepath.Base(mapPath), nil, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	window.MakeContextCurrent()
+	glfw.SwapInterval(1)
+
+	// Init OpenGL.
+	if err := gl.Init(); err != nil {
+		log.Fatal(err)
+	}
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	gl.ClearColor(0.1, 0.1, 0.1, 1.0)
+
+	// Init ImGui.
+	ui.Init(window)
+	defer ui.Shutdown()
+
+	// Create renderer.
+	glState, err := renderer.NewGLState()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	fmt.Printf("Tiles: %d 张, SmTiles: %d 张, Objects: %d 张\n",
-		tiles.Count, smTiles.Count, objects.Count)
+	rightW := float64(ui.RightPanelWidth())
+	cam := renderer.NewCamera(int(float64(windowW)-rightW), windowH)
+	cam.CenterOnContent(float64(m.Width)*renderer.TileWidth, float64(m.Height)*renderer.TileHeight)
 
-	// Generate minimap
-	minimapImg := renderer.GenerateMinimap(m)
+	ren := renderer.NewGLRenderer(tiles, smTiles, objects, dataDir, glState)
+	minimap := renderer.NewMinimap(m)
 
-	// Create renderer
-	cam := renderer.NewCamera(1200, 800)
-	ren := renderer.New(tiles, smTiles, objects, m.Width, m.Height)
-
-	// Fyne app
-	a := app.New()
-	w := a.NewWindow("传奇地图查看器 - " + filepath.Base(mapPath))
-	w.Resize(fyne.NewSize(1200, 800))
-
-	// State
+	// State.
 	showBack := true
 	showMid := true
 	showFront := true
 	showCollision := false
 	showGrid := false
 
-	// Map image canvas
-	mapCanvas := canvas.NewImageFromImage(image.NewRGBA(image.Rect(0, 0, 1, 1)))
-	mapCanvas.FillMode = canvas.ImageFillStretch
-
-	// Minimap canvas
-	minimapCanvas := canvas.NewImageFromImage(minimapImg)
-	minimapCanvas.FillMode = canvas.ImageFillStretch
-	minimapCanvas.SetMinSize(fyne.NewSize(200, 200))
-
-	// Info labels
-	tileLabel := widget.NewLabel("格子: -")
-	cellInfoLabel := widget.NewLabel("")
-	mapInfoLabel := widget.NewLabel(fmt.Sprintf("地图: %dx%d", m.Width, m.Height))
-
-	// Layer toggles
-	backCheck := widget.NewCheck("背景层", func(v bool) { showBack = v })
-	backCheck.SetChecked(true)
-	midCheck := widget.NewCheck("中间层", func(v bool) { showMid = v })
-	midCheck.SetChecked(true)
-	frontCheck := widget.NewCheck("前景层", func(v bool) { showFront = v })
-	frontCheck.SetChecked(true)
-	collisionCheck := widget.NewCheck("碰撞", func(v bool) { showCollision = v })
-	gridCheck := widget.NewCheck("网格", func(v bool) { showGrid = v })
-
-	// Render function
-	renderMap := func() {
-		rendered := ren.Render(m, cam, showBack, showMid, showFront, showCollision, showGrid)
-		mapCanvas.Image = rendered
-		mapCanvas.Refresh()
-
-		minimapViewport := renderer.GenerateMinimap(m)
-		renderer.DrawMinimapViewport(minimapViewport, cam, m.Width, m.Height)
-		minimapCanvas.Image = minimapViewport
-		minimapCanvas.Refresh()
+	uiState := &ui.UIState{
+		Map:            m,
+		Renderer:       ren,
+		Cam:            cam,
+		ShowBackground: &showBack,
+		ShowMiddle:     &showMid,
+		ShowForeground: &showFront,
+		ShowGrid:       &showGrid,
+		ShowCollision:  &showCollision,
 	}
 
-	// Initial render
-	renderMap()
+	// Drag state.
+	dragging := false
+	var lastX, lastY float64
 
-	// Mouse interaction widget
-	mapWidget := newMapWidget(cam, renderMap, func(tx, ty int) {
-		if tx >= 0 && ty >= 0 && tx < m.Width && ty < m.Height {
-			cell := m.At(tx, ty)
-			tileLabel.SetText(fmt.Sprintf("格子: (%d, %d)", tx, ty))
-			cellInfoLabel.SetText(fmt.Sprintf(
-				"碰撞: %v\n光照: %d\n动画帧: %d (tick=%d)\nBlend: %v\n区域: %d\n门: %d",
-				m.IsCollision(tx, ty),
-				cell.Light,
-				cell.AniFrame&0x7F, cell.AniTick,
-				cell.AniFrame&0x80 != 0,
-				cell.Area,
-				cell.DoorIndex,
-			))
+	// Tile lock state.
+	lockedTileX, lockedTileY := -1, -1
+	tileLocked := false
+	leftPressed := false
+
+	// Grid toggle debounce.
+	gPressed := false
+
+	// Set GLFW callbacks (forward to ImGui, plus zoom handler).
+	ui.SetGLFWCallbacks(window, func(w *glfw.Window, xoff, yoff float64) {
+		io := ui.IO()
+		if io.WantCaptureMouse() {
+			return
 		}
+		factor := 1.0
+		if yoff > 0 {
+			factor = 1.1
+		} else if yoff < 0 {
+			factor = 0.9
+		}
+		cx, cy := w.GetCursorPos()
+		cam.ZoomAt(factor, cx, cy)
+		cam.ClampToBounds(m.Width, m.Height)
 	})
 
-	mapStack := container.NewMax(mapWidget, mapCanvas)
+	// Window resize callback.
+	window.SetFramebufferSizeCallback(func(w *glfw.Window, width, height int) {
+		cam.SetViewport(int(float64(width)-rightW), height)
+	})
 
-	minimapContainer := container.NewVBox(
-		widget.NewLabel("小地图"),
-		minimapCanvas,
-	)
+	fmt.Println("Map viewer started.")
+	fmt.Println("Controls: middle-drag=pan, scroll=zoom, WASD=navigate, G=grid, left-click=lock tile, ESC=quit.")
 
-	infoPanel := container.NewVBox(
-		mapInfoLabel,
-		widget.NewSeparator(),
-		tileLabel,
-		cellInfoLabel,
-		widget.NewSeparator(),
-		backCheck,
-		midCheck,
-		frontCheck,
-		collisionCheck,
-		gridCheck,
-		widget.NewSeparator(),
-		widget.NewLabel("操作:"),
-		widget.NewLabel("拖拽: 平移"),
-		widget.NewLabel("滚轮: 缩放"),
-		widget.NewLabel("左键: 查看格子"),
-	)
+	// Main loop.
+	for !window.ShouldClose() {
+		glfw.PollEvents()
 
-	leftPanel := container.NewMax(
-		mapStack,
-		container.NewVBox(minimapContainer),
-	)
+		glfwW, glfwH := window.GetSize()
+		io := ui.IO()
 
-	split := container.NewHSplit(leftPanel, infoPanel)
-	split.SetOffset(0.8)
+		// Keyboard input (only if ImGui doesn't want it).
+		if !io.WantCaptureKeyboard() {
+			speed := 8.0 / cam.Zoom
+			moved := false
 
-	w.SetContent(split)
+			if window.GetKey(glfw.KeyW) == glfw.Press || window.GetKey(glfw.KeyUp) == glfw.Press {
+				cam.Pan(0, -speed)
+				moved = true
+			}
+			if window.GetKey(glfw.KeyS) == glfw.Press || window.GetKey(glfw.KeyDown) == glfw.Press {
+				cam.Pan(0, speed)
+				moved = true
+			}
+			if window.GetKey(glfw.KeyA) == glfw.Press || window.GetKey(glfw.KeyLeft) == glfw.Press {
+				cam.Pan(speed, 0)
+				moved = true
+			}
+			if window.GetKey(glfw.KeyD) == glfw.Press || window.GetKey(glfw.KeyRight) == glfw.Press {
+				cam.Pan(-speed, 0)
+				moved = true
+			}
 
-	// Animation ticker
-	ticker := time.NewTicker(100 * time.Millisecond)
-	go func() {
-		for range ticker.C {
-			// TODO: update animation state
-		}
-	}()
+			if window.GetKey(glfw.KeyG) == glfw.Press {
+				if !gPressed {
+					showGrid = !showGrid
+					gPressed = true
+				}
+			} else {
+				gPressed = false
+			}
 
-	w.ShowAndRun()
-	ticker.Stop()
-}
+			if window.GetKey(glfw.KeyEscape) == glfw.Press {
+				window.SetShouldClose(true)
+			}
 
-// mapWidget handles mouse events for pan/zoom/click.
-type mapWidget struct {
-	widget.BaseWidget
-	cam       *renderer.Camera2D
-	onRender  func()
-	onClick   func(tx, ty int)
-	dragging  bool
-	dragMoved bool
-	lastDragX float64
-	lastDragY float64
-}
-
-func newMapWidget(cam *renderer.Camera2D, onRender func(), onClick func(tx, ty int)) *mapWidget {
-	mw := &mapWidget{
-		cam:      cam,
-		onRender: onRender,
-		onClick:  onClick,
-	}
-	mw.ExtendBaseWidget(mw)
-	return mw
-}
-
-func (mw *mapWidget) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(widget.NewLabel(""))
-}
-
-func (mw *mapWidget) Cursor() desktop.Cursor {
-	return desktop.CrosshairCursor
-}
-
-func (mw *mapWidget) MouseDown(ev *desktop.MouseEvent) {
-	if ev.Button == desktop.MouseButtonPrimary {
-		mw.dragging = true
-		mw.dragMoved = false
-		mw.lastDragX = float64(ev.Position.X)
-		mw.lastDragY = float64(ev.Position.Y)
-	}
-}
-
-func (mw *mapWidget) MouseUp(ev *desktop.MouseEvent) {
-	if ev.Button == desktop.MouseButtonPrimary {
-		if !mw.dragMoved {
-			wx, wy := mw.cam.ScreenToWorld(float64(ev.Position.X), float64(ev.Position.Y))
-			tx, ty := mw.cam.WorldToTile(wx, wy)
-			if mw.onClick != nil {
-				mw.onClick(tx, ty)
+			if moved {
+				cam.ClampToBounds(m.Width, m.Height)
 			}
 		}
-		mw.dragging = false
-	}
-}
 
-func (mw *mapWidget) MouseMoved(ev *desktop.MouseEvent) {
-	if mw.dragging {
-		dx := float64(ev.Position.X) - mw.lastDragX
-		dy := float64(ev.Position.Y) - mw.lastDragY
-		if dx != 0 || dy != 0 {
-			mw.dragMoved = true
-		}
-		mw.cam.Pan(dx, dy)
-		mw.lastDragX = float64(ev.Position.X)
-		mw.lastDragY = float64(ev.Position.Y)
-		if mw.onRender != nil {
-			mw.onRender()
-		}
-	}
-}
+		// Mouse input (only if ImGui doesn't want it).
+		mouseTileX, mouseTileY := -1, -1
+		if !io.WantCaptureMouse() {
+			cx, cy := window.GetCursorPos()
 
-func (mw *mapWidget) Scrolled(ev *fyne.ScrollEvent) {
-	factor := 1.0
-	if ev.Scrolled.DY < 0 {
-		factor = 1.1
-	} else if ev.Scrolled.DY > 0 {
-		factor = 0.9
-	}
-	mw.cam.ZoomAt(factor, float64(ev.Position.X), float64(ev.Position.Y))
-	if mw.onRender != nil {
-		mw.onRender()
+			// Hover tile.
+			wx, wy := cam.ScreenToWorld(cx, cy)
+			tx, ty := cam.WorldToTile(wx, wy)
+			if tx >= 0 && tx < m.Width && ty >= 0 && ty < m.Height {
+				mouseTileX, mouseTileY = tx, ty
+			}
+
+			// Middle button drag.
+			if window.GetMouseButton(glfw.MouseButtonMiddle) == glfw.Press {
+				if !dragging {
+					dragging = true
+					lastX, lastY = cx, cy
+				} else {
+					dx := cx - lastX
+					dy := cy - lastY
+					cam.Pan(dx, dy)
+					cam.ClampToBounds(m.Width, m.Height)
+					lastX, lastY = cx, cy
+				}
+			} else {
+				dragging = false
+			}
+
+			// Left button: tile lock/unlock (with press detection).
+			if window.GetMouseButton(glfw.MouseButtonLeft) == glfw.Press {
+				if !leftPressed {
+					leftPressed = true
+					if tx >= 0 && tx < m.Width && ty >= 0 && ty < m.Height {
+						if tileLocked && lockedTileX == tx && lockedTileY == ty {
+							tileLocked = false
+							lockedTileX, lockedTileY = -1, -1
+						} else {
+							tileLocked = true
+							lockedTileX, lockedTileY = tx, ty
+						}
+					}
+				}
+			} else {
+				leftPressed = false
+			}
+		}
+
+		// Update renderer highlight state.
+		ren.HighlightX, ren.HighlightY = mouseTileX, mouseTileY
+		if tileLocked {
+			ren.LockedX, ren.LockedY = lockedTileX, lockedTileY
+		} else {
+			ren.LockedX, ren.LockedY = -1, -1
+		}
+
+		// Render map (custom OpenGL).
+		mapVpW := int32(float64(glfwW) - rightW)
+		if mapVpW < 1 {
+			mapVpW = 1
+		}
+		gl.Viewport(0, 0, mapVpW, int32(glfwH))
+		gl.Clear(gl.COLOR_BUFFER_BIT)
+		ren.Render(m, cam, showBack, showMid, showFront, showCollision, showGrid)
+
+		// Render minimap to FBO.
+		minimap.Render(cam, m.Width, m.Height, glState)
+		uiState.MinimapTex = minimap.FBOTex
+
+		// ImGui frame.
+		ui.BeginFrame()
+
+		menuH := ui.FrameHeight()
+		shouldClose := false
+		ui.RenderMenuBar(&shouldClose)
+		if shouldClose {
+			window.SetShouldClose(true)
+		}
+
+		ui.RenderRightPanel(uiState, int32(glfwW), int32(glfwH), menuH, mouseTileX, mouseTileY, lockedTileX, lockedTileY, tileLocked)
+		ui.RenderMinimapWindow(uiState)
+
+		ui.EndFrame()
+
+		window.SwapBuffers()
 	}
 }

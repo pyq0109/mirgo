@@ -72,3 +72,35 @@ func TestIsCollision(t *testing.T) {
 	}
 	t.Logf("Collision cells: %d/%d", collisionCount, len(m.Cells))
 }
+
+func TestCellInfos(t *testing.T) {
+	path := "../../asset/server/Map/0102.map"
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Skip("map file not found:", path)
+	}
+
+	m, err := Parse(path)
+	if err != nil {
+		t.Fatal("parse failed:", err)
+	}
+
+	if len(m.CellInfos) != len(m.Cells) {
+		t.Fatalf("CellInfos length mismatch: got %d, want %d", len(m.CellInfos), len(m.Cells))
+	}
+
+	// Count layers
+	backCount, midCount, frontCount := 0, 0, 0
+	for i := range m.CellInfos {
+		info := &m.CellInfos[i]
+		if info.BackLib >= 0 {
+			backCount++
+		}
+		if info.MiddleLib >= 0 {
+			midCount++
+		}
+		if info.FrontLib >= 0 {
+			frontCount++
+		}
+	}
+	t.Logf("CellInfos: back=%d mid=%d front=%d total=%d", backCount, midCount, frontCount, len(m.CellInfos))
+}

@@ -3,18 +3,25 @@ package renderer
 import (
 	"image"
 	"image/color"
+	"unsafe"
+
+	"github.com/go-gl/gl/v3.3-core/gl"
 
 	"github.com/pyq0109/mirgo/internal/mapformat"
 )
 
-const (
-	minimapSize = 200
-)
+const minimapSize = 200
 
-// GenerateMinimap creates a 200x200 collision texture.
-func GenerateMinimap(m *mapformat.MapData) *image.RGBA {
+// Minimap holds the minimap FBO and collision texture.
+type Minimap struct {
+	Texture uint32 // collision texture
+	FBO     uint32
+	FBOTex  uint32
+}
+
+// NewMinimap creates a minimap with collision texture.
+func NewMinimap(m *mapformat.MapData) *Minimap {
 	img := image.NewRGBA(image.Rect(0, 0, minimapSize, minimapSize))
-
 	walkable := color.RGBA{R: 34, G: 85, B: 34, A: 255}
 	blocked := color.RGBA{R: 60, G: 60, B: 60, A: 255}
 
@@ -31,7 +38,6 @@ func GenerateMinimap(m *mapformat.MapData) *image.RGBA {
 			if tileY >= m.Height {
 				tileY = m.Height - 1
 			}
-
 			if m.IsCollision(tileX, tileY) {
 				img.SetRGBA(mx, my, blocked)
 			} else {
@@ -40,36 +46,77 @@ func GenerateMinimap(m *mapformat.MapData) *image.RGBA {
 		}
 	}
 
-	return img
+	tex := UploadTexture(img)
+
+	// Create FBO for minimap rendering
+	var fbo, fboTex uint32
+	gl.GenFramebuffers(1, &fbo)
+	gl.GenTextures(1, &fboTex)
+	gl.BindTexture(gl.TEXTURE_2D, fboTex)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, minimapSize, minimapSize, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+
+	return &Minimap{
+		Texture: tex,
+		FBO:     fbo,
+		FBOTex:  fboTex,
+	}
 }
 
-// DrawMinimapViewport draws the viewport rectangle on the minimap.
-func DrawMinimapViewport(minimap *image.RGBA, cam *Camera2D, mapW, mapH int) {
-	white := color.RGBA{R: 255, G: 255, B: 255, A: 200}
+// Render draws the minimap to its FBO with viewport rectangle.
+func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
+	gl.BindFramebuffer(gl.FRAMEBUFFER, mm.FBO)
+	gl.Viewport(0, 0, minimapSize, minimapSize)
+	gl.Clear(gl.COLOR_BUFFER_BIT)
 
-	// Map camera viewport to minimap coordinates
-	worldW := float64(mapW) * TileWidth
-	worldH := float64(mapH) * TileHeight
+	// Draw collision texture
+	proj := OrthoProj(0, minimapSize, minimapSize, 0)
+	glState.DrawQuad(0, 0, minimapSize, minimapSize, mm.Texture, false, proj)
 
-	x0 := int(cam.X / worldW * minimapSize)
-	y0 := int(cam.Y / worldH * minimapSize)
-	viewW := float64(cam.ViewW) / cam.Zoom
-	viewH := float64(cam.ViewH) / cam.Zoom
-	x1 := int((cam.X + viewW) / worldW * minimapSize)
-	y1 := int((cam.Y + viewH) / worldH * minimapSize)
+	// Draw viewport rectangle
+	worldW := float32(mapW) * TileWidth
+	worldH := float32(mapH) * TileHeight
+	x0 := float32(cam.X) / worldW * minimapSize
+	y0 := float32(cam.Y) / worldH * minimapSize
+	viewW := float32(float64(cam.ViewW) / cam.Zoom)
+	viewH := float32(float64(cam.ViewH) / cam.Zoom)
+	x1 := (float32(cam.X) + viewW) / worldW * minimapSize
+	y1 := (float32(cam.Y) + viewH) / worldH * minimapSize
 
-	x0 = clamp(x0, 0, minimapSize-1)
-	y0 = clamp(y0, 0, minimapSize-1)
-	x1 = clamp(x1, 0, minimapSize-1)
-	y1 = clamp(y1, 0, minimapSize-1)
-
-	// Draw rectangle outline
-	for x := x0; x <= x1; x++ {
-		minimap.SetRGBA(x, y0, white)
-		minimap.SetRGBA(x, y1, white)
+	// Clamp
+	if x0 < 0 {
+		x0 = 0
 	}
-	for y := y0; y <= y1; y++ {
-		minimap.SetRGBA(x0, y, white)
-		minimap.SetRGBA(x1, y, white)
+	if y0 < 0 {
+		y0 = 0
 	}
+	if x1 > minimapSize {
+		x1 = minimapSize
+	}
+	if y1 > minimapSize {
+		y1 = minimapSize
+	}
+
+	// Draw white rectangle outline using grid shader
+	gl.UseProgram(glState.GridShader.ID)
+	gl.UniformMatrix4fv(glState.GridShader.ProjLoc, 1, false, &proj[0])
+	gl.Uniform4f(glState.GridShader.ColorLoc, 1, 1, 1, 0.8)
+	gl.BindVertexArray(glState.VAO)
+
+	lines := []float32{
+		x0, y0, x1, y0, // top
+		x1, y0, x1, y1, // right
+		x1, y1, x0, y1, // bottom
+		x0, y1, x0, y0, // left
+	}
+	gl.BindBuffer(gl.ARRAY_BUFFER, glState.VBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(lines)*4, unsafe.Pointer(&lines[0]), gl.STREAM_DRAW)
+	gl.DrawArrays(gl.LINES, 0, 4*2)
+
+	gl.BindVertexArray(0)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 }
