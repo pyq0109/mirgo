@@ -6,25 +6,24 @@
 
 | 模块       | 文件            | 状态 | 说明                                                         |
 | ---------- | --------------- | ---- | ------------------------------------------------------------ |
-| 基础框架   | `main.go`       | ✅   | GLFW + OpenGL + ImGui 主循环                                 |
-| 目录树     | `ui/ui.go`      | ✅   | 接受目录路径，左侧列出 .wil 文件，按类型着色                 |
-| WIL加载    | `main.go`       | ✅   | 复用 `internal/wil.Load()`，点击目录树时加载                 |
-| 图像列表   | `ui/ui.go`      | ✅   | 右侧面板显示图像索引、尺寸、热点坐标                         |
-| 图像导航   | `ui/ui.go`      | ✅   | 箭头键 + 按钮（`<<` `<` `>` `>>`）                           |
-| 模式切换   | `ui/ui.go`      | ✅   | Browse / Animation 单选按钮（UI 已有，动画模式未接入）       |
-| GL渲染器   | `renderer/*.go` | ✅   | 纹理上传、四边形绘制、着色器、`SetWILFile` 热切换            |
-| 动作模板   | `action.go`     | ✅   | 人类7种、怪物2种（MA9/MA10）、NPC、`CalcFrames`              |
-| 动画播放器 | `animation.go`  | ✅   | Play/Pause/Stop、单帧步进、方向切换、速度调节                |
-| 文件分类   | `ui/ui.go`      | ✅   | `wilCategory()` 四色分类：动画=蓝、静态=绿、混合=黄、未知=白 |
+| 基础框架   | `main.go`       | ✅   | GLFW + OpenGL + ImGui 主循环，接受目录路径                    |
+| 目录树     | `ui/ui.go`      | ✅   | 左侧 250px 面板列出 .wil 文件，按类型四色着色                |
+| WIL加载    | `main.go`       | ✅   | 复用 `internal/wil.Load()`，点击目录树时加载                  |
+| 图像列表   | `ui/ui.go`      | ✅   | 右侧面板显示图像索引、尺寸、热点坐标                          |
+| 图像导航   | `ui/ui.go`      | ✅   | 箭头键 + 按钮（`<<` `<` `>` `>>`）                            |
+| 模式切换   | `ui/ui.go`      | ✅   | Browse / Animation 单选按钮                                   |
+| GL渲染器   | `renderer/*.go` | ✅   | 纹理上传、四边形绘制、着色器、`SetWILFile` 热切换             |
+| 缩放/平移  | `renderer/renderer.go` | ✅ | 鼠标滚轮缩放（0.1x~20x），中键拖拽平移               |
+| 动作模板   | `action.go`     | ✅   | 人类7种、怪物2种（MA9/MA10）、NPC、`CalcFrames`               |
+| 动画播放器 | `animation.go`  | ✅   | Play/Pause/Stop、单帧步进、方向切换、速度调节                 |
+| 动画模式UI | `ui/ui.go`      | ✅   | 动作选择（7种）、8方向切换、播放控制、速度滑块、帧信息        |
+| 图像导出   | `renderer/renderer.go` | ✅ | 单张导出（ExportPNG）和批量导出（ExportAllPNG）为 PNG  |
+| 文件分类   | `ui/ui.go`      | ✅   | `wilCategory()` 四色分类：动画=蓝、静态=绿、混合=黄、未知=白  |
+| Debug日志  | 三个文件         | ✅   | 集成 `internal/log`，关键操作均有 DEBUG/INFO 级别日志         |
 
 ### 未完成
 
-| 模块                | 优先级 | 说明                                                    |
-| ------------------- | ------ | ------------------------------------------------------- |
-| 图像预览区缩放/平移 | P0     | 当前图像固定位置绘制，缺少鼠标缩放和拖拽平移            |
-| 动画模式UI集成      | P0     | `action.go` 和 `animation.go` 已实现但未接入 ImGui 面板 |
-| 图像导出            | P1     | 缺少 `export.go`，无法导出 PNG                          |
-| Debug日志           | P1     | 未集成 `internal/log`，无运行时日志输出                 |
+（无）
 
 ---
 
@@ -508,8 +507,18 @@ func (e *Exporter) ExportAll(file *wil.File) error
 - **黄色**：混合文件 — Objects\*
 - **白色**：未分类 .wil 文件
 
-**待实现的布局扩展**（动画模式面板）：
-
+**动画模式面板**（切换到 Animation 模式时显示在右侧面板内）：
+```
+├─────────────────────────────────────────────────────────┤
+│ Animation Controls                                      │
+│ Action: ○stand ○walk ○run ○attack ○spell ○hit ○death  │
+│ Direction: ○↑ ○↗ ○→ ○↘ ○↓ ○↙ ○← ○↖                 │
+│ Playback: |< < Play > >|                               │
+│ Speed: [========] 1.0x                                  │
+│ Frame: 1/6 (image 0)                                    │
+│ Direction: Up (0)                                       │
+│ Action: stand                                           │
+└─────────────────────────────────────────────────────────┘
 ```
 ├─────────────────────────────────────────────────────────┤
 │ 动画控制（仅动画模式）:                                   │

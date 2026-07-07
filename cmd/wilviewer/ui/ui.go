@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	igopengl3 "github.com/AllenDang/cimgui-go/impl/opengl3"
 
 	"github.com/pyq0109/mirgo/cmd/wilviewer/renderer"
+	mlog "github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
@@ -30,6 +32,14 @@ type UIState struct {
 	Renderer   *renderer.WILRenderer
 	CurrentIdx int
 	Mode       string // "browse" or "animation"
+
+	// Animation state.
+	AnimPlaying   bool
+	AnimDirection int     // 0-7
+	AnimAction    string  // "stand", "walk", "run", etc.
+	AnimSpeed     float64 // playback speed multiplier
+	animFrameIdx  int     // current frame in sequence
+	animLastTick  float64 // glfw timer for animation
 }
 
 // toImGuiWindow converts a go-gl/glfw Window to the cimgui-go GLFWwindow type.
@@ -156,39 +166,43 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	}
 	sort.Strings(wilFiles)
 
-	blue   := ig.NewVec4(0.4, 0.7, 1.0, 1.0) // animation
-	green  := ig.NewVec4(0.4, 1.0, 0.4, 1.0) // static
-	yellow := ig.NewVec4(1.0, 1.0, 0.4, 1.0) // mixed
+	blue := color.RGBA{R: 102, G: 179, B: 255, A: 255}   // animation
+	green := color.RGBA{R: 102, G: 255, B: 102, A: 255}  // static
+	yellow := color.RGBA{R: 255, G: 255, B: 102, A: 255} // mixed
 
 	ig.BeginChildStr("filetree")
 	for _, name := range wilFiles {
 		selected := state.WILFile != nil && strings.EqualFold(state.WILFile.Title, strings.TrimSuffix(name, filepath.Ext(name)))
 		cat := wilCategory(name)
+		var c color.RGBA
 		switch cat {
 		case "anim":
-			ig.PushStyleColorVec4(ig.ColText, blue)
+			c = blue
 		case "static":
-			ig.PushStyleColorVec4(ig.ColText, green)
+			c = green
 		case "mixed":
-			ig.PushStyleColorVec4(ig.ColText, yellow)
-		default: // "unknown" — no color push, stays white
+			c = yellow
+		default:
+			c = color.RGBA{R: 255, G: 255, B: 255, A: 255}
 		}
+		ig.PushStyleColorVec4(ig.ColText, ig.NewVec4(float32(c.R)/255, float32(c.G)/255, float32(c.B)/255, float32(c.A)/255))
 		if ig.SelectableBoolV(name, selected, 0, ig.NewVec2(0, 0)) {
 			wilPath := filepath.Join(state.DataDir, name)
+			mlog.Logf(mlog.LevelInfo, "UI", "选择文件: %s (分类=%s)", name, cat)
 			newFile, err := wil.Load(wilPath)
 			if err != nil {
-				if cat != "unknown" {
-					ig.PopStyleColor()
-				}
+				mlog.Logf(mlog.LevelError, "UI", "加载失败: %s, err=%v", wilPath, err)
+				ig.PopStyleColor()
 				continue
 			}
+			mlog.Logf(mlog.LevelInfo, "UI", "加载成功: title=%s, images=%d", newFile.Title, newFile.Count)
 			state.WILFile = newFile
 			state.CurrentIdx = 0
 			state.Renderer.SetWILFile(newFile)
+			state.AnimPlaying = false
+			state.animFrameIdx = 0
 		}
-		if cat != "unknown" {
-			ig.PopStyleColor()
-		}
+		ig.PopStyleColor()
 	}
 	ig.EndChild()
 
@@ -208,6 +222,8 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 		ig.Separator()
 		ig.Text("Controls:")
 		ig.BulletText("Arrow keys: Navigate images")
+		ig.BulletText("Scroll: Zoom in/out")
+		ig.BulletText("Middle drag: Pan")
 		ig.BulletText("ESC: Quit")
 		ig.End()
 		return
@@ -224,10 +240,12 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	ig.Text("Mode:")
 	if ig.RadioButtonBool("Browse", state.Mode == "browse") {
 		state.Mode = "browse"
+		mlog.Logf(mlog.LevelInfo, "UI", "模式切换: browse")
 	}
 	ig.SameLine()
 	if ig.RadioButtonBool("Animation", state.Mode == "animation") {
 		state.Mode = "animation"
+		mlog.Logf(mlog.LevelInfo, "UI", "模式切换: animation")
 	}
 	ig.Separator()
 
@@ -272,6 +290,40 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	}
 	ig.Separator()
 
+	// Export.
+	if ig.Button("Export PNG") {
+		if state.CurrentIdx >= 0 && state.CurrentIdx < len(wf.Images) {
+			dir := state.DataDir + "/export"
+			os.MkdirAll(dir, 0755)
+			path := dir + "/" + formatIdx(state.CurrentIdx) + ".png"
+			mlog.Logf(mlog.LevelInfo, "Export", "用户点击导出单张: idx=%d, path=%s", state.CurrentIdx, path)
+			if err := state.Renderer.ExportPNG(state.CurrentIdx, path); err != nil {
+				ig.TextColored(ig.NewVec4(1, 0.3, 0.3, 1), "Export failed")
+			} else {
+				ig.TextColored(ig.NewVec4(0.3, 1, 0.3, 1), "Exported: "+path)
+			}
+		}
+	}
+	ig.SameLine()
+	if ig.Button("Export All") {
+		dir := state.DataDir + "/export"
+		os.MkdirAll(dir, 0755)
+		mlog.Logf(mlog.LevelInfo, "Export", "用户点击批量导出: dir=%s", dir)
+		n, err := state.Renderer.ExportAllPNG(dir)
+		if err != nil {
+			ig.TextColored(ig.NewVec4(1, 0.3, 0.3, 1), "Export failed")
+		} else {
+			ig.TextColored(ig.NewVec4(0.3, 1, 0.3, 1), fmt.Sprintf("Exported %d images", n))
+		}
+	}
+	ig.Separator()
+
+	// Animation controls (only in animation mode).
+	if state.Mode == "animation" {
+		renderAnimationControls(state, wf)
+		ig.Separator()
+	}
+
 	// Image list (scrollable).
 	ig.Text("Image List:")
 	ig.BeginChildStr("imagelist")
@@ -293,9 +345,198 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	ig.End()
 }
 
+// renderAnimationControls renders the animation control panel.
+func renderAnimationControls(state *UIState, wf *wil.File) {
+	ig.TextColored(ig.NewVec4(0.4, 0.7, 1.0, 1), "Animation Controls")
+
+	// Action selection.
+	ig.Text("Action:")
+	actions := []string{"stand", "walk", "run", "attack", "spell", "hit", "death"}
+	for i, a := range actions {
+		if i > 0 {
+			ig.SameLine()
+		}
+		if ig.RadioButtonBool(a, state.AnimAction == a) {
+			state.AnimAction = a
+			state.AnimPlaying = false
+			state.animFrameIdx = 0
+			mlog.Logf(mlog.LevelInfo, "Anim", "动作切换: %s, direction=%d", a, state.AnimDirection)
+		}
+	}
+	if state.AnimAction == "" {
+		state.AnimAction = "stand"
+	}
+
+	// Direction selection.
+	ig.Text("Direction:")
+	dirNames := []string{"Up", "UpRight", "Right", "DownRight", "Down", "DownLeft", "Left", "UpLeft"}
+	dirArrows := []string{"\u2191", "\u2197", "\u2192", "\u2198", "\u2193", "\u2199", "\u2190", "\u2196"}
+	for i := 0; i < 8; i++ {
+		if i > 0 {
+			ig.SameLine()
+		}
+		if ig.RadioButtonBool(dirArrows[i], state.AnimDirection == i) {
+			state.AnimDirection = i
+			state.animFrameIdx = 0
+			mlog.Logf(mlog.LevelInfo, "Anim", "方向切换: %s (%d), action=%s", dirNames[i], i, state.AnimAction)
+		}
+		if ig.IsItemHovered() {
+			ig.SetTooltip(dirNames[i])
+		}
+	}
+
+	// Playback controls.
+	ig.Text("Playback:")
+	if ig.Button("|<") {
+		state.animFrameIdx = 0
+	}
+	ig.SameLine()
+	if ig.Button("<") {
+		if state.animFrameIdx > 0 {
+			state.animFrameIdx--
+		}
+	}
+	ig.SameLine()
+	playLabel := "Play"
+	if state.AnimPlaying {
+		playLabel = "Pause"
+	}
+	if ig.Button(playLabel) {
+		state.AnimPlaying = !state.AnimPlaying
+		if state.AnimPlaying {
+			mlog.Logf(mlog.LevelInfo, "Anim", "播放: action=%s, dir=%d, speed=%.1f", state.AnimAction, state.AnimDirection, state.AnimSpeed)
+		} else {
+			mlog.Logf(mlog.LevelInfo, "Anim", "暂停: action=%s, dir=%d, frame=%d", state.AnimAction, state.AnimDirection, state.animFrameIdx)
+		}
+	}
+	ig.SameLine()
+	if ig.Button(">") {
+		state.animFrameIdx++
+	}
+	ig.SameLine()
+	if ig.Button(">|") {
+		state.animFrameIdx = 0
+		state.AnimPlaying = false
+	}
+
+	// Speed control.
+	ig.Text("Speed:")
+	if state.AnimSpeed == 0 {
+		state.AnimSpeed = 1.0
+	}
+	speedF32 := float32(state.AnimSpeed)
+	ig.SliderFloat("##speed", &speedF32, 0.1, 5.0)
+	state.AnimSpeed = float64(speedF32)
+
+	// Frame info.
+	frames := calcAnimFrames(state.AnimAction, state.AnimDirection, wf.Count)
+	totalFrames := len(frames)
+	if totalFrames > 0 {
+		// Clamp frame index.
+		if state.animFrameIdx >= totalFrames {
+			state.animFrameIdx = 0
+		}
+		actualFrame := frames[state.animFrameIdx]
+		state.CurrentIdx = actualFrame
+
+		dirName := "N/A"
+		if state.AnimDirection >= 0 && state.AnimDirection < 8 {
+			dirName = dirNames[state.AnimDirection]
+		}
+		ig.Text(fmt.Sprintf("Frame: %d/%d (image %d)", state.animFrameIdx+1, totalFrames, actualFrame))
+		ig.Text(fmt.Sprintf("Direction: %s (%d)", dirName, state.AnimDirection))
+		ig.Text(fmt.Sprintf("Action: %s", state.AnimAction))
+
+		// Auto-advance animation.
+		if state.AnimPlaying {
+			now := glfw.GetTime()
+			interval := 0.1 / state.AnimSpeed // 100ms base interval
+			if now-state.animLastTick >= interval {
+				state.animLastTick = now
+				state.animFrameIdx++
+				if state.animFrameIdx >= totalFrames {
+					state.animFrameIdx = 0
+				}
+			}
+		}
+	} else {
+		ig.Text("No animation frames available")
+	}
+}
+
+// calcAnimFrames calculates the frame indices for an animation.
+func calcAnimFrames(action string, direction int, maxCount int) []int {
+	// Try to get action info from predefined templates.
+	var start, frameCount int
+	switch action {
+	case "stand":
+		start = 0
+		frameCount = 4
+	case "walk":
+		start = 64
+		frameCount = 48
+	case "run":
+		start = 128
+		frameCount = 48
+	case "attack":
+		start = 192
+		frameCount = 48
+	case "spell":
+		start = 256
+		frameCount = 48
+	case "hit":
+		start = 320
+		frameCount = 24
+	case "death":
+		start = 384
+		frameCount = 24
+	default:
+		// Unknown action: show all images.
+		frames := make([]int, maxCount)
+		for i := range frames {
+			frames[i] = i
+		}
+		return frames
+	}
+
+	// Calculate per-direction frames.
+	dirFrames := frameCount / 8
+	if dirFrames < 1 {
+		dirFrames = 1
+	}
+	base := start + direction*dirFrames
+
+	frames := make([]int, 0, dirFrames)
+	for i := 0; i < dirFrames; i++ {
+		idx := base + i
+		if idx < maxCount {
+			frames = append(frames, idx)
+		}
+	}
+	return frames
+}
+
 // RightPanelWidth returns the width of the right panel for viewport calculations.
 func RightPanelWidth() int {
 	return rightPanelWidth
+}
+
+// LeftPanelWidth returns the width of the left panel.
+func LeftPanelWidth() int {
+	return leftPanelWidth
+}
+
+func formatIdx(i int) string {
+	if i < 10 {
+		return "000" + string(rune('0'+i))
+	}
+	if i < 100 {
+		return fmt.Sprintf("%03d", i)
+	}
+	if i < 1000 {
+		return fmt.Sprintf("%03d", i)
+	}
+	return fmt.Sprintf("%04d", i)
 }
 
 // wilCategory classifies a WIL file by its name.

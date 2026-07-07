@@ -1,7 +1,6 @@
 package renderer
 
 import (
-	"image"
 	"unsafe"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
@@ -64,21 +63,6 @@ func NewGLState() (*GLState, error) {
 		VBO:      vbo,
 		WhiteTex: whiteTex,
 	}, nil
-}
-
-// UploadTexture uploads an *image.RGBA to an OpenGL texture.
-func UploadTexture(img *image.RGBA) uint32 {
-	var tex uint32
-	gl.GenTextures(1, &tex)
-	gl.BindTexture(gl.TEXTURE_2D, tex)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
-		int32(img.Bounds().Dx()), int32(img.Bounds().Dy()),
-		0, gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&img.Pix[0]))
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-	return tex
 }
 
 // DrawQuad draws a textured quad at (x, y) with size (w, h).
