@@ -156,18 +156,38 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	}
 	sort.Strings(wilFiles)
 
+	blue   := ig.NewVec4(0.4, 0.7, 1.0, 1.0) // animation
+	green  := ig.NewVec4(0.4, 1.0, 0.4, 1.0) // static
+	yellow := ig.NewVec4(1.0, 1.0, 0.4, 1.0) // mixed
+
 	ig.BeginChildStr("filetree")
 	for _, name := range wilFiles {
 		selected := state.WILFile != nil && strings.EqualFold(state.WILFile.Title, strings.TrimSuffix(name, filepath.Ext(name)))
+		cat := wilCategory(name)
+		switch cat {
+		case "anim":
+			ig.PushStyleColorVec4(ig.ColText, blue)
+		case "static":
+			ig.PushStyleColorVec4(ig.ColText, green)
+		case "mixed":
+			ig.PushStyleColorVec4(ig.ColText, yellow)
+		default: // "unknown" — no color push, stays white
+		}
 		if ig.SelectableBoolV(name, selected, 0, ig.NewVec2(0, 0)) {
 			wilPath := filepath.Join(state.DataDir, name)
 			newFile, err := wil.Load(wilPath)
 			if err != nil {
+				if cat != "unknown" {
+					ig.PopStyleColor()
+				}
 				continue
 			}
 			state.WILFile = newFile
 			state.CurrentIdx = 0
 			state.Renderer.SetWILFile(newFile)
+		}
+		if cat != "unknown" {
+			ig.PopStyleColor()
 		}
 	}
 	ig.EndChild()
@@ -276,4 +296,38 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 // RightPanelWidth returns the width of the right panel for viewport calculations.
 func RightPanelWidth() int {
 	return rightPanelWidth
+}
+
+// wilCategory classifies a WIL file by its name.
+// Returns "anim", "static", "mixed" (Objects*), or "unknown".
+func wilCategory(name string) string {
+	base := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+	switch {
+	// Animation files
+	case base == "hum" || base == "humeffect" || base == "hair" || base == "weapon":
+		return "anim"
+	case base == "npc" || base == "dragon":
+		return "anim"
+	case base == "magic" || base == "magic2":
+		return "anim"
+	case base == "effect" || base == "event":
+		return "anim"
+	case strings.HasPrefix(base, "mon"):
+		return "anim"
+	// Static files
+	case base == "items" || base == "stateitem" || base == "dnitems":
+		return "static"
+	case base == "prguse" || base == "prguse2" || base == "prguse3":
+		return "static"
+	case base == "chrsel" || base == "mmap" || base == "magicon":
+		return "static"
+	case base == "tiles" || base == "smtiles":
+		return "static"
+	// Mixed files (Objects.wil, Objects2.wil, ...)
+	case strings.HasPrefix(base, "objects"):
+		return "mixed"
+	// Unknown
+	default:
+		return "unknown"
+	}
 }
