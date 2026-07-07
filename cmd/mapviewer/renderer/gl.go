@@ -171,3 +171,14 @@ func OrthoProj(left, right, bottom, top float32) [16]float32 {
 		-(right + left) / (right - left), -(top + bottom) / (top - bottom), 0, 1,
 	}
 }
+
+// Destroy frees all GL resources held by the GLState.
+func (s *GLState) Destroy() {
+	gl.DeleteTextures(1, &s.WhiteTex)
+	gl.DeleteBuffers(1, &s.VBO)
+	gl.DeleteBuffers(1, &s.GridVBO)
+	gl.DeleteVertexArrays(1, &s.VAO)
+	gl.DeleteVertexArrays(1, &s.GridVAO)
+	gl.DeleteProgram(s.Shader.ID)
+	gl.DeleteProgram(s.GridShader.ID)
+}

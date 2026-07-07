@@ -97,6 +97,7 @@ func (r *GLRenderer) getTex(cache map[int]uint32, file *wil.File, idx int) uint3
 	}
 	tex := UploadTexture(img.RGBA)
 	cache[idx] = tex
+	img.RGBA = nil // Free Go-side pixels; GPU has its own copy.
 	return tex
 }
 
@@ -407,4 +408,19 @@ func clamp(v, min, max int) int {
 		return max
 	}
 	return v
+}
+
+// Destroy frees all GL resources held by the renderer.
+func (r *GLRenderer) Destroy() {
+	for _, tex := range r.texCache {
+		gl.DeleteTextures(1, &tex)
+	}
+	for _, tex := range r.smTexCache {
+		gl.DeleteTextures(1, &tex)
+	}
+	for _, cache := range r.objectsCaches {
+		for _, tex := range cache {
+			gl.DeleteTextures(1, &tex)
+		}
+	}
 }

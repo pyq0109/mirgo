@@ -294,4 +294,9 @@ func main() {
 
 		window.SwapBuffers()
 	}
+
+	// Cleanup GL resources before exit.
+	ren.Destroy()
+	minimap.Destroy()
+	glState.Destroy()
 }

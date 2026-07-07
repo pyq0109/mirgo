@@ -82,7 +82,7 @@ func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
 
 	// Draw collision texture.
 	proj := OrthoProj(0, minimapSize, minimapSize, 0)
-	glState.DrawQuad(0, 0, minimapSize, minimapSize, mm.Texture, false, proj)
+	glState.DrawQuad(0, 0, minimapSize, minimapSize, mm.Texture, true, proj)
 
 	// Draw viewport rectangle.
 	worldW := float32(mapW) * TileWidth
@@ -129,4 +129,11 @@ func (mm *Minimap) Render(cam *Camera2D, mapW, mapH int, glState *GLState) {
 	// Restore GL state (C++ lines 974-975).
 	gl.BindFramebuffer(gl.FRAMEBUFFER, uint32(lastFBO))
 	gl.Viewport(lastVP[0], lastVP[1], lastVP[2], lastVP[3])
+}
+
+// Destroy frees all GL resources held by the minimap.
+func (mm *Minimap) Destroy() {
+	gl.DeleteTextures(1, &mm.Texture)
+	gl.DeleteTextures(1, &mm.FBOTex)
+	gl.DeleteFramebuffers(1, &mm.FBO)
 }
