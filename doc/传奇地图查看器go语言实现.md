@@ -47,6 +47,8 @@ cmd/mapviewer/
     └── ui.go                # 右侧面板、菜单栏、小地图窗口
 
 internal/                    # 共享包（客户端、服务端、mapviewer 共用）
+├── log/
+│   └── log.go               # 分级日志系统 (TRACE/DEBUG/INFO/WARN/ERROR)
 ├── mapformat/
 │   ├── map.go               # .map 文件解析器
 │   └── map_test.go          # 解析测试
@@ -182,11 +184,15 @@ type File struct {
 - 懒加载: `getTex()` 首次访问时调用 `UploadTexture()` 上传到 GPU
 - 纹理缓存: `map[int]uint32` (图像索引 → GL 纹理 ID)
 - 不可驱逐（内存换性能）
+- 上传后释放 Go 侧像素数据: `img.RGBA = nil`（GPU 已有独立副本）
 
 ### 5.8 小地图
 - 200×200 RGBA 纹理: 碰撞格子=灰色 (60,60,60), 可行走=深绿 (34,85,34)
 - FBO 离屏渲染: 碰撞纹理 + 白色视口矩形
 - ImGui 窗口中显示, 支持点击跳转和拖拽平移
+- **Y-up 正交投影**: 使用 `OrthoProj(0, size, 0, size)` 匹配 C++ `glm::ortho(0,1,0,1)`
+- **flipV=false**: 不翻转 V 坐标。Y-up 投影 + 不翻转 = FBO 内容在 OpenGL 中倒置存储，
+  但 ImGui 的 UV 约定 (UV(0,0) 在控件左上角) 会自动纠正方向
 
 ## 6. ImGui UI
 
@@ -270,15 +276,48 @@ gl.BufferSubData(gl.ARRAY_BUFFER, 0, len(lines)*4, unsafe.Pointer(&lines[0]))
 gl.DrawArrays(gl.LINES, 0, vertexCount)  // 单次绘制调用
 ```
 
+### 8.6 GL 资源清理
+退出前必须释放所有 GL 资源，避免 GPU 内存泄漏：
+- `GLState.Destroy()` — 删除 VAO、VBO、着色器、白色纹理
+- `GLRenderer.Destroy()` — 删除所有缓存的瓦片/物体纹理
+- `Minimap.Destroy()` — 删除碰撞纹理、FBO、FBO 纹理
+- 在 `glfw.Terminate()` 之前调用
+
+### 8.7 日志系统
+`internal/log/log.go` 实现了分级日志系统（所有 cmd 程序共享）：
+
+| 级别 | 用途 | 默认可见 |
+|------|------|----------|
+| TRACE | 每帧输出的详细数据（视口坐标、FBO 像素等） | 否 |
+| DEBUG | 诊断信息（点击坐标、导航计算、初始化参数） | 是 |
+| INFO | 启动里程碑（窗口创建、资源加载、FBO 创建） | 是 |
+| WARN | 可恢复的问题 | 是 |
+| ERROR | 失败 | 是 |
+
+- 默认级别: `LevelDebug`（输出 DEBUG 及以上，TRACE 不输出）
+- 使用: `mlog.Logf(mlog.LevelDebug, "tag", "format %v", args...)`
+- 格式: `2026/07/07 09:16:52 [DEBUG] [tag] message`
+- `renderer` 和 `ui` 包均通过 `import mlog "github.com/pyq0109/mirgo/internal/log"` 使用
+
+### 8.8 纹理 Y 轴翻转 (flipV)
+OpenGL 纹理坐标系与 `image.NewRGBA` 存储方向相反：
+- OpenGL: `glTexImage2D` 第一行数据 → 纹理底部 (UV v=0)
+- Go `image`: 第一行数据 → 图像顶部
+- 主地图瓦片: 使用 `flipV=true`，着色器中执行 `uv.y = 1.0 - uv.y` 纠正方向
+- 小地图 FBO: 使用 Y-up 正交投影 + `flipV=false`。FBO 内容在 OpenGL 中倒置存储，
+  但 ImGui 显示时 UV(0,0) 在控件左上角对应 OpenGL 纹理底部，自动完成翻转
+
 ## 9. 文件清单
 
 | 文件 | 说明 |
 |---|---|
 | `go.mod` | 依赖: go-gl/glfw v3.4, go-gl/gl v3.3-core, cimgui-go v1.5.0 |
+| `internal/log/log.go` | 分级日志系统 (TRACE/DEBUG/INFO/WARN/ERROR) |
 | `internal/mapformat/map.go` | .map 文件解析器 (Cell + CellInfo) |
 | `internal/mapformat/map_test.go` | 解析测试 |
 | `internal/wil/wil.go` | WIL/WIX 图像加载器 |
 | `cmd/mapviewer/main.go` | GLFW 窗口 + ImGui + 主循环 |
+| `cmd/mapviewer/log/log.go` | 分级日志系统 (TRACE/DEBUG/INFO/WARN/ERROR) |
 | `cmd/mapviewer/renderer/camera.go` | 2D 相机 |
 | `cmd/mapviewer/renderer/gl.go` | GL 状态、纹理上传、DrawQuad |
 | `cmd/mapviewer/renderer/shader.go` | GLSL 330 着色器 |
@@ -295,6 +334,7 @@ gl.DrawArrays(gl.LINES, 0, vertexCount)  // 单次绘制调用
 5. 验证碰撞可视化（红色覆盖，可选）
 6. 验证 WASD/中键平移、滚轮缩放流畅
 7. 验证 ImGui 右侧面板显示格子信息
-8. 验证小地图点击跳转和拖拽
+8. 验证小地图方向正确（北朝上）且支持点击跳转和拖拽
 9. 验证左键格子锁定（红色高亮）
 10. 验证网格切换 (G 键)
+11. 验证退出时无 GPU 内存泄漏（Destroy 清理）

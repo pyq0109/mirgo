@@ -10,8 +10,9 @@ import (
 	igglfw "github.com/AllenDang/cimgui-go/impl/glfw"
 	igopengl3 "github.com/AllenDang/cimgui-go/impl/opengl3"
 
-	"github.com/pyq0109/mirgo/internal/mapformat"
 	"github.com/pyq0109/mirgo/cmd/mapviewer/renderer"
+	mlog "github.com/pyq0109/mirgo/internal/log"
+	"github.com/pyq0109/mirgo/internal/mapformat"
 )
 
 const (
@@ -309,6 +310,7 @@ func RenderMinimapWindow(state *UIState) {
 		worldY := (py / minimapSize) * mapH
 		camX := float64(worldX - viewW/2)
 		camY := float64(worldY - viewH/2)
+		mlog.Logf(mlog.LevelTrace, "minimap", "navigate: click=(%.1f, %.1f) world=(%.1f, %.1f) camRaw=(%.1f, %.1f)", px, py, worldX, worldY, camX, camY)
 		if camX < 0 {
 			camX = 0
 		}
@@ -323,6 +325,7 @@ func RenderMinimapWindow(state *UIState) {
 		}
 		state.Cam.X = camX
 		state.Cam.Y = camY
+		mlog.Logf(mlog.LevelTrace, "minimap", "navigate result: cam=(%.1f, %.1f)", camX, camY)
 	}
 
 	if ig.IsItemActivated() {
@@ -331,7 +334,9 @@ func RenderMinimapWindow(state *UIState) {
 		vy := float32(state.Cam.Y) / mapH * minimapSize
 		vw := viewW / mapW * minimapSize
 		vh := viewH / mapH * minimapSize
+		mlog.Logf(mlog.LevelDebug, "minimap", "click: mmPos=(%.1f, %.1f) vpRect=(%.1f, %.1f)-(%.1f, %.1f) size=(%.1f, %.1f)", mmMx, mmMy, vx, vy, vx+vw, vy+vh, vw, vh)
 		inRect := mmMx >= vx && mmMx <= vx+vw && mmMy >= vy && mmMy <= vy+vh
+		mlog.Logf(mlog.LevelDebug, "minimap", "click inRect=%v", inRect)
 		if !inRect {
 			minimapToWorld(mmMx, mmMy)
 		}
