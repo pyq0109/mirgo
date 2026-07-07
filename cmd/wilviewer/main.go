@@ -84,46 +84,27 @@ func main() {
 		mlog.Logf(mlog.LevelError, "Main", "GLState 创建失败: %v", err)
 		log.Fatal(err)
 	}
+	defer glState.Destroy()
 
 	// Create WIL renderer (no file loaded yet).
 	wilRenderer := renderer.NewWILRenderer(nil, glState)
+	defer wilRenderer.Destroy()
 	mlog.Logf(mlog.LevelDebug, "Main", "WIL 渲染器创建成功")
 
 	// Create UI state.
 	uiState := &ui.UIState{
-		DataDir:    dataDir,
-		WILFile:    nil,
-		Renderer:   wilRenderer,
-		CurrentIdx: 0,
-		Mode:       "browse",
-		AnimAction: "stand",
-		AnimSpeed:  1.0,
+		DataDir:      dataDir,
+		WILFile:      nil,
+		Renderer:     wilRenderer,
+		CurrentIdx:   0,
+		GridScrollTo: -1,
+		Mode:         "browse",
+		AnimAction:   "stand",
+		AnimSpeed:    1.0,
 	}
 
-	// Pan state.
-	panning := false
-	var lastPanX, lastPanY float64
-
-	// Set GLFW callbacks: scroll for zoom.
-	ui.SetGLFWCallbacks(window, func(w *glfw.Window, xoff, yoff float64) {
-		io := ui.IO()
-		if io.WantCaptureMouse() {
-			return
-		}
-		oldZoom := wilRenderer.Zoom
-		if yoff > 0 {
-			wilRenderer.Zoom *= 1.1
-		} else if yoff < 0 {
-			wilRenderer.Zoom /= 1.1
-		}
-		if wilRenderer.Zoom < 0.1 {
-			wilRenderer.Zoom = 0.1
-		}
-		if wilRenderer.Zoom > 20 {
-			wilRenderer.Zoom = 20
-		}
-		mlog.Logf(mlog.LevelTrace, "Zoom", "缩放: %.2f -> %.2f", oldZoom, wilRenderer.Zoom)
-	})
+	// Set GLFW callbacks: scroll for grid scrolling.
+	ui.SetGLFWCallbacks(window, nil)
 
 	// Window resize callback.
 	window.SetFramebufferSizeCallback(func(w *glfw.Window, width, height int) {
@@ -131,7 +112,7 @@ func main() {
 	})
 
 	mlog.Logf(mlog.LevelInfo, "Main", "WIL 查看器启动完成")
-	mlog.Logf(mlog.LevelInfo, "Main", "操作: ESC=退出, 左右箭头=切换图像, 滚轮=缩放, 中键拖拽=平移")
+	mlog.Logf(mlog.LevelInfo, "Main", "操作: ESC=退出, 左右箭头=切换图像")
 
 	// Main loop.
 	for !window.ShouldClose() {
@@ -154,54 +135,18 @@ func main() {
 				if window.GetKey(glfw.KeyRight) == glfw.Press {
 					if uiState.CurrentIdx < uiState.WILFile.Count-1 {
 						uiState.CurrentIdx++
+						uiState.GridScrollTo = uiState.CurrentIdx
 						mlog.Logf(mlog.LevelTrace, "Nav", "右箭头: idx=%d", uiState.CurrentIdx)
 					}
 				}
 				if window.GetKey(glfw.KeyLeft) == glfw.Press {
 					if uiState.CurrentIdx > 0 {
 						uiState.CurrentIdx--
+						uiState.GridScrollTo = uiState.CurrentIdx
 						mlog.Logf(mlog.LevelTrace, "Nav", "左箭头: idx=%d", uiState.CurrentIdx)
 					}
 				}
 			}
-		}
-
-		// Middle button drag for panning (only if ImGui doesn't want mouse).
-		if !io.WantCaptureMouse() {
-			if window.GetMouseButton(glfw.MouseButtonMiddle) == glfw.Press {
-				cx, cy := window.GetCursorPos()
-				if !panning {
-					panning = true
-					lastPanX, lastPanY = cx, cy
-					mlog.Logf(mlog.LevelTrace, "Pan", "平移开始: (%.0f, %.0f)", cx, cy)
-				} else {
-					dx := cx - lastPanX
-					dy := cy - lastPanY
-					wilRenderer.OffsetX -= dx / wilRenderer.Zoom
-					wilRenderer.OffsetY -= dy / wilRenderer.Zoom
-					lastPanX, lastPanY = cx, cy
-				}
-			} else {
-				if panning {
-					mlog.Logf(mlog.LevelTrace, "Pan", "平移结束: offset=(%.1f, %.1f)", wilRenderer.OffsetX, wilRenderer.OffsetY)
-				}
-				panning = false
-			}
-		}
-
-		// Calculate viewport for the center area (between left and right panels).
-		leftW := ui.LeftPanelWidth()
-		rightW := ui.RightPanelWidth()
-		menuH := int32(ui.FrameHeight())
-		vpX := int32(leftW)
-		vpY := int32(0)
-		vpW := glfwW - int32(leftW) - int32(rightW)
-		vpH := glfwH - menuH
-		if vpW < 1 {
-			vpW = 1
-		}
-		if vpH < 1 {
-			vpH = 1
 		}
 
 		// Clear full window.
@@ -209,13 +154,10 @@ func main() {
 		gl.ClearColor(0.1, 0.1, 0.1, 1.0)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		// Render current image in center viewport.
-		if uiState.WILFile != nil {
-			wilRenderer.Render(uiState.CurrentIdx, vpX, vpY, vpW, vpH)
-		}
-
 		// ImGui frame.
 		ui.BeginFrame()
+
+		menuH := ui.FrameHeight()
 
 		shouldClose := false
 		ui.RenderMenuBar(&shouldClose)
@@ -224,17 +166,15 @@ func main() {
 			window.SetShouldClose(true)
 		}
 
-		ui.RenderLeftPanel(uiState, glfwW, glfwH, float32(menuH))
-		ui.RenderMainPanel(uiState, glfwW, glfwH, float32(menuH))
+		ui.RenderLeftPanel(uiState, glfwW, glfwH, menuH)
+		ui.RenderGridPanel(uiState, glfwW, glfwH, menuH)
+		ui.RenderInfoPanel(uiState, glfwW, glfwH, menuH)
+		ui.RenderPreviewPanel(uiState, glfwW, glfwH, menuH)
 
 		ui.EndFrame()
 
 		window.SwapBuffers()
 	}
 
-	// Cleanup GL resources before exit.
-	mlog.Logf(mlog.LevelInfo, "Main", "正在清理资源...")
-	wilRenderer.Destroy()
-	glState.Destroy()
 	mlog.Logf(mlog.LevelInfo, "Main", "退出完成")
 }

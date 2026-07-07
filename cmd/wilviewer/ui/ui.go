@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,9 @@ import (
 const (
 	leftPanelWidth  = 250
 	rightPanelWidth = 380
+	thumbnailSize   = 64
+	thumbCellPad    = 4
+	thumbCellSize   = thumbnailSize + thumbCellPad*2
 )
 
 // UIState holds the shared state between the UI and the main loop.
@@ -32,6 +36,9 @@ type UIState struct {
 	Renderer   *renderer.WILRenderer
 	CurrentIdx int
 	Mode       string // "browse" or "animation"
+
+	// Grid state.
+	GridScrollTo int // scroll to this image index in grid (-1 = no scroll)
 
 	// Animation state.
 	AnimPlaying   bool
@@ -68,7 +75,6 @@ func Shutdown() {
 type ScrollHandler func(window *glfw.Window, xoff, yoff float64)
 
 // SetGLFWCallbacks sets up GLFW callbacks that forward to ImGui.
-// scrollHandler is called after ImGui processes the scroll event.
 func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler) {
 	imWin := toImGuiWindow(window)
 
@@ -198,6 +204,7 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 			mlog.Logf(mlog.LevelInfo, "UI", "加载成功: title=%s, images=%d", newFile.Title, newFile.Count)
 			state.WILFile = newFile
 			state.CurrentIdx = 0
+			state.GridScrollTo = 0
 			state.Renderer.SetWILFile(newFile)
 			state.AnimPlaying = false
 			state.animFrameIdx = 0
@@ -209,10 +216,118 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	ig.End()
 }
 
-// RenderMainPanel renders the main UI panel with image list and controls.
-func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
+// RenderGridPanel renders the center grid of texture thumbnails.
+func RenderGridPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
+	gridX := float32(leftPanelWidth)
+	gridY := menuH
+	gridW := float32(glfwW) - gridX - float32(rightPanelWidth)
+	gridH := float32(glfwH) - menuH
+
+	ig.SetNextWindowPosV(ig.NewVec2(gridX, gridY), ig.CondAlways, ig.NewVec2(0, 0))
+	ig.SetNextWindowSizeV(ig.NewVec2(gridW, gridH), ig.CondAlways)
+
+	ig.BeginV("Grid", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize|ig.WindowFlagsNoScrollbar)
+
+	if state.WILFile == nil {
+		ig.Text("Select a .wil file from the left panel")
+		ig.End()
+		return
+	}
+
+	wf := state.WILFile
+
+	// Calculate columns based on available width.
+	availW := ig.ContentRegionAvail().X
+	cols := int(availW) / thumbCellSize
+	if cols < 1 {
+		cols = 1
+	}
+
+	ig.BeginChildStr("gridscroll")
+
+	selectedIdx := state.CurrentIdx
+	col := 0
+	for i := 0; i < wf.Count; i++ {
+		img := wf.Images[i]
+		if img == nil || img.RGBA == nil {
+			col++
+			if col >= cols {
+				col = 0
+			}
+			continue
+		}
+
+		tex := state.Renderer.GetOrCreateTexture(i)
+		if tex == 0 {
+			col++
+			if col >= cols {
+				col = 0
+			}
+			continue
+		}
+
+		// Highlight selected cell.
+		if i == selectedIdx {
+			ig.PushStyleColorVec4(ig.ColBorder, ig.NewVec4(0.2, 0.6, 1.0, 1.0))
+			ig.PushStyleVarFloat(ig.StyleVarFrameBorderSize, 2.0)
+		}
+
+		// Cell begin.
+		ig.PushIDInt(int32(i))
+
+		// UV: full image (aspect ratio handled by ImageButton sizing).
+		uv0 := ig.NewVec2(0, 0)
+		uv1 := ig.NewVec2(1, 1)
+
+		texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
+		size := ig.NewVec2(thumbnailSize, thumbnailSize)
+		pressed := ig.ImageButtonV(fmt.Sprintf("##thumb%d", i), *texRef, size, uv0, uv1, ig.NewVec4(0.15, 0.15, 0.15, 1), ig.NewVec4(1, 1, 1, 1))
+
+		// Hover tooltip.
+		if ig.IsItemHovered() {
+			ig.SetTooltip(fmt.Sprintf("#%d  %dx%d", i, img.Width, img.Height))
+		}
+
+		// Click to select.
+		if pressed {
+			state.CurrentIdx = i
+			state.GridScrollTo = i
+			mlog.Logf(mlog.LevelDebug, "Grid", "选中图像: idx=%d", i)
+		}
+
+		ig.PopID()
+
+		if i == selectedIdx {
+			ig.PopStyleVar()
+			ig.PopStyleColor()
+		}
+
+		// SameLine until we fill the row.
+		col++
+		if col < cols {
+			ig.SameLine()
+		} else {
+			col = 0
+		}
+	}
+
+	// Auto-scroll to selected image.
+	if state.GridScrollTo >= 0 {
+		row := state.GridScrollTo / cols
+		scrollY := float32(row) * float32(thumbCellSize)
+		ig.SetScrollYFloat(scrollY)
+		state.GridScrollTo = -1
+	}
+
+	ig.EndChild()
+	ig.End()
+}
+
+// RenderInfoPanel renders the right-top panel with file info and controls.
+func RenderInfoPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
+	infoH := (float32(glfwH) - menuH) * 0.4
 	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), menuH), ig.CondAlways, ig.NewVec2(0, 0))
-	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, float32(glfwH)-menuH), ig.CondAlways)
+	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, infoH), ig.CondAlways)
 
 	ig.BeginV("WIL Info", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize)
 
@@ -223,7 +338,6 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 		ig.Text("Controls:")
 		ig.BulletText("Arrow keys: Navigate images")
 		ig.BulletText("Scroll: Zoom in/out")
-		ig.BulletText("Middle drag: Pan")
 		ig.BulletText("ESC: Quit")
 		ig.End()
 		return
@@ -250,28 +364,30 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	ig.Separator()
 
 	// Current image info.
-	ig.Text("Current Image:")
 	if state.CurrentIdx >= 0 && state.CurrentIdx < len(wf.Images) {
 		img := wf.Images[state.CurrentIdx]
 		if img != nil {
-			ig.Text(fmt.Sprintf("  Index: %d", state.CurrentIdx))
-			ig.Text(fmt.Sprintf("  Size: %d x %d", img.Width, img.Height))
-			ig.Text(fmt.Sprintf("  Hotspot: (%d, %d)", img.HotX, img.HotY))
+			ig.Text(fmt.Sprintf("Index: %d", state.CurrentIdx))
+			ig.Text(fmt.Sprintf("Size: %d x %d", img.Width, img.Height))
+			ig.Text(fmt.Sprintf("Hotspot: (%d, %d)", img.HotX, img.HotY))
 		}
 	}
 	ig.Separator()
 
 	// Navigation.
-	ig.Text("Navigation:")
+	navW := rightPanelWidth - 20
+	ig.PushItemWidth(float32(navW))
 	if ig.Button("<<") {
 		if state.CurrentIdx > 0 {
-			state.CurrentIdx--
+			state.CurrentIdx = 0
+			state.GridScrollTo = 0
 		}
 	}
 	ig.SameLine()
 	if ig.Button("<") {
 		if state.CurrentIdx > 0 {
 			state.CurrentIdx--
+			state.GridScrollTo = state.CurrentIdx
 		}
 	}
 	ig.SameLine()
@@ -280,14 +396,17 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 	if ig.Button(">") {
 		if state.CurrentIdx < wf.Count-1 {
 			state.CurrentIdx++
+			state.GridScrollTo = state.CurrentIdx
 		}
 	}
 	ig.SameLine()
 	if ig.Button(">>") {
 		if state.CurrentIdx < wf.Count-1 {
-			state.CurrentIdx++
+			state.CurrentIdx = wf.Count - 1
+			state.GridScrollTo = state.CurrentIdx
 		}
 	}
+	ig.PopItemWidth()
 	ig.Separator()
 
 	// Export.
@@ -316,31 +435,64 @@ func RenderMainPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 			ig.TextColored(ig.NewVec4(0.3, 1, 0.3, 1), fmt.Sprintf("Exported %d images", n))
 		}
 	}
-	ig.Separator()
+
+	ig.End()
+}
+
+// RenderPreviewPanel renders the right-bottom panel with image preview or animation.
+func RenderPreviewPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
+	infoH := (float32(glfwH) - menuH) * 0.4
+	previewY := menuH + infoH
+	previewH := float32(glfwH) - previewY
+
+	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), previewY), ig.CondAlways, ig.NewVec2(0, 0))
+	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, previewH), ig.CondAlways)
+
+	ig.BeginV("Preview", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize)
+
+	if state.WILFile == nil {
+		ig.End()
+		return
+	}
+
+	wf := state.WILFile
 
 	// Animation controls (only in animation mode).
 	if state.Mode == "animation" {
 		renderAnimationControls(state, wf)
-		ig.Separator()
+		ig.End()
+		return
 	}
 
-	// Image list (scrollable).
-	ig.Text("Image List:")
-	ig.BeginChildStr("imagelist")
+	// Browse mode: show selected image as ImGui Image.
+	if state.CurrentIdx >= 0 && state.CurrentIdx < len(wf.Images) {
+		img := wf.Images[state.CurrentIdx]
+		if img != nil && img.RGBA != nil {
+			tex := state.Renderer.GetOrCreateTexture(state.CurrentIdx)
+			if tex != 0 {
+				// Calculate image size to fit in available region, keeping aspect ratio.
+				avail := ig.ContentRegionAvail()
+				imgW := float32(img.Width)
+				imgH := float32(img.Height)
+				scale := math.Min(float64(avail.X)/float64(imgW), float64(avail.Y)/float64(imgH))
+				if scale > 4.0 {
+					scale = 4.0 // cap at 4x
+				}
+				drawW := float32(float64(imgW) * scale)
+				drawH := float32(float64(imgH) * scale)
 
-	for i := 0; i < wf.Count; i++ {
-		img := wf.Images[i]
-		if img == nil {
-			continue
-		}
+				// Center the image.
+				offsetX := (avail.X - drawW) / 2
+				offsetY := (avail.Y - drawH) / 2
+				if offsetX > 0 || offsetY > 0 {
+					ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+offsetX, ig.CursorPosY()+offsetY))
+				}
 
-		label := fmt.Sprintf("%d: %dx%d", i, img.Width, img.Height)
-		if ig.SelectableBool(label) {
-			state.CurrentIdx = i
+				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
+				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
+			}
 		}
 	}
-
-	ig.EndChild()
 
 	ig.End()
 }
@@ -432,7 +584,6 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 	frames := calcAnimFrames(state.AnimAction, state.AnimDirection, wf.Count)
 	totalFrames := len(frames)
 	if totalFrames > 0 {
-		// Clamp frame index.
 		if state.animFrameIdx >= totalFrames {
 			state.animFrameIdx = 0
 		}
@@ -447,10 +598,34 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 		ig.Text(fmt.Sprintf("Direction: %s (%d)", dirName, state.AnimDirection))
 		ig.Text(fmt.Sprintf("Action: %s", state.AnimAction))
 
+		// Show animation frame preview.
+		tex := state.Renderer.GetOrCreateTexture(actualFrame)
+		if tex != 0 {
+			img := state.Renderer.GetImage(actualFrame)
+			if img != nil {
+				avail := ig.ContentRegionAvail()
+				imgW := float32(img.Width)
+				imgH := float32(img.Height)
+				scale := math.Min(float64(avail.X)/float64(imgW), float64(avail.Y)/float64(imgH))
+				if scale > 4.0 {
+					scale = 4.0
+				}
+				drawW := float32(float64(imgW) * scale)
+				drawH := float32(float64(imgH) * scale)
+				offsetX := (avail.X - drawW) / 2
+				offsetY := (avail.Y - drawH) / 2
+				if offsetX > 0 || offsetY > 0 {
+					ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+offsetX, ig.CursorPosY()+offsetY))
+				}
+				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
+				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
+			}
+		}
+
 		// Auto-advance animation.
 		if state.AnimPlaying {
 			now := glfw.GetTime()
-			interval := 0.1 / state.AnimSpeed // 100ms base interval
+			interval := 0.1 / state.AnimSpeed
 			if now-state.animLastTick >= interval {
 				state.animLastTick = now
 				state.animFrameIdx++
@@ -466,7 +641,6 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 
 // calcAnimFrames calculates the frame indices for an animation.
 func calcAnimFrames(action string, direction int, maxCount int) []int {
-	// Try to get action info from predefined templates.
 	var start, frameCount int
 	switch action {
 	case "stand":
@@ -491,7 +665,6 @@ func calcAnimFrames(action string, direction int, maxCount int) []int {
 		start = 384
 		frameCount = 24
 	default:
-		// Unknown action: show all images.
 		frames := make([]int, maxCount)
 		for i := range frames {
 			frames[i] = i
@@ -499,7 +672,6 @@ func calcAnimFrames(action string, direction int, maxCount int) []int {
 		return frames
 	}
 
-	// Calculate per-direction frames.
 	dirFrames := frameCount / 8
 	if dirFrames < 1 {
 		dirFrames = 1
@@ -540,11 +712,9 @@ func formatIdx(i int) string {
 }
 
 // wilCategory classifies a WIL file by its name.
-// Returns "anim", "static", "mixed" (Objects*), or "unknown".
 func wilCategory(name string) string {
 	base := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
 	switch {
-	// Animation files
 	case base == "hum" || base == "humeffect" || base == "hair" || base == "weapon":
 		return "anim"
 	case base == "npc" || base == "dragon":
@@ -555,7 +725,6 @@ func wilCategory(name string) string {
 		return "anim"
 	case strings.HasPrefix(base, "mon"):
 		return "anim"
-	// Static files
 	case base == "items" || base == "stateitem" || base == "dnitems":
 		return "static"
 	case base == "prguse" || base == "prguse2" || base == "prguse3":
@@ -564,10 +733,8 @@ func wilCategory(name string) string {
 		return "static"
 	case base == "tiles" || base == "smtiles":
 		return "static"
-	// Mixed files (Objects.wil, Objects2.wil, ...)
 	case strings.HasPrefix(base, "objects"):
 		return "mixed"
-	// Unknown
 	default:
 		return "unknown"
 	}

@@ -50,6 +50,19 @@ func (r *WILRenderer) SetWILFile(f *wil.File) {
 	}
 }
 
+// GetOrCreateTexture returns a GL texture for the given image index, creating and caching as needed.
+func (r *WILRenderer) GetOrCreateTexture(idx int) uint32 {
+	return r.getTexture(idx)
+}
+
+// GetImage returns the image data for the given index, or nil if not available.
+func (r *WILRenderer) GetImage(idx int) *wil.Image {
+	if r.WILFile == nil || idx < 0 || idx >= len(r.WILFile.Images) {
+		return nil
+	}
+	return r.WILFile.Images[idx]
+}
+
 // getTexture returns a GL texture for the given image index, caching as needed.
 func (r *WILRenderer) getTexture(idx int) uint32 {
 	if idx < 0 || idx >= len(r.WILFile.Images) {
