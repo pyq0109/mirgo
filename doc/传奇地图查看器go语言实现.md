@@ -2,68 +2,61 @@
 
 ## 1. 概述
 
-用 Go + Fyne 实现传奇地图查看器，纯软件渲染，不引入 go-gl。
+用 Go + OpenGL + ImGui 实现传奇地图查看器，严格参考 `asset/map_viewer` C++ 实现。
 
-参考：`asset/map_viewer` C++ 实现、`doc/传奇地图查看器.md` 文档。
+参考源码：
+- `asset/map_viewer/` — C++ 地图查看器（主要参考）
+- `asset/delphi/` — 原始 Delphi 客户端源码（格式参考）
 
 ## 2. 技术选型
 
 | 库 | 用途 |
 |---|---|
-| `fyne.io/fyne/v2` | UI 框架（窗口、菜单、面板、图像显示、输入事件） |
-| `golang.org/x/text` | GBK → UTF-8 编码转换 |
+| `github.com/go-gl/glfw/v3.4/glfw` | 窗口管理、输入事件 |
+| `github.com/go-gl/gl/v3.3-core/gl` | OpenGL 3.3 Core Profile 绑定 |
+| `github.com/AllenDang/cimgui-go v1.5.0` | ImGui UI（低级 API） |
 
-**不引入 go-gl 的理由**：
-- Fyne 内置 OpenGL 渲染 UI，额外引入 go-gl 需管理两个 GL 上下文，复杂度高
-- 地图查看器渲染量有限（视口内几百个 tile），纯 CPU 合成完全够用
-- Fyne 的 `canvas.NewImageFromImage()` 可直接显示 `*image.RGBA`
-- 动画用 goroutine 定时重绘，Blend 用 `draw.DrawMask` 实现
+### ImGui 集成方式
+
+cimgui-go 的高级 `glfwbackend` 会创建自己的 GLFW 窗口（GL 3.0），与我们的 GL 3.3 冲突。
+因此使用低级 `impl/glfw` + `impl/opengl3` 包配合我们自己的 GLFW 窗口：
+
+```
+go-gl/glfw v3.4         → 窗口 + GL 上下文 (GL 3.3 Core Profile)
+go-gl/gl v3.3-core      → OpenGL 绑定 (GLSL 330)
+cimgui-go/imgui          → ImGui 控件 API (Begin, End, Text, Checkbox...)
+cimgui-go/impl/glfw      → ImGui 平台后端 (InitForOpenGL, NewFrame, Shutdown)
+cimgui-go/impl/opengl3   → ImGui 渲染后端 (InitV, NewFrame, RenderDrawData, Shutdown)
+```
+
+已验证：`impl/glfw` 和 `impl/opengl3` 只链接 `cimgui.a`，不链接 `libglfw3.a`，
+不会与 `go-gl/glfw` 产生 GLFW 符号冲突。
 
 ## 3. 架构
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Fyne Window                                    │
-│  ┌──────────────────────────┬──────────────────┐│
-│  │  MapCanvas               │  Info Panel      ││
-│  │  canvas.NewImageFromImage│  - 格子属性      ││
-│  │  ← *image.RGBA           │  - 坐标显示      ││
-│  │                          │  - 地图信息      ││
-│  │  ┌────────────────────┐  │                  ││
-│  │  │ Minimap (200x200)  │  │                  ││
-│  │  └────────────────────┘  │                  ││
-│  └──────────────────────────┴──────────────────┘│
-└─────────────────────────────────────────────────┘
-
-渲染流程:
-  mapformat.Parse() → MapData
-  wil.Load() → 图像缓存
-  renderer.Render() → 合成可见区域到 *image.RGBA
-  canvas.Refresh() → Fyne 显示
-```
-
-## 4. 目录结构
-
-```
 cmd/mapviewer/
-└── main.go              # 入口、Fyne UI 布局、事件处理
+├── main.go                  # 入口：GLFW 窗口 + 主循环
+├── renderer/                # OpenGL 渲染器（mapviewer 专用）
+│   ├── camera.go            # 2D 相机（平移、缩放、边界约束）
+│   ├── gl.go                # GL 状态管理、纹理上传、DrawQuad
+│   ├── shader.go            # GLSL 着色器（主着色器 + 网格着色器）
+│   ├── minimap.go           # 小地图 FBO 渲染
+│   └── renderer.go          # 三层渲染器 + 区域系统 + 动画 + Blend
+└── ui/                      # ImGui UI（mapviewer 专用）
+    └── ui.go                # 右侧面板、菜单栏、小地图窗口
 
-internal/pkg/
+internal/                    # 共享包（客户端、服务端、mapviewer 共用）
 ├── mapformat/
-│   ├── map.go           # .map 文件解析器
-│   └── map_test.go      # 解析测试
-├── wil/
-│   ├── wil.go           # .wil/.wix 图像加载器
-│   └── wil_test.go      # 加载测试
-└── renderer/
-    ├── camera.go         # 2D 相机（平移、缩放、边界约束）
-    ├── renderer.go       # 三层软件渲染器 + 动画 + Blend
-    └── minimap.go        # 小地图（碰撞纹理）
+│   ├── map.go               # .map 文件解析器
+│   └── map_test.go          # 解析测试
+└── wil/
+    └── wil.go               # .wil/.wix 图像加载器
 ```
 
-## 5. 核心数据结构
+## 4. 核心数据结构
 
-### 5.1 mapformat — .map 解析
+### 4.1 mapformat — .map 解析
 
 ```go
 type Header struct {
@@ -74,23 +67,40 @@ type Header struct {
     Reserved      [23]byte
 }
 
-type Cell struct {
-    BkImg      uint16  // bit15=碰撞
+type Cell struct {           // 原始 12 字节
+    BkImg      uint16        // bit15=碰撞, bits 0-14=图像索引(1-based)
     MidImg     uint16
     FrImg      uint16
-    DoorIndex  uint8   // bit7=有门
-    DoorOffset uint8   // bit7=门开启
-    AniFrame   uint8   // bit7=Alpha混合, bits6-0=帧数
+    DoorIndex  uint8         // bit7=有门
+    DoorOffset uint8         // bit7=门开启
+    AniFrame   uint8         // bit7=Alpha混合, bits 6-0=帧数
     AniTick    uint8
-    Area       uint8   // 选择 Objects{N+1}.wil
+    Area       uint8         // 选择 Objects{N+1}.wil
     Light      uint8
 }
 
+type CellInfo struct {       // 解析后的格子信息（匹配 C++ CellInfo）
+    BackLib         int      // LibTiles(0) 或 -1
+    BackImage       int      // 0-based Tiles.wil 索引
+    Collision       bool     // (BkImg & 0x8000) != 0
+    MiddleLib       int      // LibSmTiles(1) 或 -1
+    MiddleImage     int      // 0-based SmTiles.wil 索引
+    FrontLib        int      // LibObjects(2) 或 -1
+    FrontImage      int      // 0-based Objects 索引
+    FrontArea       uint8    // 选择 Objects{N+1}.wil
+    FrontAniFrame   uint8    // bit7=blend, bits 6-0=帧数
+    FrontAniTick    uint8
+    FrontDoorOffset uint8    // bit7=门开启, bits 6-0=偏移
+    FrontDoorIndex  uint8    // bit7=有门, bits 6-0=门组 ID
+    Door            uint8
+    Light           uint8
+}
+
 type MapData struct {
-    Header Header
-    Cells  []Cell
-    Width  int
-    Height int
+    Header    Header
+    Cells     []Cell         // 原始数据
+    CellInfos []CellInfo     // 解析后的数据
+    Width, Height int
 }
 ```
 
@@ -98,144 +108,123 @@ type MapData struct {
 - **列优先**存储 → 解析后转**行优先**
 - 自动检测 12/14/20 字节格式
 - 图像索引 1-based，0 表示空
+- `Parse()` 自动调用 `parseCells()` 生成 `CellInfos`
 
-### 5.2 wil — WIL/WIX 加载
+### 4.2 wil — WIL/WIX 加载
 
 ```go
 type Image struct {
     Width, Height int
     HotX, HotY    int16
-    Pixels        []byte  // RGBA
+    RGBA          *image.RGBA
 }
 
 type File struct {
-    Title  string
-    Images []*Image
+    Title   string
+    Count   int
+    Images  []*Image
+    Palette [256]color.RGBA
 }
 ```
 
 - 读 WIL 文件头 → 256 色调色板(BGRA) → 从 WIX 读偏移索引 → 按偏移读图像
 - 调色板索引 0 = 透明
-- 图像缓存为 `*image.RGBA`，供 `draw.Draw` 合成
+- 支持标准格式和 ILib 格式（`#ILIB` / `#INDX` magic）
+- 图像存储为 `*image.RGBA`，通过 `UploadTexture()` 上传到 GPU
 
-### 5.3 renderer — 软件渲染器
+## 5. 渲染方案
 
-```go
-type Renderer struct {
-    tiles      *wil.File     // Tiles.wil
-    smTiles    *wil.File     // SmTiles.wil
-    objects    []*wil.File   // Objects.wil, Objects2.wil, ...
-    camera     *Camera
-    animStates []AnimState
-}
-
-type AnimState struct {
-    FrameIdx int
-    TickAcc  int
-}
-
-type Camera struct {
-    X, Y         float64
-    Zoom         float64
-    ViewW, ViewH int
-}
-```
-
-## 6. 渲染方案
-
-### 6.1 瓦片规格
+### 5.1 瓦片规格
 - 48×32 像素/格子
 - `tile_x = floor(world_x / 48)`, `tile_y = floor(world_y / 32)`
 
-### 6.2 软件渲染流程
+### 5.2 OpenGL 渲染管线
 
-```go
-func (r *Renderer) Render(m *mapformat.MapData) *image.RGBA {
-    dst := image.NewRGBA(image.Rect(0, 0, viewW, viewH))
-    // 1. 背景层: 偶数 x,y 位置，覆盖 2x2 格子
-    for y := startY; y <= endY; y += 2 {
-        for x := startX; x <= endX; x += 2 {
-            img := r.getBackImage(m, x, y)
-            if img != nil {
-                draw.Draw(dst, screenRect, img, imgBounds.Min, draw.Over)
-            }
-        }
-    }
-    // 2. 中间层: 所有位置
-    for y := startY; y <= endY; y++ {
-        for x := startX; x <= endX; x++ {
-            img := r.getMidImage(m, x, y)
-            if img != nil {
-                draw.Draw(dst, screenRect, img, imgBounds.Min, draw.Over)
-            }
-        }
-    }
-    // 3. 前景层: 底部对齐
-    for y := startY; y <= endY; y++ {
-        for x := startX; x <= endX; x++ {
-            img := r.getFrontImage(m, x, y)
-            if img != nil {
-                draw.Draw(dst, screenRect, img, imgBounds.Min, draw.Over)
-            }
-        }
-    }
-    // 4. Blend 对象: draw.Over 加法混合
-    for _, blend := range blendObjects {
-        draw.Draw(dst, screenRect, blend.img, blend.pos, draw.Over)
-    }
-    // 5. 碰撞覆盖: 红色半透明
-    for y := startY; y <= endY; y++ {
-        for x := startX; x <= endX; x++ {
-            if m.IsCollision(x, y) {
-                draw.Draw(dst, tileRect, collisionImg, image.Point{}, draw.Over)
-            }
-        }
-    }
-    return dst
-}
+渲染顺序匹配 C++ `MapRenderer::Render`：
+
+```
+1. Back layer    — 偶数 x,y 位置 (stride-2), 覆盖 2x2 格子
+2. Middle layer  — 所有位置
+3. Front layer   — 单遍渲染, 每格子切换 blend 状态:
+   - 非 blend: 底部对齐 `y = cellY*32 - imgHeight + 32`
+   - blend:    热点定位 `x = cellX*48 + hotX - 2, y = cellY*32 + hotY - 68`
+     + 加法混合 `glBlendFunc(SRC_ALPHA, ONE)`
+4. Map border    — 蓝色矩形 (0.2, 0.5, 1.0)
+5. Tile highlight — 白色(悬停) / 红色(锁定) 矩形
+6. Grid          — 批量线段绘制 (单次 glDrawArrays)
+7. Collision     — 红色半透明覆盖 (可选)
 ```
 
-### 6.3 动画支持
+### 5.3 动画支持
 - `AniFrame & 0x7F` = 帧数（0=静态，>0=动画）
 - `AniTick` = 每帧持续 tick 数
-- goroutine 定时递增 TickAcc，达到 AniTick 时切换下一帧
+- 公式: `frame = (animCounter % (ani + ani*tick)) / (1+tick)`
 - 动画帧图像索引连续：`baseIdx + frameIdx`
-- 帧切换后调用 `canvas.Image.Refresh()` 重绘
 
-### 6.4 Blend 混合（火焰/灯光）
+### 5.4 Door Offset
+- `FrontDoorOffset & 0x80` — 门是否开启
+- `FrontDoorIndex & 0x7F` — 是否有门
+- 开启时: `imageIdx += (FrontDoorOffset & 0x7F)`
+
+### 5.5 Blend 混合（火焰/灯光）
 - 检测: `AniFrame & 0x80 != 0`
-- Go 实现: `draw.Draw()` 的 `draw.Over` 操作符（SRC over DST alpha 合成）
-- 定位: 使用 hot_x/hot_y 热点偏移
-- 绘制顺序: Blend 对象在普通前景之后
+- 渲染: 切换到 `glBlendFunc(SRC_ALPHA, ONE)` (加法混合)
+- 定位: 使用 hot_x/hot_y 热点偏移 (Delphi 公式: `n+ax-2, m+ay-68`)
+- **单遍渲染**: 每个格子独立切换 blend 状态（匹配 C++ 行为）
 
-### 6.5 Fyne UI
-```go
-// 主布局
-mapImage := canvas.NewImageFromImage(renderedMap)
-mapImage.FillMode = canvas.ImageFillStretch
+### 5.6 区域系统 (Area System)
+- `Cell.Area` 选择 `Objects{N+1}.wil` 文件
+- Area 0 → `Objects.wil`, Area 1 → `Objects2.wil`, ...
+- 按需加载: `getObjectsLoader(area)` 延迟加载并缓存
+- 每个区域独立纹理缓存
 
-infoLabel := widget.NewLabel("格子信息...")
+### 5.7 纹理管理
+- 懒加载: `getTex()` 首次访问时调用 `UploadTexture()` 上传到 GPU
+- 纹理缓存: `map[int]uint32` (图像索引 → GL 纹理 ID)
+- 不可驱逐（内存换性能）
 
-split := container.NewHSplit(
-    container.NewMax(mapImage, minimapWidget),
-    infoLabel,
-)
-split.SetOffset(0.8)
+### 5.8 小地图
+- 200×200 RGBA 纹理: 碰撞格子=灰色 (60,60,60), 可行走=深绿 (34,85,34)
+- FBO 离屏渲染: 碰撞纹理 + 白色视口矩形
+- ImGui 窗口中显示, 支持点击跳转和拖拽平移
 
-w := fyne.NewWindow("地图查看器")
-w.SetContent(split)
-w.Resize(fyne.NewSize(1200, 800))
-```
+## 6. ImGui UI
 
-### 6.6 交互
-- 鼠标拖拽平移（Fyne `desktop.MouseEvent`）
-- 滚轮缩放（Fyne `desktop.ScrollEvent`）
-- 左键点击显示格子属性（Fyne `desktop.MouseEvent`）
-- 小地图: 200×200 碰撞纹理 + 视口矩形
+### 6.1 菜单栏
+- File → Exit
 
-## 7. 关键实现细节
+### 6.2 右侧面板 (380px)
+- 地图信息: 标题、格式、尺寸、格子数
+- 格子信息: 悬停或锁定格子的三层 lib/image 索引
+- 动画信息: Area、AniFrame(blend/frames)、AniTick、DoorOffset、DoorIndex
+- Door、Light 值
+- 图层可见性复选框: Back / Middle / Front / Collision
+- 操作说明
 
-### 7.1 列优先转行优先
+### 6.3 小地图窗口 (220×240)
+- 显示小地图纹理
+- 点击视口矩形外 = 跳转
+- 拖拽视口矩形 = 平移
+
+### 6.4 输入处理
+- ImGui 输入转发: 鼠标、键盘、滚轮回调先传给 ImGui
+- `io.WantCaptureMouse()` / `io.WantCaptureKeyboard()` 判断 ImGui 是否消费输入
+- 地图交互仅在 ImGui 不消费时生效
+
+## 7. 交互
+
+| 操作 | 功能 |
+|---|---|
+| 中键拖拽 | 平移相机 |
+| 滚轮 | 以鼠标为中心缩放 |
+| WASD / 方向键 | 键盘平移 (速度 = 8.0/zoom) |
+| G 键 | 切换网格显示 |
+| 左键 | 锁定/解锁格子 (红色高亮) |
+| ESC | 退出 |
+
+## 8. 关键实现细节
+
+### 8.1 列优先转行优先
 ```go
 for col := 0; col < width; col++ {
     for row := 0; row < height; row++ {
@@ -245,52 +234,67 @@ for col := 0; col < width; col++ {
 }
 ```
 
-### 7.2 位域解析
+### 8.2 位域解析
 ```go
 collision := (cell.BkImg & 0x8000) != 0
-bkIndex := int(cell.BkImg&0x7FFF) - 1
+bkIndex := int(cell.BkImg&0x7FFF) - 1  // 1-based → 0-based
 isBlend := (cell.AniFrame & 0x80) != 0
 aniFrames := cell.AniFrame & 0x7F
+doorOpen := (cell.DoorOffset & 0x80) != 0
+hasDoor := (cell.DoorIndex & 0x7F) != 0
 ```
 
-### 7.3 GBK 编码
-```go
-title, _ = simplifiedchinese.GBK.NewDecoder().Bytes(header.Title[:header.TitleLen])
-```
-
-### 7.4 WIL 调色板解码
+### 8.3 WIL 调色板解码
 ```go
 for i, idx := range pixelData {
-    if idx == 0 {
-        rgba[i*4+3] = 0  // 透明
-    } else {
-        rgba[i*4+0] = palette[idx].Red
-        rgba[i*4+1] = palette[idx].Green
-        rgba[i*4+2] = palette[idx].Blue
-        rgba[i*4+3] = 255
-    }
+    c := palette[idx]  // palette[0].A = 0 (transparent)
+    rgba.Pix[i*4+0] = c.R
+    rgba.Pix[i*4+1] = c.G
+    rgba.Pix[i*4+2] = c.B
+    rgba.Pix[i*4+3] = c.A
 }
 ```
 
-## 8. 文件清单
+### 8.4 GL 状态恢复
+- ImGui 的 OpenGL3 后端会修改 GL 状态 (blend, shader, VAO, viewport)
+- `Render()` 开头重新启用 `GL_BLEND` 并设置 `glBlendFunc`
+- `minimap.Render()` 保存/恢复 FBO 和 viewport
+- 主循环每帧重新设置 `glClearColor`
+
+### 8.5 批量网格渲染
+```go
+// 构建所有线段顶点到一个 slice
+lines := []float32{...}  // 垂直线 + 水平线
+gl.BindBuffer(gl.ARRAY_BUFFER, gridVBO)
+gl.BufferSubData(gl.ARRAY_BUFFER, 0, len(lines)*4, unsafe.Pointer(&lines[0]))
+gl.DrawArrays(gl.LINES, 0, vertexCount)  // 单次绘制调用
+```
+
+## 9. 文件清单
 
 | 文件 | 说明 |
 |---|---|
-| `go.mod` | 添加 fyne、x/text 依赖 |
-| `internal/pkg/mapformat/map.go` | .map 文件解析器 |
-| `internal/pkg/mapformat/map_test.go` | 解析测试 |
-| `internal/pkg/wil/wil.go` | WIL/WIX 图像加载器 |
-| `internal/pkg/wil/wil_test.go` | 加载测试 |
-| `internal/pkg/renderer/camera.go` | 2D 相机 |
-| `internal/pkg/renderer/renderer.go` | 软件三层渲染器 |
-| `internal/pkg/renderer/minimap.go` | 小地图 |
-| `cmd/mapviewer/main.go` | Fyne UI 入口 |
+| `go.mod` | 依赖: go-gl/glfw v3.4, go-gl/gl v3.3-core, cimgui-go v1.5.0 |
+| `internal/mapformat/map.go` | .map 文件解析器 (Cell + CellInfo) |
+| `internal/mapformat/map_test.go` | 解析测试 |
+| `internal/wil/wil.go` | WIL/WIX 图像加载器 |
+| `cmd/mapviewer/main.go` | GLFW 窗口 + ImGui + 主循环 |
+| `cmd/mapviewer/renderer/camera.go` | 2D 相机 |
+| `cmd/mapviewer/renderer/gl.go` | GL 状态、纹理上传、DrawQuad |
+| `cmd/mapviewer/renderer/shader.go` | GLSL 330 着色器 |
+| `cmd/mapviewer/renderer/minimap.go` | 小地图 FBO |
+| `cmd/mapviewer/renderer/renderer.go` | 三层渲染器 + 区域系统 |
+| `cmd/mapviewer/ui/ui.go` | ImGui UI |
 
-## 9. 验证方式
+## 10. 验证方式
 
-1. `go build ./cmd/mapviewer` — 编译通过
-2. 运行加载 `asset/server/Map/` 下的 .map 文件
+1. `CGO_ENABLED=1 go build ./cmd/mapviewer` — 编译通过
+2. 运行: `./mapviewer asset/server/Map/0102.map asset/client/Data`
 3. 验证三层渲染正确（背景、中间层、前景）
-4. 验证动画帧切换和 Blend 混合效果
-5. 验证碰撞可视化（红色覆盖）
-6. 验证平移缩放流畅
+4. 验证动画帧切换和 Blend 混合效果（火焰、灯光）
+5. 验证碰撞可视化（红色覆盖，可选）
+6. 验证 WASD/中键平移、滚轮缩放流畅
+7. 验证 ImGui 右侧面板显示格子信息
+8. 验证小地图点击跳转和拖拽
+9. 验证左键格子锁定（红色高亮）
+10. 验证网格切换 (G 键)
