@@ -22,12 +22,15 @@ asset/
 - Go 1.26
 - GCC (MinGW-w64)
 
+```PowerShell
+$env:CGO_ENABLED=1
+```
+
 ## mapviewer
 
 运行:
 
 ```PowerShell
-$env:CGO_ENABLED=1
 # WIL 资源默认从 asset/client/Data/ 加载
 go run ".\cmd\mapviewer\" ".\asset\client\Map\0.map"
 ```
@@ -41,23 +44,11 @@ WIL资源查看器，用于查看热血传奇游戏专用的 .wil/.wix 图像资
 编译运行:
 
 ```PowerShell
-$env:CGO_ENABLED=1
-go build -o cmd/wilviewer/wilviewer.exe ./cmd/wilviewer
-./cmd/wilviewer/wilviewer.exe asset/client/Data
+# WIL 资源默认从 asset/client/Data/ 加载
+go run ".\cmd\wilviewer\" ".\asset\client\Data"
 ```
 
-功能：
-
-- 左侧目录树：列出目录中的所有 .wil 文件，点击切换查看，按类型四色着色（蓝=动画、绿=静态、黄=混合、白=未知）
-- 浏览模式：以列表形式展示WIL文件中的所有图像，支持单张查看
-- 动画模式：按动作模板播放帧序列，支持8方向切换和播放控制
-- 图像导航：使用箭头键或按钮浏览图像
-- 图像信息：显示图像索引、尺寸、热点坐标
-- 缩放/平移：鼠标滚轮缩放（0.1x~20x），中键拖拽平移
-- 图像导出：单张或批量导出为 PNG 格式
-- Debug日志：集成 `internal/log`，关键操作均有日志输出
-
-操作：左侧点击选择WIL文件，箭头键左右切换图像，滚轮缩放，中键拖拽平移，ESC退出
+操作：左侧点击选择WIL文件，中间网格点击选择图像，箭头键左右切换，ESC退出
 
 # 资源
 

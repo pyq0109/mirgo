@@ -35,22 +35,21 @@ go build -o cmd/wilviewer/wilviewer.exe ./cmd/wilviewer
 
 **功能**：
 - 左侧目录树：列出目录中的所有 .wil 文件，点击切换查看，按类型四色着色（蓝=动画、绿=静态、黄=混合、白=未知）
-- 浏览模式：以列表形式展示WIL文件中的所有图像，支持单张查看
-- 动画模式：按动作模板播放帧序列，支持8方向切换和播放控制
+- 中间纹理网格：以 64×64 缩略图网格展示 WIL 文件中的所有纹理，点击选中，悬停显示尺寸信息
+- 右上文件信息：显示文件标题、图像数量、当前索引/尺寸/热点、导航按钮（`<<`到首/`<`前一/`>`后一/`>>`到末）、导出按钮
+- 右下预览/动画：浏览模式下显示选中图像（自适应窗口大小，保持比例）；动画模式下显示动作/方向/播放控制和动画预览
 - 图像导航：使用箭头键或按钮浏览图像
-- 图像信息：显示图像索引、尺寸、热点坐标
-- 缩放/平移：鼠标滚轮缩放（0.1x~20x），中键拖拽平移
 - 图像导出：单张或批量导出为 PNG 格式
 - Debug日志：集成 `internal/log`，关键操作均有日志输出
 
 **架构**：
 - 复用 mapviewer 的 OpenGL + ImGui 架构
 - 复用 `internal/wil/` 包加载 WIL 文件
-- `cmd/wilviewer/main.go` — 主程序、窗口创建、主循环、缩放/平移处理
+- `cmd/wilviewer/main.go` — 主程序、窗口创建、主循环
 - `cmd/wilviewer/action.go` — 动作模板定义（人类7种、怪物、NPC）
 - `cmd/wilviewer/animation.go` — 动画播放器（Play/Pause/Stop、方向、速度）
 - `cmd/wilviewer/renderer/` — OpenGL 渲染（纹理缓存、SetWILFile 热切换、PNG 导出）
-- `cmd/wilviewer/ui/` — ImGui 界面（左侧目录树、右侧信息面板、动画控制面板）
+- `cmd/wilviewer/ui/` — ImGui 界面（左侧目录树、中间纹理网格、右上信息面板、右下预览/动画面板）
 - 支持两种模式切换（浏览/动画）
 
 ## 资源目录（已 gitignore — 需手动准备）
