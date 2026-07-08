@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	windowW = 1280
-	windowH = 800
+	windowW = 1600
+	windowH = 1000
 )
 
 func init() {

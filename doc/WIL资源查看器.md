@@ -329,20 +329,70 @@ cmd/wilviewer/
 
 ```go
 type File struct {
-    Header   Header
-    Palette  [256]color.RGBA
-    Entries  []Entry
-    // ...
+    Title     string
+    Count     int
+    Images    []*Image
+    Palette   [256]color.RGBA
+    btVersion  int    // 0=12字节图像头, 1=8字节图像头
+    colorCount int    // 颜色数: <=256→8-bit调色板, >256→16-bit RGB565
 }
 
-type Entry struct {
+type Image struct {
     Width  int
     Height int
-    PX     int    // 热点X
-    PY     int    // 热点Y
+    HotX   int16
+    HotY   int16
     RGBA   *image.RGBA
 }
 ```
+
+#### 4.3.1b WIL 文件格式
+
+**ILib 文件头**（56字节）：
+
+| 偏移 | 大小 | 字段 | 说明 |
+|------|------|------|------|
+| 0-39 | 40字节 | Title | 文件标识，如 `#ILIB v1.0-WEMADE Entertainment inc.` |
+| 40-43 | 4字节 | VerFlag | 版本标志（!=0 时图像头为12字节） |
+| 44-47 | 4字节 | ImageCount | 图像总数 |
+| 48-51 | 4字节 | ColorCount | 颜色数（256=8-bit调色板，65536=16-bit RGB565） |
+| 52-55 | 4字节 | PaletteSize | 调色板大小（通常1024=256×4） |
+| 56-1079 | 1024字节 | Palette | 256色 BGRA 调色板（仅8-bit模式使用） |
+
+**INDX 索引文件头**（48字节）：
+
+| 偏移 | 大小 | 字段 | 说明 |
+|------|------|------|------|
+| 0-39 | 40字节 | Title | 文件标识，如 `#INDX v1.0-WEMADE Entertainment inc.` |
+| 40-43 | 4字节 | Unknown | 未知字段 |
+| 44-47 | 4字节 | IndexCount | 索引数量（与 WIL 的 ImageCount 一致） |
+| 48+ | 4×N字节 | Offsets | 每个图像在 WIL 文件中的绝对偏移 |
+
+**图像头**（btVersion=0 时12字节，btVersion=1 时8字节）：
+
+| 偏移 | 大小 | 字段 | 说明 |
+|------|------|------|------|
+| 0-1 | 2字节 | Width | 图像宽度（int16） |
+| 2-3 | 2字节 | Height | 图像高度（int16） |
+| 4-5 | 2字节 | HotX | 热点X（int16） |
+| 6-7 | 2字节 | HotY | 热点Y（int16） |
+| 8-11 | 4字节 | Bits | 仅 btVersion=0 时存在（通常为0，可忽略） |
+
+**像素数据**：
+
+- `ColorCount <= 256`：每像素1字节，为调色板索引，通过 Palette 查找 RGBA
+- `ColorCount > 256`（通常65536）：每像素2字节，RGB565 格式（R5 G6 B5），无需调色板
+
+**RGB565 解码**：
+```
+R = (pixel >> 11) << 3
+G = ((pixel >> 5) & 0x3F) << 2
+B = (pixel & 0x1F) << 3
+pixel == 0x0000 → 透明（Alpha=0）
+```
+
+**WIX 文件名兼容**：部分 WIX 文件名存在异常（如 `Deco..wix` 对应 `Deco.wil`），
+加载器在标准路径找不到 WIX 时会遍历同目录下所有 `.wix` 文件，按 base name（不区分大小写、去尾部点）匹配。
 
 #### 4.3.2 动作模板定义
 
@@ -603,14 +653,22 @@ func toImGuiWindow(w *glfw.Window) *igglfw.GLFWwindow
 
 ```go
 // internal/wil/wil.go
-func Load(path string) (*File, error)
-func (f *File) GetImage(idx int) (*Entry, error)
+func Load(wilPath string) (*File, error)
 
-type Entry struct {
+type File struct {
+    Title     string
+    Count     int
+    Images    []*Image
+    Palette   [256]color.RGBA
+    btVersion  int    // 0=12字节图像头, 1=8字节图像头
+    colorCount int    // 颜色数: <=256→8-bit调色板, >256→16-bit RGB565
+}
+
+type Image struct {
     Width  int
     Height int
-    PX     int    // 热点X
-    PY     int    // 热点Y
+    HotX   int16
+    HotY   int16
     RGBA   *image.RGBA
 }
 ```

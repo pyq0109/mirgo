@@ -57,7 +57,15 @@ func toImGuiWindow(w *glfw.Window) *igglfw.GLFWwindow {
 // Init initializes ImGui with the given GLFW window.
 func Init(window *glfw.Window) {
 	ig.CreateContext()
+
+	// Load larger default font.
+	fontCfg := ig.NewFontConfig()
+	fontCfg.SetSizePixels(20.0)
+	ig.CurrentIO().Fonts().AddFontDefaultV(fontCfg)
+	fontCfg.Destroy()
+
 	ig.StyleColorsDark()
+	ig.CurrentStyle().ScaleAllSizes(1.5)
 
 	imWin := toImGuiWindow(window)
 	igglfw.InitForOpenGL(imWin, true)
@@ -276,8 +284,8 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 		ig.PushIDInt(int32(i))
 
 		// UV: full image (aspect ratio handled by ImageButton sizing).
-		uv0 := ig.NewVec2(0, 0)
-		uv1 := ig.NewVec2(1, 1)
+		uv0 := ig.NewVec2(0, 1)
+		uv1 := ig.NewVec2(1, 0)
 
 		texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
 		size := ig.NewVec2(thumbnailSize, thumbnailSize)
@@ -489,7 +497,7 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 				}
 
 				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
-				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
+				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 1), ig.NewVec2(1, 0), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
 			}
 		}
 	}
@@ -618,7 +626,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 					ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+offsetX, ig.CursorPosY()+offsetY))
 				}
 				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
-				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
+				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 1), ig.NewVec2(1, 0), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
 			}
 		}
 

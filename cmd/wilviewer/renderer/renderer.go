@@ -18,7 +18,7 @@ type WILRenderer struct {
 	texCache map[int]uint32 // image index -> GL texture
 
 	// Camera state for zoom/pan.
-	Zoom           float64
+	Zoom             float64
 	OffsetX, OffsetY float64
 }
 
@@ -79,7 +79,7 @@ func (r *WILRenderer) getTexture(idx int) uint32 {
 	}
 	tex := UploadTexture(img.RGBA)
 	r.texCache[idx] = tex
-	mlog.Logf(mlog.LevelDebug, "Renderer", "纹理上传: idx=%d, size=%dx%d, tex=%d", idx, img.Width, img.Height, tex)
+	mlog.Logf(mlog.LevelTrace, "Renderer", "纹理上传: idx=%d, size=%dx%d, tex=%d", idx, img.Width, img.Height, tex)
 	return tex
 }
 
