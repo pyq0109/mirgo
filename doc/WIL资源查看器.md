@@ -22,23 +22,25 @@ WIL资源查看器用于查看热血传奇游戏专用的 .wil/.wix 图像资源
 
 **每套装备每个方向 600 帧**，按动作分组：
 
-| 动作 | 起始帧 | 帧数 | 说明                  |
-| ---- | ------ | ---- | --------------------- |
-| 站立 | 0      | 4    | Stand                 |
-| 走路 | 64     | 60   | Walk (8方向×6帧+余量) |
-| 跑步 | 128    | 60   | Run                   |
-| 攻击 | 192    | 60   | Attack                |
-| 施法 | 256    | 60   | Spell                 |
-| 被击 | 320    | 30   | Hit                   |
-| 死亡 | 384    | 30   | Death                 |
+| 动作 | 起始帧 | 帧数 | 每方向帧数 | 说明                  |
+| ---- | ------ | ---- | ---------- | --------------------- |
+| 站立 | 0      | 4    | 4          | Stand（不分方向）     |
+| 走路 | 64     | 60   | 7~8        | Walk (8方向×7帧+余量) |
+| 跑步 | 128    | 60   | 7~8        | Run                   |
+| 攻击 | 192    | 60   | 7~8        | Attack                |
+| 施法 | 256    | 60   | 7~8        | Spell                 |
+| 被击 | 320    | 30   | 3~4        | Hit                   |
+| 死亡 | 384    | 30   | 3~4        | Death                 |
 
 **实际帧数计算**：
 
 ```
 方向数 = 8
-每方向帧数 = 约75帧
+每方向帧数 = 帧数 / 8（站立除外，站立 Frame=4 < 8，不分方向）
 总帧数 = 8 × 75 = 600帧
 ```
+
+**注意**：站立动作 Frame=4 < 8，不按方向分配。查看器中 `calcAnimFrames` 对 Frame < 8 的动作直接返回全部帧，不除以 8。
 
 ### 2.2 怪物动画结构
 
@@ -307,15 +309,14 @@ HA: THumanAction = (
 
 ```
 cmd/wilviewer/
-├── main.go           ← 主程序、窗口创建、主循环
-├── action.go         ← 动作模板定义（ActionInfo、HumanActions、MonsterActions、CalcFrames）
-├── animation.go      ← 动画帧播放控制（AnimationPlayer）
+├── main.go           ← 主程序、窗口创建、主循环、输入处理
+├── action.go         ← 动作模板定义（ActionInfo、HumanActions、MonsterActions、NpcActions、CalcFrames）
 ├── renderer/
-│   ├── renderer.go   ← WIL图像渲染（纹理缓存、SetWILFile、GetOrCreateTexture、ExportPNG）
+│   ├── renderer.go   ← WIL图像渲染（纹理缓存、SetWILFile、GetOrCreateTexture、UploadTexture）
 │   ├── gl.go         ← OpenGL状态管理（GLState、DrawQuad、DrawQuadColor）
-│   └── shader.go     ← 着色器程序（ShaderProgram）
+│   └── shader.go     ← 着色器程序（ShaderProgram，含 flipV uniform）
 └── ui/
-    └── ui.go         ← ImGui界面（目录树、纹理网格、信息面板、预览面板、动画控制）
+    └── ui.go         ← ImGui界面（目录树、纹理网格、信息面板、预览面板、动画控制、calcAnimFrames）
 
 复用模块：
 └── internal/wil/     ← WIL/WIX文件加载
@@ -329,12 +330,12 @@ cmd/wilviewer/
 
 ```go
 type File struct {
-    Title     string
-    Count     int
-    Images    []*Image
-    Palette   [256]color.RGBA
-    btVersion  int    // 0=12字节图像头, 1=8字节图像头
-    colorCount int    // 颜色数: <=256→8-bit调色板, >256→16-bit RGB565
+    Title      string
+    Count      int
+    Images     []*Image
+    Palette    [256]color.RGBA
+    BtVersion  int    // 版本标志（0=12字节图像头, 1=8字节图像头）
+    ColorCount int    // 颜色数: 256→8-bit调色板, 65536→16-bit RGB565
 }
 
 type Image struct {
@@ -383,13 +384,15 @@ type Image struct {
 - `ColorCount <= 256`：每像素1字节，为调色板索引，通过 Palette 查找 RGBA
 - `ColorCount > 256`（通常65536）：每像素2字节，RGB565 格式（R5 G6 B5），无需调色板
 
-**RGB565 解码**：
+**RGB565 解码**（`internal/wil/wil.go` 中实现）：
 ```
 R = (pixel >> 11) << 3
 G = ((pixel >> 5) & 0x3F) << 2
 B = (pixel & 0x1F) << 3
 pixel == 0x0000 → 透明（Alpha=0）
 ```
+
+**io.ReadFull**：读取像素数据时使用 `io.ReadFull` 替代 `f.Read`，防止底层 `Read` 返回短读导致图像损坏。
 
 **WIX 文件名兼容**：部分 WIX 文件名存在异常（如 `Deco..wix` 对应 `Deco.wil`），
 加载器在标准路径找不到 WIX 时会遍历同目录下所有 `.wix` 文件，按 base name（不区分大小写、去尾部点）匹配。
@@ -425,84 +428,72 @@ var MonsterActions = map[int]map[string]ActionInfo{
 }
 ```
 
-#### 4.3.3 动画播放器
+#### 4.3.3 动画播放
+
+动画播放逻辑直接集成在 `ui/ui.go` 的 `UIState` 中，没有独立的 `AnimationPlayer` 类型。
+
+**动画状态**（`UIState` 字段）：
 
 ```go
-// animation.go
-
-type AnimationPlayer struct {
-    // 配置
-    action     ActionInfo
-    direction  int         // 方向(0-7)
-    speed      float64     // 速度倍率
-
-    // 状态
-    playing    bool
-    frameIdx   int         // 当前帧索引
-    timer      *time.Timer
-    lastUpdate time.Time
-
-    // 帧序列
-    frames     []int       // 计算后的帧序列
-}
-
-func NewAnimationPlayer(action ActionInfo, direction int) *AnimationPlayer
-
-func (p *AnimationPlayer) Play()
-func (p *AnimationPlayer) Pause()
-func (p *AnimationPlayer) Stop()
-func (p *AnimationPlayer) NextFrame()
-func (p *AnimationPlayer) PrevFrame()
-func (p *AnimationPlayer) SetDirection(dir int)
-func (p *AnimationPlayer) SetSpeed(speed float64)
-func (p *AnimationPlayer) GetCurrentFrame() int
-func (p *AnimationPlayer) IsPlaying() bool
+AnimPlaying   bool       // 是否播放中
+AnimDirection int        // 方向(0-7)
+AnimAction    string     // "stand", "walk", "run", 等
+AnimSpeed     float64    // 速度倍率
+animFrameIdx  int        // 当前帧序列中的索引
+animLastTick  float64    // glfw 时间戳（用于帧间计时）
 ```
+
+**帧序列计算**（`calcAnimFrames` 函数）：
+
+```go
+func calcAnimFrames(action string, direction int, maxCount int) []int
+```
+
+- 根据 action 名查找 HumanActions/对应模板
+- Frame < 8 的动作（如站立 Frame=4）不按方向分配，返回全部帧
+- Frame >= 8 的动作按 8 方向分配，每方向 `Frame/8` 帧
+- 生成的帧索引受 `maxCount` 约束（不超过 WIL 文件图像总数）
+
+**播放控制**：在 UI 面板中直接处理 Play/Pause/Stop 按钮，通过 `glfw.GetTime()` 计时驱动帧切换。
 
 #### 4.3.4 图像查看器
 
+图像查看逻辑分布在 `renderer/renderer.go` 和 `ui/ui.go` 中：
+
+**`renderer.WILRenderer`**：
 ```go
-// viewer.go
-
-type ImageViewer struct {
-    file       *wil.File
-    textures   map[int]uint32  // 纹理缓存
-    currentIdx int             // 当前选中图像
-    zoom       float32         // 缩放比例
-    offset     Vec2            // 平移偏移
-
-    // 动画相关
-    player     *AnimationPlayer
-    mode       string          // "browse" / "animation"
+type WILRenderer struct {
+    GL          *GLState
+    Prog        *ShaderProgram
+    textures    map[int]uint32  // 纹理缓存（index → GL texture ID）
+    currentFile *wil.File
 }
-
-func (v *ImageViewer) LoadWIL(path string) error
-func (v *ImageViewer) GetTexture(idx int) uint32
-func (v *ImageViewer) Render()
-func (v *ImageViewer) HandleInput()
-func (v *ImageViewer) SetMode(mode string)
-func (v *ImageViewer) SetAnimation(action string, direction int)
+func (r *WILRenderer) SetWILFile(f *wil.File)  // 切换 WIL 文件，清空缓存
+func (r *WILRenderer) GetOrCreateTexture(idx int) (uint32, float32, float32)
+func (r *WILRenderer) ExportPNG(idx int, dir string) error
 ```
+
+**`ui.UIState`**：维护当前选中图像索引、模式（browse/animation）、动画状态。
+
+**纹理 UV 翻转**：ImGui 纹理坐标需要手动翻转——OpenGL 纹理 row 0 在底部，但 `image.RGBA` row 0 在顶部。所有 `ig.ImageButtonV` 调用使用 `uv0=(0,1), uv1=(1,0)` 而非默认的 `(0,0),(1,1)`。
 
 #### 4.3.5 图像导出
 
+导出功能集成在 `renderer/renderer.go` 中：
+
 ```go
-// export.go
-
-type Exporter struct {
-    outputDir string
-}
-
-func (e *Exporter) ExportSingle(img *image.RGBA, filename string) error
-func (e *Exporter) ExportBatch(file *wil.File, indices []int) error
-func (e *Exporter) ExportAll(file *wil.File) error
+func (r *WILRenderer) ExportPNG(idx int, dir string) error
 ```
+
+将指定索引的图像导出为 PNG 文件到指定目录。UI 面板提供单张导出按钮。
 
 ### 4.4 界面布局（当前实现）
 
+窗口大小：1600×1000，字体 20px，UI 缩放 1.5x。
+
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ 菜单栏: File → Exit                                               │
+│ (无菜单栏)                                                        │
 ├──────────┬───────────────────────────────┬───────────────────────┤
 │          │                               │ WIL Info (右上)       │
 │ Files    │   纹理网格 (中间)              │  Title: xxx           │
@@ -510,14 +501,15 @@ func (e *Exporter) ExportAll(file *wil.File) error
 │          │  ┌─────┐ ┌─────┐ ┌─────┐     │  Mode: ○Browse ○Anim  │
 │ Data/    │  │ img0│ │ img1│ │ img2│ ... │  Index: 42            │
 │ ├ Hum    │  └─────┘ └─────┘ └─────┘     │  Size: 96 x 68       │
-│ ├ Items  │  ┌─────┐ ┌─────┐ ┌─────┐     │  Nav: << < 42/599 > >>│
-│ ├ Mon1   │  │ img3│ │ img4│ │ img5│     │  [Export PNG] [Export All]│
-│ └ ...    │  └─────┘ └─────┘ └─────┘     ├───────────────────────┤
-│          │       ... 滚动 ...            │ Preview (右下)        │
-│ 蓝=动画  │                               │                       │
-│ 绿=静态  │  每格 64×64 缩略图            │  ┌───────────────┐    │
-│ 黄=混合  │  点击选中，悬停显示尺寸        │  │               │    │
-│ 白=未知  │                               │  │  选中图像预览  │    │
+│ ├ Items  │  ┌─────┐ ┌─────┐ ┌─────┐     │  HotX: 48 HotY: 34   │
+│ ├ Mon1   │  │ img3│ │ img4│ │ img5│     │  Nav: << < 42/599 > >>│
+│ └ ...    │  └─────┘ └─────┘ └─────┘     │  [Export PNG] [Export All]│
+│          │       ... 滚动 ...            ├───────────────────────┤
+│ 蓝=动画  │                               │ Preview (右下)        │
+│ 绿=静态  │  每格 64×64 缩略图            │                       │
+│ 黄=混合  │  点击选中，悬停显示尺寸        │  ┌───────────────┐    │
+│ 白=未知  │                               │  │               │    │
+│          │                               │  │  选中图像预览  │    │
 │          │                               │  │  (自适应窗口)  │    │
 │          │                               │  └───────────────┘    │
 └──────────┴───────────────────────────────┴───────────────────────┘
@@ -656,12 +648,12 @@ func toImGuiWindow(w *glfw.Window) *igglfw.GLFWwindow
 func Load(wilPath string) (*File, error)
 
 type File struct {
-    Title     string
-    Count     int
-    Images    []*Image
-    Palette   [256]color.RGBA
-    btVersion  int    // 0=12字节图像头, 1=8字节图像头
-    colorCount int    // 颜色数: <=256→8-bit调色板, >256→16-bit RGB565
+    Title     string         // 文件标题（ILib 标识）
+    Count     int            // 图像总数
+    Images    []*Image       // 图像数组
+    Palette   [256]color.RGBA // 256色调色板（仅8-bit模式使用）
+    BtVersion  int           // 版本标志（0=12字节图像头, 1=8字节图像头）
+    ColorCount int           // 颜色数: 256→8-bit调色板, 65536→16-bit RGB565
 }
 
 type Image struct {
@@ -673,24 +665,34 @@ type Image struct {
 }
 ```
 
+**实际验证结果**：所有游戏客户端 WIL 文件均为 ILib 格式（`#ILIB`/`#INDX` 签名），图像头均为 12 字节（`BtVersion != 0`）。8-bit 文件（如 Hum.wil、Mon1.WIL）`ColorCount=256`，16-bit 文件（如 Items.wil、DnItems.wil）`ColorCount=65536`。
+
 ### 7.3 帧序列计算示例
 
 ```go
-// 计算某动作某方向的帧序列
-func calcFrames(action ActionInfo, direction int) []int {
-    dirFrames := action.Frame / 8  // 每方向帧数
-    start := action.Start + direction * dirFrames
+// CalcFrames 计算某动作某方向的帧序列
+func CalcFrames(action ActionInfo, direction int) []int {
+    dirFrames := action.Frame
+    start := action.Start
+
+    // 帧数 >= 8 时按 8 方向分配；否则所有方向共享帧序列
+    if action.Frame >= 8 && direction >= 0 && direction < 8 {
+        dirFrames = action.Frame / 8
+        start = action.Start + direction*dirFrames
+    }
 
     frames := make([]int, 0, dirFrames)
     for i := 0; i < dirFrames; i++ {
-        if action.Skip > 0 && i % (action.Skip + 1) == action.Skip {
-            continue  // 跳帧
+        if action.Skip > 0 && i%(action.Skip+1) == action.Skip {
+            continue // 跳帧
         }
-        frames = append(frames, start + i)
+        frames = append(frames, start+i)
     }
     return frames
 }
 ```
+
+UI 中还有 `calcAnimFrames(action string, direction int, maxCount int) []int`，逻辑相同但额外接收 `maxCount` 参数限制帧索引不超过 WIL 文件图像总数。
 
 ---
 
@@ -708,34 +710,50 @@ func calcFrames(action ActionInfo, direction int) []int {
 
 ### 8.2 动画模式测试
 
-| 测试项   | 测试文件 | 预期结果         |
-| -------- | -------- | ---------------- |
-| 加载角色 | Hum.wil  | 正确加载600帧    |
-| 站立动画 | Hum.wil  | 4帧循环播放      |
-| 走路动画 | Hum.wil  | 8方向各6帧       |
-| 攻击动画 | Hum.wil  | 8方向各8帧       |
-| 加载怪物 | Mon1.wil | 正确加载怪物图像 |
-| 怪物动画 | Mon1.wil | 按模板播放       |
-| 方向切换 | 任意     | 8方向正确切换    |
-| 速度调节 | 任意     | 播放速度变化     |
+| 测试项   | 测试文件 | 预期结果                |
+| -------- | -------- | ----------------------- |
+| 加载角色 | Hum.wil  | 正确加载600帧（8-bit）  |
+| 站立动画 | Hum.wil  | 4帧循环播放（不分方向） |
+| 走路动画 | Hum.wil  | 8方向各7~8帧            |
+| 攻击动画 | Hum.wil  | 8方向各7~8帧            |
+| 加载怪物 | Mon1.wil | 正确加载怪物图像（8-bit）|
+| 怪物动画 | Mon1.wil | 按模板播放              |
+| 方向切换 | 任意     | 8方向正确切换           |
+| 速度调节 | 任意     | 播放速度变化            |
+
+**已验证的文件**：
+
+| 文件 | 格式 | ColorCount | 像素格式 | 状态 |
+| ---- | ---- | ---------- | -------- | ---- |
+| Hum.wil | ILib/INDX | 256 | 8-bit 调色板 | 正常 |
+| Mon1.wil | ILib/INDX | 256 | 8-bit 调色板 | 正常 |
+| Items.wil | ILib/INDX | 65536 | 16-bit RGB565 | 正常 |
+| DnItems.wil | ILib/INDX | 65536 | 16-bit RGB565 | 正常 |
+| Deco.wil | ILib/INDX | 65536 | 16-bit RGB565 | 正常（WIX 文件名为 `Deco..wix`，需模糊匹配）|
 
 ### 8.3 验证步骤
 
-1. 运行 `go run cmd/wilviewer/main.go`
+1. 编译运行：
+   ```bash
+   go build -o cmd/wilviewer/wilviewer.exe ./cmd/wilviewer
+   ./cmd/wilviewer/wilviewer.exe asset/client/Data
+   ```
 2. **浏览模式测试**：
-   - 打开 `asset/client/Data/Items.wil`
-   - 验证缩略图列表正确显示
-   - 点击任意图像，验证查看区显示正确
-   - 测试导出功能
+   - 左侧目录树点击 `Items.wil`（16-bit RGB565）
+   - 验证缩略图网格正确显示物品图标
+   - 点击任意图像，验证右下预览区显示正确（UV 翻转正常，无上下颠倒）
+   - 验证右上面板显示正确的 Width/Height/HotX/HotY
 3. **动画模式测试**：
-   - 切换到动画模式
-   - 打开 `asset/client/Data/Hum.wil`
-   - 选择"站立"动作，验证4帧循环
-   - 切换方向，验证8方向正确
-   - 切换"走路"动作，验证动画流畅
-   - 调整速度，验证播放速度变化
-   - 测试怪物WIL（Mon1.wil）
-4. **日志验证**：
+   - 左侧目录树点击 `Hum.wil`（8-bit 调色板）
+   - 切换右上面板 Mode 为 Animation
+   - 选择 Action: stand，验证 4 帧循环播放
+   - 切换 Direction，验证方向正确切换
+   - 选择 Action: walk/run/attack，验证动画流畅
+   - 调整 Speed 滑块，验证播放速度变化
+   - 测试 `Mon1.wil`（怪物，8-bit）
+4. **特殊文件测试**：
+   - 点击 `Deco.wil`，验证能正确加载（WIX 文件名为 `Deco..wix`）
+5. **日志验证**：
    - 检查控制台输出，确认每个关键步骤都有 DEBUG 日志
    - 验证日志中的数值（图像数量、帧号、方向等）与预期一致
    - 错误时通过日志快速定位问题
