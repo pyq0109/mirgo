@@ -48,16 +48,12 @@ var NpcActions = map[string]ActionInfo{
 
 // CalcFrames 计算某动作某方向的帧序列
 func CalcFrames(action ActionInfo, direction int) []int {
-	// 计算每方向帧数
 	dirFrames := action.Frame
-	if direction >= 0 && direction < 8 {
-		// 有方向的动作，帧数除以8
-		dirFrames = action.Frame / 8
-	}
-
-	// 计算起始帧
 	start := action.Start
-	if direction >= 0 && direction < 8 {
+
+	// 对于帧数>=8的动作，按8方向分配；否则所有方向共享帧序列
+	if action.Frame >= 8 && direction >= 0 && direction < 8 {
+		dirFrames = action.Frame / 8
 		start = action.Start + direction*dirFrames
 	}
 

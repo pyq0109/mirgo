@@ -157,19 +157,10 @@ func main() {
 		// ImGui frame.
 		ui.BeginFrame()
 
-		menuH := ui.FrameHeight()
-
-		shouldClose := false
-		ui.RenderMenuBar(&shouldClose)
-		if shouldClose {
-			mlog.Logf(mlog.LevelInfo, "Main", "用户点击菜单退出")
-			window.SetShouldClose(true)
-		}
-
-		ui.RenderLeftPanel(uiState, glfwW, glfwH, menuH)
-		ui.RenderGridPanel(uiState, glfwW, glfwH, menuH)
-		ui.RenderInfoPanel(uiState, glfwW, glfwH, menuH)
-		ui.RenderPreviewPanel(uiState, glfwW, glfwH, menuH)
+		ui.RenderLeftPanel(uiState, glfwW, glfwH)
+		ui.RenderGridPanel(uiState, glfwW, glfwH)
+		ui.RenderInfoPanel(uiState, glfwW, glfwH)
+		ui.RenderPreviewPanel(uiState, glfwW, glfwH)
 
 		ui.EndFrame()
 

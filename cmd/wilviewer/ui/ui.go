@@ -23,7 +23,7 @@ import (
 
 const (
 	leftPanelWidth  = 250
-	rightPanelWidth = 380
+	rightPanelWidth = 320
 	thumbnailSize   = 64
 	thumbCellPad    = 4
 	thumbCellSize   = thumbnailSize + thumbCellPad*2
@@ -124,29 +124,10 @@ func IO() *ig.IO {
 	return ig.CurrentIO()
 }
 
-// RenderMenuBar renders the top menu bar (File -> Exit).
-func RenderMenuBar(shouldClose *bool) {
-	if !ig.BeginMainMenuBar() {
-		return
-	}
-	if ig.BeginMenu("File") {
-		if ig.MenuItemBool("Exit") {
-			*shouldClose = true
-		}
-		ig.EndMenu()
-	}
-	ig.EndMainMenuBar()
-}
-
-// FrameHeight returns the current ImGui frame height (menu bar height).
-func FrameHeight() float32 {
-	return ig.FrameHeight()
-}
-
 // RenderLeftPanel renders the directory tree panel on the left side.
-func RenderLeftPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
-	ig.SetNextWindowPosV(ig.NewVec2(0, menuH), ig.CondAlways, ig.NewVec2(0, 0))
-	ig.SetNextWindowSizeV(ig.NewVec2(leftPanelWidth, float32(glfwH)-menuH), ig.CondAlways)
+func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
+	ig.SetNextWindowPosV(ig.NewVec2(0, 0), ig.CondAlways, ig.NewVec2(0, 0))
+	ig.SetNextWindowSizeV(ig.NewVec2(leftPanelWidth, float32(glfwH)), ig.CondAlways)
 
 	ig.BeginV("Files", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize)
 
@@ -225,16 +206,15 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 }
 
 // RenderGridPanel renders the center grid of texture thumbnails.
-func RenderGridPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
+func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 	gridX := float32(leftPanelWidth)
-	gridY := menuH
 	gridW := float32(glfwW) - gridX - float32(rightPanelWidth)
-	gridH := float32(glfwH) - menuH
+	gridH := float32(glfwH)
 
-	ig.SetNextWindowPosV(ig.NewVec2(gridX, gridY), ig.CondAlways, ig.NewVec2(0, 0))
+	ig.SetNextWindowPosV(ig.NewVec2(gridX, 0), ig.CondAlways, ig.NewVec2(0, 0))
 	ig.SetNextWindowSizeV(ig.NewVec2(gridW, gridH), ig.CondAlways)
 
-	ig.BeginV("Grid", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize|ig.WindowFlagsNoScrollbar)
+	ig.BeginV("Grid", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize|ig.WindowFlagsNoScrollbar|ig.WindowFlagsNoTitleBar)
 
 	if state.WILFile == nil {
 		ig.Text("Select a .wil file from the left panel")
@@ -244,14 +224,23 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 
 	wf := state.WILFile
 
-	// Calculate columns based on available width.
+	ig.BeginChildStr("gridscroll")
+
+	// Calculate columns based on child window's actual available width.
+	// Button width = thumbnailSize + 2*FramePadding.X; step = button width + ItemSpacing.X.
 	availW := ig.ContentRegionAvail().X
-	cols := int(availW) / thumbCellSize
+	style := ig.CurrentStyle()
+	framePadX := int(style.FramePadding().X)
+	itemSpacingX := int(style.ItemSpacing().X)
+	buttonW := thumbnailSize + framePadX*2
+	step := buttonW + itemSpacingX
+	if step < 1 {
+		step = 1
+	}
+	cols := (int(availW) + itemSpacingX) / step
 	if cols < 1 {
 		cols = 1
 	}
-
-	ig.BeginChildStr("gridscroll")
 
 	selectedIdx := state.CurrentIdx
 	col := 0
@@ -332,9 +321,9 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 }
 
 // RenderInfoPanel renders the right-top panel with file info and controls.
-func RenderInfoPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
-	infoH := (float32(glfwH) - menuH) * 0.4
-	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), menuH), ig.CondAlways, ig.NewVec2(0, 0))
+func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
+	infoH := float32(glfwH) * 0.4
+	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), 0), ig.CondAlways, ig.NewVec2(0, 0))
 	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, infoH), ig.CondAlways)
 
 	ig.BeginV("WIL Info", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize)
@@ -448,12 +437,11 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
 }
 
 // RenderPreviewPanel renders the right-bottom panel with image preview or animation.
-func RenderPreviewPanel(state *UIState, glfwW, glfwH int32, menuH float32) {
-	infoH := (float32(glfwH) - menuH) * 0.4
-	previewY := menuH + infoH
-	previewH := float32(glfwH) - previewY
+func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
+	infoH := float32(glfwH) * 0.4
+	previewH := float32(glfwH) - infoH
 
-	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), previewY), ig.CondAlways, ig.NewVec2(0, 0))
+	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), infoH), ig.CondAlways, ig.NewVec2(0, 0))
 	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, previewH), ig.CondAlways)
 
 	ig.BeginV("Preview", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize)
@@ -564,6 +552,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 	if ig.Button(playLabel) {
 		state.AnimPlaying = !state.AnimPlaying
 		if state.AnimPlaying {
+			state.animLastTick = glfw.GetTime()
 			mlog.Logf(mlog.LevelInfo, "Anim", "播放: action=%s, dir=%d, speed=%.1f", state.AnimAction, state.AnimDirection, state.AnimSpeed)
 		} else {
 			mlog.Logf(mlog.LevelInfo, "Anim", "暂停: action=%s, dir=%d, frame=%d", state.AnimAction, state.AnimDirection, state.animFrameIdx)
@@ -648,6 +637,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 }
 
 // calcAnimFrames calculates the frame indices for an animation.
+// Frame counts match the Delphi TActionInfo definitions in Actor.pas.
 func calcAnimFrames(action string, direction int, maxCount int) []int {
 	var start, frameCount int
 	switch action {
@@ -656,22 +646,22 @@ func calcAnimFrames(action string, direction int, maxCount int) []int {
 		frameCount = 4
 	case "walk":
 		start = 64
-		frameCount = 48
+		frameCount = 60
 	case "run":
 		start = 128
-		frameCount = 48
+		frameCount = 60
 	case "attack":
 		start = 192
-		frameCount = 48
+		frameCount = 60
 	case "spell":
 		start = 256
-		frameCount = 48
+		frameCount = 60
 	case "hit":
 		start = 320
-		frameCount = 24
+		frameCount = 30
 	case "death":
 		start = 384
-		frameCount = 24
+		frameCount = 30
 	default:
 		frames := make([]int, maxCount)
 		for i := range frames {
@@ -680,15 +670,17 @@ func calcAnimFrames(action string, direction int, maxCount int) []int {
 		return frames
 	}
 
-	dirFrames := frameCount / 8
-	if dirFrames < 1 {
-		dirFrames = 1
+	// For actions with fewer frames than directions (e.g. stand=4),
+	// all directions share the same frames. Otherwise divide by 8.
+	dirFrames := frameCount
+	if frameCount >= 8 {
+		dirFrames = frameCount / 8
+		start = start + direction*dirFrames
 	}
-	base := start + direction*dirFrames
 
 	frames := make([]int, 0, dirFrames)
 	for i := 0; i < dirFrames; i++ {
-		idx := base + i
+		idx := start + i
 		if idx < maxCount {
 			frames = append(frames, idx)
 		}
