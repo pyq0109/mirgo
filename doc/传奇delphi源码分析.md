@@ -77,14 +77,282 @@
 
 **光照系统**：使用6级预计算光罩(LightMask0~5)，从 `Data/lig0a~f.dat` 加载。
 
-### 2.3 角色动画
+### 2.3 角色动画系统
 
-定义在 Actor.pas 中。`TActionInfo` 记录每个动作的起始帧、帧数、跳帧、帧间隔。
+动画系统定义在 `Actor.pas` 中，是客户端最复杂的模块之一。
 
-**帧数规格**：
+#### 2.3.1 核心数据结构 TActionInfo
 
-- 人类角色：每套装备每个方向 600 帧（8方向 × 每方向约75帧）
-- 怪物：根据类型有不同帧数（MA9~MA22 共14种动作模板）
+每个动画动作由 5 个字段定义（Actor.pas:35）：
+
+```pascal
+TActionInfo = packed record
+  start   : Word;  // 起始帧索引（在 WIL 文件中的位置）
+  frame   : Word;  // 实际动画帧数
+  skip    : Word;  // 每个方向之间的填充帧数
+  ftime   : Word;  // 每帧显示时间（毫秒）
+  usetick : Word;  // 速度控制（用于走/跑）
+end;
+```
+
+**帧索引计算公式**（核心公式，贯穿整个动画系统）：
+
+```
+实际帧 = action.start + direction × (action.frame + action.skip) + 当前帧偏移
+结束帧 = action.start + direction × (action.frame + action.skip) + action.frame - 1
+```
+
+- `direction`：0~7（8方向）
+- `action.frame + action.skip`：每个方向消耗的总帧槽位
+- WIL 文件中所有方向连续存储
+
+**示例**：人类站立 HA.ActStand = {start:0, frame:4, skip:4}：
+- 方向0(上)：帧 0~3（`0 + 0×(4+4) = 0`）
+- 方向3(右下)：帧 24~27（`0 + 3×(4+4) = 24`）
+- 方向7(左上)：帧 56~59（`0 + 7×(4+4) = 56`）
+
+WIL 文件中的帧布局：`[dir0: f0 f1 f2 f3 _ _ _ _] [dir1: f0 f1 f2 f3 _ _ _ _] ...`
+
+#### 2.3.2 人类角色动画（HA 模板）
+
+人类使用 `HA` 模板（THumanAction，Actor.pas:44），包含 14 个动作：
+
+| 动作 | start | frame | skip | ftime | 每方向帧数 |
+|------|-------|-------|------|-------|-----------|
+| Stand（站立） | 0 | 4 | 4 | 200ms | 8 |
+| Walk（行走） | 64 | 6 | 2 | 90ms | 8 |
+| Run（跑步） | 128 | 6 | 2 | 120ms | 8 |
+| RushLeft（左冲） | 192 | 6 | 2 | 120ms | 8 |
+| RushRight（右冲） | 256 | 6 | 2 | 120ms | 8 |
+| WarMode（战斗姿态） | 320 | 1 | 0 | 200ms | 1 |
+| Hit（普通攻击） | 328 | 6 | 2 | 85ms | 8 |
+| HeavyHit（重击） | 392 | 6 | 2 | 90ms | 8 |
+| BigHit（大招） | 456 | 8 | 0 | 70ms | 8 |
+| Spell（施法） | 520 | 6 | 2 | 60ms | 8 |
+| Sitdown（坐下） | 584 | 2 | 0 | 300ms | 2 |
+| Struck（受击） | 600 | 3 | 5 | 70ms | 8 |
+| Die（死亡） | 664 | 4 | 4 | 120ms | 8 |
+
+**每套外观固定 600 帧**（`HUMANFRAME` 常量，Actor.pas:14）。
+
+**人类三层同步渲染**（THumActor.LoadSurface，Actor.pas:3692）：
+
+人类角色由 3~4 层叠加渲染，所有层共享同一个 `m_nCurrentFrame`，保证动画同步：
+
+| 层 | WIL 文件 | 偏移计算 | 说明 |
+|---|---|---|---|
+| 身体 | Hum.wil | `600 × dress_id` | 按服装/盔甲 ID 偏移 |
+| 头发 | Hair.wil | `600 × (hair×2 + sex)` | 按发型和性别偏移 |
+| 武器 | Weapon.wil | `600 × weapon_id` | 按武器 ID 偏移 |
+| 翅膀/特效 | HumEffect.wil | `600 × (effect-1)` | 按特效 ID 偏移 |
+
+**绘制顺序**：`WORDER[sex, frame]` 查找表（600条/性别，Actor.pas:461）决定武器在身体前（1）还是后（0）绘制，解决 8 方向精灵中武器与身体的遮挡关系。
+
+#### 2.3.3 怪物动画系统
+
+怪物动画的选择分三步：**Race → 动画模板**，**Appr → WIL文件 + 帧偏移**。
+
+**第一步：服务端发送 feature 整数**
+
+服务端通过 `MakeMonsterFeature(RaceImg, Weapon, Appr)` 编码外观信息（Grobal2.pas:2671）：
+
+```
+feature = MakeLong(MakeWord(RaceImg, Weapon), Appr)
+
+RACEfeature = LoByte(LoWord(feature))  → m_btRace（种族 ID）
+APPRfeature = HiWord(feature)          → m_wAppearance（外观值）
+```
+
+**第二步：Race → 动画模板（GetRaceByPM）**
+
+`GetRaceByPM(race, Appr)` 函数（Actor.pas:818）将种族 ID 映射到 `TMonsterAction` 模板。每个模板定义 7 个动作：站立/行走/攻击/暴击/受击/死亡/尸体。
+
+| Race | 模板 | 说明 |
+|------|------|------|
+| 9 | MA9 | 攻击复用行走帧 |
+| 10 | MA10 | 标准 8 帧怪物 |
+| 11 | MA11 | 10 帧怪物 |
+| 13,14,17,18,23 | MA14 | 扩展死亡动画 |
+| 15,22 | MA15 | |
+| 19,20,21,37,40,45,52,53,64-69,73,74,79 | **MA19** | **最常用模板** |
+| 32 | MA24 | 有暴击攻击 |
+| 33 | MA25 | 蜈蚣王 |
+| 43 | MA21 | 蜂后（不移动） |
+| 47 | MA22 | 石像类 |
+| 50 | 按 Appr 分派 | NPC，见下文 |
+| 60-62,70-72 | MA33 | |
+| 75,77 | MA39 | 石像怪物 |
+| 84-89 | MA45 | 龙形雕像 |
+| 98 | MA27 | 城墙 |
+| 99 | MA26 | 城门 |
+
+**第三步：Appr → WIL 文件 + 帧偏移**
+
+`aGetMonImg(appr)` 函数（Actor.pas:958）选择 WIL 文件：
+
+```pascal
+case (appr div 10) of
+  0:  Result := WMonImg;      // Mon1.wil
+  1:  Result := WMon2Img;     // Mon2.wil
+  2:  Result := WMon3Img;     // Mon3.wil
+  ...
+  17: Result := WMon18Img;    // Mon18.wil
+  80: Result := WDragonImg;   // Dragon.wil
+  90: Result := WEffectImg;   // Effect.wil
+end;
+```
+
+`GetOffset(appr)` 函数（Actor.pas:1003）计算帧偏移：
+
+```
+nrace = appr div 10   // 选哪个 WIL 文件
+npos  = appr mod 10   // 该 WIL 文件内的第几种怪物
+
+| nrace | 每种怪物帧数 | 计算方式 |
+|-------|-------------|---------|
+| 0     | 280         | npos × 280 |
+| 1     | 230         | npos × 230 |
+| 2,3,7~12 | 360     | npos × 360（默认） |
+| 5     | 430         | npos × 430 |
+| 6     | 440         | npos × 440 |
+| 13~27 | 不规则      | 硬编码偏移表 |
+```
+
+**怪物纹理加载**（TActor.LoadSurface，Actor.pas:1918）：
+
+```pascal
+mimg := GetMonImg(m_wAppearance);  // 按 Appr 选 WIL 文件
+m_BodySurface := mimg.GetCachedImage(
+  GetOffset(m_wAppearance) + m_nCurrentFrame,  // 基础偏移 + 当前帧
+  m_nPx, m_nPy);
+```
+
+最终纹理索引 = `GetOffset(appr) + m_nCurrentFrame`
+
+#### 2.3.4 怪物动画模板表（MA9~MA47）
+
+每个 TMonsterAction 模板定义 7 个动作的帧布局：
+
+| 模板 | 每方向帧数 | Stand | Walk | Attack | Critical | Struck | Die | Death | 特点 |
+|------|-----------|-------|------|--------|----------|--------|-----|-------|------|
+| MA9 | 8 | 0/1/7 | 64/6/2 | 64/6/2 | — | 64/6/2 | 0/1/7 | 0/1/7 | 攻击复用行走帧 |
+| MA10 | 8 | 0/4/4 | 64/6/2 | 128/4/4 | — | 192/2/0 | 208/4/4 | 272/1/0 | 标准 8 帧 |
+| MA11 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/10/0 | 340/1/0 | 10 帧 |
+| MA12 | 8 | 0/4/4 | 64/6/2 | 128/6/2 | — | 192/2/0 | 208/4/4 | 272/1/0 | |
+| MA14 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/10/0 | 340/10/0 | 扩展死亡 |
+| MA15 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/10/0 | 1/1/0 | |
+| MA16 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/4/6 | 0/1/0 | 慢攻击(160ms) |
+| MA17 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/10/0 | 340/1/0 | 快站立(60ms) |
+| MA19 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/10/0 | 340/1/0 | **最常用** |
+| MA20 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | — | 240/2/0 | 260/10/0 | 340/10/0 | 长死亡 |
+| MA21 | 10 | 0/4/6 | 0/0/0 | 10/6/4 | — | 20/2/0 | 30/10/0 | 0/0/0 | 不移动 |
+| MA22 | 10 | 80/4/6 | 160/6/4 | 240/6/4 | — | 320/2/0 | 340/10/0 | 0/6/4 | 石像类 |
+| MA23 | 10 | 20/4/6 | 100/6/4 | 180/6/4 | — | 260/2/0 | 280/10/0 | 0/20/0 | |
+| MA24 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | **240/6/4** | 320/2/0 | 340/10/0 | 420/1/0 | **有暴击** |
+| MA25 | 10 | 0/4/6 | 70/10/0 | 20/6/4 | 10/6/4 | 50/2/0 | 60/10/0 | 80/10/0 | |
+| MA26 | 8 | 0/1/7 | 0/0/0 | 56/6/2 | 64/6/2 | 0/4/4 | 24/10/0 | 0/0/0 | 城门，双攻击 |
+| MA27 | 8 | 0/1/7 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/10/0 | 0/0/0 | 城墙 |
+| MA28 | 10 | 80/4/6 | 160/6/4 | 0/6/4 | — | 240/2/0 | 260/10/0 | 0/10/0 | |
+| MA29 | 10 | 80/4/6 | 160/6/4 | 240/6/4 | 0/10/0 | 320/2/0 | 340/10/0 | 0/10/0 | |
+| MA30 | 10 | 0/4/6 | 0/10/0 | 10/6/4 | 10/6/4 | 20/2/0 | 30/20/0 | 0/10/0 | |
+| MA31 | 10 | 0/4/6 | 0/10/0 | 10/6/4 | 0/6/4 | 0/2/8 | 20/10/0 | 0/10/0 | |
+| MA32 | 10 | 0/1/9 | 0/6/4 | 0/6/4 | 0/6/4 | 0/2/8 | 80/10/0 | 80/10/0 | |
+| MA33 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | 340/6/4 | 240/2/0 | 260/10/0 | 260/10/0 | |
+| MA34 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | 320/6/4 | 400/2/0 | 420/20/0 | 420/20/0 | |
+| MA35 | 10 | 0/4/6 | 0/0/0 | 30/10/0 | — | 0/1/9 | 0/0/0 | 0/0/0 | NPC 用 |
+| MA36 | 10 | 0/4/6 | 0/0/0 | 30/20/0 | — | 0/1/9 | 0/0/0 | 0/0/0 | |
+| MA37 | 10 | 30/4/6 | 0/0/0 | 30/4/6 | — | 0/1/9 | 0/0/0 | 0/0/0 | |
+| MA38 | 10 | 0/4/6 | 0/0/0 | 80/6/4 | — | 0/0/0 | 0/0/0 | 0/0/0 | |
+| MA39 | 10 | 0/4/6 | 0/0/0 | 10/6/4 | — | 20/2/0 | 30/10/0 | 0/0/0 | 石像 |
+| MA40 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | 580/20/0 | 240/2/0 | 260/20/0 | 260/20/0 | 大暴击 |
+| MA41 | 10 | 0/4/6 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 纯装饰 NPC |
+| MA42 | 10 | 0/4/6 | 10/8/2 | 0/0/0 | — | 0/0/0 | 30/10/0 | 30/10/0 | |
+| MA43 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | 160/6/4 | 240/2/0 | 260/10/0 | 340/10/0 | 攻击=暴击 |
+| MA44 | 10 | 0/10/0 | 10/6/4 | 20/6/4 | 40/10/0 | 40/2/8 | 30/6/4 | 0/0/0 | |
+| MA45 | 10 | 0/10/0 | 0/10/0 | 10/10/0 | 10/10/0 | 0/1/9 | 0/1/9 | 0/1/9 | 龙形雕像 |
+| MA46 | 10 | 0/20/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 20帧站立 |
+| MA47 | 10 | 0/4/6 | 80/6/4 | 160/6/4 | 260/6/4 | 240/2/0 | 524/6/0 | 524/6/0 | |
+
+表中格式：`start/frame/skip`，"—" 表示该模板无此动作。
+
+#### 2.3.5 NPC 动画
+
+NPC 固定使用 `Npc.wil`，每种 NPC 占 60 帧（`MERCHANTFRAME`）。
+
+`GetNpcOffset(nAppr)` 函数（Actor.pas:1156）计算帧偏移：
+
+```pascal
+case nAppr of
+  0..22:   Result := nAppr * 60;           // 每种 60 帧
+  23:      Result := 1380;
+  24,25:   Result := (nAppr-24)*60 + 1470;
+  26,28..31,33..41: Result := (nAppr-26)*60 + 1620;
+  // ...更多条目，部分 NPC 共享偏移或使用 20 帧
+end;
+```
+
+NPC 只有 3 个方向（`m_btDir := m_btDir mod 3`），使用 MA10 模板。
+
+#### 2.3.6 地图物体动画（Objects.wil）
+
+地图前景物体（wFrImg）通过地图数据中的 `btAniFrame` 字段控制动画（PlayScn.pas:1072）：
+
+- `btAniFrame = 0` → 静态图像
+- `btAniFrame > 0` → 动画帧数（最高位 0x80 表示 Alpha 混合绘制）
+- `btAniTick` → 动画速度（值越大越慢）
+- `btArea` → 选择 Objects1~Objects15.wil 文件
+
+动画帧计算公式：
+
+```pascal
+ani := btAniFrame and $7F;  // 去掉标志位，获取帧数
+blend := (btAniFrame and $80) > 0;  // 是否 Alpha 混合
+currentFrame := fridx + (globalAniCount mod (ani + ani*anitick)) div (1 + anitick);
+```
+
+#### 2.3.7 自定义怪物模板
+
+客户端还支持从外部文件加载自定义动画模板（MShare.pas:858）：
+
+```pascal
+// 文件路径：Graphics\Monster\%d.pm（%d = appr）
+function GetMonAction(nAppr: Integer): pTMonsterAction;
+begin
+  sFileName := format(MONPMFILE, [nAppr]);
+  if FileExists(sFileName) then begin
+    // 从二进制文件读取 TMonsterAction
+  end;
+end;
+```
+
+在创建角色时调用（PlayScn.pas:2138）：`m_Action := GetMonAction(m_wAppearance);`
+
+#### 2.3.8 完整数据流总结
+
+**怪物动画完整流程**：
+
+1. 服务端发送 `feature` 整数
+2. `RACEfeature` → `m_btRace`，`APPRfeature` → `m_wAppearance`
+3. `GetRaceByPM(race, appr)` → 返回 `TMonsterAction` 模板（如 `@MA19`）
+4. `GetOffset(appr)` → 计算 WIL 文件内的基础帧偏移
+5. `aGetMonImg(appr)` → 按 `appr div 10` 选择 MonX.wil 文件
+6. 收到动作消息（SM_TURN、SM_HIT 等）时，`CalcActorFrame` 计算：
+   - `m_nStartFrame = template.ActXxx.start + dir × (template.ActXxx.frame + template.ActXxx.skip)`
+   - `m_nEndFrame = m_nStartFrame + template.ActXxx.frame - 1`
+7. 渲染时 `LoadSurface` 加载：`WIL.GetCachedImage(GetOffset(appr) + m_nCurrentFrame)`
+8. `m_nCurrentFrame` 从 `m_nStartFrame` 递增到 `m_nEndFrame`，间隔 `ftime` 毫秒
+
+**人类动画完整流程**：
+
+1. 服务端发送 `feature` 整数
+2. `DRESSfeature` → `m_btDress`，`HAIRfeature` → `m_btHair`，`WEAPONfeature` → `m_btWeapon`
+3. 固定使用 `HA` 模板（不需查找）
+4. `m_nBodyOffset = 600 × m_btDress`（Hum.wil）
+5. `m_nHairOffset = 600 × (m_btHair×2 + m_btSex)`（Hair.wil）
+6. `m_nWeaponOffset = 600 × m_btWeapon`（Weapon.wil）
+7. 同样的帧计算：`m_nStartFrame = HA.ActXxx.start + dir × (HA.ActXxx.frame + HA.ActXxx.skip)`
+8. 三层纹理使用相同的 `m_nCurrentFrame`，保证同步
+9. `WORDER[sex, frame]` 决定武器绘制顺序
 
 ### 2.4 图像资源系统 (WIL/WIX)
 
