@@ -54,7 +54,7 @@ func Load(wilPath string) (*File, error) {
 		}
 		var verFlag int32
 		binary.Read(f, binary.LittleEndian, &verFlag)
-		if verFlag != 0 {
+		if verFlag == 0 {
 			wf.btVersion = 0 // 12-byte image header
 		} else {
 			wf.btVersion = 1 // 8-byte image header
@@ -81,7 +81,7 @@ func Load(wilPath string) (*File, error) {
 		binary.Read(f, binary.LittleEndian, &verFlag)
 		wf.Count = int(imgCount)
 		wf.colorCount = int(colorCount)
-		if verFlag != 0 {
+		if verFlag == 0 {
 			wf.btVersion = 0 // 12-byte image header
 		} else {
 			wf.btVersion = 1 // 8-byte image header

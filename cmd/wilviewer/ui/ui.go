@@ -25,8 +25,6 @@ const (
 	leftPanelWidth  = 250
 	rightPanelWidth = 320
 	thumbnailSize   = 64
-	thumbCellPad    = 4
-	thumbCellSize   = thumbnailSize + thumbCellPad*2
 )
 
 // UIState holds the shared state between the UI and the main loop.
@@ -82,8 +80,11 @@ func Shutdown() {
 // ScrollHandler is a callback for scroll events (after ImGui processing).
 type ScrollHandler func(window *glfw.Window, xoff, yoff float64)
 
+// KeyHandler is a callback for key events (after ImGui processing).
+type KeyHandler func(window *glfw.Window, key glfw.Key, action glfw.Action)
+
 // SetGLFWCallbacks sets up GLFW callbacks that forward to ImGui.
-func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler) {
+func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler, keyHandler KeyHandler) {
 	imWin := toImGuiWindow(window)
 
 	window.SetMouseButtonCallback(func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
@@ -103,6 +104,9 @@ func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler) {
 
 	window.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 		igglfw.KeyCallback(imWin, int32(key), int32(scancode), int32(action), int32(mods))
+		if keyHandler != nil {
+			keyHandler(w, key, action)
+		}
 	})
 }
 
@@ -288,7 +292,6 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 		// Click to select.
 		if pressed {
 			state.CurrentIdx = i
-			state.GridScrollTo = i
 			mlog.Logf(mlog.LevelDebug, "Grid", "选中图像: idx=%d", i)
 		}
 
@@ -311,7 +314,8 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 	// Auto-scroll to selected image.
 	if state.GridScrollTo >= 0 {
 		row := state.GridScrollTo / cols
-		scrollY := float32(row) * float32(thumbCellSize)
+		rowHeight := ig.FrameHeight() + ig.CurrentStyle().ItemSpacing().Y
+		scrollY := float32(row) * rowHeight
 		ig.SetScrollYFloat(scrollY)
 		state.GridScrollTo = -1
 	}

@@ -103,8 +103,29 @@ func main() {
 		AnimSpeed:    1.0,
 	}
 
-	// Set GLFW callbacks: scroll for grid scrolling.
-	ui.SetGLFWCallbacks(window, nil)
+	// Set GLFW callbacks: scroll for grid scrolling, keys for arrow navigation.
+	ui.SetGLFWCallbacks(window, nil, func(w *glfw.Window, key glfw.Key, action glfw.Action) {
+		if action != glfw.Press {
+			return
+		}
+		if uiState.WILFile == nil {
+			return
+		}
+		switch key {
+		case glfw.KeyRight:
+			if uiState.CurrentIdx < uiState.WILFile.Count-1 {
+				uiState.CurrentIdx++
+				uiState.GridScrollTo = uiState.CurrentIdx
+				mlog.Logf(mlog.LevelTrace, "Nav", "右箭头: idx=%d", uiState.CurrentIdx)
+			}
+		case glfw.KeyLeft:
+			if uiState.CurrentIdx > 0 {
+				uiState.CurrentIdx--
+				uiState.GridScrollTo = uiState.CurrentIdx
+				mlog.Logf(mlog.LevelTrace, "Nav", "左箭头: idx=%d", uiState.CurrentIdx)
+			}
+		}
+	})
 
 	// Window resize callback.
 	window.SetFramebufferSizeCallback(func(w *glfw.Window, width, height int) {
@@ -128,24 +149,6 @@ func main() {
 			if window.GetKey(glfw.KeyEscape) == glfw.Press {
 				mlog.Logf(mlog.LevelInfo, "Main", "用户按下 ESC，退出")
 				window.SetShouldClose(true)
-			}
-
-			// Navigate images with arrow keys.
-			if uiState.WILFile != nil {
-				if window.GetKey(glfw.KeyRight) == glfw.Press {
-					if uiState.CurrentIdx < uiState.WILFile.Count-1 {
-						uiState.CurrentIdx++
-						uiState.GridScrollTo = uiState.CurrentIdx
-						mlog.Logf(mlog.LevelTrace, "Nav", "右箭头: idx=%d", uiState.CurrentIdx)
-					}
-				}
-				if window.GetKey(glfw.KeyLeft) == glfw.Press {
-					if uiState.CurrentIdx > 0 {
-						uiState.CurrentIdx--
-						uiState.GridScrollTo = uiState.CurrentIdx
-						mlog.Logf(mlog.LevelTrace, "Nav", "左箭头: idx=%d", uiState.CurrentIdx)
-					}
-				}
 			}
 		}
 
