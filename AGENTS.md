@@ -13,7 +13,8 @@ cmd/
 ├── mapviewer/       # 地图查看器（OpenGL + ImGui）
 ├── wilviewer/       # WIL资源查看器（OpenGL + ImGui）
 ├── client/          # 游戏客户端（开发中）
-└── server/          # 游戏服务端（开发中）
+├── server/          # 游戏服务端（开发中）
+└── serverconfig/    # 配置转换工具（✅ 完成）
 internal/
 ├── mapformat/       # .map 文件解析器
 ├── wil/             # .wil/.wix 图像加载器
@@ -28,6 +29,7 @@ internal/
 ├── game/            # 共享游戏逻辑 ECS（待实现）
 └── storage/         # 数据存储层（待实现）
 asset/               # 已 gitignore — 游戏资源，非 Go 代码
+serverconfig/        # 已 gitignore — 转换后的配置文件（由工具生成）
 ```
 
 ## 开发计划
@@ -364,3 +366,29 @@ TBaseObject — 所有游戏对象基类
 - 5个级别：TRACE, DEBUG, INFO, WARN, ERROR
 - 基于 Tag 的日志记录
 - 时间戳输出到 stderr
+
+### cmd/serverconfig（✅ 完成）
+
+Server Config Converter 工具，将 Delphi 服务端配置文件转换为 JSONC 格式。
+
+**编译运行**：
+```bash
+go run ./cmd/serverconfig -v
+# 或指定输入输出目录
+go run ./cmd/serverconfig --input asset/server --output serverconfig -v
+```
+
+**功能**：
+- 将 `asset/server/` 下的配置文件转换为统一的 JSONC 格式
+- 支持 INI、SQLite、自定义文本等多种格式
+- 自动处理 UTF-8/GBK 编码转换
+- 直接复制 .map 二进制地图文件
+- 保持 NPC 脚本原始格式
+
+**输出结构**：
+- `serverconfig/server.jsonc` — 服务器主配置
+- `serverconfig/items/` — 物品定义
+- `serverconfig/monsters/` — 怪物定义和掉落表
+- `serverconfig/maps/` — 地图信息和 .map 文件
+- `serverconfig/npcs/` — NPC 定义和脚本
+- `serverconfig/magic/` — 魔法定义

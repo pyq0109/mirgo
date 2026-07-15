@@ -2,6 +2,8 @@
 imgui.ini
 asset
 temp.md
+serverconfig/
+!cmd/serverconfig/
 
 # Mimo
 .mimocode/
