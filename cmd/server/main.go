@@ -173,6 +173,11 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 // handleAuthenticatedMessage handles messages in the Authenticated state (character selection).
 func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, config *ServerConfig, db *storage.Database, userEngine *UserEngine, mapMgr *MapManager) {
 	switch msg.Ident {
+	case protocol.CMSelectServer:
+		log.Logf(log.LevelInfo, "Server", "Server selected: %s", body)
+		resp := protocol.MakeDefaultMsg(protocol.SMSelectServerOK, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+
 	case protocol.CMQueryChr:
 		log.Logf(log.LevelInfo, "Server", "Query characters for account %d", session.CharacterID)
 		sendCharacterList(server, session, db)
@@ -199,8 +204,8 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		player.WAbil.Level = uint16(charData.Level)
 		player.WAbil.HP = uint16(charData.HP)
 		player.WAbil.MP = uint16(charData.MP)
-		player.WAbil.MaxHP = uint16(charData.HP)  // TODO: calculate from stats
-		player.WAbil.MaxMP = uint16(charData.MP)  // TODO: calculate from stats
+		player.WAbil.MaxHP = uint16(charData.HP) // TODO: calculate from stats
+		player.WAbil.MaxMP = uint16(charData.MP) // TODO: calculate from stats
 		player.WAbil.Exp = uint32(charData.Exp)
 		player.SessionID = session.ID
 		player.AccountName = session.AccountName
@@ -238,6 +243,10 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		// Send start play
 		startResp := protocol.MakeDefaultMsg(protocol.SMStartPlay, 0, 0, 0, 0)
 		server.Send(session.ID, startResp, "")
+
+		// Send notice
+		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
+		server.Send(session.ID, noticeResp, "Welcome to MIR2 Go Server!")
 
 		// Send logon
 		player.SendLogon(server)

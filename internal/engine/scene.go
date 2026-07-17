@@ -1,14 +1,18 @@
 ﻿package engine
 
 // SceneType represents the type of game scene.
+// Matches Delphi TSceneType enum from IntroScn.pas
 type SceneType int
 
 const (
-	SceneIntro       SceneType = iota // Startup screen
-	SceneLogin                        // Login screen
-	SceneSelectChr                    // Character selection
-	SceneLoginNotice                  // Login notice/announcement
-	ScenePlayGame                     // Main game play
+	SceneIntro         SceneType = iota // 0: Startup screen (empty)
+	SceneLogin                          // 1: Login screen with ID/Password
+	SceneSelectCountry                  // 2: Country/server selection unused
+	SceneSelectChr                      // 3: Character selection
+	SceneNewChr                         // 4: Character creation (unused)
+	SceneLoading                        // 5: Loading screen (unused)
+	SceneLoginNotice                    // :: Login notice/announcement
+	ScenePlayGame                       // 7: Main game play
 )
 
 // String returns the scene type name.
@@ -18,8 +22,14 @@ func (t SceneType) String() string {
 		return "Intro"
 	case SceneLogin:
 		return "Login"
+	case SceneSelectCountry:
+		return "SelectCountry"
 	case SceneSelectChr:
 		return "SelectChr"
+	case SceneNewChr:
+		return "NewChr"
+	case SceneLoading:
+		return "Loading"
 	case SceneLoginNotice:
 		return "LoginNotice"
 	case ScenePlayGame:
@@ -31,7 +41,7 @@ func (t SceneType) String() string {
 
 // Scene is the interface for all game scenes.
 type Scene interface {
-	// Open is called when the scene becomes active.
+	// Open called when the scene becomes active.
 	Open()
 	// Close is called when the scene becomes inactive.
 	Close()
