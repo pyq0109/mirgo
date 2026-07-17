@@ -3,6 +3,7 @@ imgui.ini
 asset
 temp.md
 serverconfig/
+serverdata/
 !cmd/serverconfig/
 
 # Mimo

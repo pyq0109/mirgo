@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## 项目
 
@@ -12,8 +12,8 @@ main.go              # 入口（占位）
 cmd/
 ├── mapviewer/       # 地图查看器（OpenGL + ImGui）
 ├── wilviewer/       # WIL资源查看器（OpenGL + ImGui）
-├── client/          # 游戏客户端（开发中）
-├── server/          # 游戏服务端（开发中）
+├── client/          # 游戏客户端（✅ Phase 2A 完成）
+├── server/          # 游戏服务端（✅ Phase 2B 完成）
 └── serverconfig/    # 配置转换工具（✅ 完成）
 internal/
 ├── mapformat/       # .map 文件解析器
@@ -23,11 +23,19 @@ internal/
 │   ├── edcode.go    # 6Bit 编解码
 │   ├── message.go   # 消息类型和常量
 │   └── types.go     # 共享数据结构
-├── engine/          # 共享渲染引擎（待实现）
+├── engine/          # 共享渲染引擎（✅ Phase 2A 完成）
+│   ├── window.go    # GLFW 窗口封装
+│   ├── gl.go        # OpenGL 状态管理
+│   ├── shader.go    # 着色器程序
+│   ├── camera.go    # 2D 相机
+│   ├── scene.go     # 场景状态机
+│   └── resourcemanager.go # WIL 资源缓存
 ├── netclient/       # TCP 客户端库（待实现）
-├── netserver/       # TCP 服务端库（待实现）
+├── netserver/       # TCP 服务端库（✅ Phase 2B 完成）
+│   └── server.go    # TCP 服务器
 ├── game/            # 共享游戏逻辑 ECS（待实现）
-└── storage/         # 数据存储层（待实现）
+└── storage/         # 数据存储层（✅ Phase 2B 完成）
+    └── sqlite.go    # SQLite 数据库
 asset/               # 已 gitignore — 游戏资源，非 Go 代码
 serverconfig/        # 已 gitignore — 转换后的配置文件（由工具生成）
 ```
@@ -39,8 +47,8 @@ serverconfig/        # 已 gitignore — 转换后的配置文件（由工具生
 | 阶段 | 状态 | 内容 |
 |------|------|------|
 | Phase 1 | ✅ 完成 | `internal/protocol/` — 共享数据 & 协议 |
-| Phase 2A | 待开始 | 客户端窗口 & 场景框架 |
-| Phase 2B | 待开始 | 服务端核心基础设施 |
+| Phase 2A | ✅ 完成 | `internal/engine/` + `cmd/client/` — 客户端窗口 & 场景框架 |
+| Phase 2B | ✅ 完成 | `internal/netserver/` + `internal/storage/` + `cmd/server/` — 服务端核心基础设施 |
 | Phase 3A | 待开始 | 客户端游戏场景 & 地图渲染 |
 | Phase 3B | 待开始 | 服务端地图 & 世界管理 |
 | Phase 4A | 待开始 | 客户端角色系统 |
@@ -274,7 +282,7 @@ TBaseObject — 所有游戏对象基类
 
 **网格常量**：UNITX=48, UNITY=32, LOGICALMAPUNIT=40
 
-**装备槽位** (10个)：U_DRESS(0), U_WEAPON(1), U_RIGHTHAND(2), U_HELMET(3), U_NECKLACE(4), U_ARMRINGL(5), U_ARMRINGR(6), U_RINGL(7), U_RINGR(8), U_BUJUK(9)
+**装备槽位** (10个)：U_DRESS(0), U_WEAPON(1), U_RIGHTHAND(2), U_NECKLACE(3), U_HELMET(4), U_ARMRINGL(5), U_ARMRINGR(6), U_RINGL(7), U_RINGR(8), U_BUJUK(9)
 
 **物品类型** TStdItem (60字节)：Name[20], StdMode, Shape, Weight, Looks, DuraMax, AC/MAC/DC/MC/SC, Need/NeedLevel, Price
 
@@ -342,6 +350,64 @@ TBaseObject — 所有游戏对象基类
   - `Ability` (50字节) — 角色属性
   - `Magic` — 魔法定义
   - Feature 编码/解码函数
+
+### internal/engine（Phase 2A ✅）
+
+共享渲染引擎，客户端使用：
+
+- **window.go**：GLFW 窗口封装
+  - `Window` 结构体 — 窗口创建、主循环、输入回调
+  - `NewWindow(width, height, title)` — 创建窗口
+  - `Run(updateFn, renderFn)` — 主循环
+
+- **gl.go**：OpenGL 状态管理
+  - `GLState` 结构体 — VAO/VBO、着色器、白色纹理
+  - `UploadTexture(*image.RGBA) uint32` — 上传纹理
+  - `DrawQuad(texID, x, y, w, h, proj)` — 绘制纹理四边形
+  - `DrawQuadColor(x, y, w, h, r, g, b, a, proj)` — 绘制纯色四边形
+  - `OrthoProj(width, height) [16]float32` — 正交投影矩阵
+
+- **shader.go**：着色器程序
+  - `TextureShader` — 纹理四边形着色器
+  - `ColorShader` — 纯色着色器
+
+- **camera.go**：2D 相机
+  - `Camera2D` 结构体 — 位置、缩放、视口
+  - `ScreenToWorld`, `WorldToTile`, `TileToWorld` — 坐标变换
+  - `Pan`, `ZoomAt`, `CenterOn` — 相机控制
+  - `ViewportTiles` — 可见瓦片范围
+
+- **scene.go**：场景状态机
+  - `SceneType` 枚举 — Intro, Login, SelectChr, LoginNotice, PlayGame
+  - `Scene` 接口 — Open, Close, Update, Render, OnKey, OnMouse, OnScroll
+  - `SceneManager` — 场景注册、切换、转发
+
+- **resourcemanager.go**：WIL 资源缓存
+  - `ResourceManager` 结构体 — 所有 WIL 文件
+  - `GetTexture(f, index) uint32` — 带缓存的纹理获取
+  - `ClearCache` — 清除缓存
+
+### internal/netserver（Phase 2B ✅）
+
+TCP 服务端库：
+
+- **server.go**：TCP 服务器
+  - `TCPServer` 结构体 — 监听器、连接管理
+  - `Session` 结构体 — 客户端会话
+  - `SetConnectHandler`, `SetDisconnectHandler`, `SetMessageHandler` — 回调设置
+  - `Start`, `Stop` — 启动/停止
+  - `Send(sessionID, msg, body)` — 发送消息
+
+### internal/storage（Phase 2B ✅）
+
+SQLite 数据存储层：
+
+- **sqlite.go**：数据库操作
+  - `Database` 结构体 — 封装 sql.DB
+  - `Open(path)` — 打开/创建数据库
+  - `CreateAccount`, `GetAccountByUsername` — 账号操作
+  - `CreateCharacter`, `GetCharactersByAccount`, `GetCharacterByID` — 角色操作
+  - `UpdateCharacter`, `DeleteCharacter` — 角色更新
 
 ### internal/mapformat（已完成）
 
