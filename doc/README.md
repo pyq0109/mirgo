@@ -56,6 +56,18 @@ go run ".\cmd\wilviewer\" ".\asset\client\Data"
 
 操作：左侧点击选择WIL文件，中间网格点击选择图像，箭头键左右切换，ESC退出
 
+## server
+
+```PowerShell
+go run ./cmd/server
+```
+
+## client
+
+```PowerShell
+go run ./cmd/client
+```
+
 # 资源
 
 - 游戏 delphi 源码参考: https://github.com/lzxsz/MIR2 (commit: 98711dad31567d9a7e272956f6c5a2487000848b)

@@ -167,7 +167,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 				img := r.Tiles.Images[info.BackImage]
 				wx := float32(x * TileWidth)
 				wy := float32(y * TileHeight)
-				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
+				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
 			}
 		}
 	}
@@ -187,7 +187,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 				img := r.SmTiles.Images[info.MiddleImage]
 				wx := float32(x * TileWidth)
 				wy := float32(y * TileHeight)
-				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
+				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
 			}
 		}
 	}
@@ -282,13 +282,13 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]floa
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 		wx := cellWorldX + float32(img.HotX) - 2
 		wy := cellWorldY + float32(img.HotY) - 68
-		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
+		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	} else {
 		// Non-blend objects: bottom-aligned positioning.
 		wx := cellWorldX
 		wy := cellWorldY - float32(img.Height) + TileHeight
-		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, true, proj)
+		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
 	}
 }
 

@@ -277,8 +277,8 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 		ig.PushIDInt(int32(i))
 
 		// UV: full image (aspect ratio handled by ImageButton sizing).
-		uv0 := ig.NewVec2(0, 1)
-		uv1 := ig.NewVec2(1, 0)
+		uv0 := ig.NewVec2(0, 0)
+		uv1 := ig.NewVec2(1, 1)
 
 		texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
 		size := ig.NewVec2(thumbnailSize, thumbnailSize)
@@ -489,7 +489,7 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 				}
 
 				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
-				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 1), ig.NewVec2(1, 0), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
+				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
 			}
 		}
 	}
@@ -619,7 +619,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 					ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+offsetX, ig.CursorPosY()+offsetY))
 				}
 				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
-				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 1), ig.NewVec2(1, 0), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
+				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
 			}
 		}
 

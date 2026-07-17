@@ -22,11 +22,11 @@ type Image struct {
 
 // File holds a loaded WIL file with decoded images.
 type File struct {
-	Title     string
-	Count     int
-	Images    []*Image
-	Palette   [256]color.RGBA
-	btVersion int // 0=12-byte image header, 1=8-byte image header
+	Title      string
+	Count      int
+	Images     []*Image
+	Palette    [256]color.RGBA
+	btVersion  int // 0=12-byte image header, 1=8-byte image header
 	colorCount int // palette size: <=256 → 8-bit indexed, >256 → 16-bit RGB565
 }
 
@@ -197,6 +197,17 @@ func Load(wilPath string) (*File, error) {
 				rgba.Pix[off+2] = c.B
 				rgba.Pix[off+3] = c.A
 			}
+		}
+
+		// WIL stores scanlines bottom-to-top; flip to top-to-bottom for image.RGBA.
+		stride := w * 4
+		tmp := make([]byte, stride)
+		for r := 0; r < h/2; r++ {
+			top := rgba.Pix[r*stride : (r+1)*stride]
+			bot := rgba.Pix[(h-1-r)*stride : (h-r)*stride]
+			copy(tmp, top)
+			copy(top, bot)
+			copy(bot, tmp)
 		}
 
 		wf.Images[i] = &Image{
