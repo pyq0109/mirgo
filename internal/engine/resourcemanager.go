@@ -59,6 +59,11 @@ func NewResourceManager(dataDir string, gl *GLState) (*ResourceManager, error) {
 	return rm, nil
 }
 
+// DataDir returns the data directory path.
+func (rm *ResourceManager) DataDir() string {
+	return rm.dataDir
+}
+
 func (rm *ResourceManager) loadAll() error {
 	load := func(name string) (*wil.File, error) {
 		path := filepath.Join(rm.dataDir, name)

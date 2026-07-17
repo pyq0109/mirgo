@@ -26,6 +26,12 @@ asset/
 $env:CGO_ENABLED=1
 ```
 
+## serverconfig
+
+```PowerShell
+go run ".\cmd\serverconfig\" -v
+```
+
 ## mapviewer
 
 运行:

@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"encoding/json"
@@ -35,22 +35,19 @@ type LimitsConfig struct {
 	MonLimit   int `json:"monLimit"`
 }
 
-// DatabaseSection contains database file paths.
+// DatabaseSection contains database file path.
 type DatabaseSection struct {
-	Accounts   string `json:"accounts"`
-	Characters string `json:"characters"`
-	Guilds     string `json:"guilds"`
+	Path string `json:"path"`
 }
 
 // GameSection contains game world settings.
 type GameSection struct {
-	HomeMap          string `json:"homeMap"`
-	HomeX            int    `json:"homeX"`
-	HomeY            int    `json:"homeY"`
-	GroupMembersMax  int    `json:"groupMembersMax"`
-	BuildGuild       int    `json:"buildGuild"`
-	GuildWarFee      int    `json:"guildWarFee"`
-	// Additional game settings can be added here
+	HomeMap         string `json:"homeMap"`
+	HomeX           int    `json:"homeX"`
+	HomeY           int    `json:"homeY"`
+	GroupMembersMax int    `json:"groupMembersMax"`
+	BuildGuild      int    `json:"buildGuild"`
+	GuildWarFee     int    `json:"guildWarFee"`
 }
 
 // CommandsSection contains GM command definitions.
@@ -84,7 +81,8 @@ func ConvertServer(inputDir, outputDir string) error {
 	pluginFile := filepath.Join(inputDir, "系统插件.ini")
 	plugins, err := ParseINI(pluginFile)
 	if err != nil {
-		return fmt.Errorf("parsing 系统插件.ini: %w", err)
+		// Plugin file is optional
+		plugins = make(map[string]map[string]string)
 	}
 
 	// Build server config
@@ -102,9 +100,7 @@ func ConvertServer(inputDir, outputDir string) error {
 			},
 		},
 		Database: DatabaseSection{
-			Accounts:   "serverdata/accounts.db",
-			Characters: "serverdata/characters.db",
-			Guilds:     "serverdata/guilds.db",
+			Path: "serverdata/mir2.db",
 		},
 		Game: GameSection{
 			HomeMap:         getINIValue(setup, "Setup", "HomeMap", "0"),

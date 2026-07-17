@@ -147,13 +147,24 @@ func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// OrthoProj computes an orthographic projection matrix (Y-down).
+// OrthoProj computes an orthographic projection matrix (Y-down) from width/height.
 func OrthoProj(width, height float32) [16]float32 {
 	return [16]float32{
 		2 / width, 0, 0, 0,
 		0, -2 / height, 0, 0,
 		0, 0, -1, 0,
 		-1, 1, 0, 1,
+	}
+}
+
+// OrthoProj4 computes an orthographic projection matrix from left/right/bottom/top.
+// This matches the mapviewer's OrthoProj function.
+func OrthoProj4(left, right, bottom, top float32) [16]float32 {
+	return [16]float32{
+		2 / (right - left), 0, 0, 0,
+		0, 2 / (top - bottom), 0, 0,
+		0, 0, -1, 0,
+		-(right + left) / (right - left), -(top + bottom) / (top - bottom), 0, 1,
 	}
 }
 
