@@ -1,6 +1,7 @@
 ﻿package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"os"
@@ -50,6 +51,7 @@ func main() {
 	}
 
 	sessionMgr := NewSessionManager()
+	userEngine := NewUserEngine(db, mapMgr)
 	server := netserver.NewTCPServer(listenAddr)
 
 	server.SetConnectHandler(func(session *netserver.Session) {
@@ -58,6 +60,20 @@ func main() {
 	})
 
 	server.SetDisconnectHandler(func(session *netserver.Session) {
+		// Clean up PlayObject if player was in game
+		if session.State == netserver.StateInGame {
+			player := userEngine.GetPlayer(int32(session.CharacterID))
+			if player != nil {
+				// Save character data before removing
+				saveCharacterData(db, player)
+				// Remove from map
+				if player.envir != nil {
+					player.envir.RemoveObject(player.CurrX, player.CurrY, OS_MOVINGOBJECT, player)
+				}
+				userEngine.RemovePlayer(int32(session.CharacterID))
+				log.Logf(log.LevelInfo, "Server", "Player %s saved and removed from world", player.Name)
+			}
+		}
 		sessionMgr.Remove(session.ID)
 		log.Logf(log.LevelInfo, "Server", "Session %d disconnected (total: %d)", session.ID, sessionMgr.Count())
 	})
@@ -67,11 +83,11 @@ func main() {
 
 		switch session.State {
 		case netserver.StateConnected:
-			handleConnectedMessage(server, session, msg, body)
+			handleConnectedMessage(server, session, msg, body, db)
 		case netserver.StateAuthenticated:
-			handleAuthenticatedMessage(server, session, msg, body, config)
+			handleAuthenticatedMessage(server, session, msg, body, config, db, userEngine, mapMgr)
 		case netserver.StateInGame:
-			handleGameMessage(server, session, msg, body, mapMgr)
+			handleGameMessage(server, session, msg, body, userEngine)
 		}
 	})
 
@@ -91,7 +107,8 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			// Game tick
+			// Game tick: process all player actions
+			userEngine.ProcessHumans()
 		case sig := <-sigChan:
 			fmt.Println()
 			log.Logf(log.LevelInfo, "Server", "Received signal: %v", sig)
@@ -103,66 +120,275 @@ func main() {
 	}
 }
 
-func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string) {
+// handleConnectedMessage handles messages in the Connected state (before authentication).
+func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, db *storage.Database) {
 	switch msg.Ident {
+	case protocol.CMProtocol:
+		log.Logf(log.LevelDebug, "Server", "Protocol version: %d", msg.Recog)
+
 	case protocol.CMIDPassword:
-		log.Logf(log.LevelInfo, "Server", "Login attempt: %s", body)
+		// Parse username/password from body (format: "username/password")
+		username, password := parseCredentials(body)
+		log.Logf(log.LevelInfo, "Server", "Login attempt: %s", username)
+
+		// Verify against database
+		accountID, passwordHash, err := db.GetAccountByUsername(username)
+		if err != nil {
+			log.Logf(log.LevelWarn, "Server", "Account not found: %s", username)
+			// Auto-create account for development (remove in production)
+			hash := simpleHash(password)
+			accountID, err = db.CreateAccount(username, hash)
+			if err != nil {
+				log.Logf(log.LevelError, "Server", "Failed to create account: %v", err)
+				sendLoginFail(server, session)
+				return
+			}
+			log.Logf(log.LevelInfo, "Server", "Auto-created account: %s (id=%d)", username, accountID)
+		} else {
+			// Verify password
+			if !verifyPassword(password, passwordHash) {
+				log.Logf(log.LevelWarn, "Server", "Invalid password for: %s", username)
+				sendLoginFail(server, session)
+				return
+			}
+		}
+
+		// Authentication successful
 		session.State = netserver.StateAuthenticated
-		session.AccountName = body
+		session.AccountName = username
+
+		// Store account ID in session for later use
+		// We'll use CharacterID temporarily to store account ID until character is selected
+		session.CharacterID = accountID
 
 		resp := protocol.MakeDefaultMsg(protocol.SMPassOKSelectServer, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
-		log.Logf(log.LevelInfo, "Server", "Login successful for session %d", session.ID)
-
-	case protocol.CMProtocol:
-		log.Logf(log.LevelDebug, "Server", "Protocol version: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Server", "Login successful for %s (account=%d)", username, accountID)
 
 	default:
 		log.Logf(log.LevelWarn, "Server", "Unexpected message %d in Connected state", msg.Ident)
 	}
 }
 
-func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, config *ServerConfig) {
+// handleAuthenticatedMessage handles messages in the Authenticated state (character selection).
+func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, config *ServerConfig, db *storage.Database, userEngine *UserEngine, mapMgr *MapManager) {
 	switch msg.Ident {
 	case protocol.CMQueryChr:
-		log.Logf(log.LevelInfo, "Server", "Query characters for session %d", session.ID)
-		resp := protocol.MakeDefaultMsg(protocol.SMQueryChr, 0, 0, 0, 0)
-		server.Send(session.ID, resp, "")
+		log.Logf(log.LevelInfo, "Server", "Query characters for account %d", session.CharacterID)
+		sendCharacterList(server, session, db)
 
 	case protocol.CMSelChr:
-		log.Logf(log.LevelInfo, "Server", "Select character: %s", body)
+		charName := body
+		log.Logf(log.LevelInfo, "Server", "Select character: %s (id=%d)", charName, msg.Recog)
+
+		// Load character from database
+		charID := int64(msg.Recog)
+		charData, err := db.GetCharacterByID(charID)
+		if err != nil {
+			log.Logf(log.LevelError, "Server", "Failed to load character %d: %v", charID, err)
+			return
+		}
+
+		// Create PlayObject
+		player := NewPlayObject(session, charData.Name, int32(charData.ID))
+		player.MapName = charData.Map
+		player.CurrX = charData.X
+		player.CurrY = charData.Y
+		player.Job = byte(charData.Job)
+		player.Gender = byte(charData.Sex)
+		player.WAbil.Level = uint16(charData.Level)
+		player.WAbil.HP = uint16(charData.HP)
+		player.WAbil.MP = uint16(charData.MP)
+		player.WAbil.MaxHP = uint16(charData.HP)  // TODO: calculate from stats
+		player.WAbil.MaxMP = uint16(charData.MP)  // TODO: calculate from stats
+		player.WAbil.Exp = uint32(charData.Exp)
+		player.SessionID = session.ID
+		player.AccountName = session.AccountName
+
+		// Find and set map environment
+		envir := mapMgr.FindMap(charData.Map)
+		if envir == nil {
+			log.Logf(log.LevelError, "Server", "Map %s not found, using home map", charData.Map)
+			envir = mapMgr.FindMap(config.GetHomeMap())
+			if envir != nil {
+				player.MapName = config.GetHomeMap()
+				player.CurrX = config.GetHomeX()
+				player.CurrY = config.GetHomeY()
+			}
+		}
+		player.envir = envir
+
+		// Add player to map
+		if envir != nil {
+			envir.AddObject(player.CurrX, player.CurrY, OS_MOVINGOBJECT, player)
+		}
+
+		// Update session state
 		session.State = netserver.StateInGame
-		session.CharacterID = int64(msg.Recog)
+		session.CharacterID = charData.ID
 
-		// Use home map from config
-		mapName := config.GetHomeMap()
-		x := int32(config.GetHomeX())
-		y := uint16(config.GetHomeY())
+		// Add to UserEngine
+		userEngine.AddPlayer(player)
+		player.ReadyToRun = true
 
-		mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, x, y, 0, 0)
-		server.Send(session.ID, mapResp, mapName)
-		log.Logf(log.LevelInfo, "Server", "Sent map %s(%d,%d) to session %d", mapName, x, y, session.ID)
+		// Send map info
+		player.SendMapInfo(server)
+		log.Logf(log.LevelInfo, "Server", "Sent map %s(%d,%d) to player %s", player.MapName, player.CurrX, player.CurrY, player.Name)
 
+		// Send start play
 		startResp := protocol.MakeDefaultMsg(protocol.SMStartPlay, 0, 0, 0, 0)
 		server.Send(session.ID, startResp, "")
 
-		logonResp := protocol.MakeDefaultMsg(protocol.SMLogon, 0, 0, 0, 0)
-		server.Send(session.ID, logonResp, "")
+		// Send logon
+		player.SendLogon(server)
+
+		// Send ability
+		player.SendAbility(server)
+
+		// Send bag items (empty for now)
+		sendBagItems(server, session)
+
+		log.Logf(log.LevelInfo, "Server", "Player %s entered game at %s(%d,%d)", player.Name, player.MapName, player.CurrX, player.CurrY)
 
 	default:
 		log.Logf(log.LevelWarn, "Server", "Unexpected message %d in Authenticated state", msg.Ident)
 	}
 }
 
-func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, mapMgr *MapManager) {
+// handleGameMessage handles messages in the InGame state (gameplay).
+func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, userEngine *UserEngine) {
+	player := userEngine.GetPlayer(int32(session.CharacterID))
+	if player == nil {
+		log.Logf(log.LevelError, "Server", "Player not found for session %d", session.ID)
+		return
+	}
+
+	// Route message to player's message queue for processing in game tick
 	switch msg.Ident {
 	case protocol.CMTurn:
-		log.Logf(log.LevelDebug, "Server", "Player turn: dir=%d", msg.Param)
+		player.SendMsg(protocol.CMTurn, int(msg.Param), 0, 0, "")
 	case protocol.CMWalk:
-		log.Logf(log.LevelDebug, "Server", "Player walk: dir=%d", msg.Param)
+		player.SendMsg(protocol.CMWalk, int(msg.Param), 0, 0, "")
 	case protocol.CMRun:
-		log.Logf(log.LevelDebug, "Server", "Player run: dir=%d", msg.Param)
+		player.SendMsg(protocol.CMRun, int(msg.Param), 0, 0, "")
+	case protocol.CMHit:
+		player.SendMsg(protocol.CMHit, int(msg.Param), int(msg.Tag), int(msg.Series), "")
+	case protocol.CMSpell:
+		player.SendMsg(protocol.CMSpell, int(msg.Param), int(msg.Tag), int(msg.Series), body)
 	default:
-		log.Logf(log.LevelDebug, "Server", "Game message: %d", msg.Ident)
+		log.Logf(log.LevelDebug, "Server", "Unhandled game message: %d from %s", msg.Ident, player.Name)
 	}
+}
+
+// sendCharacterList sends the character list to the client.
+func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, db *storage.Database) {
+	chars, err := db.GetCharactersByAccount(session.CharacterID)
+	if err != nil {
+		log.Logf(log.LevelError, "Server", "Failed to load characters: %v", err)
+		resp := protocol.MakeDefaultMsg(protocol.SMQueryChrFail, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+		return
+	}
+
+	// Encode character list as binary data
+	// Format: count(1) + per char: name(20) + job(1) + hair(1) + level(1) + sex(1)
+	var buf []byte
+	buf = append(buf, byte(len(chars)))
+	for _, c := range chars {
+		// Name (20 bytes, null-terminated)
+		var nameBuf [20]byte
+		copy(nameBuf[:], c.Name)
+		buf = append(buf, nameBuf[:]...)
+		// Job (1 byte)
+		buf = append(buf, byte(c.Job))
+		// Hair (1 byte) - default 0
+		buf = append(buf, 0)
+		// Level (1 byte)
+		buf = append(buf, byte(c.Level))
+		// Sex (1 byte)
+		buf = append(buf, byte(c.Sex))
+	}
+
+	// Send as SMQueryChr with encoded body
+	// msg.Param = character count
+	resp := protocol.MakeDefaultMsg(protocol.SMQueryChr, int32(len(chars)), 0, 0, 0)
+	encodedBody := protocol.EncodeBuffer(buf)
+	server.Send(session.ID, resp, encodedBody)
+
+	log.Logf(log.LevelInfo, "Server", "Sent %d characters to session %d", len(chars), session.ID)
+}
+
+// sendBagItems sends the bag items to the client (empty for now).
+func sendBagItems(server *netserver.TCPServer, session *netserver.Session) {
+	resp := protocol.MakeDefaultMsg(protocol.SMBagItems, 0, 0, 0, 0)
+	server.Send(session.ID, resp, "")
+}
+
+// sendLoginFail sends a login failure response.
+func sendLoginFail(server *netserver.TCPServer, session *netserver.Session) {
+	resp := protocol.MakeDefaultMsg(protocol.SMQueryChrFail, 0, 0, 0, 0)
+	server.Send(session.ID, resp, "")
+}
+
+// saveCharacterData saves player data to the database.
+func saveCharacterData(db *storage.Database, player *PlayObject) {
+	c := &storage.Character{
+		ID:    int64(player.ID),
+		Map:   player.MapName,
+		X:     player.CurrX,
+		Y:     player.CurrY,
+		Level: int(player.WAbil.Level),
+		HP:    int(player.WAbil.HP),
+		MP:    int(player.WAbil.MP),
+		Exp:   int64(player.WAbil.Exp),
+	}
+	if err := db.UpdateCharacter(c); err != nil {
+		log.Logf(log.LevelError, "Server", "Failed to save character %s: %v", player.Name, err)
+	} else {
+		log.Logf(log.LevelDebug, "Server", "Saved character %s at %s(%d,%d)", player.Name, player.MapName, player.CurrX, player.CurrY)
+	}
+}
+
+// parseCredentials parses "username/password" format.
+func parseCredentials(body string) (username, password string) {
+	for i, c := range body {
+		if c == '/' {
+			return body[:i], body[i+1:]
+		}
+	}
+	return body, ""
+}
+
+// simpleHash creates a simple hash for development (NOT for production).
+func simpleHash(password string) string {
+	// Simple XOR-based hash for development
+	// In production, use bcrypt or argon2
+	hash := make([]byte, len(password))
+	for i, c := range password {
+		hash[i] = byte(c) ^ 0x5A
+	}
+	return fmt.Sprintf("%x", hash)
+}
+
+// verifyPassword verifies a password against a hash.
+func verifyPassword(password, hash string) bool {
+	return simpleHash(password) == hash
+}
+
+// encodeCharacterInfo encodes character info for network transmission.
+func encodeCharacterInfo(c storage.CharacterInfo) []byte {
+	buf := make([]byte, 24) // name(20) + job(1) + hair(1) + level(1) + sex(1)
+	copy(buf[:20], c.Name)
+	buf[20] = byte(c.Job)
+	buf[21] = 0 // hair
+	buf[22] = byte(c.Level)
+	buf[23] = byte(c.Sex)
+	return buf
+}
+
+// encodeUint16 encodes a uint16 to bytes (little-endian).
+func encodeUint16(v uint16) []byte {
+	buf := make([]byte, 2)
+	binary.LittleEndian.PutUint16(buf, v)
+	return buf
 }

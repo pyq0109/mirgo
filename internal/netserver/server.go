@@ -170,10 +170,18 @@ func (s *TCPServer) readLoop(session *Session) {
 		}
 
 		// Parse message frame: #<code><payload>!
+		// Client sends: #<digit><payload>! (digit is 1-9)
+		// Server sends: #<payload>! (no digit)
 		if s.onMessage != nil && n > 0 {
 			data := buf[:n]
 			if len(data) > 2 && data[0] == '#' && data[len(data)-1] == '!' {
-				payload := string(data[1 : len(data)-1])
+				// Skip the '#' prefix and '!' suffix
+				payloadStart := 1
+				// Check if next char is a digit (client code)
+				if len(data) > 3 && data[1] >= '1' && data[1] <= '9' {
+					payloadStart = 2 // Skip the code digit
+				}
+				payload := string(data[payloadStart : len(data)-1])
 				if len(payload) >= protocol.DefBlockSize {
 					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
 					body := ""
