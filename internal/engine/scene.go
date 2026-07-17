@@ -1,4 +1,4 @@
-﻿package engine
+package engine
 
 // SceneType represents the type of game scene.
 // Matches Delphi TSceneType enum from IntroScn.pas
@@ -130,5 +130,12 @@ func (m *SceneManager) OnMouse(x, y float64, button int, action int) {
 func (m *SceneManager) OnScroll(x, y float64) {
 	if m.current != nil {
 		m.current.OnScroll(x, y)
+	}
+}
+
+// OnChar forwards character input to the current scene if it supports it.
+func (m *SceneManager) OnChar(char rune) {
+	if s, ok := m.current.(interface{ OnChar(rune) }); ok {
+		s.OnChar(char)
 	}
 }

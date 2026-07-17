@@ -12,3 +12,5 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.48
 	golang.org/x/text v0.40.0
 )
+
+require golang.org/x/image v0.44.0

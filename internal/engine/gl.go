@@ -1,4 +1,4 @@
-﻿package engine
+package engine
 
 import (
 	"image"
@@ -112,6 +112,34 @@ func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
 
 	gl.Uniform1i(s.TextureShader.UseTexLoc, 1)
 	gl.Uniform4f(s.TextureShader.ColorLoc, 1, 1, 1, 1)
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	if texID != 0 {
+		gl.BindTexture(gl.TEXTURE_2D, texID)
+	} else {
+		gl.BindTexture(gl.TEXTURE_2D, s.WhiteTex)
+	}
+
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+}
+
+// DrawQuadTint draws a textured quad with color tinting (frag_color = texture * color).
+func (s *GLState) DrawQuadTint(texID uint32, x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
+	gl.UseProgram(s.TextureShader.ID)
+	gl.BindVertexArray(s.VAO)
+
+	gl.UniformMatrix4fv(s.TextureShader.ProjLoc, 1, false, &proj[0])
+
+	model := [16]float32{
+		w, 0, 0, 0,
+		0, h, 0, 0,
+		0, 0, 1, 0,
+		x, y, 0, 1,
+	}
+	gl.UniformMatrix4fv(s.TextureShader.ModelLoc, 1, false, &model[0])
+
+	gl.Uniform1i(s.TextureShader.UseTexLoc, 1)
+	gl.Uniform4f(s.TextureShader.ColorLoc, r, g, b, a)
 
 	gl.ActiveTexture(gl.TEXTURE0)
 	if texID != 0 {

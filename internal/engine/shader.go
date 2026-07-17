@@ -1,4 +1,4 @@
-﻿// Package engine provides shared OpenGL rendering infrastructure for the MIR2 client.
+// Package engine provides shared OpenGL rendering infrastructure for the MIR2 client.
 package engine
 
 import (
@@ -28,7 +28,7 @@ uniform bool u_use_tex;
 out vec4 frag_color;
 void main() {
     if (u_use_tex) {
-        frag_color = texture(u_tex, v_uv);
+        frag_color = texture(u_tex, v_uv) * u_color;
         if (frag_color.a < 0.01) discard;
     } else {
         frag_color = u_color;

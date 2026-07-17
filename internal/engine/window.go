@@ -1,4 +1,4 @@
-﻿package engine
+package engine
 
 import (
 	"fmt"
@@ -142,6 +142,11 @@ func (w *Window) SetScrollCallback(cb func(window *glfw.Window, xoff float64, yo
 // SetFramebufferSizeCallback sets the framebuffer size callback.
 func (w *Window) SetFramebufferSizeCallback(cb func(window *glfw.Window, width int, height int)) {
 	w.window.SetFramebufferSizeCallback(cb)
+}
+
+// SetCharCallback sets the character input callback.
+func (w *Window) SetCharCallback(cb func(window *glfw.Window, char rune)) {
+	w.window.SetCharCallback(cb)
 }
 
 // GetWindow returns the underlying GLFW window (for ImGui integration).
