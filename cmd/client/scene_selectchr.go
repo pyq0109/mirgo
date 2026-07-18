@@ -217,6 +217,10 @@ func (s *SelectChrScene) OnMouse(x, y float64, button int, action int) {
 
 	for i, btn := range selButtonAreas {
 		if hitTest(fx, fy, btn) {
+			buttonNames := []string{"SelectChr1", "SelectChr2", "StartGame", "NewChr", "EraseChr", "Exit"}
+			if i < len(buttonNames) {
+				log.Logf(log.LevelInfo, "SelectChrScene", "Button clicked: %s", buttonNames[i])
+			}
 			s.handleButton(i)
 			return
 		}
@@ -252,11 +256,14 @@ func (s *SelectChrScene) handleButton(index int) {
 // startGame validates selection and triggers the start callback.
 func (s *SelectChrScene) startGame() {
 	if s.Selected < 0 || s.Selected >= 2 || !s.Characters[s.Selected].Valid {
+		log.Logf(log.LevelWarn, "SelectChrScene", "Start game failed: no character selected (selected=%d)", s.Selected)
 		s.errorMsg = "请先选择一个角色"
 		return
 	}
+	charName := s.Characters[s.Selected].Name
+	log.Logf(log.LevelInfo, "SelectChrScene", "Starting game with character: %s", charName)
 	if s.startFunc != nil {
-		s.startFunc(s.Characters[s.Selected].Name)
+		s.startFunc(charName)
 	}
 }
 
@@ -277,6 +284,7 @@ func (s *SelectChrScene) SetError(msg string) {
 
 // SetCharactersFromServer populates characters from parsed server data.
 func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx int) {
+	log.Logf(log.LevelInfo, "SelectChrScene", "SetCharactersFromServer: %d chars, selectedIdx=%d", len(chars), selectedIdx)
 	// Clear existing
 	s.Characters = [2]CharacterSlot{}
 	s.Selected = -1
@@ -293,6 +301,8 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 			Sex:   byte(c.Sex),
 			Valid: true,
 		}
+		log.Logf(log.LevelInfo, "SelectChrScene", "  Character %d: %s Lv%d Job=%d Sex=%d",
+			i, c.Name, c.Level, c.Job, c.Sex)
 	}
 
 	if selectedIdx >= 0 && selectedIdx < 2 {
@@ -300,6 +310,7 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 	} else if s.Characters[0].Valid {
 		s.Selected = 0
 	}
+	log.Logf(log.LevelInfo, "SelectChrScene", "Final selected=%d", s.Selected)
 }
 
 // OnScroll handles mouse scroll input.

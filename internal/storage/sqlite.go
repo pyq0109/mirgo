@@ -1,4 +1,4 @@
-﻿// Package storage provides SQLite database access for the MIR2 game server.
+// Package storage provides SQLite database access for the MIR2 game server.
 package storage
 
 import (
@@ -163,6 +163,19 @@ func (d *Database) GetCharacterByID(id int64) (*Character, error) {
 	err := d.db.QueryRow(
 		"SELECT id, account_id, name, job, sex, level, map, x, y, hp, mp, exp, gold FROM characters WHERE id = ?",
 		id,
+	).Scan(&c.ID, &c.AccountID, &c.Name, &c.Job, &c.Sex, &c.Level, &c.Map, &c.X, &c.Y, &c.HP, &c.MP, &c.Exp, &c.Gold)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// GetCharacterByName returns a character by name within an account.
+func (d *Database) GetCharacterByName(accountID int64, name string) (*Character, error) {
+	var c Character
+	err := d.db.QueryRow(
+		"SELECT id, account_id, name, job, sex, level, map, x, y, hp, mp, exp, gold FROM characters WHERE account_id = ? AND name = ?",
+		accountID, name,
 	).Scan(&c.ID, &c.AccountID, &c.Name, &c.Job, &c.Sex, &c.Level, &c.Map, &c.X, &c.Y, &c.HP, &c.MP, &c.Exp, &c.Gold)
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-﻿// Package netserver provides TCP server infrastructure for the MIR2 game server.
+// Package netserver provides TCP server infrastructure for the MIR2 game server.
 package netserver
 
 import (
@@ -23,16 +23,21 @@ const (
 
 // Session represents a connected client.
 type Session struct {
-	ID          int64
-	Conn        net.Conn
-	State       SessionState
-	AccountName string
-	CharacterID int64
-	SendChan    chan []byte
+	ID            int64
+	Conn          net.Conn
+	State         SessionState
+	AccountName   string
+	CharacterID   int64
+	Certification int32
+	SendChan      chan []byte
 }
 
 // MessageHandler handles incoming messages from clients.
 type MessageHandler func(session *Session, msg protocol.DefaultMessage, body string)
+
+// RawMessageHandler handles raw string messages (e.g., **login) before standard parsing.
+// Return true if the message was handled, false to fall through to standard parsing.
+type RawMessageHandler func(session *Session, raw string) bool
 
 // ConnectHandler handles new client connections.
 type ConnectHandler func(session *Session)
@@ -51,6 +56,7 @@ type TCPServer struct {
 	onConnect    ConnectHandler
 	onDisconnect DisconnectHandler
 	onMessage    MessageHandler
+	onRawMessage RawMessageHandler
 
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -78,6 +84,11 @@ func (s *TCPServer) SetDisconnectHandler(h DisconnectHandler) {
 // SetMessageHandler sets the message handler.
 func (s *TCPServer) SetMessageHandler(h MessageHandler) {
 	s.onMessage = h
+}
+
+// SetRawMessageHandler sets the raw message handler.
+func (s *TCPServer) SetRawMessageHandler(h RawMessageHandler) {
+	s.onRawMessage = h
 }
 
 // Start starts listening for connections.
@@ -169,25 +180,59 @@ func (s *TCPServer) readLoop(session *Session) {
 			}
 		}
 
-		// Parse message frame: #<code><payload>!
-		// Client sends: #<digit><payload>! (digit is 1-9)
-		// Server sends: #<payload>! (no digit)
-		if s.onMessage != nil && n > 0 {
+		// Parse message frames: #<code><payload>!
+		// Multiple frames may arrive in a single Read() call.
+		if n > 0 {
 			data := buf[:n]
-			if len(data) > 2 && data[0] == '#' && data[len(data)-1] == '!' {
-				// Skip the '#' prefix and '!' suffix
-				payloadStart := 1
-				// Check if next char is a digit (client code)
-				if len(data) > 3 && data[1] >= '1' && data[1] <= '9' {
-					payloadStart = 2 // Skip the code digit
+			// Process all frames in the buffer
+			for len(data) > 2 {
+				// Find the end of the first frame
+				if data[0] != '#' {
+					break
 				}
-				payload := string(data[payloadStart : len(data)-1])
-				if len(payload) >= protocol.DefBlockSize {
+				endIdx := -1
+				for i := 1; i < len(data); i++ {
+					if data[i] == '!' {
+						endIdx = i
+						break
+					}
+				}
+				if endIdx < 0 {
+					break // No complete frame yet
+				}
+
+				frame := data[1:endIdx] // Content between # and !
+				data = data[endIdx+1:]   // Move past the !
+
+				// Skip the code digit if present
+				payloadStart := 0
+				if len(frame) > 0 && frame[0] >= '0' && frame[0] <= '9' {
+					payloadStart = 1
+				}
+				payload := string(frame[payloadStart:])
+
+				if len(payload) == 0 {
+					continue
+				}
+
+				// Check for raw message (e.g., **login)
+				handled := false
+				if s.onRawMessage != nil {
+					decoded := protocol.DecodeString(payload)
+					if len(decoded) >= 2 && decoded[0] == '*' && decoded[1] == '*' {
+						log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] RAW %q", session.ID, decoded)
+						handled = s.onRawMessage(session, decoded)
+					}
+				}
+
+				if !handled && s.onMessage != nil && len(payload) >= protocol.DefBlockSize {
 					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
 					body := ""
 					if len(payload) > protocol.DefBlockSize {
 						body = protocol.DecodeString(payload[protocol.DefBlockSize:])
 					}
+					log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+						session.ID, protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 					s.onMessage(session, msg, body)
 				}
 			}
@@ -232,6 +277,9 @@ func (s *TCPServer) removeSession(session *Session) {
 
 // Send sends a message to a specific session.
 func (s *TCPServer) Send(sessionID int64, msg protocol.DefaultMessage, body string) error {
+	log.Logf(log.LevelInfo, "Server", ">>> SEND [%d] %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+		sessionID, protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
+
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
 	s.mu.RUnlock()

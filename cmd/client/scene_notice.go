@@ -89,6 +89,7 @@ func (s *NoticeScene) OnKey(key int, action int) {
 	}
 	switch key {
 	case keyEnter, keyKPEnter:
+		log.Logf(log.LevelInfo, "NoticeScene", "Enter pressed, confirming notice")
 		s.confirm()
 	}
 }
@@ -97,6 +98,7 @@ func (s *NoticeScene) OnKey(key int, action int) {
 func (s *NoticeScene) OnMouse(x, y float64, button int, action int) {
 	fx, fy := float32(x), float32(y)
 	if hitTest(fx, fy, noticeOKButton) {
+		log.Logf(log.LevelInfo, "NoticeScene", "OK button clicked")
 		s.confirm()
 	}
 }
@@ -119,6 +121,7 @@ func (s *NoticeScene) SetConfirmFunc(fn func()) {
 
 // SetNotice sets the notice text and splits into lines.
 func (s *NoticeScene) SetNotice(text string) {
+	log.Logf(log.LevelInfo, "NoticeScene", "SetNotice: %d chars, %d lines", len(text), len(strings.Split(text, "\n")))
 	s.NoticeText = text
 	s.Lines = strings.Split(text, "\n")
 	s.Ready = true

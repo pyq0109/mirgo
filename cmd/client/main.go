@@ -68,11 +68,13 @@ func main() {
 	sceneMgr := engine.NewSceneManager()
 	playScene := NewPlayScene(glState, resources, *mapDir)
 	loginScene := NewLoginScene(glState, resources, textRenderer)
+	selectServerScene := NewSelectServerScene(glState, resources, textRenderer)
 	selectChrScene := NewSelectChrScene(glState, resources, textRenderer)
 	noticeScene := NewNoticeScene(glState, resources, textRenderer)
 
 	sceneMgr.RegisterScene(engine.SceneIntro, &DebugScene{name: "Intro"})
 	sceneMgr.RegisterScene(engine.SceneLogin, loginScene)
+	sceneMgr.RegisterScene(engine.SceneSelectServer, selectServerScene)
 	sceneMgr.RegisterScene(engine.SceneSelectChr, selectChrScene)
 	sceneMgr.RegisterScene(engine.SceneLoginNotice, noticeScene)
 	sceneMgr.RegisterScene(engine.ScenePlayGame, playScene)
@@ -85,31 +87,63 @@ func main() {
 
 	// Wire login scene callbacks.
 	loginScene.SetLoginFunc(func(id, password string) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc called: id=%s", id)
 		if handler != nil {
+			log.Logf(log.LevelWarn, "Client", "[Callback] LoginFunc: handler already exists, skipping")
 			return
 		}
 		var err error
-		handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
+		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc: connecting to %s...", *serverAddr)
+		handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
 		if err != nil {
-			log.Logf(log.LevelError, "Client", "Failed to connect: %v", err)
+			log.Logf(log.LevelError, "Client", "[Callback] LoginFunc: connect failed: %v", err)
 			loginScene.SetError("连接服务器失败")
 			handler = nil
 			return
 		}
+		handler.onFail = func() {
+			log.Logf(log.LevelInfo, "Client", "[Callback] onFail: resetting handler")
+			handler = nil
+		}
 		handler.loginID = id
+		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc: sending login for id=%s", id)
 		handler.SendLogin(id, password)
 	})
-	loginScene.SetCloseFunc(func() { glfwWindow.SetShouldClose(true) })
+	loginScene.SetCloseFunc(func() {
+		log.Logf(log.LevelInfo, "Client", "[Callback] CloseFunc: closing window")
+		glfwWindow.SetShouldClose(true)
+	})
+
+	// Wire server selection scene callbacks.
+	selectServerScene.SetSelectFunc(func(serverName string) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ServerSelectFunc: server=%s", serverName)
+		if handler == nil {
+			log.Logf(log.LevelWarn, "Client", "[Callback] ServerSelectFunc: handler is nil")
+			return
+		}
+		handler.SendSelectServer(serverName)
+	})
+	selectServerScene.SetCloseFunc(func() {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ServerSelectClose: returning to login")
+		if handler != nil {
+			handler.Close()
+			handler = nil
+		}
+		sceneMgr.ChangeScene(engine.SceneLogin)
+	})
 
 	// Wire select character scene callbacks.
 	selectChrScene.SetStartFunc(func(charName string) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ChrStartFunc: char=%s", charName)
 		if handler == nil {
+			log.Logf(log.LevelWarn, "Client", "[Callback] ChrStartFunc: handler is nil")
 			return
 		}
 		handler.charName = charName
 		handler.SendSelChr(charName)
 	})
 	selectChrScene.SetExitFunc(func() {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ChrExitFunc: exiting")
 		if handler != nil {
 			handler.Close()
 			handler = nil
@@ -119,7 +153,9 @@ func main() {
 
 	// Wire notice scene callbacks.
 	noticeScene.SetConfirmFunc(func() {
+		log.Logf(log.LevelInfo, "Client", "[Callback] NoticeConfirmFunc")
 		if handler == nil {
+			log.Logf(log.LevelWarn, "Client", "[Callback] NoticeConfirmFunc: handler is nil")
 			return
 		}
 		okMsg := protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0)
@@ -172,37 +208,45 @@ func main() {
 
 // NetHandler handles network communication.
 type NetHandler struct {
-	conn           net.Conn
-	loginScene     *LoginScene
-	playScene      *PlayScene
-	selectChrScene *SelectChrScene
-	noticeScene    *NoticeScene
-	sceneMgr       *engine.SceneManager
-	code           byte
-	done           chan struct{}
+	conn               net.Conn
+	loginScene         *LoginScene
+	selectServerScene  *SelectServerScene
+	playScene          *PlayScene
+	selectChrScene     *SelectChrScene
+	noticeScene        *NoticeScene
+	sceneMgr           *engine.SceneManager
+	code               byte
+	done               chan struct{}
 
 	// Auth state
 	loginID       string
+	password      string // Stored for re-authentication after reconnect
 	certification int
 	charName      string
+	reconnecting  bool // True when waiting for re-auth after reconnect
 
-	// Reconnection callback (set by main)
+	// Callbacks (set by main)
 	onReconnect func(addr string, loginID string, certification int)
+	onFail      func() // Called when login fails, resets handler in main
 }
 
 // Close stops the read loop and closes the connection.
 func (h *NetHandler) Close() {
+	log.Logf(log.LevelInfo, "Client", "NetHandler.Close()")
 	select {
 	case <-h.done:
-		// Already closed
+		log.Logf(log.LevelDebug, "Client", "NetHandler.Close: already closed")
 	default:
 		close(h.done)
 	}
 	h.conn.Close()
+	log.Logf(log.LevelInfo, "Client", "NetHandler.Close: connection closed")
 }
 
 // Send encodes and sends a message to the server.
 func (h *NetHandler) Send(msg protocol.DefaultMessage, body string) error {
+	log.Logf(log.LevelInfo, "Client", ">>> SEND %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 	encoded := protocol.EncodeMessage(msg)
 	if body != "" {
 		encoded += protocol.EncodeString(body)
@@ -214,6 +258,7 @@ func (h *NetHandler) Send(msg protocol.DefaultMessage, body string) error {
 
 // SendRawString sends a raw string without TDefaultMessage header.
 func (h *NetHandler) SendRawString(s string) error {
+	log.Logf(log.LevelInfo, "Client", ">>> SEND RAW %q", s)
 	encoded := protocol.EncodeString(s)
 	frame := protocol.FormatClientFrame(encoded, &h.code)
 	_, err := h.conn.Write([]byte(frame))
@@ -222,6 +267,8 @@ func (h *NetHandler) SendRawString(s string) error {
 
 // SendLogin sends the login credentials.
 func (h *NetHandler) SendLogin(id, password string) {
+	h.loginID = id
+	h.password = password
 	loginMsg := protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0)
 	h.Send(loginMsg, id+"/"+password)
 }
@@ -252,41 +299,47 @@ func (h *NetHandler) SendRunLogin() {
 
 // Reconnect disconnects and reconnects to a new server address.
 func (h *NetHandler) Reconnect(addr string) error {
-	log.Logf(log.LevelInfo, "Client", "Reconnecting to %s...", addr)
-
+	log.Logf(log.LevelInfo, "Client", "Reconnect: disconnecting from current server")
 	// Stop old read loop
 	select {
 	case <-h.done:
+		log.Logf(log.LevelDebug, "Client", "Reconnect: done channel already closed")
 	default:
 		close(h.done)
 	}
 	h.conn.Close()
+	log.Logf(log.LevelInfo, "Client", "Reconnect: old connection closed, waiting 100ms...")
 
 	// Wait briefly for read loop to exit
 	time.Sleep(100 * time.Millisecond)
 
 	// Connect to new server
+	log.Logf(log.LevelInfo, "Client", "Reconnect: connecting to %s...", addr)
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
+		log.Logf(log.LevelError, "Client", "Reconnect: failed to connect to %s: %v", addr, err)
 		return fmt.Errorf("reconnect to %s: %w", addr, err)
 	}
-	log.Logf(log.LevelInfo, "Client", "Reconnected to %s", addr)
+	log.Logf(log.LevelInfo, "Client", "Reconnect: connected to %s", addr)
 
 	h.conn = conn
 	h.done = make(chan struct{})
 	h.code = 0
 
 	// Start new read loop
+	log.Logf(log.LevelInfo, "Client", "Reconnect: starting new ReadLoop")
 	go h.ReadLoop()
 	return nil
 }
 
 // ReadLoop reads messages from the server.
 func (h *NetHandler) ReadLoop() {
+	log.Logf(log.LevelInfo, "Client", "ReadLoop started")
 	buf := make([]byte, 4096)
 	for {
 		select {
 		case <-h.done:
+			log.Logf(log.LevelInfo, "Client", "ReadLoop stopped (done)")
 			return
 		default:
 		}
@@ -300,16 +353,34 @@ func (h *NetHandler) ReadLoop() {
 			// Check if we were intentionally closed
 			select {
 			case <-h.done:
+				log.Logf(log.LevelInfo, "Client", "ReadLoop stopped (closed)")
 				return
 			default:
 			}
-			log.Logf(log.LevelError, "Client", "Read error: %v", err)
+			log.Logf(log.LevelError, "Client", "ReadLoop error: %v", err)
 			return
 		}
 
+		// Parse all frames in the buffer (server may send multiple frames in one TCP write)
 		data := buf[:n]
-		if len(data) > 2 && data[0] == '#' && data[len(data)-1] == '!' {
-			payload := string(data[1 : len(data)-1])
+		for len(data) > 2 {
+			if data[0] != '#' {
+				break
+			}
+			endIdx := -1
+			for i := 1; i < len(data); i++ {
+				if data[i] == '!' {
+					endIdx = i
+					break
+				}
+			}
+			if endIdx < 0 {
+				break // No complete frame
+			}
+
+			payload := string(data[1:endIdx])
+			data = data[endIdx+1:]
+
 			if len(payload) >= protocol.DefBlockSize {
 				msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
 				body := ""
@@ -324,7 +395,8 @@ func (h *NetHandler) ReadLoop() {
 
 // HandleMessage processes a server message.
 func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
-	log.Logf(log.LevelDebug, "Client", "Received: msg=%d body=%q", msg.Ident, body)
+	log.Logf(log.LevelInfo, "Client", "<<< RECV %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 
 	switch msg.Ident {
 
@@ -350,40 +422,63 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				h.loginScene.SetError("登录失败")
 			}
 		}
+		// Close connection and reset handler so user can retry
+		h.Close()
+		if h.onFail != nil {
+			h.onFail()
+		}
 
 	case protocol.SMPassOKSelectServer:
-		log.Logf(log.LevelInfo, "Client", "Login successful")
-		if h.loginScene != nil {
-			h.loginScene.OpenLoginDoor()
+		if h.reconnecting {
+			// Re-authenticated after reconnect — switch to LoginScene for door animation
+			h.reconnecting = false
+			log.Logf(log.LevelInfo, "Client", "Re-authenticated, switching to LoginScene for door animation")
+			h.sceneMgr.ChangeScene(engine.SceneLogin)
+			if h.loginScene != nil {
+				h.loginScene.OpenLoginDoor()
+				h.loginScene.SetDoorCompleteFunc(func() {
+					log.Logf(log.LevelInfo, "Client", "Door animation complete, switching to SelectChr")
+					h.sceneMgr.ChangeScene(engine.SceneSelectChr)
+					time.Sleep(100 * time.Millisecond)
+					h.SendQueryChr()
+				})
+			}
+		} else {
+			// First login — show server selection dialog
+			log.Logf(log.LevelInfo, "Client", "Login successful, showing server selection")
+			servers := parseServerList(body)
+			if h.selectServerScene != nil {
+				h.selectServerScene.SetServers(servers)
+			}
+			h.sceneMgr.ChangeScene(engine.SceneSelectServer)
 		}
-		// Parse server list from body: "name1/status1/name2/status2/..."
-		serverName := parseFirstServer(body)
-		log.Logf(log.LevelInfo, "Client", "Selecting server: %s", serverName)
-		h.SendSelectServer(serverName)
 
 	case protocol.SMSelectServerOK:
 		// Body: "selChrAddr/selChrPort/certification"
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Parsing body=%q", body)
 		addr, cert, err := parseAddrPortCert(body)
 		if err != nil {
-			log.Logf(log.LevelError, "Client", "Parse SM_SELECTSERVER_OK: %v", err)
+			log.Logf(log.LevelError, "Client", "[SMSelectServerOK] Parse error: %v", err)
 			return
 		}
 		h.certification = cert
-		log.Logf(log.LevelInfo, "Client", "SelChr server: %s (cert=%d)", addr, cert)
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] addr=%s cert=%d", addr, cert)
 
 		// Reconnect to selection server
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Reconnecting to %s...", addr)
 		if err := h.Reconnect(addr); err != nil {
-			log.Logf(log.LevelError, "Client", "Reconnect to selchr: %v", err)
+			log.Logf(log.LevelError, "Client", "[SMSelectServerOK] Reconnect failed: %v", err)
 			return
 		}
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Reconnected, re-authenticating...")
 
-		// Send protocol version + query characters
+		// Re-authenticate on the new connection
+		h.reconnecting = true
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Setting reconnecting=true")
 		protoMsg := protocol.MakeDefaultMsg(protocol.CMProtocol, clientVersion, 0, 0, 0)
 		h.Send(protoMsg, "")
-
-		// Wait briefly before querying characters
-		time.Sleep(200 * time.Millisecond)
-		h.SendQueryChr()
+		h.SendLogin(h.loginID, h.password)
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Re-auth sent, waiting for SM_PASSOKSELECTSERVER")
 
 	case protocol.SMQueryChr:
 		// Body: "*name1/job1/hair1/level1/sex1/name2/job2/hair2/level2/sex2"
@@ -432,21 +527,17 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMStartPlay:
 		// Body: "runAddr/runPort"
-		addr, err := parseAddrPort(body)
+		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] body=%q", body)
+		_, err := parseAddrPort(body)
 		if err != nil {
-			log.Logf(log.LevelError, "Client", "Parse SM_STARTPLAY: %v", err)
+			log.Logf(log.LevelError, "Client", "[SMStartPlay] Parse error: %v", err)
 			return
 		}
-		log.Logf(log.LevelInfo, "Client", "Game server: %s", addr)
+		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] Single-server mode, sending run login")
 
-		// Reconnect to game server
-		if err := h.Reconnect(addr); err != nil {
-			log.Logf(log.LevelError, "Client", "Reconnect to game: %v", err)
-			return
-		}
-
-		// Send run login (no TDefaultMessage header)
+		// Single-server mode: send run login on existing connection
 		h.SendRunLogin()
+		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] Run login sent, switching to LoginNotice scene")
 
 		// Switch to notice scene
 		h.sceneMgr.ChangeScene(engine.SceneLoginNotice)
@@ -496,6 +587,26 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMBagItems:
 		log.Logf(log.LevelInfo, "Client", "Received bag items")
+
+	case protocol.SMVersionFail:
+		log.Logf(log.LevelWarn, "Client", "Version mismatch")
+		if h.loginScene != nil {
+			h.loginScene.SetError("客户端版本不匹配")
+		}
+		h.Close()
+		if h.onFail != nil {
+			h.onFail()
+		}
+
+	case protocol.SMCertificationFail:
+		log.Logf(log.LevelWarn, "Client", "Certification failed")
+		if h.loginScene != nil {
+			h.loginScene.SetError("认证失败")
+		}
+		h.Close()
+		if h.onFail != nil {
+			h.onFail()
+		}
 
 	default:
 		log.Logf(log.LevelDebug, "Client", "Unhandled: %d", msg.Ident)
@@ -593,7 +704,7 @@ func parseQueryChrBody(body string) (chars []parsedChar, selectedIdx int) {
 }
 
 // connectToServer creates a new NetHandler and connects to the login server.
-func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, selectChrScene *SelectChrScene, noticeScene *NoticeScene, sceneMgr *engine.SceneManager) (*NetHandler, error) {
+func connectToServer(addr string, loginScene *LoginScene, selectServerScene *SelectServerScene, playScene *PlayScene, selectChrScene *SelectChrScene, noticeScene *NoticeScene, sceneMgr *engine.SceneManager) (*NetHandler, error) {
 	log.Logf(log.LevelInfo, "Client", "Connecting to %s...", addr)
 
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
@@ -603,13 +714,14 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 	log.Logf(log.LevelInfo, "Client", "Connected to server")
 
 	handler := &NetHandler{
-		conn:           conn,
-		loginScene:     loginScene,
-		playScene:      playScene,
-		selectChrScene: selectChrScene,
-		noticeScene:    noticeScene,
-		sceneMgr:       sceneMgr,
-		done:           make(chan struct{}),
+		conn:              conn,
+		loginScene:        loginScene,
+		selectServerScene: selectServerScene,
+		playScene:         playScene,
+		selectChrScene:    selectChrScene,
+		noticeScene:       noticeScene,
+		sceneMgr:          sceneMgr,
+		done:              make(chan struct{}),
 	}
 
 	// Send protocol version

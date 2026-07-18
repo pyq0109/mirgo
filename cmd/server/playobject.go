@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -120,7 +120,7 @@ func (p *PlayObject) SendMapInfo(server *netserver.TCPServer) {
 
 // SendLogon sends the logon message to the client.
 func (p *PlayObject) SendLogon(server *netserver.TCPServer) {
-	logonResp := protocol.MakeDefaultMsg(protocol.SMLogon, 0, 0, 0, 0)
+	logonResp := protocol.MakeDefaultMsg(protocol.SMLogon, p.ID, uint16(p.CurrX), uint16(p.CurrY), uint16(p.Dir))
 	server.Send(p.Session.ID, logonResp, "")
 }
 

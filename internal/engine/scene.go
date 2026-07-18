@@ -1,5 +1,7 @@
 package engine
 
+import "github.com/pyq0109/mirgo/internal/log"
+
 // SceneType represents the type of game scene.
 // Matches Delphi TSceneType enum from IntroScn.pas
 type SceneType int
@@ -7,11 +9,11 @@ type SceneType int
 const (
 	SceneIntro         SceneType = iota // 0: Startup screen (empty)
 	SceneLogin                          // 1: Login screen with ID/Password
-	SceneSelectCountry                  // 2: Country/server selection unused
+	SceneSelectServer                   // 2: Server selection dialog
 	SceneSelectChr                      // 3: Character selection
 	SceneNewChr                         // 4: Character creation (unused)
 	SceneLoading                        // 5: Loading screen (unused)
-	SceneLoginNotice                    // :: Login notice/announcement
+	SceneLoginNotice                    // 6: Login notice/announcement
 	ScenePlayGame                       // 7: Main game play
 )
 
@@ -22,8 +24,8 @@ func (t SceneType) String() string {
 		return "Intro"
 	case SceneLogin:
 		return "Login"
-	case SceneSelectCountry:
-		return "SelectCountry"
+	case SceneSelectServer:
+		return "SelectServer"
 	case SceneSelectChr:
 		return "SelectChr"
 	case SceneNewChr:
@@ -78,6 +80,7 @@ func (m *SceneManager) RegisterScene(t SceneType, scene Scene) {
 
 // ChangeScene transitions to a new scene.
 func (m *SceneManager) ChangeScene(t SceneType) {
+	log.Logf(log.LevelInfo, "Scene", "ChangeScene: %s → %s", m.currentType, t)
 	if m.current != nil {
 		m.current.Close()
 	}

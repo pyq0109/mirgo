@@ -1,17 +1,18 @@
-﻿package main
+package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ServerConfig holds server configuration (matches serverconfig/server.jsonc format).
 type ServerConfig struct {
 	Server struct {
-		Name  string `json:"name"`
-		Index int    `json:"index"`
+		Name   string `json:"name"`
+		Index  int    `json:"index"`
 		Listen struct {
 			Addr string `json:"addr"`
 		} `json:"listen"`
@@ -157,4 +158,22 @@ func (c *ServerConfig) GetHomeY() int {
 		return c.Game.HomeY
 	}
 	return 618
+}
+
+// GetServerHostPort returns the server address as host/port pair.
+// For listen address ":7000", returns ("localhost", 7000).
+func (c *ServerConfig) GetServerHostPort() (string, int) {
+	addr := c.GetListenAddr()
+	host := "localhost"
+	port := 7000
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		if idx > 0 {
+			host = addr[:idx]
+		}
+		fmt.Sscanf(addr[idx+1:], "%d", &port)
+	}
+	if host == "" || host == "0.0.0.0" {
+		host = "localhost"
+	}
+	return host, port
 }

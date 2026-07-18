@@ -14,6 +14,7 @@ const (
 	keyEnter     = 257
 	keyTab       = 258
 	keyKPEnter   = 335
+	keyEscape    = 256
 )
 
 // loginArea defines a clickable region.
@@ -45,8 +46,9 @@ type LoginScene struct {
 	connecting bool
 
 	// Callbacks
-	loginFunc func(id, password string)
-	closeFunc func()
+	loginFunc        func(id, password string)
+	closeFunc        func()
+	doorCompleteFunc func() // Called when door animation finishes
 }
 
 // Screen offset: 800x600 game area centered in 1024x768 window.
@@ -109,8 +111,14 @@ func (s *LoginScene) Update(dt float64) {
 	if time.Since(s.doorStartTime) > 300*time.Millisecond {
 		s.doorStartTime = time.Now()
 		s.doorFrame++
+		log.Logf(log.LevelDebug, "LoginScene", "Door animation frame %d/%d", s.doorFrame, s.doorMaxFrame)
 		if s.doorFrame >= s.doorMaxFrame {
 			s.doorFrame = s.doorMaxFrame - 1
+			log.Logf(log.LevelInfo, "LoginScene", "Door animation complete")
+			if s.doorCompleteFunc != nil {
+				s.doorCompleteFunc()
+				s.doorCompleteFunc = nil // Only call once
+			}
 		}
 	}
 }
@@ -282,6 +290,7 @@ func (s *LoginScene) OnKey(key int, action int) {
 		s.cursorBlink = time.Now()
 
 	case keyEnter, keyKPEnter:
+		log.Logf(log.LevelInfo, "LoginScene", "Enter pressed, submitting login")
 		s.submitLogin()
 	}
 }
@@ -316,6 +325,10 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
 
 // handleButton handles button click actions.
 func (s *LoginScene) handleButton(index int) {
+	buttonNames := []string{"OK", "ChangePW", "NewAccount", "Close"}
+	if index < len(buttonNames) {
+		log.Logf(log.LevelInfo, "LoginScene", "Button clicked: %s", buttonNames[index])
+	}
 	switch index {
 	case 0: // OK
 		s.submitLogin()
@@ -359,8 +372,14 @@ func (s *LoginScene) SetCloseFunc(fn func()) {
 	s.closeFunc = fn
 }
 
+// SetDoorCompleteFunc sets the callback for when the door animation finishes.
+func (s *LoginScene) SetDoorCompleteFunc(fn func()) {
+	s.doorCompleteFunc = fn
+}
+
 // SetError displays an error message and resets connecting state.
 func (s *LoginScene) SetError(msg string) {
+	log.Logf(log.LevelWarn, "LoginScene", "Error: %s", msg)
 	s.errorMsg = msg
 	s.connecting = false
 }

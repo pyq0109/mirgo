@@ -47,15 +47,16 @@ serverconfig/        # 已 gitignore — 转换后的配置文件（由工具生
 
 | 阶段 | 状态 | 内容 |
 |------|------|------|
-| Phase 1 | ✅ 完成 | `internal/protocol/` — 共享数据 & 协议 |
+| Phase 1 | ✅ 完成 | `internal/protocol/` — 共享数据 & 协议，MsgName() 消息名称映射 |
 | Phase 2A | ✅ 完成 | `internal/engine/` + `cmd/client/` — 客户端窗口 & 场景框架 |
 | Phase 2B | ✅ 完成 | `internal/netserver/` + `internal/storage/` + `cmd/server/` — 服务端核心基础设施 |
-| Phase 3A | 待开始 | 客户端游戏场景 & 地图渲染 |
-| Phase 3B | 待开始 | 服务端地图 & 世界管理 |
-| Phase 4A | 待开始 | 客户端角色系统 |
-| Phase 4B | 待开始 | 服务端游戏对象 & 玩家逻辑 |
-| Phase 5A | ✅ 部分完成 | `internal/engine/text.go` + `cmd/client/` — 文字渲染、登录/选角/公告场景交互、三阶段断开重连登录流程 |
-| Phase 5B | 待开始 | 服务端消息处理 & 游戏循环 |
+| Phase 3A | ✅ 完成 | `cmd/client/scene_play.go` — 三层地图渲染、相机控制 |
+| Phase 3B | ✅ 完成 | `cmd/server/envir.go` + `mapmanager.go` — 地图加载、碰撞检测 |
+| Phase 4A | ✅ 完成 | `cmd/client/actor*.go` — 角色动画系统 (HA + MA9-MA47 模板) |
+| Phase 4B | ✅ 完成 | `cmd/server/playobject.go` + `baseobject.go` — 游戏对象、玩家逻辑 |
+| Phase 5A | ✅ 完成 | `cmd/client/` — 登录/服务器选择/选角/公告场景、门动画、三阶段重连重认证、完整消息日志 |
+| Phase 5B | ✅ 完成 | `cmd/server/` — 登录认证、服务器选择、角色查询、** 运行登录、消息日志 |
+| Phase 5 集成 | ✅ 完成 | 端到端登录流程可跑通：登录→选服务器→门动画→选角→进游戏 |
 | Phase 6A | 待开始 | 客户端战斗 & 魔法视觉 |
 | Phase 6B | 待开始 | 服务端怪物AI & 战斗系统 |
 | Phase 7A | 待开始 | 客户端UI系统 |
@@ -614,7 +615,7 @@ SQLite 数据存储层：
 - 基于 Tag 的日志记录
 - 时间戳输出到 stderr
 
-### cmd/client（✅ Phase 5A 部分完成）
+### cmd/client（✅ Phase 5A 完成）
 
 游戏客户端，场景状态机 + 网络层 + 场景交互：
 
@@ -644,6 +645,30 @@ SQLite 数据存储层：
 
 - **scene_play.go**：游戏场景 — 三层地图渲染、相机控制
 - **actor.go / actor_base.go / actor_manager.go** — 角色动画系统（HA + MA9-MA47 模板）
+
+### cmd/server（✅ Phase 5B 完成）
+
+游戏服务端，TCP 服务器 + 会话管理 + 消息处理：
+
+- **main.go**：服务端入口 + 消息路由
+  - 三阶段会话状态机：StateConnected → StateAuthenticated → StateInGame
+  - 登录认证：CM_IDPASSWORD → SQLite 密码验证 → SM_PASSOKSELECTSERVER
+  - 服务器选择：CM_SELECTSERVER → 生成 cert → SM_SELECTSERVEROK
+  - 角色查询：CM_QUERYCHR → 文本格式角色列表 → SM_QUERYCHR
+  - 角色选择：CMSelChr → 验证角色存在 → SM_STARTPLAY
+  - 运行登录：RawMessageHandler 解析 ** 前缀原始消息 → 创建 PlayObject → 进入游戏
+  - 公告确认：CM_LOGINNOTICEOK → SM_LOGON
+  - 完整消息日志：所有接收/发送消息均以 INFO 级别记录
+  - 状态转换日志：Connected → Authenticated → InGame 均有记录
+  - 自动创建账号（开发模式）
+- **config.go**：服务器配置加载（JSONC 格式）+ GetServerHostPort()
+- **session.go**：会话管理器（Add/Remove/Get/GetByAccount/Count）
+- **playobject.go**：玩家对象（SendMapInfo/SendLogon/SendAbility/SendMsg）
+- **baseobject.go**：基础游戏对象（移动、碰撞、消息队列）
+- **envir.go**：地图环境（CanWalk、对象管理）
+- **mapmanager.go**：地图加载和查找
+- **doors.go**：门状态处理
+- **usrengine.go**：用户引擎（玩家列表、ProcessHumans 游戏循环）
 
 ### cmd/serverconfig（✅ 完成）
 
