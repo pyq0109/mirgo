@@ -44,7 +44,8 @@ type PlayScene struct {
 	mapDir    string
 	cam       *engine.Camera2D
 	mapData   *mapformat.MapData
-	minimap   *Minimap
+	minimap      *Minimap
+	minimapDirty bool
 
 	texCache       map[int]uint32
 	smTexCache     map[int]uint32
@@ -150,8 +151,9 @@ func (s *PlayScene) LoadMap(mapName string) error {
 
 	if s.minimap != nil {
 		s.minimap.Destroy()
+		s.minimap = nil
 	}
-	s.minimap = NewMinimap(s.gl, m)
+	s.minimapDirty = true
 
 	if s.resources.Objects[0] != nil {
 		s.objectsLoaders[0] = s.resources.Objects[0]
@@ -172,6 +174,11 @@ func (s *PlayScene) Close() {
 }
 
 func (s *PlayScene) Update(dt float64) {
+	if s.minimapDirty && s.mapData != nil {
+		s.minimap = NewMinimap(s.gl, s.mapData)
+		s.minimapDirty = false
+	}
+
 	now := time.Now().UnixMilli()
 
 	if len(s.floatingTexts) > 0 {
