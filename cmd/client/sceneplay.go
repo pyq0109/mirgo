@@ -928,29 +928,88 @@ func (s *PlayScene) OnScroll(x, y float64) {
 	}
 }
 
+func (s *PlayScene) drawWilImage(f *wil.File, idx int, x, y float32, proj [16]float32) bool {
+	if f == nil || idx < 0 || idx >= f.Count {
+		return false
+	}
+	img := f.GetImage(idx)
+	if img == nil || img.RGBA == nil {
+		return false
+	}
+	tex := s.resources.GetTexture(f, idx)
+	if tex == 0 {
+		return false
+	}
+	s.gl.DrawQuad(tex, x, y, float32(img.Width), float32(img.Height), proj)
+	return true
+}
+
 func (s *PlayScene) RenderUI(proj [16]float32) {
 	if s.text == nil {
 		return
 	}
 	st := s.State
 
-	s.gl.DrawQuadColor(10, 730, 200, 12, 0.1, 0.1, 0.1, 0.8, proj)
-	if st.MaxHP > 0 {
-		hpRatio := float32(st.HP) / float32(st.MaxHP)
-		s.gl.DrawQuadColor(10, 730, 200*hpRatio, 12, 0.8, 0.1, 0.1, 0.9, proj)
+	if s.resources.Prguse != nil {
+		barImg := s.resources.Prguse.GetImage(1)
+		if barImg != nil && barImg.RGBA != nil {
+			barTex := s.resources.GetTexture(s.resources.Prguse, 1)
+			if barTex != 0 {
+				barW := float32(barImg.Width)
+				barH := float32(barImg.Height)
+				barX := (1024 - barW) / 2
+				barY := 768 - barH
+				s.gl.DrawQuad(barTex, barX, barY, barW, barH, proj)
+			}
+		}
+	} else {
+		s.gl.DrawQuadColor(0, 628, 1024, 140, 0.08, 0.08, 0.12, 0.95, proj)
 	}
-	s.text.DrawText(fmt.Sprintf("HP %d/%d", st.HP, st.MaxHP), 14, 731, 1.0, 1.0, 1.0, 1.0, proj)
 
-	s.gl.DrawQuadColor(10, 746, 200, 12, 0.1, 0.1, 0.1, 0.8, proj)
-	if st.MaxMP > 0 {
-		mpRatio := float32(st.MP) / float32(st.MaxMP)
-		s.gl.DrawQuadColor(10, 746, 200*mpRatio, 12, 0.1, 0.1, 0.8, 0.9, proj)
+	s.text.DrawText(fmt.Sprintf("HP %d/%d", st.HP, st.MaxHP), 50, 700, 1.0, 0.3, 0.3, 1.0, proj)
+	s.text.DrawText(fmt.Sprintf("MP %d/%d", st.MP, st.MaxMP), 50, 716, 0.3, 0.3, 1.0, 1.0, proj)
+	s.text.DrawText(fmt.Sprintf("Lv.%d", st.Level), 50, 684, 1.0, 1.0, 0.5, 1.0, proj)
+
+	if s.resources.Prguse != nil {
+		buttons := []struct {
+			idx   int
+			x, y  float32
+			label string
+		}{
+			{8, 880, 680, "状态"},
+			{9, 910, 680, "背包"},
+			{10, 940, 680, "魔法"},
+			{11, 970, 680, "设置"},
+		}
+		for _, btn := range buttons {
+			if !s.drawWilImage(s.resources.Prguse, btn.idx, btn.x, btn.y, proj) {
+				s.gl.DrawQuadColor(btn.x, btn.y, 28, 28, 0.15, 0.15, 0.2, 0.9, proj)
+				s.text.DrawText(btn.label, btn.x+2, btn.y+8, 0.7, 0.7, 0.7, 1.0, proj)
+			}
+		}
 	}
-	s.text.DrawText(fmt.Sprintf("MP %d/%d", st.MP, st.MaxMP), 14, 747, 1.0, 1.0, 1.0, 1.0, proj)
 
-	s.text.DrawText(fmt.Sprintf("Lv.%d", st.Level), 10, 714, 1.0, 1.0, 0.5, 1.0, proj)
+	skillX := float32(380)
+	skillY := float32(720)
+	for i := 0; i < 8; i++ {
+		sx := skillX + float32(i)*38
+		s.gl.DrawQuadColor(sx, skillY, 34, 34, 0.1, 0.1, 0.15, 0.7, proj)
+		if i < len(st.Magics) && s.resources.MagIcon != nil {
+			magIdx := int(st.Magics[i].MagID)
+			if magIdx >= 0 && magIdx < s.resources.MagIcon.Count {
+				iconImg := s.resources.MagIcon.GetImage(magIdx)
+				if iconImg != nil && iconImg.RGBA != nil {
+					iconTex := s.resources.GetTexture(s.resources.MagIcon, magIdx)
+					if iconTex != 0 {
+						s.gl.DrawQuad(iconTex, sx+1, skillY+1, 32, 32, proj)
+					}
+				}
+			}
+		}
+		s.text.DrawText(fmt.Sprintf("F%d", i+1), sx+2, skillY+24, 0.7, 0.7, 0.7, 1.0, proj)
+	}
 
-	chatY := float32(680)
+	chatY := float32(650)
 	for i := len(s.chatMessages) - 1; i >= 0; i-- {
 		msg := s.chatMessages[i]
 		alpha := float32(1.0)
@@ -970,32 +1029,9 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 		s.text.DrawText("> "+s.chatInput+"|", 14, 752, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 
-	skillX := float32(350)
-	skillY := float32(740)
-	for i := 0; i < 8; i++ {
-		sx := skillX + float32(i)*40
-		s.gl.DrawQuadColor(sx, skillY, 36, 24, 0.1, 0.1, 0.15, 0.9, proj)
-		s.text.DrawText(fmt.Sprintf("F%d", i+1), sx+2, skillY+2, 0.6, 0.6, 0.6, 1.0, proj)
-		if i < len(st.Magics) {
-			s.text.DrawText(fmt.Sprintf("%d", st.Magics[i].MagID), sx+4, skillY+10, 1.0, 1.0, 0.5, 1.0, proj)
-		}
-	}
-
 	if st.ShowNpcDialog {
-		px, py := float32(250), float32(150)
-		s.gl.DrawQuadColor(px, py, 400, 200, 0.05, 0.05, 0.1, 0.95, proj)
-		s.gl.DrawQuadColor(px+2, py+2, 396, 24, 0.15, 0.15, 0.25, 1.0, proj)
-		s.text.DrawText("NPC对话", px+170, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-		lines := strings.Split(st.NpcDialog, "\n")
-		for i, line := range lines {
-			if i > 8 {
-				break
-			}
-			s.text.DrawText(line, px+10, py+32+float32(i)*18, 0.9, 0.9, 0.9, 1.0, proj)
-		}
-		s.text.DrawText("[任意键关闭]", px+160, py+180, 0.6, 0.6, 0.6, 1.0, proj)
+		s.renderNpcDialog(proj)
 	}
-
 	if st.ShowBag {
 		s.renderBagPanel(proj)
 	}
@@ -1011,70 +1047,88 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 	if st.ShowGuild {
 		s.renderGuildPanel(proj)
 	}
-
-	s.text.DrawText(fmt.Sprintf("金币: %d", st.Gold), 10, 700, 1.0, 0.9, 0.3, 1.0, proj)
 }
 
 func (s *PlayScene) renderBagPanel(proj [16]float32) {
 	st := s.State
-	px, py := float32(600), float32(200)
-	s.gl.DrawQuadColor(px, py, 360, 380, 0.08, 0.08, 0.12, 0.92, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 356, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("背包", px+155, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-	s.text.DrawText(fmt.Sprintf("%d/46", len(st.BagItems)), px+310, py+5, 0.7, 0.7, 0.7, 1.0, proj)
+	px, py := float32(620), float32(200)
 
-	cellSize := float32(40)
-	startX := px + 10
-	startY := py + 32
+	if !s.drawWilImage(s.resources.Prguse, 3, px, py, proj) {
+		s.gl.DrawQuadColor(px, py, 320, 380, 0.08, 0.08, 0.12, 0.92, proj)
+	}
+
+	s.text.DrawText("背包", px+140, py+8, 1.0, 1.0, 0.8, 1.0, proj)
+
+	cellSize := float32(36)
+	startX := px + 16
+	startY := py + 36
 	for i := 0; i < 46; i++ {
 		col := i % 8
 		row := i / 8
-		cx := startX + float32(col)*(cellSize+3)
-		cy := startY + float32(row)*(cellSize+3)
-
-		s.gl.DrawQuadColor(cx, cy, cellSize, cellSize, 0.12, 0.12, 0.18, 1.0, proj)
-
-		if i < len(st.BagItems) {
+		cx := startX + float32(col)*(cellSize+2)
+		cy := startY + float32(row)*(cellSize+2)
+		s.gl.DrawQuadColor(cx, cy, cellSize, cellSize, 0.15, 0.15, 0.2, 0.8, proj)
+		if i < len(st.BagItems) && s.resources.Items != nil {
 			item := st.BagItems[i]
-			s.gl.DrawQuadColor(cx+2, cy+2, cellSize-4, cellSize-4, 0.3, 0.25, 0.15, 1.0, proj)
-			if s.resources.Items != nil && int(item.Idx) < s.resources.Items.Count {
-				tex := s.resources.GetTexture(s.resources.Items, int(item.Idx))
-				if tex != 0 {
-					img := s.resources.Items.GetImage(int(item.Idx))
-					if img != nil {
-						s.gl.DrawQuad(tex, cx+4, cy+4, float32(img.Width), float32(img.Height), proj)
+			looks := int(item.Idx)
+			if looks >= 0 && looks < s.resources.Items.Count {
+				itemImg := s.resources.Items.GetImage(looks)
+				if itemImg != nil && itemImg.RGBA != nil {
+					itemTex := s.resources.GetTexture(s.resources.Items, looks)
+					if itemTex != 0 {
+						iw := float32(itemImg.Width)
+						ih := float32(itemImg.Height)
+						if iw > cellSize {
+							iw = cellSize
+						}
+						if ih > cellSize {
+							ih = cellSize
+						}
+						s.gl.DrawQuad(itemTex, cx+(cellSize-iw)/2, cy+(cellSize-ih)/2, iw, ih, proj)
 					}
 				}
-			} else {
-				s.text.DrawText(fmt.Sprintf("%d", item.Idx), cx+8, cy+12, 0.8, 0.8, 0.6, 1.0, proj)
 			}
 		}
 	}
+
+	s.text.DrawText(fmt.Sprintf("金币: %d", st.Gold), px+16, py+360, 1.0, 0.9, 0.3, 1.0, proj)
 }
 
 func (s *PlayScene) renderEquipPanel(proj [16]float32) {
 	st := s.State
-	px, py := float32(100), float32(200)
-	s.gl.DrawQuadColor(px, py, 200, 350, 0.08, 0.08, 0.12, 0.92, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 196, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("装备", px+80, py+5, 1.0, 1.0, 0.8, 1.0, proj)
+	px, py := float32(100), float32(150)
+
+	if !s.drawWilImage(s.resources.Prguse, 370, px, py, proj) {
+		s.gl.DrawQuadColor(px, py, 240, 350, 0.08, 0.08, 0.12, 0.92, proj)
+	}
+
+	s.text.DrawText("装备", px+100, py+8, 1.0, 1.0, 0.8, 1.0, proj)
 
 	slotNames := []string{"衣服", "武器", "右手", "项链", "头盔", "左手镯", "右手镯", "左戒指", "右戒指", "护身符", "腰带", "鞋子", "宝石"}
-	slotColors := [][3]float32{
-		{0.15, 0.12, 0.20}, {0.20, 0.12, 0.12}, {0.12, 0.15, 0.20},
-		{0.12, 0.18, 0.15}, {0.18, 0.15, 0.12}, {0.12, 0.12, 0.18},
-		{0.12, 0.12, 0.18}, {0.18, 0.12, 0.15}, {0.18, 0.12, 0.15},
-		{0.15, 0.18, 0.12}, {0.14, 0.14, 0.14}, {0.14, 0.14, 0.14},
-		{0.18, 0.16, 0.10},
-	}
 	for i := 0; i < 13; i++ {
-		sy := py + 32 + float32(i)*24
-		sc := slotColors[i]
-		s.gl.DrawQuadColor(px+10, sy, 180, 20, sc[0], sc[1], sc[2], 1.0, proj)
+		sy := py + 35 + float32(i)*24
+		s.gl.DrawQuadColor(px+10, sy, 220, 20, 0.12, 0.12, 0.18, 0.7, proj)
 		s.text.DrawText(slotNames[i], px+14, sy+3, 0.7, 0.7, 0.7, 1.0, proj)
 		if st.UseItems[i] != nil {
-			s.text.DrawText(fmt.Sprintf("#%d", st.UseItems[i].WIndex), px+100, sy+3, 1.0, 1.0, 0.5, 1.0, proj)
+			s.text.DrawText(fmt.Sprintf("#%d", st.UseItems[i].WIndex), px+120, sy+3, 1.0, 1.0, 0.5, 1.0, proj)
 		}
+	}
+}
+
+func (s *PlayScene) renderNpcDialog(proj [16]float32) {
+	st := s.State
+	px, py := float32(250), float32(150)
+
+	if !s.drawWilImage(s.resources.Prguse, 384, px, py, proj) {
+		s.gl.DrawQuadColor(px, py, 400, 250, 0.05, 0.05, 0.1, 0.95, proj)
+	}
+
+	lines := strings.Split(st.NpcDialog, "\n")
+	for i, line := range lines {
+		if i > 10 {
+			break
+		}
+		s.text.DrawText(line, px+15, py+15+float32(i)*18, 0.9, 0.9, 0.9, 1.0, proj)
 	}
 }
 

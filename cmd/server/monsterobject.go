@@ -30,6 +30,17 @@ type MonsterObject struct {
 	LootDropped    bool
 	lastSummonTick int64
 	minionCount    int
+
+	LastHiterID   int32
+	LastHiterTick int64
+	FocusTick     int64
+
+	walkCount    int
+	walkWaitTick int64
+	WalkStep     int
+	WalkWait     int64
+
+	lastRegenTick int64
 }
 
 func getAIBehavior(race byte) int {
@@ -59,6 +70,8 @@ func NewMonsterObject(name string, id int32, race, raceImg byte, appr uint16, hp
 		AttackSpeed: attackSpeed,
 		Exp:         exp,
 		AIBehavior:  getAIBehavior(race),
+		WalkStep:    3,
+		WalkWait:    1000,
 	}
 }
 
@@ -66,13 +79,34 @@ func (o *MonsterObject) Feature() int32 {
 	return protocol.MakeMonsterFeature(o.RaceImg, 0, o.Appr)
 }
 
+func (o *MonsterObject) OnStruck(attackerID int32, now int64) {
+	o.LastHiterID = attackerID
+	o.LastHiterTick = now
+	if o.TargetID == 0 || rand.Intn(6) == 0 {
+		o.TargetID = attackerID
+		o.FocusTick = now
+	}
+}
+
 func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *UserEngine) {
 	if o.Ghost || o.Death {
 		return
 	}
 
+	if int(o.WAbil.HP) < o.MaxHP {
+		if now-o.lastRegenTick >= 6000 {
+			o.lastRegenTick = now
+			regen := o.MaxHP/75 + 1
+			hp := int(o.WAbil.HP) + regen
+			if hp > o.MaxHP {
+				hp = o.MaxHP
+			}
+			o.WAbil.HP = uint16(hp)
+		}
+	}
+
 	o.searchTarget(now, userEngine)
-	o.validateTarget(userEngine)
+	o.validateTarget(now, userEngine)
 
 	if o.TargetID != 0 {
 		target := userEngine.GetPlayer(o.TargetID)
@@ -80,7 +114,12 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			o.TargetID = 0
 			return
 		}
-		dist := abs(target.CurrX-o.CurrX) + abs(target.CurrY-o.CurrY)
+		dx := abs(target.CurrX - o.CurrX)
+		dy := abs(target.CurrY - o.CurrY)
+		dist := dx
+		if dy > dist {
+			dist = dy
+		}
 
 		switch o.AIBehavior {
 		case 0:
@@ -96,8 +135,11 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				if now-o.HitTick > o.AttackSpeed {
 					o.HitTick = now
 					o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-					damage := o.calcMonsterDamage(target.BaseObject)
-					o.applyMonsterDamageToPlayer(server, target, damage)
+					if rand.Intn(100) < 80 {
+						damage := o.calcMonsterDamage(target.BaseObject)
+						o.applyMonsterDamageToPlayer(server, target, damage, now)
+						o.FocusTick = now
+					}
 					o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 				}
 			} else {
@@ -120,20 +162,21 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		case 3:
 			if dist <= 1 && now-o.HitTick > o.AttackSpeed {
 				o.HitTick = now
-				for dy := -1; dy <= 1; dy++ {
-					for dx := -1; dx <= 1; dx++ {
-						tx, ty := o.CurrX+dx, o.CurrY+dy
+				for a_dy := -1; a_dy <= 1; a_dy++ {
+					for a_dx := -1; a_dx <= 1; a_dx++ {
+						tx, ty := o.CurrX+a_dx, o.CurrY+a_dy
 						obj := o.envir.GetMovingObject(tx, ty)
 						if obj == nil {
 							continue
 						}
 						if p, ok := obj.(*PlayObject); ok && !p.Death && !p.Ghost {
 							damage := o.calcMonsterDamage(p.BaseObject)
-							o.applyMonsterDamageToPlayer(server, p, damage)
+							o.applyMonsterDamageToPlayer(server, p, damage, now)
 						}
 					}
 				}
 				o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+				o.FocusTick = now
 				o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 			} else if dist > 1 {
 				o.chaseTarget(target)
@@ -157,9 +200,8 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				if rand.Intn(4) == 0 {
 					o.TurnTo(rand.Intn(8))
 				} else {
-					dir := rand.Intn(8)
-					if o.WalkTo(dir) {
-						o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
+					if o.WalkTo(o.Dir) {
+						o.SendRefMsg(RM_WALK, o.Dir, o.CurrX, o.CurrY, "")
 					}
 				}
 			}
@@ -186,7 +228,7 @@ func (o *MonsterObject) calcMonsterDamage(target *BaseObject) int {
 	return damage
 }
 
-func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, target *PlayObject, damage int) {
+func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, target *PlayObject, damage int, now int64) {
 	hp := int(target.WAbil.HP)
 	hp -= damage
 	if hp < 0 {
@@ -195,7 +237,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	target.WAbil.HP = uint16(hp)
 
 	if o.envir != nil {
-		o.envir.broadcastRefMsg(target.BaseObject, RM_STRUCK, o.ID, target.CurrX, target.CurrY, o.Dir)
+		o.envir.broadcastRefMsg(target.BaseObject, RM_STRUCK, target.ID, target.CurrX, target.CurrY, o.Dir)
 	}
 
 	if hp <= 0 {
@@ -215,10 +257,27 @@ func (o *MonsterObject) chaseTarget(target *PlayObject) {
 	if now-o.WalkTick < o.WalkSpeed {
 		return
 	}
+	o.walkCount++
+	if o.walkCount > o.WalkStep && o.WalkStep > 0 {
+		if now-o.walkWaitTick < o.WalkWait {
+			return
+		}
+		o.walkCount = 0
+		o.walkWaitTick = now
+	}
 	o.WalkTick = now
+
 	dir := dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 	if o.WalkTo(dir) {
 		o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
+		return
+	}
+	for i := 0; i < 7; i++ {
+		altDir := (dir + i + 1) % 8
+		if o.WalkTo(altDir) {
+			o.SendRefMsg(RM_WALK, altDir, o.CurrX, o.CurrY, "")
+			return
+		}
 	}
 }
 
@@ -231,8 +290,13 @@ func (o *MonsterObject) meleeAttack(server *netserver.TCPServer, target *PlayObj
 	if IsSafeZone(o.envir, target.CurrX, target.CurrY) {
 		return
 	}
+	if rand.Intn(100) >= 80 {
+		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+		return
+	}
 	damage := o.calcMonsterDamage(target.BaseObject)
-	o.applyMonsterDamageToPlayer(server, target, damage)
+	o.applyMonsterDamageToPlayer(server, target, damage, now)
+	o.FocusTick = now
 	o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 }
 
@@ -270,8 +334,12 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 	}
 }
 
-func (o *MonsterObject) validateTarget(userEngine *UserEngine) {
+func (o *MonsterObject) validateTarget(now int64, userEngine *UserEngine) {
 	if o.TargetID == 0 {
+		return
+	}
+	if o.FocusTick > 0 && now-o.FocusTick > 30000 {
+		o.TargetID = 0
 		return
 	}
 	target := userEngine.GetPlayer(o.TargetID)

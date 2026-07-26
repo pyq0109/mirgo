@@ -73,7 +73,7 @@ func (e *UserEngine) LoadMonGen() {
 		npc.envir = env
 		env.AddObject(npc.CurrX, npc.CurrY, OS_MOVINGOBJECT, npc)
 		e.Npcs = append(e.Npcs, npc)
-		log.Logf(log.LevelInfo, "MonGen", "Spawned NPC %s at %s(%d,%d)", npc.Name, npc.MapName, npc.CurrX, npc.CurrY)
+		// log.Logf(log.LevelInfo, "MonGen", "Spawned NPC %s at %s(%d,%d)", npc.Name, npc.MapName, npc.CurrX, npc.CurrY)
 	}
 }
 
@@ -164,7 +164,7 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 					m.DropLootWithTable(m.envir, &e.nextItemID, server, e.DropTables)
 				}
 			}
-			if m.DeathTick > 0 && now-m.DeathTick > 30000 {
+			if m.DeathTick > 0 && now-m.DeathTick > 180000 {
 				m.Ghost = true
 				if m.envir != nil {
 					m.envir.RemoveObject(m.CurrX, m.CurrY, OS_MOVINGOBJECT, m)
@@ -253,6 +253,6 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	e.Monsters = append(e.Monsters, mon)
 	entry.LiveList = append(entry.LiveList, mon)
 
-	log.Logf(log.LevelInfo, "MonGen", "Spawned %s (id=%d) at %s(%d,%d)", mon.Name, mon.ID, mon.MapName, x, y)
+	// log.Logf(log.LevelInfo, "MonGen", "Spawned %s (id=%d) at %s(%d,%d)", mon.Name, mon.ID, mon.MapName, x, y)
 	return mon
 }

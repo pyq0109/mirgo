@@ -99,7 +99,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 			p.skeletonSent = true
 			p.envir.broadcastRefMsg(p.BaseObject, RM_DEATH, p.ID, p.CurrX, p.CurrY, 0)
 		}
-		if now-p.deathTick > 3000 {
+		if now-p.deathTick > 30000 {
 			p.resurrect(server)
 		}
 		return
@@ -518,6 +518,10 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 
 	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, target.CurrX, target.CurrY, dir)
 
+	if mon := p.envir.getMonsterByBase(target); mon != nil {
+		mon.OnStruck(p.ID, time.Now().UnixMilli())
+	}
+
 	if tp := p.envir.getPlayerByBase(target); tp != nil {
 		if tp.UseItems[protocol.UDress] != nil && tp.UseItems[protocol.UDress].Dura > 0 {
 			tp.UseItems[protocol.UDress].Dura--
@@ -540,10 +544,10 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 			target.Death = true
 			p.envir.broadcastRefMsg(target, RM_DEATH, target.ID, target.CurrX, target.CurrY, dir)
 
-			if mon := p.envir.getMonsterByBase(target); mon != nil {
-				mon.DeathTick = time.Now().UnixMilli()
-				p.awardExp(server, mon)
-			}
+		if mon := p.envir.getMonsterByBase(target); mon != nil {
+			mon.DeathTick = time.Now().UnixMilli()
+			p.awardExp(server, mon)
+		}
 			if tp := p.envir.getPlayerByBase(target); tp != nil {
 				tp.deathTick = time.Now().UnixMilli()
 				tp.Death = true
@@ -711,6 +715,20 @@ func (p *PlayObject) resurrect(server *netserver.TCPServer) {
 	p.skeletonSent = false
 	p.WAbil.HP = p.WAbil.MaxHP / 2
 	p.WAbil.MP = p.WAbil.MaxMP / 2
+
+	if p.envir != nil {
+		p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+	}
+	safeMap, safeX, safeY := GetSafeZonePoint()
+	if p.MapMgr != nil {
+		if env := p.MapMgr.FindMap(safeMap); env != nil {
+			p.envir = env
+			p.MapName = safeMap
+			p.CurrX = safeX
+			p.CurrY = safeY
+			env.AddObject(safeX, safeY, OS_MOVINGOBJECT, p)
+		}
+	}
 
 	resp := protocol.MakeDefaultMsg(protocol.SMAlive, p.ID, uint16(p.CurrX), uint16(p.CurrY), uint16(p.Dir))
 	server.Send(p.Session.ID, resp, "")

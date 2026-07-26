@@ -46,6 +46,7 @@ type Actor struct {
 	Weapon     int
 	Job        int
 	Appearance int
+	Level      int
 
 	Death    bool
 	Skeleton bool
@@ -129,12 +130,23 @@ func (a *Actor) GetMessage() (ActorMsg, bool) {
 }
 
 func (a *Actor) ProcMsg() {
-	for a.CurrentAction == 0 && !a.LockEndFrame {
-		msg, ok := a.GetMessage()
-		if !ok {
+	for {
+		if len(a.MsgList) == 0 {
 			break
 		}
+		next := a.MsgList[0]
+		isStruck := next.Ident == protocol.SMStruck
+		if a.CurrentAction != 0 && !isStruck {
+			break
+		}
+		if a.LockEndFrame && !isStruck {
+			break
+		}
+		msg, _ := a.GetMessage()
 		a.ReadyAction(msg)
+		if !isStruck {
+			break
+		}
 	}
 }
 
@@ -348,6 +360,11 @@ func (a *Actor) calcHumanFrame() {
 		a.WarModeTime = time.Now().UnixMilli()
 	case protocol.SMStruck:
 		action = HA.ActStruck
+		struckTime := 70 + (45-a.Level)*4
+		if struckTime < 70 {
+			struckTime = 70
+		}
+		action.FTime = struckTime
 	case protocol.SMDeath, protocol.SMNowDeath:
 		action = HA.ActDie
 	case protocol.SMSkeleton:

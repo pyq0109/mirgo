@@ -91,3 +91,11 @@ func CheckSafeZone(mapName string, x, y int) bool {
 	}
 	return false
 }
+
+func GetSafeZonePoint() (mapName string, x, y int) {
+	if len(globalSafeZones.zones) > 0 {
+		z := globalSafeZones.zones[0]
+		return z.MapName, z.X, z.Y
+	}
+	return "0", 289, 618
+}
