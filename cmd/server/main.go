@@ -217,17 +217,22 @@ func main() {
 
 		if metaJSON, err := db.LoadCharacterMeta(charData.ID); err == nil && metaJSON != nil {
 			var meta struct {
-				PkPoint int           `json:"pkPoint"`
-				Magics  []PlayerMagic `json:"magics"`
-				Storage []int         `json:"storage"`
+				PkPoint int             `json:"pkPoint"`
+				Magics  []PlayerMagic   `json:"magics"`
+				Storage []savedUserItem `json:"storage"`
 			}
 			if json.Unmarshal(metaJSON, &meta) == nil {
 				player.PkPoint = meta.PkPoint
 				for i := range meta.Magics {
 					player.LearnedMagics = append(player.LearnedMagics, &meta.Magics[i])
 				}
-				for _, idx := range meta.Storage {
-					player.StorageItems = append(player.StorageItems, &protocol.UserItem{WIndex: uint16(idx)})
+				for _, it := range meta.Storage {
+					player.StorageItems = append(player.StorageItems, &protocol.UserItem{
+						MakeIndex: it.MakeIndex,
+						WIndex:    it.WIndex,
+						Dura:      it.Dura,
+						DuraMax:   it.DuraMax,
+					})
 				}
 			}
 		}
@@ -239,7 +244,7 @@ func main() {
 		switch player.Job {
 		case 0: // Warrior
 			player.learnMagic(3, 0, 1) // 基本剑术
-			player.learnMagic(4, 0, 2) // 攻杀剑术
+			player.learnMagic(7, 0, 2) // 攻杀剑术
 		case 1: // Mage
 			player.learnMagic(1, 0, 1) // 火球术
 		case 2: // Taoist
@@ -701,9 +706,9 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 	savePlayerItems(db, player)
 
 	type charMeta struct {
-		PkPoint int           `json:"pkPoint"`
-		Magics  []PlayerMagic `json:"magics"`
-		Storage []int         `json:"storage"`
+		PkPoint int             `json:"pkPoint"`
+		Magics  []PlayerMagic   `json:"magics"`
+		Storage []savedUserItem `json:"storage"`
 	}
 	meta := charMeta{
 		PkPoint: player.PkPoint,
@@ -716,7 +721,12 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 	}
 	for _, item := range player.StorageItems {
 		if item != nil {
-			meta.Storage = append(meta.Storage, int(item.WIndex))
+			meta.Storage = append(meta.Storage, savedUserItem{
+				MakeIndex: item.MakeIndex,
+				WIndex:    item.WIndex,
+				Dura:      item.Dura,
+				DuraMax:   item.DuraMax,
+			})
 		}
 	}
 	metaJSON, err := json.Marshal(meta)

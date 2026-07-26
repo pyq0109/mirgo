@@ -21,6 +21,9 @@ const (
 	StateInGame
 )
 
+// maxRecvBuf bounds per-connection accumulated receive data; a peer exceeding it is dropped.
+const maxRecvBuf = 64 * 1024
+
 // Session represents a connected client.
 type Session struct {
 	ID            int64
@@ -168,6 +171,7 @@ func (s *TCPServer) readLoop(session *Session) {
 	defer s.removeSession(session)
 
 	buf := make([]byte, 4096)
+	var recvBuf []byte // accumulates bytes across Read calls so frames split by TCP are not lost
 	for {
 		n, err := session.Conn.Read(buf)
 		if err != nil {
@@ -181,14 +185,20 @@ func (s *TCPServer) readLoop(session *Session) {
 		}
 
 		// Parse message frames: #<code><payload>!
-		// Multiple frames may arrive in a single Read() call.
+		// Multiple frames may arrive in a single Read() call, and one frame may span calls.
 		if n > 0 {
-			data := buf[:n]
-			// Process all frames in the buffer
+			recvBuf = append(recvBuf, buf[:n]...)
+			if len(recvBuf) > maxRecvBuf {
+				log.Logf(log.LevelWarn, "Server", "Recv buffer overflow from %d, dropping connection", session.ID)
+				return
+			}
+			data := recvBuf
+			// Process all complete frames, keeping any trailing partial frame for the next Read.
 			for len(data) > 2 {
 				// Find the end of the first frame
 				if data[0] != '#' {
-					break
+					data = data[1:] // tolerate noise/misalignment, resync on next '#'
+					continue
 				}
 				endIdx := -1
 				for i := 1; i < len(data); i++ {
@@ -198,7 +208,7 @@ func (s *TCPServer) readLoop(session *Session) {
 					}
 				}
 				if endIdx < 0 {
-					break // No complete frame yet
+					break // partial frame; wait for more data
 				}
 
 				frame := data[1:endIdx] // Content between # and !
@@ -236,6 +246,8 @@ func (s *TCPServer) readLoop(session *Session) {
 					s.onMessage(session, msg, body)
 				}
 			}
+			// Compact: keep any trailing partial frame, drop the consumed prefix.
+			recvBuf = recvBuf[:copy(recvBuf, data)]
 		}
 	}
 }

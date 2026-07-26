@@ -19,6 +19,15 @@ func (p *PlayObject) HandleSay(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 
+	if strings.HasPrefix(text, "!~") {
+		if guildText := text[2:]; guildText != "" {
+			gmsg := msg
+			gmsg.Msg = guildText
+			p.HandleGuildMessage(gmsg, server)
+		}
+		return
+	}
+
 	if p.envir == nil {
 		return
 	}

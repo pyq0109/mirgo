@@ -170,26 +170,14 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 			}
 		}
 	case 22:
+		const fireDuration = int64(8000)
+		perTick := power / int(fireDuration/100)
+		if perTick < 1 {
+			perTick = 1
+		}
 		for dy := -1; dy <= 1; dy++ {
 			for dx := -1; dx <= 1; dx++ {
-				fx, fy := tx+dx, ty+dy
-				obj := p.envir.GetMovingObject(fx, fy)
-				if obj == nil {
-					continue
-				}
-				if mon, ok := obj.(*MonsterObject); ok && !mon.Death {
-					damage := power / 2
-					hp := int(mon.WAbil.HP) - damage
-					if hp <= 0 {
-						mon.Death = true
-						mon.DeathTick = time.Now().UnixMilli()
-						mon.WAbil.HP = 0
-						p.envir.broadcastRefMsg(mon.BaseObject, RM_DEATH, mon.ID, mon.CurrX, mon.CurrY, 0)
-						p.awardExp(server, mon)
-					} else {
-						mon.WAbil.HP = uint16(hp)
-					}
-				}
+				p.envir.AddFireEvent(server, tx+dx, ty+dy, perTick, fireDuration, p.ID)
 			}
 		}
 	case 21:
@@ -423,8 +411,30 @@ func (p *PlayObject) sendMagicFail(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, resp, "")
 }
 
+// magicEffType classifies a magic into the client effect kind packed into
+// SMMagicFire.Series low byte: 0=explosion, 1=fly, 2=ground. The magic_db
+// effectType field is Delphi's animation-set selector (0..14) and does not map
+// onto this enum, so the kind is keyed by magID here; effnum (high byte) comes
+// straight from magic_db "effect".
+var magicEffType = map[int]int{
+	1: 1, 5: 1, 10: 1, 11: 1, 13: 1, 44: 1, // projectiles → fly
+	22: 2, 23: 2, 24: 2, 33: 2, // area effects → ground
+}
+
+func (p *PlayObject) magicEffectParams(magID int) (effType, effNum int) {
+	effType = magicEffType[magID]
+	if p.MagicDB != nil {
+		if def := p.MagicDB.GetByID(magID); def != nil {
+			effNum = def.Effect
+		}
+	}
+	return effType, effNum
+}
+
 func (p *PlayObject) sendMagicFire(server *netserver.TCPServer, magID, tx, ty int) {
-	resp := protocol.MakeDefaultMsg(protocol.SMMagicFire, int32(magID), uint16(tx), uint16(ty), 0)
+	effType, effNum := p.magicEffectParams(magID)
+	series := uint16(effType&0xFF) | uint16(effNum&0xFF)<<8
+	resp := protocol.MakeDefaultMsg(protocol.SMMagicFire, int32(magID), uint16(tx), uint16(ty), series)
 	server.Send(p.Session.ID, resp, "")
 }
 
@@ -454,7 +464,7 @@ func (p *PlayObject) sendSpellToClient(server *netserver.TCPServer, msg SendMess
 		return
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMSpell, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 	server.Send(p.Session.ID, resp, body)
 }
 

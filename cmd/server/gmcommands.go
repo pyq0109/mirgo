@@ -90,11 +90,17 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 		p.sysMsg(server, "已回复")
 		return true
 	case "takeonhorse":
-		p.OnHorse = true
+		if !p.OnHorse {
+			p.OnHorse = true
+			p.broadcastFeatureChanged(server)
+		}
 		p.sysMsg(server, "已上马")
 		return true
 	case "takeoffhorse":
-		p.OnHorse = false
+		if p.OnHorse {
+			p.OnHorse = false
+			p.broadcastFeatureChanged(server)
+		}
 		p.sysMsg(server, "已下马")
 		return true
 	case "pkpoint":

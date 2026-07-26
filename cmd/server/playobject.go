@@ -227,6 +227,8 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.sendDeathToClient(server, msg)
 	case RM_SPELL:
 		p.sendSpellToClient(server, msg)
+	case RM_FEATURECHANGED:
+		p.sendFeatureChangedToClient(server, msg)
 	}
 }
 
@@ -312,7 +314,10 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	if dir < 0 || dir > 7 {
 		return
 	}
-	p.OnHorse = true
+	if !p.OnHorse {
+		p.OnHorse = true
+		p.broadcastFeatureChanged(server)
+	}
 	dx, dy := dirToOffset(dir)
 	x1, y1 := p.CurrX+dx, p.CurrY+dy
 	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
@@ -330,11 +335,32 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	p.CheckMapRoute(server)
 }
 
+func hitSkillMagID(ident int) (int, bool) {
+	switch ident {
+	case protocol.CMPowerHit:
+		return 7, true // 攻杀剑术
+	case protocol.CMLongHit:
+		return 12, true // 刺杀剑术
+	case protocol.CMWideHit:
+		return 25, true // 半月弯刀
+	case protocol.CMFireHit:
+		return 26, true // 烈火剑法
+	case protocol.CMTwinHit:
+		return 38, true // 狂风斩
+	default:
+		return 0, false
+	}
+}
+
 func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	now := time.Now().UnixMilli()
 	baseSpeed := int64(1400)
 	if now-p.HitTick < baseSpeed {
 		return
+	}
+
+	if magID, ok := hitSkillMagID(msg.Ident); ok && p.findMagic(magID) == nil {
+		msg.Ident = protocol.CMHit
 	}
 
 	switch msg.Ident {
@@ -561,13 +587,15 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	}
 
 	if tp := p.envir.getPlayerByBase(target); tp != nil {
-		if tp.UseItems[protocol.UDress] != nil && tp.UseItems[protocol.UDress].Dura > 0 {
-			tp.UseItems[protocol.UDress].Dura--
+		if it := tp.UseItems[protocol.UDress]; it != nil && it.Dura > 0 {
+			it.Dura--
+			tp.sendDuraChange(server, it)
 		}
 		for i := 1; i < 13; i++ {
-			if tp.UseItems[i] != nil && tp.UseItems[i].Dura > 0 {
+			if it := tp.UseItems[i]; it != nil && it.Dura > 0 {
 				if rand.Intn(8) == 0 {
-					tp.UseItems[i].Dura--
+					it.Dura--
+					tp.sendDuraChange(server, it)
 				}
 			}
 		}
@@ -589,7 +617,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 			if tp := p.envir.getPlayerByBase(target); tp != nil {
 				tp.deathTick = time.Now().UnixMilli()
 				tp.Death = true
-				p.OnPlayerKilled(tp)
+				p.OnPlayerKilled(server, tp)
 				tp.DropDeathItems(server)
 			}
 		}
@@ -613,7 +641,7 @@ func (p *PlayObject) sendHitToClient(server *netserver.TCPServer, smIdent uint16
 		return
 	}
 	resp := protocol.MakeDefaultMsg(smIdent, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 	server.Send(p.Session.ID, resp, body)
 }
 
@@ -840,7 +868,7 @@ func (p *PlayObject) sendMovementToClient(server *netserver.TCPServer, smIdent u
 		return
 	}
 	resp := protocol.MakeDefaultMsg(smIdent, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 	server.Send(p.Session.ID, resp, body)
 }
 
@@ -854,7 +882,7 @@ func (p *PlayObject) sendTurnToClient(server *netserver.TCPServer, msg SendMessa
 		return
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMTurn, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 	if src.Name != "" {
 		body += protocol.EncodeString(src.Name)
 	}
@@ -866,11 +894,40 @@ func (p *PlayObject) sendDisappearToClient(server *netserver.TCPServer, msg Send
 	server.Send(p.Session.ID, resp, "")
 }
 
-func (p *PlayObject) encodeCharDesc(feature int32) []byte {
+func (p *PlayObject) sendFeatureChangedToClient(server *netserver.TCPServer, msg SendMessage) {
+	if p.envir == nil {
+		return
+	}
+	obj := p.envir.getObjectByID(msg.SourceID)
+	src := objectBase(obj)
+	if src == nil {
+		return
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMFeatureChanged, src.ID, 0, 0, 0)
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
+	server.Send(p.Session.ID, resp, body)
+}
+
+func (p *PlayObject) encodeCharDesc(feature, featureEx int32) []byte {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(feature))
-	binary.LittleEndian.PutUint32(buf[4:8], 0)
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(featureEx))
 	return buf
+}
+
+// FeatureEx encodes extended appearance: low byte = horse type, high byte = dress effect.
+func (p *PlayObject) FeatureEx() int32 {
+	if p.OnHorse {
+		return 1
+	}
+	return 0
+}
+
+// broadcastFeatureChanged notifies visible players and the player's own client of an appearance change.
+func (p *PlayObject) broadcastFeatureChanged(server *netserver.TCPServer) {
+	p.SendRefMsg(RM_FEATURECHANGED, 0, 0, 0, "")
+	resp := protocol.MakeDefaultMsg(protocol.SMFeatureChanged, p.ID, 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(p.encodeCharDesc(p.Feature(), p.FeatureEx())))
 }
 
 func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
@@ -927,7 +984,7 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 				continue
 			}
 			resp := protocol.MakeDefaultMsg(protocol.SMTurn, base.ID, uint16(base.CurrX), uint16(base.CurrY), uint16(base.Dir))
-			body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+			body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 			if base.Name != "" {
 				body += protocol.EncodeString(base.Name)
 			}
@@ -968,7 +1025,7 @@ func (p *PlayObject) SendLogon(server *netserver.TCPServer) {
 func (p *PlayObject) encodeLogonBody() string {
 	buf := make([]byte, 16)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(p.Feature()))
-	binary.LittleEndian.PutUint32(buf[4:8], 0)
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(p.FeatureEx()))
 	binary.LittleEndian.PutUint32(buf[8:12], 0)
 	binary.LittleEndian.PutUint32(buf[12:16], 0)
 	return protocol.EncodeBuffer(buf)

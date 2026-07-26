@@ -388,6 +388,7 @@ func (h *NetHandler) Reconnect(addr string) error {
 func (h *NetHandler) ReadLoop() {
 	log.Logf(log.LevelInfo, "Client", "ReadLoop started")
 	buf := make([]byte, 4096)
+	var recvBuf []byte // accumulates bytes across Read calls; the 100ms deadline frequently splits frames
 	for {
 		select {
 		case <-h.done:
@@ -413,39 +414,49 @@ func (h *NetHandler) ReadLoop() {
 			return
 		}
 
-		// Parse all frames in the buffer (server may send multiple frames in one TCP write)
-		data := buf[:n]
-		for len(data) > 2 {
-			if data[0] != '#' {
-				break
+		// Parse all complete frames; accumulate across reads since a frame may span the 100ms deadline.
+		if n > 0 {
+			recvBuf = append(recvBuf, buf[:n]...)
+			if len(recvBuf) > 64*1024 {
+				log.Logf(log.LevelError, "Client", "Recv buffer overflow, disconnecting")
+				return
 			}
-			endIdx := -1
-			for i := 1; i < len(data); i++ {
-				if data[i] == '!' {
-					endIdx = i
-					break
+			data := recvBuf
+			for len(data) > 2 {
+				if data[0] != '#' {
+					data = data[1:] // tolerate noise/misalignment, resync on next '#'
+					continue
+				}
+				endIdx := -1
+				for i := 1; i < len(data); i++ {
+					if data[i] == '!' {
+						endIdx = i
+						break
+					}
+				}
+				if endIdx < 0 {
+					break // partial frame; wait for more data
+				}
+
+				payload := string(data[1:endIdx])
+				data = data[endIdx+1:]
+
+				if len(payload) > 0 && payload[0] == '+' {
+					h.handleControlMsg(payload)
+					continue
+				}
+
+				if len(payload) >= protocol.DefBlockSize {
+					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
+					body := ""
+					if len(payload) > protocol.DefBlockSize {
+						body = protocol.DecodeString(payload[protocol.DefBlockSize:])
+					}
+					h.HandleMessage(msg, body)
 				}
 			}
-			if endIdx < 0 {
-				break // No complete frame
-			}
-
-			payload := string(data[1:endIdx])
-			data = data[endIdx+1:]
-
-			if len(payload) > 0 && payload[0] == '+' {
-				h.handleControlMsg(payload)
-				continue
-			}
-
-			if len(payload) >= protocol.DefBlockSize {
-				msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
-				body := ""
-				if len(payload) > protocol.DefBlockSize {
-					body = protocol.DecodeString(payload[protocol.DefBlockSize:])
-				}
-				h.HandleMessage(msg, body)
-			}
+			// Compact: keep any trailing partial frame, drop the consumed prefix.
+			recvBuf = recvBuf[:copy(recvBuf, data)]
 		}
 	}
 }
@@ -654,7 +665,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor := NewActor(msg.Recog, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF)
 		actor.Type = ActorHuman
 		if body != "" {
-			actor.updateFeatureFromLogon(body)
+			actor.updateFeatureFromBody(body)
 		}
 		h.playScene.State.MySelf = actor
 		h.playScene.State.Actors.Add(actor)
@@ -978,14 +989,33 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMMagicFire:
-		log.Logf(log.LevelDebug, "Client", "Magic fire: magID=%d x=%d y=%d", msg.Recog, msg.Param, msg.Tag)
-		h.playScene.effects.AddExplosion(
-			float64(msg.Param)*engine.TileWidth+engine.TileWidth/2,
-			float64(msg.Tag)*engine.TileHeight+engine.TileHeight/2,
-			0, 10, 50)
+		log.Logf(log.LevelDebug, "Client", "Magic fire: magID=%d x=%d y=%d series=%d", msg.Recog, msg.Param, msg.Tag, msg.Series)
+		fx := float64(msg.Param)*engine.TileWidth + engine.TileWidth/2
+		fy := float64(msg.Tag)*engine.TileHeight + engine.TileHeight/2
+		effType := int(msg.Series & 0xFF)
+		effNum := int(msg.Series >> 8)
+		switch effType {
+		case 2:
+			h.playScene.effects.AddGround(fx, fy, effNum, 10, 50)
+		default:
+			// fly(1) carries no start coordinate in this message; degrade to explosion
+			h.playScene.effects.AddExplosion(fx, fy, effNum, 10, 50)
+		}
 
 	case protocol.SMMagicFireFail:
 		log.Logf(log.LevelDebug, "Client", "Magic fire failed")
+
+	case protocol.SMShowEvent:
+		h.playScene.events.AddEvent(&MapEvent{
+			ServerID:  msg.Recog,
+			EType:     int(msg.Param),
+			X:         int(msg.Tag),
+			Y:         int(msg.Series),
+			FrameTime: 50,
+		})
+
+	case protocol.SMHideEvent:
+		h.playScene.events.DelEventByID(msg.Recog)
 
 	case protocol.SMAddMagic:
 		log.Logf(log.LevelInfo, "Client", "Learned magic: %d", msg.Recog)
@@ -1042,7 +1072,19 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelDebug, "Client", "Weight changed")
 
 	case protocol.SMDuraChange:
-		log.Logf(log.LevelDebug, "Client", "Durability changed")
+		log.Logf(log.LevelDebug, "Client", "Durability changed: makeIndex=%d dura=%d/%d", msg.Recog, msg.Param, msg.Tag)
+		for _, it := range h.playScene.State.UseItems {
+			if it != nil && it.MakeIndex == msg.Recog {
+				it.Dura = msg.Param
+				it.DuraMax = msg.Tag
+			}
+		}
+		for i := range h.playScene.State.BagItems {
+			if h.playScene.State.BagItems[i].MakeIndex == msg.Recog {
+				h.playScene.State.BagItems[i].Dura = msg.Param
+				h.playScene.State.BagItems[i].DuraMax = msg.Tag
+			}
+		}
 
 	case protocol.SMEatOK:
 		log.Logf(log.LevelInfo, "Client", "Ate item OK")
@@ -1412,6 +1454,26 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 	playScene.SetSendDealCancel(func() {
 		cancelMsg := protocol.MakeDefaultMsg(protocol.CMDealCancel, 0, 0, 0, 0)
 		handler.Send(cancelMsg, "")
+	})
+
+	playScene.SetSendUseItem(func(bagIdx int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMEat, 0, uint16(bagIdx), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendAttackMode(func(mode int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMChangeAttackMode, 0, uint16(mode), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendBuyItem(func(itemIdx int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMUserBuyItem, 0, uint16(itemIdx), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendSellItem(func(bagIdx int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMUserSellItem, 0, uint16(bagIdx), 0, 0)
+		handler.Send(msg, "")
 	})
 
 	go handler.ReadLoop()

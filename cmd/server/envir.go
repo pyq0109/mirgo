@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"github.com/pyq0109/mirgo/internal/mapformat"
@@ -63,6 +63,7 @@ type Environment struct {
 	Doors       []Door
 	GroundItems []*GroundItem
 	Events      []*MapEvent
+	eventIDSeq  int32
 
 	rawMap *mapformat.MapData
 }
@@ -205,6 +206,14 @@ func objectFeature(obj interface{}) int32 {
 		return o.Feature()
 	case *NpcObject:
 		return o.Feature()
+	}
+	return 0
+}
+
+// objectFeatureEx: low byte = horse type, high byte = dress effect (Delphi MakeWord(HorseType, DressEffType)).
+func objectFeatureEx(obj interface{}) int32 {
+	if p, ok := obj.(*PlayObject); ok {
+		return p.FeatureEx()
 	}
 	return 0
 }

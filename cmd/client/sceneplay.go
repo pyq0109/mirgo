@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"fmt"
@@ -91,6 +91,7 @@ type PlayScene struct {
 	deathGray   bool
 
 	effects *EffectManager
+	events  *EventManager
 }
 
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
@@ -108,6 +109,7 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		targetY:        -1,
 		showMinimap:    true,
 		effects:        NewEffectManager(),
+		events:         NewEventManager(),
 	}
 }
 
@@ -137,6 +139,22 @@ func (s *PlayScene) SetSendNpcClick(fn func(int)) {
 
 func (s *PlayScene) SetSendDealCancel(fn func()) {
 	s.sendDealCancel = fn
+}
+
+func (s *PlayScene) SetSendUseItem(fn func(bagIdx int)) {
+	s.sendUseItem = fn
+}
+
+func (s *PlayScene) SetSendBuyItem(fn func(itemIdx int)) {
+	s.sendBuyItem = fn
+}
+
+func (s *PlayScene) SetSendSellItem(fn func(bagIdx int)) {
+	s.sendSellItem = fn
+}
+
+func (s *PlayScene) SetSendAttackMode(fn func(mode int)) {
+	s.sendAttackMode = fn
 }
 
 func (s *PlayScene) AddChatMessage(text string) {
@@ -232,6 +250,7 @@ func (s *PlayScene) Update(dt float64) {
 
 	s.State.Actors.Update(now, moveTick)
 	s.effects.Update(now)
+	s.events.Update(now)
 
 	if s.State.MySelf != nil && s.cam != nil && s.mapData != nil {
 		my := s.State.MySelf
@@ -350,6 +369,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
+	s.events.Render(s.gl, s.resources, proj)
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
 	s.effects.Render(s.gl, s.resources, proj)
 

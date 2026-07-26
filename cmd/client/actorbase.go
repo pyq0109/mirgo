@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"encoding/binary"
@@ -90,8 +90,9 @@ type Actor struct {
 	SpellFrame  int
 	CurEffFrame int
 
-	Effect int
-	State  int32
+	Effect  int
+	OnHorse bool
+	State   int32
 
 	SayingArr    [5]string
 	SayTime      int64
@@ -233,14 +234,6 @@ func (a *Actor) updateFeature(feature int) {
 	a.Sex = int(hair) % 2
 }
 
-func (a *Actor) updateFeatureFromLogon(body string) {
-	raw := []byte(body)
-	if len(raw) >= 4 {
-		feature := int32(binary.LittleEndian.Uint32(raw[0:4]))
-		a.updateFeature(int(feature))
-	}
-}
-
 func (a *Actor) updateFeatureFromBody(body string) {
 	if body == "" {
 		return
@@ -252,6 +245,7 @@ func (a *Actor) updateFeatureFromBody(body string) {
 	}
 	if len(raw) >= 8 {
 		featureEx := int32(binary.LittleEndian.Uint32(raw[4:8]))
+		a.OnHorse = featureEx&0xFF != 0
 		a.Effect = int((featureEx >> 8) & 0xFF)
 	}
 }
@@ -739,8 +733,16 @@ func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, 
 	gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
 }
 
+func (a *Actor) wingBehind() bool {
+	return a.Dir >= 3 && a.Dir <= 5
+}
+
 func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
 	wpord := getWordOrder(a.Sex, a.CurrentFrame)
+
+	if a.Effect > 0 && a.wingBehind() {
+		a.drawWingLayer(gl, resources, screenX, screenY, proj)
+	}
 
 	if wpord == 0 && a.Weapon >= 2 {
 		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
@@ -780,6 +782,10 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 
 	if wpord == 1 && a.Weapon >= 2 {
 		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
+	}
+
+	if a.Effect > 0 && !a.wingBehind() {
+		a.drawWingLayer(gl, resources, screenX, screenY, proj)
 	}
 }
 

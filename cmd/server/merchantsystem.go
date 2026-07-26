@@ -294,6 +294,7 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 
 	p.Gold -= cost
 	item.Dura = item.DuraMax
+	p.sendDuraChange(server, item)
 
 	resp := protocol.MakeDefaultMsg(protocol.SMUserRepairItemOK, int32(bagIdx), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")

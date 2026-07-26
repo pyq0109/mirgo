@@ -53,10 +53,14 @@ cmd/server/
 ├── baseobject.go     # 基础对象、RM_*常量、SendRefMsg、WalkTo
 ├── playobject.go     # 玩家：移动/战斗/视野/地图切换/消息分发
 ├── monsterobject.go  # 怪物：AI(搜索/追击/攻击/游荡)
+├── monsterai.go      # 怪物AI行为(12种:melee/ranged/flee/area/burrow/explode等)
+├── monsterdb.go      # 怪物数据库加载(monster_db.jsonc)
 ├── npcobject.go      # NPC：固定位置、外观
 ├── mongen.go         # 刷怪系统、地面物品消失
 ├── drops.go          # 怪物掉落逻辑
+├── droptable.go      # 掉落表加载(MonItems/*.jsonc)
 ├── envir.go          # 地图环境、碰撞、门、对象管理
+├── mapevent.go       # 地图事件(火墙持续伤害/SM_SHOWEVENT广播)
 ├── mapmanager.go     # 地图加载、传送路由
 ├── usrengine.go      # 用户引擎、tick处理
 ├── session.go        # 会话管理
@@ -70,6 +74,10 @@ cmd/server/
 ├── pksystem.go       # PK点数/红名/衰减
 ├── tradesystem.go    # 面对面交易
 ├── guildsystem.go    # 行会创建/聊天
+├── merchantsystem.go # NPC商店买/卖/修理/价格查询
+├── attackmode.go     # 攻击模式(全体/组队/和平等)
+├── safezone.go       # 安全区配置(start_points.jsonc)
+├── statuseffect.go   # 状态效果(毒/隐身/石化等12种)
 ├── storagesystem.go  # 仓库存取(39格)
 └── gmcommands.go     # GM命令(@make/@level/@move/@mob等)
 ```
@@ -86,6 +94,9 @@ cmd/client/
 ├── actor.go          # 动画模板(HA 14动作/MA 39模板)/CalcFrame
 ├── worder.go         # 武器前后层规则
 ├── minimap.go        # 碰撞式小地图(FBO)
+├── lighting.go       # 光照/迷雾(6级光罩+光源)
+├── magiceffect.go    # 魔法特效管理(爆炸/飞行/地面)
+├── eventman.go       # 地图事件渲染(SM_SHOWEVENT/火墙)
 ├── scenelogin.go     # 登录/注册场景
 ├── sceneserverselect.go  # 选服场景
 ├── sceneselectchr.go # 选角/创角/删角场景

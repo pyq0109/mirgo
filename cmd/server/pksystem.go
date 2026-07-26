@@ -4,6 +4,7 @@ import (
 	"math/rand"
 
 	"github.com/pyq0109/mirgo/internal/log"
+	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
@@ -51,7 +52,7 @@ func (p *PlayObject) NameColor() int {
 	return 255
 }
 
-func (p *PlayObject) OnPlayerKilled(victim *PlayObject) {
+func (p *PlayObject) OnPlayerKilled(server *netserver.TCPServer, victim *PlayObject) {
 	if IsSafeZone(p.envir, victim.CurrX, victim.CurrY) {
 		return
 	}
@@ -63,11 +64,12 @@ func (p *PlayObject) OnPlayerKilled(victim *PlayObject) {
 	}
 
 	if p.PKLevel() >= 1 && rand.Intn(5) == 0 {
-		if p.UseItems[protocol.UWeapon] != nil && p.UseItems[protocol.UWeapon].Dura > 0 {
-			p.UseItems[protocol.UWeapon].Dura -= 100
-			if p.UseItems[protocol.UWeapon].Dura > p.UseItems[protocol.UWeapon].DuraMax {
-				p.UseItems[protocol.UWeapon].Dura = 0
+		if it := p.UseItems[protocol.UWeapon]; it != nil && it.Dura > 0 {
+			it.Dura -= 100
+			if it.Dura > it.DuraMax {
+				it.Dura = 0
 			}
+			p.sendDuraChange(server, it)
 		}
 	}
 

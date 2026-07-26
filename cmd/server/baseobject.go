@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"sync"
@@ -24,6 +24,7 @@ const (
 	RM_WIDEHIT   = 10017
 	RM_FIREHIT   = 10018
 	RM_SPELL     = 10012
+	RM_FEATURECHANGED = 10019
 )
 
 const viewRange = 12

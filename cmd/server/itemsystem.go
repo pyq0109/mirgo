@@ -32,6 +32,14 @@ func (p *PlayObject) GiveItem(itemIdx int) bool {
 	return true
 }
 
+func (p *PlayObject) sendDuraChange(server *netserver.TCPServer, item *protocol.UserItem) {
+	if item == nil {
+		return
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMDuraChange, item.MakeIndex, item.Dura, item.DuraMax, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
 func (p *PlayObject) SendBagItemsFull(server *netserver.TCPServer) {
 	buf := make([]byte, 0, 2+len(p.ItemList)*10)
 	count := make([]byte, 2)
