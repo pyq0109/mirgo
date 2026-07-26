@@ -16,21 +16,21 @@ type ItemDef struct {
 	Weight    byte   `json:"weight"`
 	Looks     uint16 `json:"looks"`
 	DuraMax   uint32 `json:"duraMax"`
-	AC        uint16 `json:"ac"`
-	ACMax     uint16 `json:"acMax"`
-	MAC       uint16 `json:"mac"`
-	MACMax    uint16 `json:"macMax"`
-	DC        uint16 `json:"dc"`
-	DCMax     uint16 `json:"dcMax"`
-	MC        uint16 `json:"mc"`
-	MCMax     uint16 `json:"mcMax"`
-	SC        uint16 `json:"sc"`
-	SCMax     uint16 `json:"scMax"`
+	AC        uint32 `json:"ac"`
+	ACMax     uint32 `json:"acMax"`
+	MAC       uint32 `json:"mac"`
+	MACMax    uint32 `json:"macMax"`
+	DC        uint32 `json:"dc"`
+	DCMax     uint32 `json:"dcMax"`
+	MC        uint32 `json:"mc"`
+	MCMax     uint32 `json:"mcMax"`
+	SC        uint32 `json:"sc"`
+	SCMax     uint32 `json:"scMax"`
 	Need      byte   `json:"need"`
 	NeedLevel byte   `json:"needLevel"`
 	Price     uint32 `json:"price"`
 	Source    int16  `json:"source"`
-	AniCount byte   `json:"aniCount"`
+	AniCount  byte   `json:"aniCount"`
 }
 
 type ItemDB struct {

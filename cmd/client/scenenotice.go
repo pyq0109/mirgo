@@ -18,12 +18,11 @@ type NoticeScene struct {
 	Lines      []string
 	Ready      bool
 
+	okBtnArea [4]float32
+
 	// Callback
 	confirmFunc func()
 }
-
-// OK button area for notice scene.
-var noticeOKButton = loginArea{412, 520, 200, 40}
 
 // NewNoticeScene creates a new notice scene.
 func NewNoticeScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *NoticeScene {
@@ -51,7 +50,44 @@ func (s *NoticeScene) Update(dt float64) {
 
 // Render renders the notice scene.
 func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, 1024, 768, 0.05, 0.05, 0.12, 1.0, proj)
+	gl.DrawQuadColor(0, 0, 1024, 768, 0, 0, 0, 0.7, proj)
+
+	if s.resources != nil && s.resources.Prguse != nil {
+		bgImg := s.resources.Prguse.GetImage(360)
+		if bgImg != nil && bgImg.RGBA != nil {
+			bgTex := s.resources.GetTexture(s.resources.Prguse, 360)
+			if bgTex != 0 {
+				bgW := float32(bgImg.Width)
+				bgH := float32(bgImg.Height)
+				bgX := (1024 - bgW) / 2
+				bgY := (768 - bgH) / 2
+				gl.DrawQuad(bgTex, bgX, bgY, bgW, bgH, proj)
+
+				if s.text != nil {
+					for i, line := range s.Lines {
+						if i > 12 {
+							break
+						}
+						s.text.DrawText(line, bgX+20, bgY+20+float32(i)*18, 0.9, 0.9, 0.9, 1.0, proj)
+					}
+				}
+
+				okImg := s.resources.Prguse.GetImage(361)
+				if okImg != nil && okImg.RGBA != nil {
+					okTex := s.resources.GetTexture(s.resources.Prguse, 361)
+					if okTex != 0 {
+						okW := float32(okImg.Width)
+						okH := float32(okImg.Height)
+						okX := bgX + (bgW-okW)/2
+						okY := bgY + bgH - okH - 15
+						gl.DrawQuad(okTex, okX, okY, okW, okH, proj)
+						s.okBtnArea = [4]float32{okX, okY, okW, okH}
+					}
+				}
+				return
+			}
+		}
+	}
 
 	panelX, panelY := float32(200), float32(130)
 	panelW, panelH := float32(624), float32(380)
@@ -60,8 +96,10 @@ func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
 	gl.DrawQuadColor(panelX, panelY, panelW, panelH, 0.08, 0.08, 0.15, 0.95, proj)
 	gl.DrawQuadColor(panelX+2, panelY+2, panelW-4, 28, 0.15, 0.12, 0.08, 0.9, proj)
 
-	gl.DrawQuadColor(noticeOKButton.X-1, noticeOKButton.Y-1, noticeOKButton.W+2, noticeOKButton.H+2, 0.5, 0.45, 0.3, 1.0, proj)
-	gl.DrawQuadColor(noticeOKButton.X, noticeOKButton.Y, noticeOKButton.W, noticeOKButton.H, 0.2, 0.18, 0.12, 1.0, proj)
+	okX, okY, okW, okH := float32(412), float32(520), float32(200), float32(40)
+	gl.DrawQuadColor(okX-1, okY-1, okW+2, okH+2, 0.5, 0.45, 0.3, 1.0, proj)
+	gl.DrawQuadColor(okX, okY, okW, okH, 0.2, 0.18, 0.12, 1.0, proj)
+	s.okBtnArea = [4]float32{okX, okY, okW, okH}
 
 	if s.text == nil {
 		return
@@ -82,7 +120,7 @@ func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
 
 	okText := "确 定"
 	ow := s.text.MeasureText(okText)
-	s.text.DrawText(okText, noticeOKButton.X+(noticeOKButton.W-float32(ow))/2, noticeOKButton.Y+10, 1.0, 1.0, 0.8, 1.0, proj)
+	s.text.DrawText(okText, okX+(okW-float32(ow))/2, okY+10, 1.0, 1.0, 0.8, 1.0, proj)
 }
 
 // OnKey handles keyboard input.
@@ -100,7 +138,8 @@ func (s *NoticeScene) OnKey(key int, action int) {
 // OnMouse handles mouse button input.
 func (s *NoticeScene) OnMouse(x, y float64, button int, action int) {
 	fx, fy := float32(x), float32(y)
-	if hitTest(fx, fy, noticeOKButton) {
+	a := s.okBtnArea
+	if fx >= a[0] && fx <= a[0]+a[2] && fy >= a[1] && fy <= a[1]+a[3] {
 		log.Logf(log.LevelInfo, "NoticeScene", "OK button clicked")
 		s.confirm()
 	}

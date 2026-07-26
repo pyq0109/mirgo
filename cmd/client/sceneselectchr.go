@@ -183,11 +183,27 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 		return
 	}
 
-	slotX := ox + float32(71)
-	if idx == 1 {
-		slotX = ox + float32(71+340)
+	type charPos struct{ x, y float32 }
+	positions := [3][2]charPos{
+		{{71, 52}, {65, 55}},
+		{{77, 46}, {171, 97}},
+		{{85, 63}, {164, 103}},
 	}
-	slotY := oy + float32(52)
+	job := int(ch.Job)
+	sex := int(ch.Sex)
+	if job > 2 {
+		job = 0
+	}
+	if sex > 1 {
+		sex = 0
+	}
+	pos := positions[job][sex]
+	slotX := ox + pos.x
+	slotY := oy + pos.y
+	if idx == 1 {
+		slotX += 340
+		slotY += 2
+	}
 
 	var imgIdx int
 	if ch.FreezeState || ch.Freezing {
@@ -265,25 +281,29 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 		return
 	}
 
+	type textPos struct{ nameX, nameY, levelX, levelY, jobX, jobY float32 }
+	textPositions := [2]textPos{
+		{136, 476, 136, 513, 136, 548},
+		{586, 476, 666, 513, 638, 548},
+	}
+
 	for i := 0; i < 2; i++ {
 		ch := s.Characters[i]
 		if !ch.Valid {
 			continue
 		}
-		textX := ox + float32(50)
-		if i == 1 {
-			textX = ox + float32(50+340)
-		}
-		textY := oy + float32(270)
+		tp := textPositions[i]
 
-		s.drawTextOutline(ch.Name, textX, textY, 1.0, 1.0, 0.8, 1.0, proj)
+		s.drawTextOutline(ch.Name, ox+tp.nameX, oy+tp.nameY, 1.0, 1.0, 0.8, 1.0, proj)
+
+		levelStr := fmt.Sprintf("Lv.%d", ch.Level)
+		s.drawTextOutline(levelStr, ox+tp.levelX, oy+tp.levelY, 0.8, 0.8, 0.8, 1.0, proj)
 
 		jobName := "未知"
 		if int(ch.Job) < len(jobNames) {
 			jobName = jobNames[ch.Job]
 		}
-		info := fmt.Sprintf("Lv.%d %s", ch.Level, jobName)
-		s.drawTextOutline(info, textX, textY+20, 0.8, 0.8, 0.8, 1.0, proj)
+		s.drawTextOutline(jobName, ox+tp.jobX, oy+tp.jobY, 0.8, 0.8, 0.8, 1.0, proj)
 	}
 
 	if s.errorMsg != "" {
@@ -293,8 +313,11 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 
 func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32) {
 	gl.DrawQuadColor(0, 0, 1024, 768, 0, 0, 0, 0.5, proj)
-	gl.DrawQuadColor(352, 200, 320, 260, 0.12, 0.12, 0.2, 0.95, proj)
-	gl.DrawQuadColor(354, 202, 316, 256, 0.18, 0.18, 0.28, 0.95, proj)
+
+	if !s.drawPrguseImage(73, 352, 200, proj) {
+		gl.DrawQuadColor(352, 200, 320, 260, 0.12, 0.12, 0.2, 0.95, proj)
+		gl.DrawQuadColor(354, 202, 316, 256, 0.18, 0.18, 0.28, 0.95, proj)
+	}
 
 	if s.text == nil {
 		return
@@ -317,6 +340,7 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 	}
 
 	s.text.DrawText("职业:", 372, 308, 0.9, 0.9, 0.9, 1.0, proj)
+	jobImgIdx := []int{74, 75, 76}
 	for i, name := range jobNames {
 		var r, g, b float32
 		if i == s.createJob {
@@ -324,12 +348,15 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 		} else {
 			r, g, b = 0.7, 0.7, 0.7
 		}
-		gl.DrawQuadColor(createJobAreas[i].X, createJobAreas[i].Y, createJobAreas[i].W, createJobAreas[i].H, 0.2, 0.2, 0.3, 0.8, proj)
+		if !s.drawPrguseImage(jobImgIdx[i], createJobAreas[i].X, createJobAreas[i].Y, proj) {
+			gl.DrawQuadColor(createJobAreas[i].X, createJobAreas[i].Y, createJobAreas[i].W, createJobAreas[i].H, 0.2, 0.2, 0.3, 0.8, proj)
+		}
 		s.text.DrawText(name, createJobAreas[i].X+12, createJobAreas[i].Y+3, r, g, b, 1.0, proj)
 	}
 
 	s.text.DrawText("性别:", 372, 348, 0.9, 0.9, 0.9, 1.0, proj)
 	sexNames := []string{"男", "女"}
+	sexImgIdx := []int{77, 78}
 	for i, name := range sexNames {
 		var r, g, b float32
 		if i == s.createSex {
@@ -337,14 +364,20 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 		} else {
 			r, g, b = 0.7, 0.7, 0.7
 		}
-		gl.DrawQuadColor(createSexAreas[i].X, createSexAreas[i].Y, createSexAreas[i].W, createSexAreas[i].H, 0.2, 0.2, 0.3, 0.8, proj)
+		if !s.drawPrguseImage(sexImgIdx[i], createSexAreas[i].X, createSexAreas[i].Y, proj) {
+			gl.DrawQuadColor(createSexAreas[i].X, createSexAreas[i].Y, createSexAreas[i].W, createSexAreas[i].H, 0.2, 0.2, 0.3, 0.8, proj)
+		}
 		s.text.DrawText(name, createSexAreas[i].X+20, createSexAreas[i].Y+3, r, g, b, 1.0, proj)
 	}
 
-	gl.DrawQuadColor(createConfirmArea.X, createConfirmArea.Y, createConfirmArea.W, createConfirmArea.H, 0.25, 0.35, 0.25, 1.0, proj)
+	if !s.drawPrguseImage(51, createConfirmArea.X, createConfirmArea.Y, proj) {
+		gl.DrawQuadColor(createConfirmArea.X, createConfirmArea.Y, createConfirmArea.W, createConfirmArea.H, 0.25, 0.35, 0.25, 1.0, proj)
+	}
 	s.text.DrawText("确 定", createConfirmArea.X+18, createConfirmArea.Y+5, 1.0, 1.0, 1.0, 1.0, proj)
 
-	gl.DrawQuadColor(createCancelArea.X, createCancelArea.Y, createCancelArea.W, createCancelArea.H, 0.35, 0.25, 0.25, 1.0, proj)
+	if !s.drawPrguseImage(52, createCancelArea.X, createCancelArea.Y, proj) {
+		gl.DrawQuadColor(createCancelArea.X, createCancelArea.Y, createCancelArea.W, createCancelArea.H, 0.35, 0.25, 0.25, 1.0, proj)
+	}
 	s.text.DrawText("取 消", createCancelArea.X+18, createCancelArea.Y+5, 1.0, 1.0, 1.0, 1.0, proj)
 }
 
@@ -659,4 +692,20 @@ func (s *SelectChrScene) getPrguseSize(index int) (int, int) {
 		return 0, 0
 	}
 	return img.Width, img.Height
+}
+
+func (s *SelectChrScene) drawPrguseImage(index int, x, y float32, proj [16]float32) bool {
+	if s.resources.Prguse == nil || index >= s.resources.Prguse.Count {
+		return false
+	}
+	img := s.resources.Prguse.GetImage(index)
+	if img == nil || img.RGBA == nil {
+		return false
+	}
+	tex := s.resources.GetTexture(s.resources.Prguse, index)
+	if tex == 0 {
+		return false
+	}
+	s.gl.DrawQuad(tex, x, y, float32(img.Width), float32(img.Height), proj)
+	return true
 }

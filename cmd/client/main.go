@@ -804,7 +804,18 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.LightLevel = int(msg.Recog)
 
 	case protocol.SMHealthSpellChanged:
-		log.Logf(log.LevelDebug, "Client", "Health/spell changed")
+		hp := int(msg.Recog & 0xFFFF)
+		maxHP := int(msg.Param)
+		maxMP := int(msg.Tag)
+		if hp > 0 {
+			h.playScene.State.HP = hp
+		}
+		if maxHP > 0 {
+			h.playScene.State.MaxHP = maxHP
+		}
+		if maxMP > 0 {
+			h.playScene.State.MaxMP = maxMP
+		}
 
 	case protocol.SMCharStatusChanged:
 		actor := h.playScene.State.Actors.Get(msg.Recog)

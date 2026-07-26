@@ -592,6 +592,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMapDescription(server)
 		player.SendSubAbility(server)
 		player.SendRefMsg(RM_TURN, player.Dir, player.CurrX, player.CurrY, player.Name)
+	case protocol.CMQueryBagItems:
+		player.SendBagItemsFull(server)
 	default:
 		log.Logf(log.LevelDebug, "Server", "Unhandled game message: %d from %s", msg.Ident, player.Name)
 	}

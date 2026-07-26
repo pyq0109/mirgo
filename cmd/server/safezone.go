@@ -68,6 +68,17 @@ func LoadSafeZones(path string) {
 		})
 	}
 
+	hasDefault := false
+	for _, z := range zones {
+		if z.MapName == "0" && z.X == 289 && z.Y == 618 {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		zones = append(zones, SafeZone{MapName: "0", X: 289, Y: 618, Radius: 5})
+	}
+
 	globalSafeZones.zones = zones
 	log.Logf(log.LevelInfo, "SafeZone", "Loaded %d safe zones from %s", len(zones), path)
 }

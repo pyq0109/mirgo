@@ -365,7 +365,9 @@ func (a *Actor) calcHumanFrame() {
 			struckTime = 70
 		}
 		action.FTime = struckTime
-	case protocol.SMDeath, protocol.SMNowDeath:
+	case protocol.SMDeath:
+		action = HA.ActDie
+	case protocol.SMNowDeath:
 		action = HA.ActDie
 	case protocol.SMSkeleton:
 		a.Skeleton = true
@@ -390,6 +392,10 @@ func (a *Actor) calcHumanFrame() {
 	}
 
 	if a.CurrentAction == protocol.SMSkeleton {
+		a.CurrentFrame = a.EndFrame
+	}
+
+	if a.CurrentAction == protocol.SMDeath {
 		a.CurrentFrame = a.EndFrame
 	}
 }
@@ -736,10 +742,6 @@ func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, 
 func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
 	wpord := getWordOrder(a.Sex, a.CurrentFrame)
 
-	if a.Effect > 0 && (a.Dir == 3 || a.Dir == 4 || a.Dir == 5) {
-		a.drawWingLayer(gl, resources, screenX, screenY, proj)
-	}
-
 	if wpord == 0 && a.Weapon >= 2 {
 		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
 	}
@@ -778,10 +780,6 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 
 	if wpord == 1 && a.Weapon >= 2 {
 		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
-	}
-
-	if a.Effect > 0 && (a.Dir == 0 || a.Dir == 1 || a.Dir == 2 || a.Dir == 6 || a.Dir == 7) {
-		a.drawWingLayer(gl, resources, screenX, screenY, proj)
 	}
 }
 

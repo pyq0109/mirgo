@@ -237,7 +237,7 @@ func (s *PlayScene) Update(dt float64) {
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
-	if s.targetX >= 0 && s.State.MySelf != nil && moveTick && s.sendMove != nil {
+	if s.targetX >= 0 && s.State.MySelf != nil && moveTick && s.sendMove != nil && !s.State.MySelf.Death {
 		my := s.State.MySelf
 		if my.CurrX == s.targetX && my.CurrY == s.targetY {
 			s.targetX = -1
@@ -365,7 +365,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 			0.3, 0.3, 0.3, 0.4, proj)
 	}
 
-	if s.lighting != nil {
+	if s.lighting != nil && !s.deathGray {
 		darkness := s.calcDarkness()
 		if darkness > 0.01 {
 			lights := s.collectLightSources()
@@ -376,8 +376,21 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	s.animCounter++
 
 	uiProj := engine.OrthoProj(1024, 768)
-	if s.showMinimap && s.minimap != nil {
-		glState.DrawQuad(s.minimap.GetTexture(), 814, 10, minimapSize, minimapSize, uiProj)
+	if s.showMinimap {
+		mmapDrawn := false
+		if s.resources.Mmap != nil && s.resources.Mmap.Count > 0 {
+			mmImg := s.resources.Mmap.GetImage(0)
+			if mmImg != nil && mmImg.RGBA != nil {
+				mmTex := s.resources.GetTexture(s.resources.Mmap, 0)
+				if mmTex != 0 {
+					s.gl.DrawQuad(mmTex, 904, 10, 120, 120, uiProj)
+					mmapDrawn = true
+				}
+			}
+		}
+		if !mmapDrawn && s.minimap != nil {
+			glState.DrawQuad(s.minimap.GetTexture(), 814, 10, minimapSize, minimapSize, uiProj)
+		}
 	}
 	s.RenderUI(uiProj)
 }
@@ -440,20 +453,53 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 }
 
 func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]float32) {
-	if a.UserName != "" && s.text != nil {
+	showName := false
+	if s.State.MySelf != nil {
+		if a.RecogID == s.State.MySelf.RecogID {
+			showName = true
+		} else if absInt(a.CurrX-s.State.MySelf.CurrX) <= 5 && absInt(a.CurrY-s.State.MySelf.CurrY) <= 5 {
+			showName = true
+		}
+	}
+	if showName && a.UserName != "" && s.text != nil {
 		nameW := float32(s.text.MeasureText(a.UserName))
 		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
-		nameY := worldY - 60
+		nameY := worldY - 75
+		s.text.DrawText(a.UserName, nameX-1, nameY, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX+1, nameY, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, nameY-1, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, nameY+1, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX, nameY, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 
-	if a.Type == ActorMonster && !a.Death {
-		barW := float32(40)
-		barH := float32(4)
-		barX := worldX + float32(engine.TileWidth)/2 - barW/2
-		barY := worldY - 52
-		s.gl.DrawQuadColor(barX, barY, barW, barH, 0.2, 0.0, 0.0, 0.8, proj)
-		s.gl.DrawQuadColor(barX, barY, barW, barH, 0.0, 0.8, 0.0, 0.8, proj)
+	if !a.Death && s.resources.Prguse2 != nil {
+		bgImg := s.resources.Prguse2.GetImage(0)
+		fillImg := s.resources.Prguse2.GetImage(1)
+		if bgImg != nil && bgImg.RGBA != nil && fillImg != nil {
+			bgTex := s.resources.GetTexture(s.resources.Prguse2, 0)
+			fillTex := s.resources.GetTexture(s.resources.Prguse2, 1)
+			hpBarW := float32(bgImg.Width)
+			hpBarH := float32(bgImg.Height)
+			hpBarX := worldX + float32(engine.TileWidth)/2 - hpBarW/2
+			hpBarY := worldY - 70
+			if bgTex != 0 {
+				s.gl.DrawQuad(bgTex, hpBarX, hpBarY, hpBarW, hpBarH, proj)
+			}
+			ratio := float32(1.0)
+			if s.State.MySelf != nil && a.RecogID == s.State.MySelf.RecogID && s.State.MaxHP > 0 {
+				ratio = float32(s.State.HP) / float32(s.State.MaxHP)
+			}
+			if fillTex != 0 && ratio > 0 {
+				fillW := hpBarW * ratio
+				s.gl.DrawQuad(fillTex, hpBarX, hpBarY, fillW, hpBarH, proj)
+			}
+		} else {
+			s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
+			s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
+		}
+	} else if !a.Death {
+		s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
+		s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
 	}
 }
 
@@ -756,6 +802,9 @@ func (s *PlayScene) OnKey(key int, action int) {
 	if s.State.MySelf == nil || s.sendMove == nil {
 		return
 	}
+	if s.State.MySelf.Death {
+		return
+	}
 	if s.actionFailLock {
 		if time.Now().UnixMilli()-s.actionFailLockTime > 1000 {
 			s.actionFailLock = false
@@ -837,6 +886,9 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 		return
 	}
 	if s.State.MySelf == nil || s.sendMove == nil {
+		return
+	}
+	if s.State.MySelf.Death {
 		return
 	}
 	if button == 0 {
@@ -966,8 +1018,40 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 		s.gl.DrawQuadColor(0, 628, 1024, 140, 0.08, 0.08, 0.12, 0.95, proj)
 	}
 
-	s.text.DrawText(fmt.Sprintf("HP %d/%d", st.HP, st.MaxHP), 50, 700, 1.0, 0.3, 0.3, 1.0, proj)
-	s.text.DrawText(fmt.Sprintf("MP %d/%d", st.MP, st.MaxMP), 50, 716, 0.3, 0.3, 1.0, 1.0, proj)
+	if s.resources.Prguse != nil {
+		barImg := s.resources.Prguse.GetImage(4)
+		if barImg != nil && barImg.RGBA != nil {
+			barTex := s.resources.GetTexture(s.resources.Prguse, 4)
+			if barTex != 0 {
+				barX := float32(40)
+				barY := float32(640)
+				barW := float32(barImg.Width)
+				barH := float32(barImg.Height)
+				s.gl.DrawQuad(barTex, barX, barY, barW, barH, proj)
+				hpRatio := float32(0)
+				if st.MaxHP > 0 {
+					hpRatio = float32(st.HP) / float32(st.MaxHP)
+				}
+				halfW := barW / 2
+				if hpRatio < 1.0 {
+					emptyX := barX + halfW*hpRatio
+					emptyW := halfW * (1.0 - hpRatio)
+					s.gl.DrawQuadColor(emptyX, barY, emptyW, barH, 0, 0, 0, 0.6, proj)
+				}
+				mpRatio := float32(0)
+				if st.MaxMP > 0 {
+					mpRatio = float32(st.MP) / float32(st.MaxMP)
+				}
+				if mpRatio < 1.0 {
+					emptyX := barX + halfW + halfW*mpRatio
+					emptyW := halfW * (1.0 - mpRatio)
+					s.gl.DrawQuadColor(emptyX, barY, emptyW, barH, 0, 0, 0, 0.6, proj)
+				}
+			}
+		}
+	}
+	s.text.DrawText(fmt.Sprintf("%d/%d", st.HP, st.MaxHP), 42, 642, 1.0, 1.0, 1.0, 1.0, proj)
+	s.text.DrawText(fmt.Sprintf("%d/%d", st.MP, st.MaxMP), 90, 642, 1.0, 1.0, 1.0, 1.0, proj)
 	s.text.DrawText(fmt.Sprintf("Lv.%d", st.Level), 50, 684, 1.0, 1.0, 0.5, 1.0, proj)
 
 	if s.resources.Prguse != nil {
@@ -976,10 +1060,10 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 			x, y  float32
 			label string
 		}{
-			{8, 880, 680, "状态"},
-			{9, 910, 680, "背包"},
-			{10, 940, 680, "魔法"},
-			{11, 970, 680, "设置"},
+			{8, 843, 680, "状态"},
+			{9, 882, 660, "背包"},
+			{10, 922, 640, "魔法"},
+			{11, 964, 620, "设置"},
 		}
 		for _, btn := range buttons {
 			if !s.drawWilImage(s.resources.Prguse, btn.idx, btn.x, btn.y, proj) {
@@ -1009,24 +1093,33 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 		s.text.DrawText(fmt.Sprintf("F%d", i+1), sx+2, skillY+24, 0.7, 0.7, 0.7, 1.0, proj)
 	}
 
-	chatY := float32(650)
+	chatX := float32(208)
+	chatY := float32(620)
 	for i := len(s.chatMessages) - 1; i >= 0; i-- {
 		msg := s.chatMessages[i]
-		alpha := float32(1.0)
-		age := time.Now().UnixMilli() - msg.Time
-		if age > 10000 {
-			alpha = 0.5
+		r, g, b := float32(1.0), float32(1.0), float32(0.8)
+		if strings.HasPrefix(msg.Text, "[系统]") {
+			r, g, b = 1.0, 0.5, 0.5
 		}
-		if age > 20000 {
-			continue
+		if strings.HasPrefix(msg.Text, "[行会]") {
+			r, g, b = 0.5, 1.0, 0.5
 		}
-		s.text.DrawText(msg.Text, 10, chatY, 1.0, 1.0, 0.8, alpha, proj)
-		chatY -= 16
+		if strings.HasPrefix(msg.Text, "[组队]") {
+			r, g, b = 0.5, 0.5, 1.0
+		}
+		if strings.HasPrefix(msg.Text, "[私聊]") {
+			r, g, b = 1.0, 0.5, 1.0
+		}
+		if strings.HasPrefix(msg.Text, "[喊话]") {
+			r, g, b = 1.0, 1.0, 0.0
+		}
+		s.text.DrawText(msg.Text, chatX, chatY, r, g, b, 1.0, proj)
+		chatY -= 14
 	}
 
 	if s.chatMode {
-		s.gl.DrawQuadColor(10, 750, 400, 18, 0.0, 0.0, 0.0, 0.8, proj)
-		s.text.DrawText("> "+s.chatInput+"|", 14, 752, 1.0, 1.0, 1.0, 1.0, proj)
+		s.gl.DrawQuadColor(208, 750, 386, 16, 0.7, 0.7, 0.7, 0.9, proj)
+		s.text.DrawText(s.chatInput+"|", 212, 752, 0.0, 0.0, 0.0, 1.0, proj)
 	}
 
 	if st.ShowNpcDialog {
@@ -1051,7 +1144,7 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 
 func (s *PlayScene) renderBagPanel(proj [16]float32) {
 	st := s.State
-	px, py := float32(620), float32(200)
+	px, py := float32(0), float32(0)
 
 	if !s.drawWilImage(s.resources.Prguse, 3, px, py, proj) {
 		s.gl.DrawQuadColor(px, py, 320, 380, 0.08, 0.08, 0.12, 0.92, proj)
@@ -1096,7 +1189,7 @@ func (s *PlayScene) renderBagPanel(proj [16]float32) {
 
 func (s *PlayScene) renderEquipPanel(proj [16]float32) {
 	st := s.State
-	px, py := float32(100), float32(150)
+	px, py := float32(780), float32(0)
 
 	if !s.drawWilImage(s.resources.Prguse, 370, px, py, proj) {
 		s.gl.DrawQuadColor(px, py, 240, 350, 0.08, 0.08, 0.12, 0.92, proj)

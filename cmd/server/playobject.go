@@ -99,7 +99,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 			p.skeletonSent = true
 			p.envir.broadcastRefMsg(p.BaseObject, RM_DEATH, p.ID, p.CurrX, p.CurrY, 0)
 		}
-		if now-p.deathTick > 30000 {
+		if now-p.deathTick > 180000 {
 			p.resurrect(server)
 		}
 		return
@@ -114,6 +114,13 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer) {
+	if p.Death {
+		switch msg.Ident {
+		case protocol.CMSay, protocol.CMQueryBagItems, protocol.CMTakeOnItem, protocol.CMTakeOffItem:
+		default:
+			return
+		}
+	}
 	switch msg.Ident {
 	case protocol.CMTurn:
 		p.HandleTurn(msg, server)
