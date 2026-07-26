@@ -3,11 +3,14 @@
 import (
 	"encoding/binary"
 	"math"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/protocol"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
+
+const SMHorseRun = 5010
 
 type ActorType int
 
@@ -67,6 +70,8 @@ type Actor struct {
 	DefFrameTime   int64
 	WarModeTime    int64
 
+	RushDir int
+
 	MsgList []ActorMsg
 
 	RealActionMsg ActorMsg
@@ -121,7 +126,7 @@ func (a *Actor) ProcMsg() {
 
 func (a *Actor) ReadyAction(msg ActorMsg) {
 	switch msg.Ident {
-	case protocol.SMWalk, protocol.SMRun, protocol.SMTurn, protocol.SMRush, protocol.SMRushKung:
+	case protocol.SMWalk, protocol.SMRun, protocol.SMTurn, protocol.SMRush, protocol.SMRushKung, protocol.SMBackStep, SMHorseRun:
 		a.updateFeature(msg.Feature)
 	}
 
@@ -141,8 +146,10 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 	a.CurrentAction = msg.Ident
 	a.CalcActorFrame()
 
-	if msg.Ident == protocol.SMWalk || msg.Ident == protocol.SMRun {
+	if msg.Ident == protocol.SMWalk || msg.Ident == protocol.SMRun || msg.Ident == SMHorseRun {
 		a.Shift(a.Dir, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
+	} else if msg.Ident == protocol.SMBackStep {
+		a.Shift((a.Dir+4)%8, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
 	}
 }
 
@@ -242,13 +249,34 @@ func (a *Actor) calcHumanFrame() {
 	case protocol.SMRun:
 		action = HA.ActRun
 		a.MoveStep = 2
-	case protocol.SMRush, protocol.SMRushKung:
+	case SMHorseRun:
 		action = HA.ActRun
+		a.MoveStep = 3
+	case protocol.SMRush, protocol.SMRushKung:
+		if a.RushDir == 0 {
+			a.RushDir = 1
+			action = HA.ActRushLeft
+		} else {
+			a.RushDir = 0
+			action = HA.ActRushRight
+		}
 		a.MoveStep = 1
+	case protocol.SMBackStep:
+		action = HA.ActWalk
+		a.MoveStep = 1
+	case protocol.SMSitdown:
+		action = HA.ActSitdown
+		a.MoveStep = 0
+	case protocol.SMThrow:
+		action = HA.ActHit
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
 	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit,
 		protocol.SMPowerHit, protocol.SMLongHit, protocol.SMWideHit,
 		protocol.SMCrsHit, protocol.SMTwinHit, protocol.SMFireHit:
 		action = HA.ActHit
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
 	case protocol.SMSpell:
 		action = HA.ActSpell
 	case protocol.SMStruck:
@@ -308,7 +336,7 @@ func (a *Actor) calcNPCFrame() {
 
 func (a *Actor) Move(now int64) bool {
 	switch a.CurrentAction {
-	case protocol.SMWalk, protocol.SMRun, protocol.SMRush, protocol.SMRushKung:
+	case protocol.SMWalk, protocol.SMRun, protocol.SMRush, protocol.SMRushKung, protocol.SMBackStep, SMHorseRun:
 	default:
 		return false
 	}
@@ -322,7 +350,11 @@ func (a *Actor) Move(now int64) bool {
 		a.CurrentFrame++
 		cur := a.CurrentFrame - a.StartFrame + 1
 		max := a.EndFrame - a.StartFrame + 1
-		a.Shift(a.Dir, a.MoveStep, cur, max)
+		shiftDir := a.Dir
+		if a.CurrentAction == protocol.SMBackStep {
+			shiftDir = (a.Dir + 4) % 8
+		}
+		a.Shift(shiftDir, a.MoveStep, cur, max)
 	}
 
 	if a.CurrentFrame >= a.EndFrame {
@@ -335,7 +367,8 @@ func (a *Actor) Move(now int64) bool {
 
 func (a *Actor) Run(now int64) {
 	if a.CurrentAction == protocol.SMWalk || a.CurrentAction == protocol.SMRun ||
-		a.CurrentAction == protocol.SMRush || a.CurrentAction == protocol.SMRushKung {
+		a.CurrentAction == protocol.SMRush || a.CurrentAction == protocol.SMRushKung ||
+		a.CurrentAction == protocol.SMBackStep || a.CurrentAction == SMHorseRun {
 		return
 	}
 
@@ -561,6 +594,12 @@ func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, 
 }
 
 func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+	wpord := getWordOrder(a.Sex, a.CurrentFrame)
+
+	if wpord == 0 && a.Weapon >= 2 {
+		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
+	}
+
 	bodyIdx := HumanFrame*a.Dress + a.CurrentFrame
 	if resources.Hum != nil && bodyIdx >= 0 && bodyIdx < resources.Hum.Count {
 		img := resources.Hum.GetImage(bodyIdx)
@@ -587,18 +626,27 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 		}
 	}
 
-	weaponIdx := HumanFrame*a.Weapon + a.CurrentFrame
-	if a.Weapon > 0 && resources.Weapon != nil && weaponIdx >= 0 && weaponIdx < resources.Weapon.Count {
-		img := resources.Weapon.GetImage(weaponIdx)
-		if img != nil && img.RGBA != nil {
-			tex := resources.GetTexture(resources.Weapon, weaponIdx)
-			if tex != 0 {
-				w := float32(img.Width)
-				h := float32(img.Height)
-				gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
-			}
-		}
+	if wpord == 1 && a.Weapon >= 2 {
+		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
 	}
+}
+
+func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+	weaponIdx := HumanFrame*a.Weapon + a.CurrentFrame
+	if resources.Weapon == nil || weaponIdx < 0 || weaponIdx >= resources.Weapon.Count {
+		return
+	}
+	img := resources.Weapon.GetImage(weaponIdx)
+	if img == nil || img.RGBA == nil {
+		return
+	}
+	tex := resources.GetTexture(resources.Weapon, weaponIdx)
+	if tex == 0 {
+		return
+	}
+	w := float32(img.Width)
+	h := float32(img.Height)
+	gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
 }
 
 func getWilFile(resources *engine.ResourceManager, actorType ActorType, appr int) *wil.File {
@@ -662,6 +710,12 @@ func GetMonOffset(appr int) int {
 		if npos < len(offsets) {
 			return offsets[npos]
 		}
+		return npos * 360
+	case 18, 19, 20, 21, 22, 23, 24, 25, 26, 27:
+		return npos * 360
+	case 80:
+		return npos * 600
+	case 90:
 		return npos * 360
 	default:
 		return npos * 280

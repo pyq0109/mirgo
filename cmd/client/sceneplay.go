@@ -34,7 +34,9 @@ type PlayScene struct {
 
 	State        *GameState
 	sendMove     func(ident int, dir int)
+	sendAttack   func(ident int, dir int)
 	lastMoveTick int64
+	text         *engine.TextRenderer
 
 	ActionLock     bool
 	ActionLockTime int64
@@ -55,6 +57,14 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 
 func (s *PlayScene) SetSendMove(fn func(ident int, dir int)) {
 	s.sendMove = fn
+}
+
+func (s *PlayScene) SetSendAttack(fn func(ident int, dir int)) {
+	s.sendAttack = fn
+}
+
+func (s *PlayScene) SetText(t *engine.TextRenderer) {
+	s.text = t
 }
 
 func (s *PlayScene) LoadMap(mapName string) error {
@@ -205,18 +215,38 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 
 		for actorIdx < len(actors) && actors[actorIdx].Ry <= y {
 			a := actors[actorIdx]
-			screenX := float32(float64(a.Rx*engine.TileWidth) - s.cam.X + a.ShiftX)
-			screenY := float32(float64(a.Ry*engine.TileHeight) - s.cam.Y + a.ShiftY)
-			a.Draw(s.gl, s.resources, screenX, screenY, proj)
+			worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
+			worldY := float32(float64(a.Ry*engine.TileHeight) + a.ShiftY)
+			a.Draw(s.gl, s.resources, worldX, worldY, proj)
+			s.drawActorLabel(a, worldX, worldY, proj)
 			actorIdx++
 		}
 	}
 
 	for ; actorIdx < len(actors); actorIdx++ {
 		a := actors[actorIdx]
-		screenX := float32(float64(a.Rx*engine.TileWidth) - s.cam.X + a.ShiftX)
-		screenY := float32(float64(a.Ry*engine.TileHeight) - s.cam.Y + a.ShiftY)
-		a.Draw(s.gl, s.resources, screenX, screenY, proj)
+		worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
+		worldY := float32(float64(a.Ry*engine.TileHeight) + a.ShiftY)
+		a.Draw(s.gl, s.resources, worldX, worldY, proj)
+		s.drawActorLabel(a, worldX, worldY, proj)
+	}
+}
+
+func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]float32) {
+	if a.UserName != "" && s.text != nil {
+		nameW := float32(s.text.MeasureText(a.UserName))
+		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
+		nameY := worldY - 60
+		s.text.DrawText(a.UserName, nameX, nameY, 1.0, 1.0, 1.0, 1.0, proj)
+	}
+
+	if a.Type == ActorMonster && !a.Death {
+		barW := float32(40)
+		barH := float32(4)
+		barX := worldX + float32(engine.TileWidth)/2 - barW/2
+		barY := worldY - 52
+		s.gl.DrawQuadColor(barX, barY, barW, barH, 0.2, 0.0, 0.0, 0.8, proj)
+		s.gl.DrawQuadColor(barX, barY, barW, barH, 0.0, 0.8, 0.0, 0.8, proj)
 	}
 }
 
@@ -435,7 +465,72 @@ func dirOffset(dir int) (dx, dy int) {
 	return 0, 0
 }
 
-func (s *PlayScene) OnMouse(x, y float64, button int, action int) {}
+func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
+	if action != 1 {
+		return
+	}
+	if s.State.MySelf == nil || s.sendMove == nil {
+		return
+	}
+	if button == 0 {
+		if s.cam == nil || s.mapData == nil {
+			return
+		}
+		wx, wy := s.cam.ScreenToWorld(x, y)
+		tx, ty := s.cam.WorldToTile(wx, wy)
+
+		my := s.State.MySelf
+		for _, a := range s.State.Actors.All() {
+			if a.RecogID == my.RecogID {
+				continue
+			}
+			if a.CurrX == tx && a.CurrY == ty && !a.Death {
+				dir := dirToward(my.CurrX, my.CurrY, a.CurrX, a.CurrY)
+				dx := a.CurrX - my.CurrX
+				dy := a.CurrY - my.CurrY
+				if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
+					if s.sendAttack != nil {
+						s.sendAttack(protocol.CMHit, dir)
+					}
+				} else {
+					my.UpdateMsg(protocol.CMTurn, my.CurrX, my.CurrY, dir, 0, 0)
+					s.sendMove(protocol.CMTurn, dir)
+				}
+				return
+			}
+		}
+	}
+}
+
+func dirToward(fromX, fromY, toX, toY int) int {
+	dx := toX - fromX
+	dy := toY - fromY
+	if dx == 0 && dy == 0 {
+		return 0
+	}
+	if dy < 0 {
+		if dx < 0 {
+			return 7
+		}
+		if dx > 0 {
+			return 1
+		}
+		return 0
+	}
+	if dy > 0 {
+		if dx < 0 {
+			return 5
+		}
+		if dx > 0 {
+			return 3
+		}
+		return 4
+	}
+	if dx < 0 {
+		return 6
+	}
+	return 2
+}
 
 func (s *PlayScene) OnScroll(x, y float64) {
 	if s.cam != nil {

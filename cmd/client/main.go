@@ -67,6 +67,7 @@ func main() {
 
 	sceneMgr := engine.NewSceneManager()
 	playScene := NewPlayScene(glState, resources, *mapDir)
+	playScene.SetText(textRenderer)
 	loginScene := NewLoginScene(glState, resources, textRenderer)
 	selectServerScene := NewSelectServerScene(glState, resources, textRenderer)
 	selectChrScene := NewSelectChrScene(glState, resources, textRenderer)
@@ -791,6 +792,63 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMCharStatusChanged:
 		log.Logf(log.LevelDebug, "Client", "Char status changed")
 
+	case protocol.SMClearObjects:
+		log.Logf(log.LevelInfo, "Client", "Clear objects (map switch)")
+		h.playScene.State.Actors.Clear()
+		h.playScene.State.MySelf = nil
+
+	case protocol.SMChangeMap:
+		mapName := body
+		newX := int(msg.Param)
+		newY := int(msg.Tag)
+		log.Logf(log.LevelInfo, "Client", "Change map: %s (%d,%d)", mapName, newX, newY)
+		if err := h.playScene.LoadMap(mapName); err != nil {
+			log.Logf(log.LevelError, "Client", "Failed to load map on change: %v", err)
+			return
+		}
+		actor := NewActor(msg.Recog, newX, newY, 0)
+		actor.Type = ActorHuman
+		h.playScene.State.MySelf = actor
+		h.playScene.State.Actors.Add(actor)
+		actor.SendMsg(protocol.SMTurn, newX, newY, 0, 0, 0)
+
+	// =====================================================================
+	// Combat
+	// =====================================================================
+
+	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit, protocol.SMPowerHit, protocol.SMLongHit:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMStruck:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMStruck, actor.CurrX, actor.CurrY, int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMDeath, protocol.SMNowDeath:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.Death = true
+			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), 0, 0, 0)
+		}
+
+	case protocol.SMAlive:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.Death = false
+			actor.Skeleton = false
+			actor.SendMsg(protocol.SMAlive, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMWinExp:
+		log.Logf(log.LevelInfo, "Client", "Won exp: %d", msg.Recog)
+
+	case protocol.SMLevelUp:
+		log.Logf(log.LevelInfo, "Client", "Level up: %d", msg.Recog)
+
 	default:
 		log.Logf(log.LevelDebug, "Client", "Unhandled: %d", msg.Ident)
 	}
@@ -914,6 +972,11 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 	playScene.SetSendMove(func(ident int, dir int) {
 		moveMsg := protocol.MakeDefaultMsg(uint16(ident), 0, uint16(dir), 0, 0)
 		handler.Send(moveMsg, "")
+	})
+
+	playScene.SetSendAttack(func(ident int, dir int) {
+		hitMsg := protocol.MakeDefaultMsg(uint16(ident), 0, uint16(dir), 0, 0)
+		handler.Send(hitMsg, "")
 	})
 
 	go handler.ReadLoop()

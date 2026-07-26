@@ -115,3 +115,12 @@ func (m *MapManager) GetLoadedCount() int {
 	defer m.mu.RUnlock()
 	return len(m.maps)
 }
+
+// InitRoutes sets up teleport routes between loaded maps.
+func (m *MapManager) InitRoutes() {
+	if m.FindMap("0") != nil && m.FindMap("3") != nil {
+		m.AddRoute("0", 289, 618, "3", 330, 330)
+		m.AddRoute("3", 330, 331, "0", 289, 619)
+	}
+	log.Logf(log.LevelInfo, "MapManager", "Initialized %d map routes", len(m.routes))
+}

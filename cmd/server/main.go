@@ -51,9 +51,11 @@ func main() {
 		log.Logf(log.LevelError, "Server", "Failed to load maps: %v", err)
 		os.Exit(1)
 	}
+	mapMgr.InitRoutes()
 
 	sessionMgr := NewSessionManager()
 	userEngine := NewUserEngine(db, mapMgr)
+	userEngine.InitWorld(mapMgr)
 	server := netserver.NewTCPServer(listenAddr)
 
 	server.SetConnectHandler(func(session *netserver.Session) {
@@ -120,6 +122,7 @@ func main() {
 
 		// Create PlayObject
 		player := NewPlayObject(session, charData.Name, int32(charData.ID))
+		player.MapMgr = mapMgr
 		player.MapName = charData.Map
 		player.CurrX = charData.X
 		player.CurrY = charData.Y
@@ -175,7 +178,7 @@ func main() {
 
 		// Send notice (SMLogon will be sent after CMLoginNoticeOK)
 		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
-		server.Send(session.ID, noticeResp, "Welcome to MIR2 Go Server!")
+		server.Send(session.ID, noticeResp, protocol.EncodeString("Welcome to MIR2 Go Server!"))
 
 		log.Logf(log.LevelInfo, "Server", "Player %s entered game at %s(%d,%d)",
 			player.Name, player.MapName, player.CurrX, player.CurrY)
@@ -221,6 +224,7 @@ func main() {
 		case <-ticker.C:
 			tickCount++
 			userEngine.ProcessHumans(server)
+			userEngine.ProcessMonsters(server, tickCount*100)
 			userEngine.ProcessDoors(tickCount * 100)
 		case sig := <-sigChan:
 			fmt.Println()
@@ -306,7 +310,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		if serverName == "" {
 			serverName = "Server"
 		}
-		server.Send(session.ID, resp, serverName+"/1")
+		server.Send(session.ID, resp, protocol.EncodeString(serverName+"/1"))
 		log.Logf(log.LevelInfo, "Server", "Login successful for %s (account=%d)", username, accountID)
 
 	default:
@@ -326,7 +330,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		host, port := config.GetServerHostPort()
 		addrBody := fmt.Sprintf("%s/%d/%d", host, port, cert)
 		resp := protocol.MakeDefaultMsg(protocol.SMSelectServerOK, 0, 0, 0, 0)
-		server.Send(session.ID, resp, addrBody)
+		server.Send(session.ID, resp, protocol.EncodeString(addrBody))
 		log.Logf(log.LevelInfo, "Server", "[CMSelectServer] Sent SMSelectServerOK: %s (cert=%d)", addrBody, cert)
 
 	case protocol.CMQueryChr:
@@ -430,7 +434,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		host, port := config.GetServerHostPort()
 		startBody := fmt.Sprintf("%s/%d", host, port)
 		startResp := protocol.MakeDefaultMsg(protocol.SMStartPlay, 0, 0, 0, 0)
-		server.Send(session.ID, startResp, startBody)
+		server.Send(session.ID, startResp, protocol.EncodeString(startBody))
 		log.Logf(log.LevelInfo, "Server", "[CMSelChr] Sent SMStartPlay: %s", startBody)
 
 	default:
@@ -507,7 +511,7 @@ func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, 
 
 	// msg.Param = character count
 	resp := protocol.MakeDefaultMsg(protocol.SMQueryChr, int32(len(chars)), 0, 0, 0)
-	server.Send(session.ID, resp, sb.String())
+	server.Send(session.ID, resp, protocol.EncodeString(sb.String()))
 
 	log.Logf(log.LevelInfo, "Server", "Sent %d characters to session %d", len(chars), session.ID)
 }

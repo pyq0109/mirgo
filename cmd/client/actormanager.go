@@ -97,16 +97,15 @@ func NewActorFromMessage(msg protocol.DefaultMessage, body string) *Actor {
 			raceImg := byte(feature & 0xFF)
 			if raceImg == 0 {
 				actor.Type = ActorHuman
+			} else if raceImg == 10 || raceImg == 15 {
+				actor.Type = ActorNPC
+				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
 			} else {
 				actor.Type = ActorMonster
 				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
 				actor.MonAction = GetRaceByPM(int(raceImg))
 			}
 		}
-	}
-
-	if actor.Type == ActorHuman && actor.Dress == 0 && actor.Hair == 0 && actor.Weapon == 0 {
-		actor.Type = ActorHuman
 	}
 
 	return actor

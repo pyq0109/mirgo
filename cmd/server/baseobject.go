@@ -16,6 +16,7 @@ const (
 	RM_DEATH     = 10008
 	RM_SKELETON  = 10009
 	RM_LOGON     = 10010
+	RM_HIT       = 10011
 )
 
 const viewRange = 12

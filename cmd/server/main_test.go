@@ -250,7 +250,7 @@ func newTestServer(t *testing.T) *testServer {
 		session.State = netserver.StateInGame
 		session.CharacterID = charData.ID
 		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
-		ts.server.Send(session.ID, noticeResp, "Welcome!")
+		ts.server.Send(session.ID, noticeResp, protocol.EncodeString("Welcome!"))
 		return true
 	})
 
@@ -278,14 +278,14 @@ func newTestServer(t *testing.T) *testServer {
 				session.AccountName = username
 				session.CharacterID = accountID
 				resp := protocol.MakeDefaultMsg(protocol.SMPassOKSelectServer, 0, 0, 0, 0)
-				ts.server.Send(session.ID, resp, "Server/1")
+				ts.server.Send(session.ID, resp, protocol.EncodeString("Server/1"))
 			}
 		case netserver.StateAuthenticated:
 			switch msg.Ident {
 			case protocol.CMSelectServer:
 				session.Certification = 54321
 				resp := protocol.MakeDefaultMsg(protocol.SMSelectServerOK, 0, 0, 0, 0)
-				ts.server.Send(session.ID, resp, fmt.Sprintf("127.0.0.1/%d/54321", port))
+				ts.server.Send(session.ID, resp, protocol.EncodeString(fmt.Sprintf("127.0.0.1/%d/54321", port)))
 			case protocol.CMQueryChr:
 				chars, _ := db.GetCharactersByAccount(session.CharacterID)
 				var sb strings.Builder
@@ -307,7 +307,7 @@ func newTestServer(t *testing.T) *testServer {
 					sb.WriteString(fmt.Sprintf("%d", c.Sex))
 				}
 				resp := protocol.MakeDefaultMsg(protocol.SMQueryChr, int32(len(chars)), 0, 0, 0)
-				ts.server.Send(session.ID, resp, sb.String())
+				ts.server.Send(session.ID, resp, protocol.EncodeString(sb.String()))
 			case protocol.CMSelChr:
 				charName := body
 				if idx := strings.Index(body, "/"); idx >= 0 {
@@ -318,7 +318,7 @@ func newTestServer(t *testing.T) *testServer {
 					return
 				}
 				startResp := protocol.MakeDefaultMsg(protocol.SMStartPlay, 0, 0, 0, 0)
-				ts.server.Send(session.ID, startResp, fmt.Sprintf("127.0.0.1/%d", port))
+				ts.server.Send(session.ID, startResp, protocol.EncodeString(fmt.Sprintf("127.0.0.1/%d", port)))
 			}
 		case netserver.StateInGame:
 			// Game messages — handled by raw handler for **login

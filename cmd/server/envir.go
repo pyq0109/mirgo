@@ -134,6 +134,55 @@ func (e *Environment) getPlayerByID(id int32) *PlayObject {
 	return nil
 }
 
+func (e *Environment) getObjectByID(id int32) interface{} {
+	for i := range e.Cells {
+		for _, o := range e.Cells[i].ObjList {
+			if o.Type != OS_MOVINGOBJECT {
+				continue
+			}
+			switch obj := o.Obj.(type) {
+			case *PlayObject:
+				if obj.ID == id {
+					return obj
+				}
+			case *MonsterObject:
+				if obj.ID == id {
+					return obj
+				}
+			case *NpcObject:
+				if obj.ID == id {
+					return obj
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func objectBase(obj interface{}) *BaseObject {
+	switch o := obj.(type) {
+	case *PlayObject:
+		return o.BaseObject
+	case *MonsterObject:
+		return o.BaseObject
+	case *NpcObject:
+		return o.BaseObject
+	}
+	return nil
+}
+
+func objectFeature(obj interface{}) int32 {
+	switch o := obj.(type) {
+	case *PlayObject:
+		return o.Feature()
+	case *MonsterObject:
+		return o.Feature()
+	case *NpcObject:
+		return o.Feature()
+	}
+	return 0
+}
+
 // AddObject adds an object to the map at the given position.
 func (e *Environment) AddObject(x, y int, objType byte, obj interface{}) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
@@ -198,4 +247,51 @@ func (e *Environment) GetRangeObjects(x, y, radius int) []interface{} {
 // RawMap returns the underlying map data.
 func (e *Environment) RawMap() *mapformat.MapData {
 	return e.rawMap
+}
+
+func (e *Environment) getMonsterByBase(base *BaseObject) *MonsterObject {
+	for i := range e.Cells {
+		for _, o := range e.Cells[i].ObjList {
+			if o.Type != OS_MOVINGOBJECT {
+				continue
+			}
+			if mon, ok := o.Obj.(*MonsterObject); ok && mon.BaseObject == base {
+				return mon
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Environment) getPlayerByBase(base *BaseObject) *PlayObject {
+	for i := range e.Cells {
+		for _, o := range e.Cells[i].ObjList {
+			if o.Type != OS_MOVINGOBJECT {
+				continue
+			}
+			if p, ok := o.Obj.(*PlayObject); ok && p.BaseObject == base {
+				return p
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Environment) broadcastRefMsg(center *BaseObject, ident int, sourceID int32, param1, param2, param3 int) {
+	objs := e.GetRangeObjects(center.CurrX, center.CurrY, viewRange)
+	for _, obj := range objs {
+		p, ok := obj.(*PlayObject)
+		if !ok || p.Ghost {
+			continue
+		}
+		p.msgMu.Lock()
+		p.msgList = append(p.msgList, SendMessage{
+			Ident:    ident,
+			Param1:   param1,
+			Param2:   param2,
+			Param3:   param3,
+			SourceID: sourceID,
+		})
+		p.msgMu.Unlock()
+	}
 }

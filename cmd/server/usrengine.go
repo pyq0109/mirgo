@@ -14,6 +14,11 @@ type UserEngine struct {
 
 	db     *storage.Database
 	mapMgr *MapManager
+
+	Monsters      []*MonsterObject
+	Npcs          []*NpcObject
+	MonGenList    []MonGenEntry
+	nextMonsterID int32
 }
 
 func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {
@@ -21,6 +26,7 @@ func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {
 		PlayObjectList: make(map[int32]*PlayObject),
 		db:             db,
 		mapMgr:         mapMgr,
+		nextMonsterID:  100000,
 	}
 }
 

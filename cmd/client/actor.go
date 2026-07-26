@@ -81,7 +81,7 @@ func GetRaceByPM(race int) *MonsterAction {
 		return &MA10
 	case 11:
 		return &MA11
-	case 12:
+	case 12, 24:
 		return &MA12
 	case 13, 14, 17, 18, 23:
 		return &MA14
@@ -89,20 +89,42 @@ func GetRaceByPM(race int) *MonsterAction {
 		return &MA15
 	case 16:
 		return &MA16
-	case 19, 20, 21, 37, 40, 45, 52, 53, 64, 65, 66, 67, 68, 69, 73, 74, 79:
+	case 19, 20, 21, 30, 31, 37, 40, 41, 42, 45, 48, 49, 52, 53, 64, 65, 66, 67, 68, 69, 73, 74, 79:
 		return &MA19
 	case 32:
 		return &MA24
 	case 33:
 		return &MA25
+	case 34, 90:
+		return &MA30
+	case 35:
+		return &MA31
+	case 36:
+		return &MA32
 	case 43:
 		return &MA21
 	case 47:
 		return &MA22
+	case 54:
+		return &MA28
+	case 55:
+		return &MA29
 	case 60, 61, 62, 70, 71, 72:
 		return &MA33
+	case 63:
+		return &MA34
 	case 75, 77:
 		return &MA39
+	case 76:
+		return &MA38
+	case 78:
+		return &MA40
+	case 80:
+		return &MA42
+	case 81:
+		return &MA43
+	case 83:
+		return &MA44
 	case 84, 85, 86, 87, 88, 89:
 		return &MA45
 	case 98:
@@ -110,7 +132,7 @@ func GetRaceByPM(race int) *MonsterAction {
 	case 99:
 		return &MA26
 	default:
-		return &MA19 // Default
+		return &MA19
 	}
 }
 
@@ -202,7 +224,7 @@ var MA21 = MonsterAction{
 	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 20, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 30, Frame: 10, Skip: 0, FTime: 150, UseTick: 0},
-	ActDeath:   ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 200, UseTick: 3},
+	ActDeath:   ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 }
 
 var MA22 = MonsterAction{
@@ -211,7 +233,7 @@ var MA22 = MonsterAction{
 	ActAttack:  ActionInfo{Start: 240, Frame: 6, Skip: 4, FTime: 100, UseTick: 0},
 	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 320, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
-	ActDie:     ActionInfo{Start: 340, Frame: 10, Skip: 0, FTime: 140, UseTick: 0},
+	ActDie:     ActionInfo{Start: 340, Frame: 10, Skip: 0, FTime: 160, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 0, Frame: 6, Skip: 4, FTime: 0, UseTick: 0},
 }
 
@@ -227,10 +249,10 @@ var MA24 = MonsterAction{
 
 var MA25 = MonsterAction{
 	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
-	ActWalk:    ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 160, UseTick: 3},
+	ActWalk:    ActionInfo{Start: 70, Frame: 10, Skip: 0, FTime: 160, UseTick: 3},
 	ActAttack:  ActionInfo{Start: 20, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
 	ActCritical: ActionInfo{Start: 10, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
-	ActStruck:  ActionInfo{Start: 30, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
+	ActStruck:  ActionInfo{Start: 50, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 50, Frame: 20, Skip: 0, FTime: 150, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 200, UseTick: 3},
 }
@@ -238,8 +260,8 @@ var MA25 = MonsterAction{
 var MA26 = MonsterAction{
 	ActStand:   ActionInfo{Start: 0, Frame: 1, Skip: 7, FTime: 200, UseTick: 0},
 	ActWalk:    ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
-	ActAttack:  ActionInfo{Start: 56, Frame: 6, Skip: 2, FTime: 150, UseTick: 0},
-	ActCritical: ActionInfo{Start: 64, Frame: 6, Skip: 2, FTime: 150, UseTick: 0},
+	ActAttack:  ActionInfo{Start: 56, Frame: 6, Skip: 2, FTime: 500, UseTick: 0},
+	ActCritical: ActionInfo{Start: 64, Frame: 6, Skip: 2, FTime: 500, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 0, Frame: 4, Skip: 4, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 24, Frame: 10, Skip: 0, FTime: 140, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
@@ -301,7 +323,7 @@ var MA32 = MonsterAction{
 	ActAttack:  ActionInfo{Start: 0, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
 	ActCritical: ActionInfo{Start: 0, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 0, Frame: 2, Skip: 8, FTime: 100, UseTick: 0},
-	ActDie:     ActionInfo{Start: 80, Frame: 10, Skip: 0, FTime: 150, UseTick: 0},
+	ActDie:     ActionInfo{Start: 80, Frame: 10, Skip: 0, FTime: 80, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 80, Frame: 10, Skip: 0, FTime: 200, UseTick: 3},
 }
 
@@ -366,12 +388,12 @@ var MA38 = MonsterAction{
 }
 
 var MA39 = MonsterAction{
-	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
+	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 300, UseTick: 0},
 	ActWalk:    ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActAttack:  ActionInfo{Start: 10, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
 	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 20, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
-	ActDie:     ActionInfo{Start: 30, Frame: 10, Skip: 0, FTime: 150, UseTick: 0},
+	ActDie:     ActionInfo{Start: 30, Frame: 10, Skip: 0, FTime: 80, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 }
 
@@ -397,7 +419,7 @@ var MA41 = MonsterAction{
 
 var MA42 = MonsterAction{
 	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
-	ActWalk:    ActionInfo{Start: 10, Frame: 8, Skip: 2, FTime: 160, UseTick: 3},
+	ActWalk:    ActionInfo{Start: 10, Frame: 8, Skip: 2, FTime: 160, UseTick: 0},
 	ActAttack:  ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
@@ -407,8 +429,8 @@ var MA42 = MonsterAction{
 
 var MA43 = MonsterAction{
 	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
-	ActWalk:    ActionInfo{Start: 80, Frame: 6, Skip: 4, FTime: 160, UseTick: 3},
-	ActAttack:  ActionInfo{Start: 160, Frame: 6, Skip: 4, FTime: 100, UseTick: 0},
+	ActWalk:    ActionInfo{Start: 80, Frame: 6, Skip: 4, FTime: 160, UseTick: 0},
+	ActAttack:  ActionInfo{Start: 160, Frame: 6, Skip: 4, FTime: 160, UseTick: 0},
 	ActCritical: ActionInfo{Start: 160, Frame: 6, Skip: 4, FTime: 100, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 240, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 260, Frame: 10, Skip: 0, FTime: 150, UseTick: 0},
@@ -416,7 +438,7 @@ var MA43 = MonsterAction{
 }
 
 var MA44 = MonsterAction{
-	ActStand:   ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 200, UseTick: 0},
+	ActStand:   ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 300, UseTick: 0},
 	ActWalk:    ActionInfo{Start: 10, Frame: 6, Skip: 4, FTime: 160, UseTick: 3},
 	ActAttack:  ActionInfo{Start: 20, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
 	ActCritical: ActionInfo{Start: 40, Frame: 10, Skip: 0, FTime: 120, UseTick: 0},
@@ -426,9 +448,9 @@ var MA44 = MonsterAction{
 }
 
 var MA45 = MonsterAction{
-	ActStand:   ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 200, UseTick: 0},
-	ActWalk:    ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 200, UseTick: 3},
-	ActAttack:  ActionInfo{Start: 10, Frame: 10, Skip: 0, FTime: 120, UseTick: 0},
+	ActStand:   ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 300, UseTick: 0},
+	ActWalk:    ActionInfo{Start: 0, Frame: 10, Skip: 0, FTime: 300, UseTick: 3},
+	ActAttack:  ActionInfo{Start: 10, Frame: 10, Skip: 0, FTime: 300, UseTick: 0},
 	ActCritical: ActionInfo{Start: 10, Frame: 10, Skip: 0, FTime: 120, UseTick: 0},
 	ActStruck:  ActionInfo{Start: 0, Frame: 1, Skip: 9, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 0, Frame: 1, Skip: 9, FTime: 150, UseTick: 0},
@@ -436,7 +458,7 @@ var MA45 = MonsterAction{
 }
 
 var MA46 = MonsterAction{
-	ActStand:   ActionInfo{Start: 0, Frame: 20, Skip: 0, FTime: 200, UseTick: 0},
+	ActStand:   ActionInfo{Start: 0, Frame: 20, Skip: 0, FTime: 100, UseTick: 0},
 	ActWalk:    ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActAttack:  ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
 	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},

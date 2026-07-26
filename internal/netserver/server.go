@@ -290,7 +290,7 @@ func (s *TCPServer) Send(sessionID int64, msg protocol.DefaultMessage, body stri
 
 	encoded := protocol.EncodeMessage(msg)
 	if body != "" {
-		encoded += protocol.EncodeString(body)
+		encoded += body
 	}
 
 	frame := protocol.FormatServerFrame(encoded)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"math/rand"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
@@ -16,8 +17,9 @@ type PlayObject struct {
 	AccountName string
 	SessionID   int64
 	ReadyToRun  bool
+	MapMgr      *MapManager
 
-	VisibleActors map[int32]*VisibleEntry
+	VisibleActors  map[int32]*VisibleEntry
 	lastVisionTick int64
 }
 
@@ -60,8 +62,8 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleWalk(msg, server)
 	case protocol.CMRun:
 		p.HandleRun(msg, server)
-	case protocol.CMHit:
-		p.HandleHit(msg)
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit:
+		p.HandleHit(msg, server)
 	case protocol.CMSpell:
 		p.HandleSpell(msg)
 	case RM_WALK:
@@ -72,6 +74,12 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.sendTurnToClient(server, msg)
 	case RM_DISAPPEAR:
 		p.sendDisappearToClient(server, msg)
+	case RM_HIT:
+		p.sendHitToClient(server, protocol.SMHit, msg)
+	case RM_STRUCK:
+		p.sendStruckToClient(server, msg)
+	case RM_DEATH:
+		p.sendDeathToClient(server, msg)
 	}
 }
 
@@ -93,6 +101,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	if p.WalkTo(dir) {
 		p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
 		server.SendRaw(p.Session.ID, "#+GOOD!")
+		p.CheckMapRoute(server)
 	} else {
 		p.sendMoveFail(server)
 	}
@@ -110,10 +119,165 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	p.WalkTo(dir)
 	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
 	server.SendRaw(p.Session.ID, "#+GOOD!")
+	p.CheckMapRoute(server)
 }
 
-func (p *PlayObject) HandleHit(msg SendMessage) {
-	log.Logf(log.LevelDebug, "PlayObject", "%s attacked", p.Name)
+func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
+	dir := msg.Param1
+	if dir < 0 || dir > 7 {
+		return
+	}
+	p.Dir = dir
+	p.SendRefMsg(RM_HIT, dir, p.CurrX, p.CurrY, "")
+
+	if p.envir == nil {
+		return
+	}
+
+	dx, dy := dirToOffset(dir)
+	target := p.findAttackTarget(p.CurrX+dx, p.CurrY+dy)
+	if target == nil {
+		return
+	}
+
+	damage := p.calcDamage(target)
+	p.applyDamage(server, target, damage, dir)
+}
+
+func (p *PlayObject) findAttackTarget(x, y int) *BaseObject {
+	if p.envir == nil {
+		return nil
+	}
+	if x < 0 || x >= p.envir.Width || y < 0 || y >= p.envir.Height {
+		return nil
+	}
+	idx := y*p.envir.Width + x
+	for _, o := range p.envir.Cells[idx].ObjList {
+		if o.Type != OS_MOVINGOBJECT {
+			continue
+		}
+		switch obj := o.Obj.(type) {
+		case *MonsterObject:
+			if !obj.Death && !obj.Ghost {
+				return obj.BaseObject
+			}
+		case *PlayObject:
+			if obj.ID != p.ID && !obj.Death && !obj.Ghost {
+				return obj.BaseObject
+			}
+		}
+	}
+	return nil
+}
+
+func (p *PlayObject) calcDamage(target *BaseObject) int {
+	dc := int(p.WAbil.DC&0xFFFF) + int(p.WAbil.DC>>16)
+	ac := int(target.WAbil.AC & 0xFFFF)
+
+	damage := dc - ac
+	if damage < 1 {
+		damage = 1
+	}
+	variance := damage / 5
+	if variance > 0 {
+		damage = damage - variance + rand.Intn(variance*2+1)
+	}
+	if damage < 1 {
+		damage = 1
+	}
+	return damage
+}
+
+func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject, damage int, dir int) {
+	hp := int(target.WAbil.HP)
+	hp -= damage
+	if hp < 0 {
+		hp = 0
+	}
+	target.WAbil.HP = uint16(hp)
+
+	p.envir.broadcastRefMsg(target, RM_STRUCK, p.ID, target.CurrX, target.CurrY, dir)
+
+	if hp <= 0 {
+		target.Death = true
+		p.envir.broadcastRefMsg(target, RM_DEATH, target.ID, target.CurrX, target.CurrY, dir)
+
+		if mon := p.envir.getMonsterByBase(target); mon != nil {
+			p.awardExp(server, mon)
+		}
+	} else {
+		if tp := p.envir.getPlayerByBase(target); tp != nil {
+			tp.sendHealthSpell(server)
+		}
+	}
+
+	log.Logf(log.LevelInfo, "Combat", "%s hit %s for %d damage (HP: %d/%d)",
+		p.Name, target.Name, damage, hp, target.WAbil.MaxHP)
+}
+
+func (p *PlayObject) sendHitToClient(server *netserver.TCPServer, smIdent uint16, msg SendMessage) {
+	if p.envir == nil {
+		return
+	}
+	obj := p.envir.getObjectByID(msg.SourceID)
+	src := objectBase(obj)
+	if src == nil {
+		return
+	}
+	resp := protocol.MakeDefaultMsg(smIdent, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+	server.Send(p.Session.ID, resp, body)
+}
+
+func (p *PlayObject) sendStruckToClient(server *netserver.TCPServer, msg SendMessage) {
+	resp := protocol.MakeDefaultMsg(protocol.SMStruck, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), uint16(msg.Param3))
+	server.Send(p.Session.ID, resp, "")
+}
+
+func (p *PlayObject) sendDeathToClient(server *netserver.TCPServer, msg SendMessage) {
+	resp := protocol.MakeDefaultMsg(protocol.SMDeath, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
+func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
+	exp := mon.Exp
+	if exp <= 0 {
+		exp = 10
+	}
+	p.WAbil.Exp += uint32(exp)
+
+	expMsg := protocol.MakeDefaultMsg(protocol.SMWinExp, int32(exp), 0, 0, 0)
+	server.Send(p.Session.ID, expMsg, "")
+
+	maxExp := p.GetMaxExp()
+	if p.WAbil.Exp >= maxExp {
+		p.WAbil.Exp -= maxExp
+		p.WAbil.Level++
+		p.WAbil.MaxHP += 15
+		p.WAbil.HP = p.WAbil.MaxHP
+		p.WAbil.MaxMP += 10
+		p.WAbil.MP = p.WAbil.MaxMP
+
+		levelMsg := protocol.MakeDefaultMsg(protocol.SMLevelUp, int32(p.WAbil.Level), 0, 0, 0)
+		server.Send(p.Session.ID, levelMsg, "")
+
+		log.Logf(log.LevelInfo, "Combat", "%s leveled up to %d", p.Name, p.WAbil.Level)
+	}
+}
+
+func (p *PlayObject) GetMaxExp() uint32 {
+	level := int(p.WAbil.Level)
+	if level <= 0 {
+		level = 1
+	}
+	return uint32(level * level * 100)
+}
+
+func (p *PlayObject) sendHealthSpell(server *netserver.TCPServer) {
+	resp := protocol.MakeDefaultMsg(protocol.SMHealthSpellChanged,
+		int32(p.WAbil.HP)<<16|int32(p.WAbil.MP),
+		uint16(p.WAbil.MaxHP), uint16(p.WAbil.MaxMP), 0)
+	server.Send(p.Session.ID, resp, "")
 }
 
 func (p *PlayObject) HandleSpell(msg SendMessage) {
@@ -129,12 +293,13 @@ func (p *PlayObject) sendMovementToClient(server *netserver.TCPServer, smIdent u
 	if p.envir == nil {
 		return
 	}
-	src := p.envir.getPlayerByID(msg.SourceID)
+	obj := p.envir.getObjectByID(msg.SourceID)
+	src := objectBase(obj)
 	if src == nil {
 		return
 	}
 	resp := protocol.MakeDefaultMsg(smIdent, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(src.BaseObject))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
 	server.Send(p.Session.ID, resp, body)
 }
 
@@ -142,12 +307,13 @@ func (p *PlayObject) sendTurnToClient(server *netserver.TCPServer, msg SendMessa
 	if p.envir == nil {
 		return
 	}
-	src := p.envir.getPlayerByID(msg.SourceID)
+	obj := p.envir.getObjectByID(msg.SourceID)
+	src := objectBase(obj)
 	if src == nil {
 		return
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMTurn, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(src.BaseObject))
+	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
 	if src.Name != "" {
 		body += protocol.EncodeString(src.Name)
 	}
@@ -159,9 +325,9 @@ func (p *PlayObject) sendDisappearToClient(server *netserver.TCPServer, msg Send
 	server.Send(p.Session.ID, resp, "")
 }
 
-func (p *PlayObject) encodeCharDesc(src *BaseObject) []byte {
+func (p *PlayObject) encodeCharDesc(feature int32) []byte {
 	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(src.Feature()))
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(feature))
 	binary.LittleEndian.PutUint32(buf[4:8], 0)
 	return buf
 }
@@ -176,14 +342,33 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 
 	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
 	for _, obj := range objs {
-		other, ok := obj.(*PlayObject)
-		if !ok || other.ID == p.ID || other.Ghost || other.Death || other.Hidden {
+		var id int32
+		var skip bool
+		switch o := obj.(type) {
+		case *PlayObject:
+			if o.ID == p.ID || o.Ghost || o.Death || o.Hidden {
+				skip = true
+			} else {
+				id = o.ID
+			}
+		case *MonsterObject:
+			if o.Ghost || o.Death || o.Hidden {
+				skip = true
+			} else {
+				id = o.ID
+			}
+		case *NpcObject:
+			id = o.ID
+		default:
+			skip = true
+		}
+		if skip {
 			continue
 		}
-		if entry, exists := p.VisibleActors[other.ID]; exists {
+		if entry, exists := p.VisibleActors[id]; exists {
 			entry.Flag = 1
 		} else {
-			p.VisibleActors[other.ID] = &VisibleEntry{ID: other.ID, Flag: 2}
+			p.VisibleActors[id] = &VisibleEntry{ID: id, Flag: 2}
 		}
 	}
 
@@ -194,15 +379,16 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 			server.Send(p.Session.ID, resp, "")
 			delete(p.VisibleActors, id)
 		case 2:
-			other := p.envir.getPlayerByID(id)
-			if other == nil {
+			obj := p.envir.getObjectByID(id)
+			base := objectBase(obj)
+			if base == nil {
 				delete(p.VisibleActors, id)
 				continue
 			}
-			resp := protocol.MakeDefaultMsg(protocol.SMTurn, other.ID, uint16(other.CurrX), uint16(other.CurrY), uint16(other.Dir))
-			body := protocol.EncodeBuffer(p.encodeCharDesc(other.BaseObject))
-			if other.Name != "" {
-				body += protocol.EncodeString(other.Name)
+			resp := protocol.MakeDefaultMsg(protocol.SMTurn, base.ID, uint16(base.CurrX), uint16(base.CurrY), uint16(base.Dir))
+			body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj)))
+			if base.Name != "" {
+				body += protocol.EncodeString(base.Name)
 			}
 			server.Send(p.Session.ID, resp, body)
 		}
@@ -211,7 +397,7 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 
 func (p *PlayObject) SendMapInfo(server *netserver.TCPServer) {
 	mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, int32(p.CurrX), uint16(p.CurrY), 0, 0)
-	server.Send(p.Session.ID, mapResp, p.MapName)
+	server.Send(p.Session.ID, mapResp, protocol.EncodeString(p.MapName))
 }
 
 func (p *PlayObject) SendLogon(server *netserver.TCPServer) {
@@ -251,10 +437,53 @@ func (p *PlayObject) SendDayChanging(server *netserver.TCPServer) {
 
 func (p *PlayObject) SendMapDescription(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMMapDescription, 0, 0, 0, 0)
-	server.Send(p.Session.ID, resp, p.MapName)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(p.MapName))
 }
 
 func (p *PlayObject) SendSubAbility(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMSubAbility, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+}
+
+func (p *PlayObject) CheckMapRoute(server *netserver.TCPServer) {
+	if p.MapMgr == nil {
+		return
+	}
+	route := p.MapMgr.FindRoute(p.MapName, p.CurrX, p.CurrY)
+	if route == nil {
+		return
+	}
+	newEnvir := p.MapMgr.FindMap(route.DstMap)
+	if newEnvir == nil {
+		return
+	}
+	p.EnterAnotherMap(server, newEnvir, route.DstX, route.DstY)
+}
+
+func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Environment, newX, newY int) bool {
+	p.Ghost = true
+	p.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+	p.Ghost = false
+
+	clearMsg := protocol.MakeDefaultMsg(protocol.SMClearObjects, 0, 0, 0, 0)
+	server.Send(p.Session.ID, clearMsg, "")
+
+	if p.envir != nil {
+		p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+	}
+
+	p.envir = newEnvir
+	p.MapName = newEnvir.Name
+	p.CurrX = newX
+	p.CurrY = newY
+
+	newEnvir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+
+	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, p.ID, uint16(p.CurrX), uint16(p.CurrY), 0)
+	server.Send(p.Session.ID, changeMsg, protocol.EncodeString(p.MapName))
+
+	p.VisibleActors = make(map[int32]*VisibleEntry)
+
+	log.Logf(log.LevelInfo, "PlayObject", "%s entered map %s at (%d,%d)", p.Name, p.MapName, p.CurrX, p.CurrY)
+	return true
 }
