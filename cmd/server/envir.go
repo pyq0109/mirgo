@@ -43,14 +43,25 @@ type Door struct {
 	OpenTick int64
 }
 
+// GroundItem represents an item on the ground.
+type GroundItem struct {
+	ID       int32
+	Name     string
+	Looks    int
+	X, Y     int
+	DropTick int64
+	Gold     int
+}
+
 // Environment represents a single map.
 type Environment struct {
-	Name   string
-	Width  int
-	Height int
-	Cells  []MapCellInfo
-	Flag   MapFlag
-	Doors  []Door
+	Name        string
+	Width       int
+	Height      int
+	Cells       []MapCellInfo
+	Flag        MapFlag
+	Doors       []Door
+	GroundItems []*GroundItem
 
 	rawMap *mapformat.MapData
 }
@@ -132,6 +143,20 @@ func (e *Environment) getPlayerByID(id int32) *PlayObject {
 		}
 	}
 	return nil
+}
+
+func (e *Environment) getNpcByID(id int32) (*NpcObject, bool) {
+	for i := range e.Cells {
+		for _, o := range e.Cells[i].ObjList {
+			if o.Type != OS_MOVINGOBJECT {
+				continue
+			}
+			if npc, ok := o.Obj.(*NpcObject); ok && npc.ID == id {
+				return npc, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func (e *Environment) getObjectByID(id int32) interface{} {
@@ -294,4 +319,28 @@ func (e *Environment) broadcastRefMsg(center *BaseObject, ident int, sourceID in
 		})
 		p.msgMu.Unlock()
 	}
+}
+
+func (e *Environment) AddGroundItem(item *GroundItem) {
+	e.GroundItems = append(e.GroundItems, item)
+	e.AddObject(item.X, item.Y, OS_ITEMOBJECT, item)
+}
+
+func (e *Environment) RemoveGroundItem(id int32) {
+	for i, item := range e.GroundItems {
+		if item.ID == id {
+			e.RemoveObject(item.X, item.Y, OS_ITEMOBJECT, item)
+			e.GroundItems = append(e.GroundItems[:i], e.GroundItems[i+1:]...)
+			return
+		}
+	}
+}
+
+func (e *Environment) GetGroundItemAt(x, y int) *GroundItem {
+	for _, item := range e.GroundItems {
+		if item.X == x && item.Y == y {
+			return item
+		}
+	}
+	return nil
 }

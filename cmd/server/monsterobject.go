@@ -3,6 +3,7 @@ package main
 import (
 	"math/rand"
 
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -17,11 +18,13 @@ type MonsterObject struct {
 	AttackSpeed int64
 	Exp         int
 
-	TargetID    int32
+	TargetID     int32
 	HomeX, HomeY int
-	WalkTick    int64
-	SearchTick  int64
-	HitTick     int64
+	WalkTick     int64
+	SearchTick   int64
+	HitTick      int64
+	DeathTick    int64
+	LootDropped  bool
 }
 
 func NewMonsterObject(name string, id int32, race, raceImg byte, appr uint16, hp int, walkSpeed, attackSpeed int64, exp int) *MonsterObject {
@@ -58,8 +61,13 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		if dx <= 1 && dy <= 1 {
 			if now-o.HitTick > o.AttackSpeed {
 				o.HitTick = now
-				o.TurnTo(dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY))
-				o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
+				dir := dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+				o.TurnTo(dir)
+				o.SendRefMsg(RM_TURN, dir, o.CurrX, o.CurrY, o.Name)
+
+				if !IsSafeZone(o.envir, target.CurrX, target.CurrY) {
+					o.attackPlayer(server, target, dir, now)
+				}
 			}
 		} else if now-o.WalkTick > o.WalkSpeed {
 			o.WalkTick = now
@@ -85,6 +93,43 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			}
 		}
 	}
+}
+
+func (o *MonsterObject) attackPlayer(server *netserver.TCPServer, target *PlayObject, dir int, now int64) {
+	baseDmg := o.MaxHP / 10
+	if baseDmg < 1 {
+		baseDmg = 1
+	}
+	ac := int(target.WAbil.AC & 0xFFFF)
+	damage := baseDmg - ac
+	if damage < 1 {
+		damage = 1
+	}
+
+	hp := int(target.WAbil.HP)
+	hp -= damage
+	if hp < 0 {
+		hp = 0
+	}
+	target.WAbil.HP = uint16(hp)
+
+	if o.envir != nil {
+		o.envir.broadcastRefMsg(target.BaseObject, RM_STRUCK, o.ID, target.CurrX, target.CurrY, dir)
+	}
+
+	if hp <= 0 {
+		target.Death = true
+		target.deathTick = now
+		if o.envir != nil {
+			o.envir.broadcastRefMsg(target.BaseObject, RM_DEATH, target.ID, target.CurrX, target.CurrY, dir)
+		}
+		log.Logf(log.LevelInfo, "Combat", "%s killed %s", o.Name, target.Name)
+	} else {
+		target.sendHealthSpell(server)
+	}
+
+	log.Logf(log.LevelInfo, "Combat", "%s hit %s for %d damage (HP: %d/%d)",
+		o.Name, target.Name, damage, hp, target.WAbil.MaxHP)
 }
 
 func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {

@@ -198,6 +198,24 @@ func (d *Database) DeleteCharacter(id int64) error {
 	return err
 }
 
+func (d *Database) SaveCharacterItems(charID int64, bagJSON, equipJSON []byte) error {
+	_, err := d.db.Exec(`INSERT OR REPLACE INTO character_items (character_id, slot_type, slot_index, item_data) VALUES (?, 0, 0, ?)`, charID, bagJSON)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(`INSERT OR REPLACE INTO character_items (character_id, slot_type, slot_index, item_data) VALUES (?, 1, 0, ?)`, charID, equipJSON)
+	return err
+}
+
+func (d *Database) LoadCharacterItems(charID int64) (bagJSON, equipJSON []byte, err error) {
+	err = d.db.QueryRow(`SELECT item_data FROM character_items WHERE character_id=? AND slot_type=0`, charID).Scan(&bagJSON)
+	if err != nil {
+		return nil, nil, nil
+	}
+	d.db.QueryRow(`SELECT item_data FROM character_items WHERE character_id=? AND slot_type=1`, charID).Scan(&equipJSON)
+	return bagJSON, equipJSON, nil
+}
+
 // CharacterInfo is a summary of character data.
 type CharacterInfo struct {
 	ID    int64

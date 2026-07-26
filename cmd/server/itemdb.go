@@ -1,0 +1,82 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+
+	"github.com/pyq0109/mirgo/internal/log"
+)
+
+type ItemDef struct {
+	Idx       int    `json:"idx"`
+	Name      string `json:"name"`
+	StdMode   byte   `json:"stdMode"`
+	Shape     byte   `json:"shape"`
+	Weight    byte   `json:"weight"`
+	Looks     uint16 `json:"looks"`
+	DuraMax   uint32 `json:"duraMax"`
+	AC        uint16 `json:"ac"`
+	ACMax     uint16 `json:"acMax"`
+	MAC       uint16 `json:"mac"`
+	MACMax    uint16 `json:"macMax"`
+	DC        uint16 `json:"dc"`
+	DCMax     uint16 `json:"dcMax"`
+	MC        uint16 `json:"mc"`
+	MCMax     uint16 `json:"mcMax"`
+	SC        uint16 `json:"sc"`
+	SCMax     uint16 `json:"scMax"`
+	Need      byte   `json:"need"`
+	NeedLevel byte   `json:"needLevel"`
+	Price     uint32 `json:"price"`
+}
+
+type ItemDB struct {
+	Items  []ItemDef
+	byName map[string]*ItemDef
+	byIdx  map[int]*ItemDef
+}
+
+func LoadItemDB(path string) (*ItemDB, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	var clean []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		clean = append(clean, line)
+	}
+
+	var raw struct {
+		Items []ItemDef `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
+		return nil, err
+	}
+
+	db := &ItemDB{
+		Items:  raw.Items,
+		byName: make(map[string]*ItemDef),
+		byIdx:  make(map[int]*ItemDef),
+	}
+	for i := range db.Items {
+		item := &db.Items[i]
+		db.byName[item.Name] = item
+		db.byIdx[item.Idx] = item
+	}
+	log.Logf(log.LevelInfo, "ItemDB", "Loaded %d items from %s", len(db.Items), path)
+	return db, nil
+}
+
+func (db *ItemDB) GetByName(name string) *ItemDef {
+	return db.byName[name]
+}
+
+func (db *ItemDB) GetByIdx(idx int) *ItemDef {
+	return db.byIdx[idx]
+}

@@ -17,6 +17,7 @@ const (
 	RM_SKELETON  = 10009
 	RM_LOGON     = 10010
 	RM_HIT       = 10011
+	RM_SPELL     = 10012
 )
 
 const viewRange = 12
@@ -48,6 +49,7 @@ type BaseObject struct {
 	HitPoint int
 	HitSpeed int
 	Luck     int
+	Gold     int
 
 	// State
 	StatusTimeArr [12]int16

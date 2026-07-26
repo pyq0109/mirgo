@@ -5,6 +5,7 @@ import (
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
+	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
 type MonGenEntry struct {
@@ -81,9 +82,53 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 	}
 
 	for _, m := range e.Monsters {
-		if !m.Ghost && !m.Death {
-			m.Run(server, now, e)
+		if m.Ghost {
+			continue
 		}
+		if m.Death {
+			if !m.LootDropped {
+				m.LootDropped = true
+				if m.envir != nil {
+					m.DropLoot(m.envir, &e.nextItemID, server)
+				}
+			}
+			if m.DeathTick > 0 && now-m.DeathTick > 30000 {
+				m.Ghost = true
+				if m.envir != nil {
+					m.envir.RemoveObject(m.CurrX, m.CurrY, OS_MOVINGOBJECT, m)
+				}
+				log.Logf(log.LevelInfo, "MonGen", "Corpse removed: %s (id=%d)", m.Name, m.ID)
+			}
+			continue
+		}
+		m.Run(server, now, e)
+	}
+
+	e.despawnGroundItems(server, now)
+}
+
+func (e *UserEngine) despawnGroundItems(server *netserver.TCPServer, now int64) {
+	e.mapMgr.mu.RLock()
+	defer e.mapMgr.mu.RUnlock()
+	for _, env := range e.mapMgr.maps {
+		var remaining []*GroundItem
+		for _, item := range env.GroundItems {
+			if now-item.DropTick > 60000 {
+				env.RemoveGroundItem(item.ID)
+				resp := protocol.MakeDefaultMsg(protocol.SMItemHide, item.ID, 0, 0, 0)
+				objs := env.GetRangeObjects(item.X, item.Y, viewRange)
+				for _, obj := range objs {
+					p, ok := obj.(*PlayObject)
+					if !ok || p.Ghost {
+						continue
+					}
+					server.Send(p.Session.ID, resp, "")
+				}
+			} else {
+				remaining = append(remaining, item)
+			}
+		}
+		env.GroundItems = remaining
 	}
 }
 

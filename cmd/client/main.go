@@ -198,15 +198,14 @@ func main() {
 	})
 
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
-		if action == glfw.Press {
-			switch key {
-			case glfw.KeyEscape:
-				if handler != nil {
-					handler.Close()
-					handler = nil
-				}
-				w.SetShouldClose(true)
+		if action == glfw.Press && key == glfw.KeyEscape &&
+			!playScene.State.ShowNpcDialog && !playScene.State.InDeal &&
+			!playScene.State.ShowGuild && !playScene.State.ShowStorage {
+			if handler != nil {
+				handler.Close()
+				handler = nil
 			}
+			w.SetShouldClose(true)
 		}
 		sceneMgr.OnKey(int(key), int(action))
 	})
@@ -711,10 +710,15 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMAbility:
-		log.Logf(log.LevelInfo, "Client", "Received ability")
+		log.Logf(log.LevelInfo, "Client", "Ability: level=%d hp=%d mp=%d maxhp=%d", msg.Recog, msg.Param, msg.Tag, msg.Series)
+		h.playScene.State.Level = int(msg.Recog)
+		h.playScene.State.HP = int(msg.Param)
+		h.playScene.State.MP = int(msg.Tag)
+		h.playScene.State.MaxHP = int(msg.Series)
 
 	case protocol.SMBagItems:
-		log.Logf(log.LevelInfo, "Client", "Received bag items")
+		log.Logf(log.LevelInfo, "Client", "Received bag items: count=%d", msg.Recog)
+		h.playScene.State.ParseBagItems(body)
 
 	case protocol.SMVersionFail:
 		log.Logf(log.LevelWarn, "Client", "Version mismatch")
@@ -760,9 +764,20 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMSendUseItems:
 		log.Logf(log.LevelInfo, "Client", "Received use items (equipment)")
+		h.playScene.State.ParseUseItems(body)
 
 	case protocol.SMSendMyMagic:
-		log.Logf(log.LevelInfo, "Client", "Received magic list")
+		log.Logf(log.LevelInfo, "Client", "Received magic list: count=%d", msg.Recog)
+		h.playScene.State.ParseMagics(body)
+
+	case protocol.SMHear:
+		log.Logf(log.LevelInfo, "Client", "Chat: %s", body)
+		h.playScene.AddChatMessage(body)
+
+	case protocol.SMMerchantSay:
+		log.Logf(log.LevelInfo, "Client", "NPC says: %s", body)
+		h.playScene.State.NpcDialog = body
+		h.playScene.State.ShowNpcDialog = true
 
 	case protocol.SMDayChanging:
 		log.Logf(log.LevelInfo, "Client", "Day changing: bright=%d", msg.Recog)
@@ -848,6 +863,53 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMLevelUp:
 		log.Logf(log.LevelInfo, "Client", "Level up: %d", msg.Recog)
+
+	case protocol.SMItemShow:
+		log.Logf(log.LevelDebug, "Client", "Item show: id=%d x=%d y=%d looks=%d name=%s",
+			msg.Recog, msg.Param, msg.Tag, msg.Series, body)
+		h.playScene.AddGroundItem(msg.Recog, int(msg.Param), int(msg.Tag), int(msg.Series), body)
+
+	case protocol.SMItemHide:
+		h.playScene.RemoveGroundItem(msg.Recog)
+
+	case protocol.SMDealMenu:
+		log.Logf(log.LevelInfo, "Client", "Trade: partner=%s", body)
+		h.playScene.State.InDeal = true
+		h.playScene.State.DealPartner = body
+
+	case protocol.SMDealSuccess:
+		log.Logf(log.LevelInfo, "Client", "Trade completed")
+		h.playScene.State.InDeal = false
+		h.playScene.State.DealPartner = ""
+
+	case protocol.SMDealCancel:
+		log.Logf(log.LevelInfo, "Client", "Trade cancelled")
+		h.playScene.State.InDeal = false
+		h.playScene.State.DealPartner = ""
+
+	case protocol.SMBuildGuildOK:
+		log.Logf(log.LevelInfo, "Client", "Guild created")
+
+	case protocol.SMGuildMessage:
+		log.Logf(log.LevelInfo, "Client", "Guild chat: %s", body)
+		h.playScene.AddChatMessage("[行会] " + body)
+
+	case protocol.SMStorageOK:
+		log.Logf(log.LevelInfo, "Client", "Item stored")
+
+	case protocol.SMStorageFull:
+		log.Logf(log.LevelInfo, "Client", "Storage full")
+
+	case protocol.SMTakeBackStorageItemOK:
+		log.Logf(log.LevelInfo, "Client", "Item retrieved from storage")
+
+	case protocol.SMSysMessage:
+		log.Logf(log.LevelInfo, "Client", "System: %s", body)
+		h.playScene.AddChatMessage("[系统] " + body)
+
+	case protocol.SMGoldChanged:
+		log.Logf(log.LevelInfo, "Client", "Gold: %d", msg.Recog)
+		h.playScene.State.Gold = int(msg.Recog)
 
 	default:
 		log.Logf(log.LevelDebug, "Client", "Unhandled: %d", msg.Ident)
@@ -977,6 +1039,31 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 	playScene.SetSendAttack(func(ident int, dir int) {
 		hitMsg := protocol.MakeDefaultMsg(uint16(ident), 0, uint16(dir), 0, 0)
 		handler.Send(hitMsg, "")
+	})
+
+	playScene.SetSendPickup(func() {
+		pickupMsg := protocol.MakeDefaultMsg(protocol.CMPickup, 0, 0, 0, 0)
+		handler.Send(pickupMsg, "")
+	})
+
+	playScene.SetSendChat(func(text string) {
+		sayMsg := protocol.MakeDefaultMsg(protocol.CMSay, 0, 0, 0, 0)
+		handler.Send(sayMsg, text)
+	})
+
+	playScene.SetSendSpell(func(magID int, x, y int) {
+		spellMsg := protocol.MakeDefaultMsg(protocol.CMSpell, 0, uint16(magID), uint16(x), uint16(y))
+		handler.Send(spellMsg, "")
+	})
+
+	playScene.SetSendNpcClick(func(npcID int) {
+		clickMsg := protocol.MakeDefaultMsg(protocol.CMClickNPC, int32(npcID), 0, 0, 0)
+		handler.Send(clickMsg, "")
+	})
+
+	playScene.SetSendDealCancel(func() {
+		cancelMsg := protocol.MakeDefaultMsg(protocol.CMDealCancel, 0, 0, 0, 0)
+		handler.Send(cancelMsg, "")
 	})
 
 	go handler.ReadLoop()

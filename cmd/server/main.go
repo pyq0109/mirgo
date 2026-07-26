@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -53,8 +55,26 @@ func main() {
 	}
 	mapMgr.InitRoutes()
 
+	var itemDB *ItemDB
+	itemDBPath := filepath.Join(*configDir, "items", "std_items.jsonc")
+	itemDB, err = LoadItemDB(itemDBPath)
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "Failed to load ItemDB: %v (items disabled)", err)
+		itemDB = nil
+	}
+
+	var magicDB *MagicDB
+	magicDBPath := filepath.Join(*configDir, "magic", "magic_db.jsonc")
+	magicDB, err = LoadMagicDB(magicDBPath)
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "Failed to load MagicDB: %v (magic disabled)", err)
+		magicDB = nil
+	}
+
 	sessionMgr := NewSessionManager()
 	userEngine := NewUserEngine(db, mapMgr)
+	userEngine.ItemDB = itemDB
+	userEngine.MagicDB = magicDB
 	userEngine.InitWorld(mapMgr)
 	server := netserver.NewTCPServer(listenAddr)
 
@@ -123,6 +143,9 @@ func main() {
 		// Create PlayObject
 		player := NewPlayObject(session, charData.Name, int32(charData.ID))
 		player.MapMgr = mapMgr
+		player.ItemDB = itemDB
+		player.MagicDB = magicDB
+		player.Engine = userEngine
 		player.MapName = charData.Map
 		player.CurrX = charData.X
 		player.CurrY = charData.Y
@@ -134,8 +157,10 @@ func main() {
 		player.WAbil.MaxHP = uint16(charData.HP)
 		player.WAbil.MaxMP = uint16(charData.MP)
 		player.WAbil.Exp = uint32(charData.Exp)
+		player.Gold = int(charData.Gold)
 		player.SessionID = session.ID
 		player.AccountName = session.AccountName
+		player.LastPkDecayTick = time.Now().UnixMilli()
 
 		// Find and set map environment
 		envir := mapMgr.FindMap(charData.Map)
@@ -165,6 +190,23 @@ func main() {
 		userEngine.AddPlayer(player)
 		player.ReadyToRun = true
 
+		// Load or initialize items
+		loadPlayerItems(db, player)
+
+		// Recalculate stats from equipment
+		player.RecalcAbilitys()
+
+		// Give starting spells based on job
+		switch player.Job {
+		case 0: // Warrior
+			player.learnMagic(3, 0, 1) // 基本剑术
+			player.learnMagic(4, 0, 2) // 攻杀剑术
+		case 1: // Mage
+			player.learnMagic(1, 0, 1) // 火球术
+		case 2: // Taoist
+			player.learnMagic(2, 0, 1) // 治愈术
+		}
+
 		// Send map info
 		player.SendMapInfo(server)
 		log.Logf(log.LevelInfo, "Server", "Sent map %s(%d,%d) to player %s",
@@ -173,8 +215,9 @@ func main() {
 		// Send ability
 		player.SendAbility(server)
 
-		// Send bag items (empty for now)
-		sendBagItems(server, session)
+		// Send bag and equipment
+		player.SendBagItemsFull(server)
+		player.SendUseItemsFull(server)
 
 		// Send notice (SMLogon will be sent after CMLoginNoticeOK)
 		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
@@ -226,6 +269,9 @@ func main() {
 			userEngine.ProcessHumans(server)
 			userEngine.ProcessMonsters(server, tickCount*100)
 			userEngine.ProcessDoors(tickCount * 100)
+			if tickCount%300 == 0 {
+				userEngine.SaveAllPlayers(db)
+			}
 		case sig := <-sigChan:
 			fmt.Println()
 			log.Logf(log.LevelInfo, "Server", "Received signal: %v", sig)
@@ -458,15 +504,50 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMWalk, int(msg.Param), 0, 0, "")
 	case protocol.CMRun:
 		player.SendMsg(protocol.CMRun, int(msg.Param), 0, 0, "")
-	case protocol.CMHit:
-		player.SendMsg(protocol.CMHit, int(msg.Param), int(msg.Tag), int(msg.Series), "")
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit:
+		player.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series), "")
 	case protocol.CMSpell:
 		player.SendMsg(protocol.CMSpell, int(msg.Param), int(msg.Tag), int(msg.Series), body)
+	case protocol.CMSay:
+		player.SendMsg(protocol.CMSay, 0, 0, 0, body)
+	case protocol.CMClickNPC:
+		player.SendMsg(protocol.CMClickNPC, int(msg.Recog), 0, 0, "")
+	case protocol.CMCreateGroup:
+		player.SendMsg(protocol.CMCreateGroup, int(msg.Recog), 0, 0, "")
+	case protocol.CMPickup:
+		player.SendMsg(protocol.CMPickup, 0, 0, 0, "")
+	case protocol.CMTakeOnItem:
+		player.SendMsg(protocol.CMTakeOnItem, int(msg.Param), int(msg.Tag), 0, "")
+	case protocol.CMTakeOffItem:
+		player.SendMsg(protocol.CMTakeOffItem, int(msg.Param), 0, 0, "")
+	case protocol.CMEat:
+		player.SendMsg(protocol.CMEat, int(msg.Param), 0, 0, "")
+	case protocol.CMDealTry:
+		player.SendMsg(protocol.CMDealTry, 0, 0, 0, body)
+	case protocol.CMDealAddItem:
+		player.SendMsg(protocol.CMDealAddItem, int(msg.Param), 0, 0, "")
+	case protocol.CMDealDelItem:
+		player.SendMsg(protocol.CMDealDelItem, int(msg.Param), 0, 0, "")
+	case protocol.CMDealCancel:
+		player.SendMsg(protocol.CMDealCancel, 0, 0, 0, "")
+	case protocol.CMDealChgGold:
+		player.SendMsg(protocol.CMDealChgGold, int(msg.Recog), 0, 0, "")
+	case protocol.CMDealEnd:
+		player.SendMsg(protocol.CMDealEnd, 0, 0, 0, "")
+	case protocol.CMUserStorageItem:
+		player.SendMsg(protocol.CMUserStorageItem, int(msg.Param), 0, 0, "")
+	case protocol.CMUserTakeBackStorageItem:
+		player.SendMsg(protocol.CMUserTakeBackStorageItem, int(msg.Param), 0, 0, "")
+	case protocol.CMOpenGuildDlg:
+		player.SendMsg(protocol.CMOpenGuildDlg, 0, 0, 0, body)
+	case protocol.CMHorseRun:
+		player.SendMsg(protocol.CMHorseRun, int(msg.Param), 0, 0, "")
 	case protocol.CMLoginNoticeOK:
 		log.Logf(log.LevelInfo, "Server", "Notice acknowledged by %s", player.Name)
 		player.SendLogon(server)
-		player.SendUseItems(server)
-		player.SendMyMagic(server)
+		player.SendBagItemsFull(server)
+		player.SendUseItemsFull(server)
+		player.SendMyMagicFull(server)
 		player.SendDayChanging(server)
 		player.SendMapDescription(server)
 		player.SendSubAbility(server)
@@ -516,11 +597,6 @@ func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, 
 	log.Logf(log.LevelInfo, "Server", "Sent %d characters to session %d", len(chars), session.ID)
 }
 
-// sendBagItems sends the bag items to the client (empty for now).
-func sendBagItems(server *netserver.TCPServer, session *netserver.Session) {
-	resp := protocol.MakeDefaultMsg(protocol.SMBagItems, 0, 0, 0, 0)
-	server.Send(session.ID, resp, "")
-}
 
 // sendLoginFail sends a login failure response.
 // Fix 1: Use SMPasswdFail (503) instead of SMQueryChrFail (527).
@@ -541,12 +617,107 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		HP:    int(player.WAbil.HP),
 		MP:    int(player.WAbil.MP),
 		Exp:   int64(player.WAbil.Exp),
+		Gold:  int64(player.Gold),
 	}
 	if err := db.UpdateCharacter(c); err != nil {
 		log.Logf(log.LevelError, "Server", "Failed to save character %s: %v", player.Name, err)
 	} else {
 		log.Logf(log.LevelDebug, "Server", "Saved character %s at %s(%d,%d)", player.Name, player.MapName, player.CurrX, player.CurrY)
 	}
+
+	savePlayerItems(db, player)
+}
+
+type savedUserItem struct {
+	MakeIndex int32  `json:"makeIndex"`
+	WIndex    uint16 `json:"wIndex"`
+	Dura      uint16 `json:"dura"`
+	DuraMax   uint16 `json:"duraMax"`
+}
+
+func savePlayerItems(db *storage.Database, player *PlayObject) {
+	bag := make([]savedUserItem, 0, len(player.ItemList))
+	for _, item := range player.ItemList {
+		bag = append(bag, savedUserItem{
+			MakeIndex: item.MakeIndex,
+			WIndex:    item.WIndex,
+			Dura:      item.Dura,
+			DuraMax:   item.DuraMax,
+		})
+	}
+	bagJSON, err := json.Marshal(bag)
+	if err != nil {
+		log.Logf(log.LevelError, "Server", "Failed to marshal bag items for %s: %v", player.Name, err)
+		return
+	}
+
+	equip := make([]*savedUserItem, 13)
+	for i := 0; i < 13; i++ {
+		if player.UseItems[i] != nil {
+			equip[i] = &savedUserItem{
+				MakeIndex: player.UseItems[i].MakeIndex,
+				WIndex:    player.UseItems[i].WIndex,
+				Dura:      player.UseItems[i].Dura,
+				DuraMax:   player.UseItems[i].DuraMax,
+			}
+		}
+	}
+	equipJSON, err := json.Marshal(equip)
+	if err != nil {
+		log.Logf(log.LevelError, "Server", "Failed to marshal equip items for %s: %v", player.Name, err)
+		return
+	}
+
+	if err := db.SaveCharacterItems(int64(player.ID), bagJSON, equipJSON); err != nil {
+		log.Logf(log.LevelError, "Server", "Failed to save items for %s: %v", player.Name, err)
+	}
+}
+
+func loadPlayerItems(db *storage.Database, player *PlayObject) {
+	bagJSON, equipJSON, err := db.LoadCharacterItems(int64(player.ID))
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "Failed to load items for %s: %v", player.Name, err)
+	}
+
+	if bagJSON == nil && equipJSON == nil {
+		player.GiveItem(1)
+		player.GiveItem(1)
+		player.GiveItem(2)
+		log.Logf(log.LevelInfo, "Server", "Gave starting items to %s", player.Name)
+		return
+	}
+
+	if bagJSON != nil {
+		var bag []savedUserItem
+		if err := json.Unmarshal(bagJSON, &bag); err == nil {
+			for _, si := range bag {
+				player.ItemList = append(player.ItemList, &protocol.UserItem{
+					MakeIndex: si.MakeIndex,
+					WIndex:    si.WIndex,
+					Dura:      si.Dura,
+					DuraMax:   si.DuraMax,
+				})
+			}
+		}
+	}
+
+	if equipJSON != nil {
+		var equip []*savedUserItem
+		if err := json.Unmarshal(equipJSON, &equip); err == nil {
+			for i := 0; i < 13 && i < len(equip); i++ {
+				if equip[i] != nil {
+					player.UseItems[i] = &protocol.UserItem{
+						MakeIndex: equip[i].MakeIndex,
+						WIndex:    equip[i].WIndex,
+						Dura:      equip[i].Dura,
+						DuraMax:   equip[i].DuraMax,
+					}
+				}
+			}
+		}
+	}
+
+	player.updateAppearance()
 }
 
 // parseCredentials parses "username/password" format.

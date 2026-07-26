@@ -1,0 +1,306 @@
+package main
+
+import (
+	"encoding/binary"
+
+	"github.com/pyq0109/mirgo/internal/log"
+	"github.com/pyq0109/mirgo/internal/netserver"
+	"github.com/pyq0109/mirgo/internal/protocol"
+)
+
+const MaxBagItems = 46
+
+func (p *PlayObject) GiveItem(itemIdx int) bool {
+	if len(p.ItemList) >= MaxBagItems {
+		return false
+	}
+	if p.ItemDB == nil {
+		return false
+	}
+	def := p.ItemDB.GetByIdx(itemIdx)
+	if def == nil {
+		return false
+	}
+	userItem := &protocol.UserItem{
+		MakeIndex: int32(itemIdx),
+		WIndex:    uint16(itemIdx),
+		Dura:      uint16(def.DuraMax),
+		DuraMax:   uint16(def.DuraMax),
+	}
+	p.ItemList = append(p.ItemList, userItem)
+	return true
+}
+
+func (p *PlayObject) SendBagItemsFull(server *netserver.TCPServer) {
+	buf := make([]byte, 0, 2+len(p.ItemList)*10)
+	count := make([]byte, 2)
+	binary.LittleEndian.PutUint16(count, uint16(len(p.ItemList)))
+	buf = append(buf, count...)
+	for _, item := range p.ItemList {
+		entry := make([]byte, 10)
+		binary.LittleEndian.PutUint16(entry[0:2], item.WIndex)
+		binary.LittleEndian.PutUint16(entry[2:4], item.Dura)
+		binary.LittleEndian.PutUint16(entry[4:6], item.DuraMax)
+		binary.LittleEndian.PutUint32(entry[6:10], uint32(item.MakeIndex))
+		buf = append(buf, entry...)
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMBagItems, int32(len(p.ItemList)), 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+}
+
+func (p *PlayObject) SendUseItemsFull(server *netserver.TCPServer) {
+	buf := make([]byte, 13*10)
+	for i := 0; i < 13; i++ {
+		if p.UseItems[i] != nil {
+			off := i * 10
+			binary.LittleEndian.PutUint16(buf[off:off+2], p.UseItems[i].WIndex)
+			binary.LittleEndian.PutUint16(buf[off+2:off+4], p.UseItems[i].Dura)
+			binary.LittleEndian.PutUint16(buf[off+4:off+6], p.UseItems[i].DuraMax)
+			binary.LittleEndian.PutUint32(buf[off+6:off+10], uint32(p.UseItems[i].MakeIndex))
+		}
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMSendUseItems, 0, 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+}
+
+func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServer) {
+	bagIdx := msg.Param1
+	slot := msg.Param2
+
+	if slot < 0 || slot > 12 {
+		p.sendTakeOnFail(server, 0)
+		return
+	}
+	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+		p.sendTakeOnFail(server, 0)
+		return
+	}
+
+	item := p.ItemList[bagIdx]
+	if p.ItemDB == nil {
+		p.sendTakeOnFail(server, 0)
+		return
+	}
+	def := p.ItemDB.GetByIdx(int(item.WIndex))
+	if def == nil {
+		p.sendTakeOnFail(server, 0)
+		return
+	}
+
+	validSlot := getEquipSlot(def.StdMode)
+	if validSlot != slot {
+		p.sendTakeOnFail(server, 1)
+		return
+	}
+
+	if def.NeedLevel > 0 && p.WAbil.Level < uint16(def.NeedLevel) {
+		p.sendTakeOnFail(server, 2)
+		return
+	}
+
+	oldItem := p.UseItems[slot]
+
+	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
+	p.UseItems[slot] = item
+
+	if oldItem != nil {
+		p.ItemList = append(p.ItemList, oldItem)
+	}
+
+	p.RecalcAbilitys()
+	p.updateAppearance()
+
+	resp := protocol.MakeDefaultMsg(protocol.SMTakeOnOK, int32(slot), uint16(bagIdx), 0, 0)
+	server.Send(p.Session.ID, resp, "")
+
+	p.SendBagItemsFull(server)
+	p.SendUseItemsFull(server)
+	p.sendHealthSpell(server)
+
+	log.Logf(log.LevelInfo, "Items", "%s equipped %s to slot %d", p.Name, def.Name, slot)
+}
+
+func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPServer) {
+	slot := msg.Param1
+
+	if slot < 0 || slot > 12 {
+		p.sendTakeOffFail(server)
+		return
+	}
+	if p.UseItems[slot] == nil {
+		p.sendTakeOffFail(server)
+		return
+	}
+	if len(p.ItemList) >= MaxBagItems {
+		p.sendTakeOffFail(server)
+		return
+	}
+
+	item := p.UseItems[slot]
+	p.UseItems[slot] = nil
+	p.ItemList = append(p.ItemList, item)
+
+	p.RecalcAbilitys()
+	p.updateAppearance()
+
+	resp := protocol.MakeDefaultMsg(protocol.SMTakeOffOK, int32(slot), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+
+	p.SendBagItemsFull(server)
+	p.SendUseItemsFull(server)
+	p.sendHealthSpell(server)
+
+	name := "?"
+	if p.ItemDB != nil {
+		if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil {
+			name = def.Name
+		}
+	}
+	log.Logf(log.LevelInfo, "Items", "%s unequipped %s from slot %d", p.Name, name, slot)
+}
+
+func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer) {
+	bagIdx := msg.Param1
+
+	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+		p.sendEatFail(server)
+		return
+	}
+
+	item := p.ItemList[bagIdx]
+	if p.ItemDB == nil {
+		p.sendEatFail(server)
+		return
+	}
+	def := p.ItemDB.GetByIdx(int(item.WIndex))
+	if def == nil {
+		p.sendEatFail(server)
+		return
+	}
+
+	healed := false
+	if def.StdMode == 0 {
+		heal := int(def.AC)
+		if heal > 0 {
+			hp := int(p.WAbil.HP) + heal
+			if hp > int(p.WAbil.MaxHP) {
+				hp = int(p.WAbil.MaxHP)
+			}
+			p.WAbil.HP = uint16(hp)
+			healed = true
+		}
+	} else if def.StdMode == 1 {
+		heal := int(def.AC)
+		if heal > 0 {
+			mp := int(p.WAbil.MP) + heal
+			if mp > int(p.WAbil.MaxMP) {
+				mp = int(p.WAbil.MaxMP)
+			}
+			p.WAbil.MP = uint16(mp)
+			healed = true
+		}
+	}
+
+	if !healed {
+		p.sendEatFail(server)
+		return
+	}
+
+	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
+
+	resp := protocol.MakeDefaultMsg(protocol.SMEatOK, int32(bagIdx), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+	p.SendBagItemsFull(server)
+	p.sendHealthSpell(server)
+
+	log.Logf(log.LevelInfo, "Items", "%s used %s", p.Name, def.Name)
+}
+
+func (p *PlayObject) RecalcAbilitys() {
+	level := int(p.WAbil.Level)
+	p.WAbil.MaxHP = uint16(50 + level*15)
+	p.WAbil.MaxMP = uint16(20 + level*10)
+	p.WAbil.AC = uint32(level / 2)
+	p.WAbil.MAC = uint32(level / 3)
+	p.WAbil.DC = uint32(level/2) | uint32(level)<<16
+	p.WAbil.MC = uint32(level/3) | uint32(level/2)<<16
+	p.WAbil.SC = uint32(level/3) | uint32(level/2)<<16
+
+	if p.ItemDB != nil {
+		for i := 0; i < 13; i++ {
+			if p.UseItems[i] == nil {
+				continue
+			}
+			def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+			if def == nil {
+				continue
+			}
+			p.WAbil.AC += uint32(def.AC) | uint32(def.ACMax)<<16
+			p.WAbil.MAC += uint32(def.MAC) | uint32(def.MACMax)<<16
+			p.WAbil.DC += uint32(def.DC) | uint32(def.DCMax)<<16
+			p.WAbil.MC += uint32(def.MC) | uint32(def.MCMax)<<16
+			p.WAbil.SC += uint32(def.SC) | uint32(def.SCMax)<<16
+		}
+	}
+
+	if p.WAbil.HP > p.WAbil.MaxHP {
+		p.WAbil.HP = p.WAbil.MaxHP
+	}
+	if p.WAbil.MP > p.WAbil.MaxMP {
+		p.WAbil.MP = p.WAbil.MaxMP
+	}
+}
+
+func (p *PlayObject) updateAppearance() {
+	p.DressLook = 0
+	p.WeaponLook = 0
+	if p.ItemDB == nil {
+		return
+	}
+	if p.UseItems[protocol.UDress] != nil {
+		def := p.ItemDB.GetByIdx(int(p.UseItems[protocol.UDress].WIndex))
+		if def != nil {
+			p.DressLook = def.Shape*2 + p.Gender
+		}
+	}
+	if p.UseItems[protocol.UWeapon] != nil {
+		def := p.ItemDB.GetByIdx(int(p.UseItems[protocol.UWeapon].WIndex))
+		if def != nil {
+			p.WeaponLook = def.Shape*2 + p.Gender
+		}
+	}
+}
+
+func getEquipSlot(stdMode byte) int {
+	switch {
+	case stdMode >= 10 && stdMode <= 12:
+		return protocol.UDress
+	case stdMode >= 5 && stdMode <= 6:
+		return protocol.UWeapon
+	case stdMode >= 15 && stdMode <= 17:
+		return protocol.UNecklace
+	case stdMode >= 20 && stdMode <= 22:
+		return protocol.UHelmet
+	case stdMode >= 24 && stdMode <= 26:
+		return protocol.UArmRingL
+	case stdMode >= 28 && stdMode <= 30:
+		return protocol.URingL
+	default:
+		return -1
+	}
+}
+
+func (p *PlayObject) sendTakeOnFail(server *netserver.TCPServer, code int) {
+	resp := protocol.MakeDefaultMsg(protocol.SMTakeOnFail, int32(code), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
+func (p *PlayObject) sendTakeOffFail(server *netserver.TCPServer) {
+	resp := protocol.MakeDefaultMsg(protocol.SMTakeOffFail, 0, 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
+func (p *PlayObject) sendEatFail(server *netserver.TCPServer) {
+	resp := protocol.MakeDefaultMsg(protocol.SMEatFail, 0, 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}

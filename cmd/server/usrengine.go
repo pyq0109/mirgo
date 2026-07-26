@@ -14,11 +14,17 @@ type UserEngine struct {
 
 	db     *storage.Database
 	mapMgr *MapManager
+	ItemDB *ItemDB
 
 	Monsters      []*MonsterObject
 	Npcs          []*NpcObject
 	MonGenList    []MonGenEntry
 	nextMonsterID int32
+	nextItemID    int32
+
+	MagicDB *MagicDB
+	Parties map[int32]*Party
+	Guilds  []*Guild
 }
 
 func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {
@@ -27,6 +33,8 @@ func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {
 		db:             db,
 		mapMgr:         mapMgr,
 		nextMonsterID:  100000,
+		nextItemID:     200000,
+		Parties:        make(map[int32]*Party),
 	}
 }
 
@@ -75,4 +83,27 @@ func (e *UserEngine) GetPlayerCount() int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return len(e.PlayObjectList)
+}
+
+func (e *UserEngine) GetPlayerByName(name string) *PlayObject {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, p := range e.PlayObjectList {
+		if p.Name == name {
+			return p
+		}
+	}
+	return nil
+}
+
+func (e *UserEngine) SaveAllPlayers(db *storage.Database) {
+	e.mu.RLock()
+	players := make([]*PlayObject, 0, len(e.PlayObjectList))
+	for _, p := range e.PlayObjectList {
+		players = append(players, p)
+	}
+	e.mu.RUnlock()
+	for _, p := range players {
+		saveCharacterData(db, p)
+	}
 }
