@@ -64,6 +64,10 @@ type PlayScene struct {
 	sendSpell    func(magID int, x, y int)
 	sendNpcClick   func(npcID int)
 	sendDealCancel func()
+	sendUseItem    func(bagIdx int)
+	sendBuyItem    func(itemIdx int)
+	sendSellItem   func(bagIdx int)
+	sendAttackMode func(mode int)
 	lastMoveTick   int64
 	text         *engine.TextRenderer
 
@@ -742,6 +746,10 @@ func (s *PlayScene) OnKey(key int, action int) {
 				}
 				return
 			}
+			if s.State.ShowShop {
+				s.State.ShowShop = false
+				return
+			}
 			if s.State.ShowGuild || s.State.ShowStorage {
 				s.State.ShowGuild = false
 				s.State.ShowStorage = false
@@ -771,7 +779,12 @@ func (s *PlayScene) OnKey(key int, action int) {
 			s.showMinimap = !s.showMinimap
 			return
 		case 72: // H
-			log.Logf(log.LevelInfo, "PlayScene", "Attack mode toggled")
+			s.State.AttackMode = (s.State.AttackMode + 1) % 5
+			if s.sendAttackMode != nil {
+				s.sendAttackMode(s.State.AttackMode)
+			}
+			modes := []string{"和平", "组队", "行会", "全体", "PK"}
+			s.addChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
 			return
 		case 80: // P
 			s.State.ShowChar = !s.State.ShowChar
@@ -789,6 +802,15 @@ func (s *PlayScene) OnKey(key int, action int) {
 					ty := my.CurrY + dy
 					s.sendSpell(int(mag.MagID), tx, ty)
 				}
+			}
+			return
+		}
+
+		if !s.chatMode && key >= 49 && key <= 54 {
+			beltIdx := key - 49
+			bagIdx := s.State.BeltItems[beltIdx]
+			if bagIdx >= 0 && bagIdx < len(s.State.BagItems) && s.sendUseItem != nil {
+				s.sendUseItem(bagIdx)
 			}
 			return
 		}
@@ -980,6 +1002,13 @@ func (s *PlayScene) OnScroll(x, y float64) {
 	}
 }
 
+func (s *PlayScene) addChatMessage(text string) {
+	s.chatMessages = append(s.chatMessages, ChatMessage{Text: text, Time: time.Now().UnixMilli()})
+	if len(s.chatMessages) > 10 {
+		s.chatMessages = s.chatMessages[len(s.chatMessages)-10:]
+	}
+}
+
 func (s *PlayScene) drawWilImage(f *wil.File, idx int, x, y float32, proj [16]float32) bool {
 	if f == nil || idx < 0 || idx >= f.Count {
 		return false
@@ -1093,6 +1122,33 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 		s.text.DrawText(fmt.Sprintf("F%d", i+1), sx+2, skillY+24, 0.7, 0.7, 0.7, 1.0, proj)
 	}
 
+	beltX := float32(160)
+	beltY := float32(720)
+	for i := 0; i < 6; i++ {
+		bx := beltX + float32(i)*36
+		s.gl.DrawQuadColor(bx, beltY, 32, 32, 0.12, 0.12, 0.18, 0.8, proj)
+		bagIdx := st.BeltItems[i]
+		if bagIdx >= 0 && bagIdx < len(st.BagItems) && s.resources.Items != nil {
+			item := st.BagItems[bagIdx]
+			looks := int(item.Idx)
+			if looks >= 0 && looks < s.resources.Items.Count {
+				itemImg := s.resources.Items.GetImage(looks)
+				if itemImg != nil && itemImg.RGBA != nil {
+					itemTex := s.resources.GetTexture(s.resources.Items, looks)
+					if itemTex != 0 {
+						s.gl.DrawQuad(itemTex, bx+2, beltY+2, 28, 28, proj)
+					}
+				}
+			}
+		}
+		s.text.DrawText(fmt.Sprintf("%d", i+1), bx+2, beltY+22, 0.6, 0.6, 0.6, 1.0, proj)
+	}
+
+	amNames := []string{"和平", "组队", "行会", "全体", "PK"}
+	amColors := [][4]float32{{0.5, 1.0, 0.5, 1}, {0.5, 0.5, 1.0, 1}, {0.5, 1.0, 1.0, 1}, {1.0, 1.0, 1.0, 1}, {1.0, 0.3, 0.3, 1}}
+	ac := amColors[st.AttackMode]
+	s.text.DrawText("["+amNames[st.AttackMode]+"]", 10, 620, ac[0], ac[1], ac[2], 1.0, proj)
+
 	chatX := float32(208)
 	chatY := float32(620)
 	for i := len(s.chatMessages) - 1; i >= 0; i-- {
@@ -1139,6 +1195,12 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 	}
 	if st.ShowGuild {
 		s.renderGuildPanel(proj)
+	}
+	if st.ShowShop {
+		s.renderShopPanel(proj)
+	}
+	if st.ShowStorage {
+		s.renderStoragePanel(proj)
 	}
 }
 
@@ -1265,4 +1327,82 @@ func (s *PlayScene) renderCharPanel(proj [16]float32) {
 	if st.GuildName != "" {
 		s.text.DrawText("行会: "+st.GuildName, px+10, y, 0.8, 0.9, 0.8, 1.0, proj)
 	}
+}
+
+func (s *PlayScene) renderShopPanel(proj [16]float32) {
+	st := s.State
+	px, py := float32(550), float32(100)
+	s.gl.DrawQuadColor(px, py, 280, 400, 0.08, 0.08, 0.12, 0.95, proj)
+	s.gl.DrawQuadColor(px+2, py+2, 276, 24, 0.15, 0.15, 0.25, 1.0, proj)
+
+	title := "商店"
+	if st.ShopMode == 1 {
+		title = "出售"
+	} else if st.ShopMode == 2 {
+		title = "修理"
+	}
+	s.text.DrawText(title, px+120, py+5, 1.0, 1.0, 0.8, 1.0, proj)
+
+	if st.ShopMode == 0 {
+		for i, item := range st.ShopGoods {
+			if i > 14 {
+				break
+			}
+			iy := py + 32 + float32(i)*24
+			s.gl.DrawQuadColor(px+6, iy, 268, 22, 0.12, 0.12, 0.18, 0.7, proj)
+			name := item.Name
+			if name == "" {
+				name = fmt.Sprintf("物品#%d", item.ItemIdx)
+			}
+			s.text.DrawText(name, px+10, iy+4, 0.9, 0.9, 0.9, 1.0, proj)
+			s.text.DrawText(fmt.Sprintf("%d金", item.Price), px+200, iy+4, 1.0, 0.9, 0.3, 1.0, proj)
+		}
+	} else {
+		for i, item := range st.BagItems {
+			if i > 14 {
+				break
+			}
+			iy := py + 32 + float32(i)*24
+			s.gl.DrawQuadColor(px+6, iy, 268, 22, 0.12, 0.12, 0.18, 0.7, proj)
+			s.text.DrawText(fmt.Sprintf("物品#%d", item.Idx), px+10, iy+4, 0.9, 0.9, 0.9, 1.0, proj)
+			if item.DuraMax > 0 {
+				s.text.DrawText(fmt.Sprintf("%d/%d", item.Dura, item.DuraMax), px+200, iy+4, 0.7, 0.7, 0.7, 1.0, proj)
+			}
+		}
+	}
+
+	s.text.DrawText("[ESC关闭]", px+100, py+380, 0.6, 0.6, 0.6, 1.0, proj)
+}
+
+func (s *PlayScene) renderStoragePanel(proj [16]float32) {
+	st := s.State
+	px, py := float32(350), float32(150)
+	s.gl.DrawQuadColor(px, py, 300, 350, 0.08, 0.08, 0.12, 0.95, proj)
+	s.gl.DrawQuadColor(px+2, py+2, 296, 24, 0.15, 0.15, 0.25, 1.0, proj)
+	s.text.DrawText("仓库", px+130, py+5, 1.0, 1.0, 0.8, 1.0, proj)
+
+	cellSize := float32(36)
+	startX := px + 12
+	startY := py + 32
+	for i := 0; i < 39; i++ {
+		col := i % 8
+		row := i / 8
+		cx := startX + float32(col)*(cellSize+2)
+		cy := startY + float32(row)*(cellSize+2)
+		s.gl.DrawQuadColor(cx, cy, cellSize, cellSize, 0.15, 0.15, 0.2, 0.8, proj)
+		if i < len(st.StorageItems) && s.resources.Items != nil {
+			item := st.StorageItems[i]
+			looks := int(item.Idx)
+			if looks >= 0 && looks < s.resources.Items.Count {
+				itemImg := s.resources.Items.GetImage(looks)
+				if itemImg != nil && itemImg.RGBA != nil {
+					itemTex := s.resources.GetTexture(s.resources.Items, looks)
+					if itemTex != 0 {
+						s.gl.DrawQuad(itemTex, cx+2, cy+2, cellSize-4, cellSize-4, proj)
+					}
+				}
+			}
+		}
+	}
+	s.text.DrawText("[ESC关闭]", px+110, py+330, 0.6, 0.6, 0.6, 1.0, proj)
 }

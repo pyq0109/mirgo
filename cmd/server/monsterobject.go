@@ -19,7 +19,7 @@ type MonsterObject struct {
 	AttackSpeed int64
 	Exp         int
 
-	AIBehavior int // 0=melee, 1=ranged, 2=flee, 3=area, 4=summoner
+	AIBehavior int // 0=melee, 1=ranged, 2=flee, 3=area, 4=summoner, 5+=extended
 
 	TargetID       int32
 	HomeX, HomeY   int
@@ -41,6 +41,7 @@ type MonsterObject struct {
 	WalkWait     int64
 
 	lastRegenTick int64
+	Engine        *UserEngine
 }
 
 func getAIBehavior(race byte) int {
@@ -69,7 +70,7 @@ func NewMonsterObject(name string, id int32, race, raceImg byte, appr uint16, hp
 		WalkSpeed:   walkSpeed,
 		AttackSpeed: attackSpeed,
 		Exp:         exp,
-		AIBehavior:  getAIBehavior(race),
+		AIBehavior:  getExtendedAIBehavior(race),
 		WalkStep:    3,
 		WalkWait:    1000,
 	}
@@ -192,6 +193,8 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			} else {
 				o.chaseTarget(target)
 			}
+		default:
+			o.runExtendedAI(server, target, dist, now)
 		}
 	} else {
 		if now-o.WalkTick > o.WalkSpeed*3 {

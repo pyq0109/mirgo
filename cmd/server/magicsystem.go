@@ -74,12 +74,50 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 
 func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power, tx, ty int) {
 	switch magID {
+	case 3:
 	case 4:
 		p.doSpellDamageToAdjacent(server, power)
-	case 7, 12:
+	case 7:
 		p.doSpellDamageArea(server, power, 1)
+	case 12:
+		dx, dy := dirToOffset(p.Dir)
+		p.doSpellDamageAt(server, power, p.CurrX+dx, p.CurrY+dy)
+		p.doSpellDamageAt(server, power, p.CurrX+dx*2, p.CurrY+dy*2)
 	case 25, 26:
 		p.doSpellDamageToAdjacent(server, power*2)
+	case 27:
+		dx, dy := dirToOffset(p.Dir)
+		rushX := p.CurrX + dx*3
+		rushY := p.CurrY + dy*3
+		if p.envir != nil && p.envir.CanWalk(rushX, rushY) {
+			p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+			p.CurrX, p.CurrY = rushX, rushY
+			p.envir.AddObject(rushX, rushY, OS_MOVINGOBJECT, p)
+			p.SendRefMsg(RM_WALK, p.Dir, p.CurrX, p.CurrY, "")
+		}
+	case 37:
+		for dy2 := -1; dy2 <= 1; dy2++ {
+			for dx2 := -1; dx2 <= 1; dx2++ {
+				if dx2 == 0 && dy2 == 0 {
+					continue
+				}
+				obj := p.envir.GetMovingObject(p.CurrX+dx2, p.CurrY+dy2)
+				if obj == nil {
+					continue
+				}
+				if mon, ok := obj.(*MonsterObject); ok && !mon.Death {
+					pushX := mon.CurrX + dx2*3
+					pushY := mon.CurrY + dy2*3
+					if p.envir.CanWalk(pushX, pushY) {
+						p.envir.RemoveObject(mon.CurrX, mon.CurrY, OS_MOVINGOBJECT, mon)
+						mon.CurrX, mon.CurrY = pushX, pushY
+						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, mon)
+						damage := power / 3
+						p.applyDamage(server, mon.BaseObject, damage, p.Dir)
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -89,8 +127,23 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 		p.doSpellDamageAt(server, power, tx, ty)
 	case 10, 11:
 		p.doSpellDamageAt(server, power, tx, ty)
+	case 9:
+		dx, dy := dirToOffset(p.Dir)
+		for i := 1; i <= 4; i++ {
+			p.doSpellDamageAt(server, power*2/3, p.CurrX+dx*i, p.CurrY+dy*i)
+		}
 	case 23, 33:
 		p.doSpellDamageAreaAt(server, power, tx, ty, 2)
+	case 24:
+		p.doSpellDamageAreaAt(server, power, tx, ty, 3)
+	case 42:
+		objs := p.envir.GetRangeObjects(tx, ty, 3)
+		for _, obj := range objs {
+			if mon, ok := obj.(*MonsterObject); ok && !mon.Death && !mon.Ghost {
+				damage := power * 2 / 3
+				p.applyDamage(server, mon.BaseObject, damage, p.Dir)
+			}
+		}
 	case 31:
 		p.MakePoison(STATE_BUBBLEDEFENCE, 600)
 	case 8:
@@ -186,6 +239,24 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				}
 			}
 		}
+	case 13:
+		target := p.findAttackTarget(tx, ty)
+		if target != nil {
+			damage := power
+			antiMagic := int(target.WAbil.MAC & 0xFFFF)
+			if antiMagic > 0 && rand.Intn(100) < antiMagic {
+				damage = damage / 2
+			}
+			p.applyDamage(server, target, damage, p.Dir)
+		}
+	case 16:
+		objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, 3)
+		for _, obj := range objs {
+			if other, ok := obj.(*PlayObject); ok && !other.Ghost && !other.Death {
+				other.WAbil.AC += uint32(power / 5)
+				other.WAbil.MAC += uint32(power / 5)
+			}
+		}
 	case 17, 30:
 		petX := p.CurrX + 1
 		petY := p.CurrY
@@ -216,6 +287,47 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 		for _, obj := range objs {
 			if other, ok := obj.(*PlayObject); ok && !other.Ghost && !other.Death {
 				other.MakePoison(STATE_TRANSPARENT, 300)
+			}
+		}
+	case 20:
+		target := p.envir.GetMovingObject(tx, ty)
+		if target != nil {
+			if mon, ok := target.(*MonsterObject); ok && !mon.Death {
+				if int(mon.WAbil.HP) < mon.MaxHP/3 && rand.Intn(100) < 30+int(p.WAbil.Level) {
+					mon.TargetID = 0
+					mon.LastHiterID = 0
+					log.Logf(log.LevelInfo, "Magic", "%s tamed %s", p.Name, mon.Name)
+				}
+			}
+		}
+	case 32:
+		target := p.envir.GetMovingObject(tx, ty)
+		if target != nil {
+			if mon, ok := target.(*MonsterObject); ok && !mon.Death {
+				if mon.Race >= 10 && mon.Race <= 19 {
+					mon.Death = true
+					mon.DeathTick = time.Now().UnixMilli()
+					mon.WAbil.HP = 0
+					p.envir.broadcastRefMsg(mon.BaseObject, RM_DEATH, mon.ID, mon.CurrX, mon.CurrY, 0)
+					p.awardExp(server, mon)
+				} else {
+					damage := power * 3
+					p.applyDamage(server, mon.BaseObject, damage, p.Dir)
+				}
+			}
+		}
+	case 48:
+		objs := p.envir.GetRangeObjects(tx, ty, 2)
+		for _, obj := range objs {
+			switch t := obj.(type) {
+			case *MonsterObject:
+				if !t.Death && !t.Ghost {
+					t.StatusTimeArr[POISON_DECHEALTH] = 80
+				}
+			case *PlayObject:
+				if !t.Ghost && !t.Death {
+					t.MakePoison(POISON_DECHEALTH, 80)
+				}
 			}
 		}
 	}
@@ -295,6 +407,15 @@ func (p *PlayObject) learnMagic(magID, level int, key byte) {
 		Level: level,
 		Key:   key,
 	})
+}
+
+func (p *PlayObject) removeMagic(magID int) {
+	for i, pm := range p.LearnedMagics {
+		if pm.MagID == magID {
+			p.LearnedMagics = append(p.LearnedMagics[:i], p.LearnedMagics[i+1:]...)
+			return
+		}
+	}
 }
 
 func (p *PlayObject) sendMagicFail(server *netserver.TCPServer) {

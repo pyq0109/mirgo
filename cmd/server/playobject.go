@@ -50,6 +50,7 @@ type PlayObject struct {
 	GuildName    string
 	GuildRank    string
 	StorageItems []*protocol.UserItem
+	AttackMode   byte
 
 	HasParalysis   bool
 	HasRevival     bool
@@ -60,6 +61,8 @@ type PlayObject struct {
 	HasAngry       bool
 	HasMagicShield bool
 	HasMuscle      bool
+
+	ScriptVars [10]int
 }
 
 type VisibleEntry struct {
@@ -164,10 +167,38 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleTakeBackStorageItem(msg, server)
 	case protocol.CMOpenGuildDlg:
 		p.HandleBuildGuild(msg, server)
+	case protocol.CMGuildAddMember:
+		p.HandleGuildAddMember(msg, server)
+	case protocol.CMGuildDelMember:
+		p.HandleGuildDelMember(msg, server)
+	case protocol.CMGuildAlly:
+		p.HandleGuildAlly(msg, server)
+	case protocol.CMGuildBreakAlly:
+		p.HandleGuildBreakAlly(msg, server)
+	case protocol.CMGuildUpdateNotice:
+		p.HandleGuildUpdateNotice(msg, server)
 	case protocol.CMHorseRun:
 		p.HandleHorseRun(msg, server)
 	case protocol.CMOpenDoor:
 		p.HandleOpenDoor(msg, server)
+	case protocol.CMUserBuyItem:
+		p.HandleBuyItem(msg, server)
+	case protocol.CMUserSellItem:
+		p.HandleSellItem(msg, server)
+	case protocol.CMUserRepairItem:
+		p.HandleRepairItem(msg, server)
+	case protocol.CMMerchantQuerySellPrice:
+		p.HandleQuerySellPrice(msg, server)
+	case protocol.CMMerchantQueryRepairCost:
+		p.HandleQueryRepairCost(msg, server)
+	case protocol.CMMerchantDlgSelect:
+		p.HandleMerchantDlgSelect(msg, server)
+	case protocol.CMDropItem:
+		p.HandleDropItem(msg, server)
+	case protocol.CMDropGold:
+		p.HandleDropGold(msg, server)
+	case protocol.CMChangeAttackMode:
+		p.HandleChangeAttackMode(msg, server)
 	case RM_WALK:
 		p.sendMovementToClient(server, protocol.SMWalk, msg)
 	case RM_RUN:

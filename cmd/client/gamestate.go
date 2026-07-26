@@ -56,6 +56,20 @@ type GameState struct {
 	StorageItems []BagItem
 
 	SysMessages []string
+
+	BeltItems  [6]int
+	AttackMode int
+
+	ShowShop    bool
+	ShopGoods   []ShopItem
+	ShopNpcID   int32
+	ShopMode    int
+}
+
+type ShopItem struct {
+	ItemIdx uint16
+	Price   int
+	Name    string
 }
 
 func NewGameState() *GameState {

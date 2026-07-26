@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"net"
@@ -847,7 +848,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	// Combat
 	// =====================================================================
 
-	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit, protocol.SMPowerHit, protocol.SMLongHit:
+	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit, protocol.SMPowerHit, protocol.SMLongHit, protocol.SMWideHit, protocol.SMFireHit, protocol.SMCrsHit, protocol.SMTwinHit:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
 			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
@@ -1067,7 +1068,33 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.ShowNpcDialog = false
 
 	case protocol.SMSendGoodsList:
-		log.Logf(log.LevelInfo, "Client", "Received goods list")
+		h.playScene.State.ShowShop = true
+		h.playScene.State.ShopMode = 0
+		h.playScene.State.ShopNpcID = msg.Recog
+		raw := []byte(body)
+		if len(raw) >= 2 {
+			count := int(binary.LittleEndian.Uint16(raw[0:2]))
+			h.playScene.State.ShopGoods = make([]ShopItem, 0, count)
+			for i := 0; i < count; i++ {
+				off := 2 + i*4
+				if off+4 > len(raw) {
+					break
+				}
+				itemIdx := binary.LittleEndian.Uint16(raw[off : off+2])
+				price := int(binary.LittleEndian.Uint16(raw[off+2 : off+4]))
+				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price})
+			}
+		}
+
+	case protocol.SMSendUserSell:
+		h.playScene.State.ShowShop = true
+		h.playScene.State.ShopMode = 1
+		h.playScene.State.ShopNpcID = msg.Recog
+
+	case protocol.SMSendUserRepair:
+		h.playScene.State.ShowShop = true
+		h.playScene.State.ShopMode = 2
+		h.playScene.State.ShopNpcID = msg.Recog
 
 	case protocol.SMBuyItemSuccess:
 		log.Logf(log.LevelInfo, "Client", "Buy success")
@@ -1094,7 +1121,25 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Repair cost: %d", msg.Recog)
 
 	case protocol.SMSaveItemList:
-		log.Logf(log.LevelInfo, "Client", "Storage list: count=%d", msg.Series)
+		h.playScene.State.ShowStorage = true
+		raw := []byte(body)
+		if len(raw) >= 2 {
+			count := int(binary.LittleEndian.Uint16(raw[0:2]))
+			h.playScene.State.StorageItems = make([]BagItem, 0, count)
+			for i := 0; i < count; i++ {
+				off := 2 + i*10
+				if off+10 > len(raw) {
+					break
+				}
+				item := BagItem{
+					Idx:       binary.LittleEndian.Uint16(raw[off : off+2]),
+					Dura:      binary.LittleEndian.Uint16(raw[off+2 : off+4]),
+					DuraMax:   binary.LittleEndian.Uint16(raw[off+4 : off+6]),
+					MakeIndex: int32(binary.LittleEndian.Uint32(raw[off+6 : off+10])),
+				}
+				h.playScene.State.StorageItems = append(h.playScene.State.StorageItems, item)
+			}
+		}
 
 	case protocol.SMStorageFail:
 		log.Logf(log.LevelInfo, "Client", "Storage failed")

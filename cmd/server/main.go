@@ -85,6 +85,9 @@ func main() {
 	safeZonesPath := filepath.Join(*configDir, "maps", "start_points.jsonc")
 	LoadSafeZones(safeZonesPath)
 
+	merchantDir := filepath.Join(*configDir, "merchants")
+	LoadMerchantConfigs(merchantDir)
+
 	monGenPath := filepath.Join(*configDir, "monsters", "mon_gen.jsonc")
 
 	sessionMgr := NewSessionManager()
@@ -578,10 +581,38 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMUserTakeBackStorageItem, int(msg.Param), 0, 0, "")
 	case protocol.CMOpenGuildDlg:
 		player.SendMsg(protocol.CMOpenGuildDlg, 0, 0, 0, body)
+	case protocol.CMGuildAddMember:
+		player.SendMsg(protocol.CMGuildAddMember, 0, 0, 0, body)
+	case protocol.CMGuildDelMember:
+		player.SendMsg(protocol.CMGuildDelMember, 0, 0, 0, body)
+	case protocol.CMGuildAlly:
+		player.SendMsg(protocol.CMGuildAlly, 0, 0, 0, body)
+	case protocol.CMGuildBreakAlly:
+		player.SendMsg(protocol.CMGuildBreakAlly, 0, 0, 0, body)
+	case protocol.CMGuildUpdateNotice:
+		player.SendMsg(protocol.CMGuildUpdateNotice, 0, 0, 0, body)
 	case protocol.CMHorseRun:
 		player.SendMsg(protocol.CMHorseRun, int(msg.Param), 0, 0, "")
 	case protocol.CMOpenDoor:
 		player.SendMsg(protocol.CMOpenDoor, 0, 0, 0, "")
+	case protocol.CMUserBuyItem:
+		player.SendMsg(protocol.CMUserBuyItem, int(msg.Param), 0, 0, "")
+	case protocol.CMUserSellItem:
+		player.SendMsg(protocol.CMUserSellItem, int(msg.Param), 0, 0, "")
+	case protocol.CMUserRepairItem:
+		player.SendMsg(protocol.CMUserRepairItem, int(msg.Param), 0, 0, "")
+	case protocol.CMMerchantQuerySellPrice:
+		player.SendMsg(protocol.CMMerchantQuerySellPrice, int(msg.Param), 0, 0, "")
+	case protocol.CMMerchantQueryRepairCost:
+		player.SendMsg(protocol.CMMerchantQueryRepairCost, int(msg.Param), 0, 0, "")
+	case protocol.CMMerchantDlgSelect:
+		player.SendMsg(protocol.CMMerchantDlgSelect, int(msg.Recog), int(msg.Param), 0, "")
+	case protocol.CMDropItem:
+		player.SendMsg(protocol.CMDropItem, int(msg.Param), 0, 0, "")
+	case protocol.CMDropGold:
+		player.SendMsg(protocol.CMDropGold, int(msg.Recog), 0, 0, "")
+	case protocol.CMChangeAttackMode:
+		player.SendMsg(protocol.CMChangeAttackMode, int(msg.Param), 0, 0, "")
 	case protocol.CMLoginNoticeOK:
 		log.Logf(log.LevelInfo, "Server", "Notice acknowledged by %s", player.Name)
 		player.SendLogon(server)

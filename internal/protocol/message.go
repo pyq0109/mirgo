@@ -131,6 +131,7 @@ const (
 	CMAdjustBonus        = 1043
 	CMGuildAlly          = 1044
 	CMGuildBreakAlly     = 1045
+	CMChangeAttackMode   = 1046
 )
 
 // Login/Account
