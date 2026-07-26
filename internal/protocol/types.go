@@ -184,7 +184,7 @@ type ClientItem struct {
 }
 
 // Ability represents character abilities.
-// Size: 50 bytes (packed)
+// Size: 50 bytes (packed) — matches Delphi TAbility (Grobal2.pas:734)
 type Ability struct {
 	Level         uint16 // Character level
 	AC            uint32 // Physical defense
@@ -200,10 +200,10 @@ type Ability struct {
 	MaxExp        uint32 // Experience to next level
 	Weight        uint16 // Current weight
 	MaxWeight     uint16 // Max weight
-	WearWeight    uint8  // Current wear weight
-	MaxWearWeight uint8  // Max wear weight
-	HandWeight    uint8  // Current hand weight
-	MaxHandWeight uint8  // Max hand weight
+	WearWeight    uint16 // Current wear weight
+	MaxWearWeight uint16 // Max wear weight
+	HandWeight    uint16 // Current hand weight
+	MaxHandWeight uint16 // Max hand weight
 }
 
 // NakedAbility represents bonus attributes.

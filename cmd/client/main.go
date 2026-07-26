@@ -142,6 +142,22 @@ func main() {
 		handler.charName = charName
 		handler.SendSelChr(charName)
 	})
+	selectChrScene.SetNewChrFunc(func(name string, hair, job, sex int) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ChrNewFunc: name=%s hair=%d job=%d sex=%d", name, hair, job, sex)
+		if handler == nil {
+			log.Logf(log.LevelWarn, "Client", "[Callback] ChrNewFunc: handler is nil")
+			return
+		}
+		handler.SendNewChr(name, hair, job, sex)
+	})
+	selectChrScene.SetDelChrFunc(func(name string) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ChrDelFunc: name=%s", name)
+		if handler == nil {
+			log.Logf(log.LevelWarn, "Client", "[Callback] ChrDelFunc: handler is nil")
+			return
+		}
+		handler.SendDelChr(name)
+	})
 	selectChrScene.SetExitFunc(func() {
 		log.Logf(log.LevelInfo, "Client", "[Callback] ChrExitFunc: exiting")
 		if handler != nil {
@@ -289,6 +305,18 @@ func (h *NetHandler) SendQueryChr() {
 func (h *NetHandler) SendSelChr(charName string) {
 	selMsg := protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0)
 	h.Send(selMsg, h.loginID+"/"+charName)
+}
+
+// SendNewChr sends a create character request.
+func (h *NetHandler) SendNewChr(name string, hair, job, sex int) {
+	msg := protocol.MakeDefaultMsg(protocol.CMNewChr, 0, 0, 0, 0)
+	h.Send(msg, fmt.Sprintf("%s/%s/%d/%d/%d", h.loginID, name, hair, job, sex))
+}
+
+// SendDelChr sends a delete character request.
+func (h *NetHandler) SendDelChr(name string) {
+	msg := protocol.MakeDefaultMsg(protocol.CMDelChr, 0, 0, 0, 0)
+	h.Send(msg, name)
 }
 
 // SendRunLogin sends the run login to the game server.

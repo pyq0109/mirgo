@@ -79,9 +79,123 @@ func (m *MapData) InfoAt(x, y int) *CellInfo {
 	return &m.CellInfos[y*m.Width+x]
 }
 
-// IsCollision returns true if the cell at (x, y) is blocked.
+// IsCollision returns true if the cell at (x, y) is blocked (terrain only, ignores doors).
 func (m *MapData) IsCollision(x, y int) bool {
 	return m.CellInfos[y*m.Width+x].Collision
+}
+
+// CanMove returns true if the cell at (x, y) is walkable, considering doors.
+// Matches Delphi TMap.CanMove (MapUnit.pas:311-327).
+func (m *MapData) CanMove(x, y int) bool {
+	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
+		return false
+	}
+	idx := y*m.Width + x
+	if m.CellInfos[idx].Collision {
+		return false
+	}
+	cell := &m.Cells[idx]
+	if cell.DoorIndex&0x80 != 0 {
+		if cell.DoorOffset&0x80 == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// CanFly returns true if the cell at (x, y) allows flight (only checks FrImg bit15).
+// Matches Delphi TMap.CanFly (MapUnit.pas:329-343).
+func (m *MapData) CanFly(x, y int) bool {
+	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
+		return false
+	}
+	idx := y*m.Width + x
+	if m.Cells[idx].FrImg&0x8000 != 0 {
+		return false
+	}
+	cell := &m.Cells[idx]
+	if cell.DoorIndex&0x80 != 0 {
+		if cell.DoorOffset&0x80 == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// GetDoor returns the door group ID at (x, y), or 0 if no door.
+// Matches Delphi TMap.GetDoor (MapUnit.pas:346-356).
+func (m *MapData) GetDoor(x, y int) int {
+	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
+		return 0
+	}
+	cell := &m.Cells[y*m.Width+x]
+	if cell.DoorIndex&0x80 != 0 {
+		return int(cell.DoorIndex & 0x7F)
+	}
+	return 0
+}
+
+// IsDoorOpen returns true if the door at (x, y) is open.
+// Matches Delphi TMap.IsDoorOpen (MapUnit.pas:358-368).
+func (m *MapData) IsDoorOpen(x, y int) bool {
+	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
+		return false
+	}
+	cell := &m.Cells[y*m.Width+x]
+	if cell.DoorIndex&0x80 != 0 {
+		return cell.DoorOffset&0x80 != 0
+	}
+	return false
+}
+
+// OpenDoor opens all cells belonging to the same door group as (x, y).
+// Matches Delphi TMap.OpenDoor (MapUnit.pas:370-387).
+func (m *MapData) OpenDoor(x, y int) {
+	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
+		return
+	}
+	idx := y*m.Width + x
+	cell := &m.Cells[idx]
+	if cell.DoorIndex&0x80 == 0 {
+		return
+	}
+	doorID := cell.DoorIndex & 0x7F
+	for dy := y - 10; dy <= y+10; dy++ {
+		for dx := x - 10; dx <= x+10; dx++ {
+			if dx < 0 || dx >= m.Width || dy < 0 || dy >= m.Height {
+				continue
+			}
+			c := &m.Cells[dy*m.Width+dx]
+			if c.DoorIndex&0x7F == doorID {
+				c.DoorOffset |= 0x80
+			}
+		}
+	}
+}
+
+// CloseDoor closes all cells belonging to the same door group as (x, y).
+// Matches Delphi TMap.CloseDoor (MapUnit.pas:389-405).
+func (m *MapData) CloseDoor(x, y int) {
+	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
+		return
+	}
+	idx := y*m.Width + x
+	cell := &m.Cells[idx]
+	if cell.DoorIndex&0x80 == 0 {
+		return
+	}
+	doorID := cell.DoorIndex & 0x7F
+	for dy := y - 8; dy <= y+10; dy++ {
+		for dx := x - 8; dx <= x+10; dx++ {
+			if dx < 0 || dx >= m.Width || dy < 0 || dy >= m.Height {
+				continue
+			}
+			c := &m.Cells[dy*m.Width+dx]
+			if c.DoorIndex&0x7F == doorID {
+				c.DoorOffset &= 0x7F
+			}
+		}
+	}
 }
 
 // Parse reads a .map file and returns MapData.
@@ -171,8 +285,8 @@ func (m *MapData) parseCells() {
 		raw := &m.Cells[i]
 		info := &m.CellInfos[i]
 
-		// Back layer: bit15 = collision, bits 0-14 = 1-based image index
-		info.Collision = (raw.BkImg & 0x8000) != 0
+		// Collision: Delphi CanMove checks both wBkImg and wFrImg bit15 (MapUnit.pas:320)
+		info.Collision = (raw.BkImg&0x8000) != 0 || (raw.FrImg&0x8000) != 0
 		backImg := int(raw.BkImg&0x7FFF) - 1
 		if backImg >= 0 {
 			info.BackLib = LibTiles

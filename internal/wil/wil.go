@@ -67,8 +67,9 @@ func Load(wilPath string) (*File, error) {
 		wf.colorCount = int(colorCount)
 		wf.Title = "#ILIB"
 	} else {
-		// Standard: 40-byte title + fields
-		title := make([]byte, 35)
+		// Standard format: String[40] title (41 bytes in Delphi) + fields.
+		// We read 5 (magic) + 36 = 41 bytes for title to match Delphi String[40].
+		title := make([]byte, 36)
 		if _, err := f.Read(title); err != nil {
 			return nil, err
 		}
@@ -81,11 +82,14 @@ func Load(wilPath string) (*File, error) {
 		binary.Read(f, binary.LittleEndian, &verFlag)
 		wf.Count = int(imgCount)
 		wf.colorCount = int(colorCount)
+		// Delphi WIL.pas:175-178: VerFlag=0 means old format (no VerFlag field in
+		// file, those 4 bytes are actually palette start) → btVersion=1, seek back.
+		// VerFlag≠0 means new format with 12-byte image headers → btVersion=0.
 		if verFlag == 0 {
-			wf.btVersion = 0 // 12-byte image header
-		} else {
-			wf.btVersion = 1 // 8-byte image header
+			wf.btVersion = 1 // 8-byte image header (old format)
 			f.Seek(-4, io.SeekCurrent)
+		} else {
+			wf.btVersion = 0 // 12-byte image header (new format)
 		}
 	}
 
@@ -126,7 +130,7 @@ func Load(wilPath string) (*File, error) {
 			}
 		}
 	}
-	offsets, err := loadWix(wixPath, wf.Count)
+	offsets, err := loadWix(wixPath, wf.Count, wf.btVersion)
 	if err != nil {
 		return nil, fmt.Errorf("load wix: %w", err)
 	}
@@ -222,7 +226,7 @@ func Load(wilPath string) (*File, error) {
 	return wf, nil
 }
 
-func loadWix(wixPath string, expectedCount int) ([]int32, error) {
+func loadWix(wixPath string, expectedCount int, btVersion int) ([]int32, error) {
 	f, err := os.Open(wixPath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", wixPath, err)
@@ -238,16 +242,19 @@ func loadWix(wixPath string, expectedCount int) ([]int32, error) {
 	if isILib {
 		f.Seek(44, io.SeekStart)
 	} else {
-		title := make([]byte, 35)
+		// Standard WIX: String[40] title (41 bytes total, 5 already read as magic).
+		title := make([]byte, 36)
 		f.Read(title)
 	}
 
 	var indexCount int32
 	binary.Read(f, binary.LittleEndian, &indexCount)
 	if !isILib {
+		// Delphi WIL.pas LoadIndex: btVersion=1 (old format) has no VerFlag in WIX,
+		// btVersion=0 (new format) has VerFlag field.
 		var verFlag int32
 		binary.Read(f, binary.LittleEndian, &verFlag)
-		if verFlag == 0 {
+		if btVersion == 1 {
 			f.Seek(-4, io.SeekCurrent)
 		}
 	}

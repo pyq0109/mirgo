@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/engine"
@@ -358,8 +359,9 @@ func (s *LoginScene) submitLogin() {
 	}
 	s.errorMsg = ""
 	s.connecting = true
+	pw := strings.ReplaceAll(strings.ReplaceAll(s.password, "~", "_"), "'", "_")
 	log.Logf(log.LevelInfo, "LoginScene", "Submitting login: %s", s.userID)
-	s.loginFunc(s.userID, s.password)
+	s.loginFunc(s.userID, pw)
 }
 
 // SetLoginFunc sets the callback for login attempts.

@@ -305,6 +305,79 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		log.Logf(log.LevelInfo, "Server", "[CMQueryChr] accountID=%d", session.CharacterID)
 		sendCharacterList(server, session, db)
 
+	case protocol.CMNewChr:
+		// body: "loginID/charName/hair/job/sex"
+		parts := strings.Split(body, "/")
+		if len(parts) < 5 {
+			log.Logf(log.LevelWarn, "Server", "[CMNewChr] Invalid body: %q", body)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		charName := parts[1]
+		var hair, job, sex int
+		fmt.Sscanf(parts[2], "%d", &hair)
+		fmt.Sscanf(parts[3], "%d", &job)
+		fmt.Sscanf(parts[4], "%d", &sex)
+
+		log.Logf(log.LevelInfo, "Server", "[CMNewChr] name=%q job=%d sex=%d hair=%d account=%d",
+			charName, job, sex, hair, session.CharacterID)
+
+		if charName == "" || len([]rune(charName)) > 14 {
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		chars, err := db.GetCharactersByAccount(session.CharacterID)
+		if err == nil && len(chars) >= 2 {
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 3, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		_, err = db.GetCharacterByName(session.CharacterID, charName)
+		if err == nil {
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 2, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		_, err = db.CreateCharacter(session.CharacterID, charName, job, sex)
+		if err != nil {
+			log.Logf(log.LevelError, "Server", "[CMNewChr] Create failed: %v", err)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		log.Logf(log.LevelInfo, "Server", "[CMNewChr] Created character %q for account %d", charName, session.CharacterID)
+		resp := protocol.MakeDefaultMsg(protocol.SMNewChrSuccess, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+
+	case protocol.CMDelChr:
+		charName := body
+		log.Logf(log.LevelInfo, "Server", "[CMDelChr] name=%q account=%d", charName, session.CharacterID)
+
+		charData, err := db.GetCharacterByName(session.CharacterID, charName)
+		if err != nil {
+			log.Logf(log.LevelWarn, "Server", "[CMDelChr] Character %q not found: %v", charName, err)
+			resp := protocol.MakeDefaultMsg(protocol.SMDelChrFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		if err := db.DeleteCharacter(charData.ID); err != nil {
+			log.Logf(log.LevelError, "Server", "[CMDelChr] Delete failed: %v", err)
+			resp := protocol.MakeDefaultMsg(protocol.SMDelChrFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		log.Logf(log.LevelInfo, "Server", "[CMDelChr] Deleted character %q (id=%d)", charName, charData.ID)
+		resp := protocol.MakeDefaultMsg(protocol.SMDelChrSuccess, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+
 	case protocol.CMSelChr:
 		// Fix 4: Parse character name from body instead of msg.Recog
 		// Client sends: "loginID/charName"

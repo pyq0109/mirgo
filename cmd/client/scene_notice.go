@@ -51,35 +51,38 @@ func (s *NoticeScene) Update(dt float64) {
 
 // Render renders the notice scene.
 func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
-	// Background
-	gl.DrawQuadColor(0, 0, 1024, 768, 0.1, 0.1, 0.2, 1.0, proj)
+	gl.DrawQuadColor(0, 0, 1024, 768, 0.05, 0.05, 0.12, 1.0, proj)
 
-	// Notice panel
-	gl.DrawQuadColor(200, 150, 624, 350, 0.15, 0.15, 0.25, 0.9, proj)
+	panelX, panelY := float32(200), float32(130)
+	panelW, panelH := float32(624), float32(380)
 
-	// OK button
-	gl.DrawQuadColor(noticeOKButton.X, noticeOKButton.Y, noticeOKButton.W, noticeOKButton.H, 0.3, 0.3, 0.4, 1.0, proj)
+	gl.DrawQuadColor(panelX-2, panelY-2, panelW+4, panelH+4, 0.4, 0.35, 0.2, 1.0, proj)
+	gl.DrawQuadColor(panelX, panelY, panelW, panelH, 0.08, 0.08, 0.15, 0.95, proj)
+	gl.DrawQuadColor(panelX+2, panelY+2, panelW-4, 28, 0.15, 0.12, 0.08, 0.9, proj)
 
-	// Render text
-	if s.text != nil {
-		// Title
-		s.text.DrawText("服务器公告", 400, 160, 1.0, 1.0, 0.5, 1.0, proj)
+	gl.DrawQuadColor(noticeOKButton.X-1, noticeOKButton.Y-1, noticeOKButton.W+2, noticeOKButton.H+2, 0.5, 0.45, 0.3, 1.0, proj)
+	gl.DrawQuadColor(noticeOKButton.X, noticeOKButton.Y, noticeOKButton.W, noticeOKButton.H, 0.2, 0.18, 0.12, 1.0, proj)
 
-		// Notice text lines
-		y := float32(200)
-		for _, line := range s.Lines {
-			if y > 480 {
-				break
-			}
-			s.text.DrawText(line, 220, y, 0.9, 0.9, 0.9, 1.0, proj)
-			y += 20
-		}
-
-		// OK button text
-		okText := "确 定"
-		tw := s.text.MeasureText(okText)
-		s.text.DrawText(okText, noticeOKButton.X+(noticeOKButton.W-float32(tw))/2, noticeOKButton.Y+10, 1.0, 1.0, 1.0, 1.0, proj)
+	if s.text == nil {
+		return
 	}
+
+	titleText := "服务器公告"
+	tw := s.text.MeasureText(titleText)
+	s.text.DrawText(titleText, panelX+(panelW-float32(tw))/2, panelY+6, 1.0, 0.9, 0.4, 1.0, proj)
+
+	y := panelY + 40
+	for _, line := range s.Lines {
+		if y > panelY+panelH-20 {
+			break
+		}
+		s.text.DrawText(line, panelX+20, y, 0.9, 0.9, 0.9, 1.0, proj)
+		y += 22
+	}
+
+	okText := "确 定"
+	ow := s.text.MeasureText(okText)
+	s.text.DrawText(okText, noticeOKButton.X+(noticeOKButton.W-float32(ow))/2, noticeOKButton.Y+10, 1.0, 1.0, 0.8, 1.0, proj)
 }
 
 // OnKey handles keyboard input.
