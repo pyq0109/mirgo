@@ -26,12 +26,19 @@ type ServerConfig struct {
 		Path string `json:"path"`
 	} `json:"database"`
 	Game struct {
-		HomeMap         string `json:"homeMap"`
-		HomeX           int    `json:"homeX"`
-		HomeY           int    `json:"homeY"`
-		GroupMembersMax int    `json:"groupMembersMax"`
-		BuildGuild      int    `json:"buildGuild"`
-		GuildWarFee     int    `json:"guildWarFee"`
+		HomeMap         string         `json:"homeMap"`
+		HomeX           int            `json:"homeX"`
+		HomeY           int            `json:"homeY"`
+		GroupMembersMax int            `json:"groupMembersMax"`
+		BuildGuild      int            `json:"buildGuild"`
+		GuildWarFee     int            `json:"guildWarFee"`
+		DisableRun      bool           `json:"disableRun"`
+		GMRunAll        bool           `json:"gmRunAll"`
+		GMAccounts      map[string]int `json:"gmAccounts"`
+		WalkInterval    int64          `json:"walkInterval"`
+		RunInterval     int64          `json:"runInterval"`
+		SpeedHackKick   bool           `json:"speedHackKick"`
+		SpeedHackMax    int            `json:"speedHackMax"`
 	} `json:"game"`
 	Commands struct {
 		Names       map[string]string `json:"names"`
@@ -158,6 +165,27 @@ func (c *ServerConfig) GetHomeY() int {
 		return c.Game.HomeY
 	}
 	return 618
+}
+
+func (c *ServerConfig) GetWalkInterval() int64 {
+	if c.Game.WalkInterval > 0 {
+		return c.Game.WalkInterval
+	}
+	return 600
+}
+
+func (c *ServerConfig) GetRunInterval() int64 {
+	if c.Game.RunInterval > 0 {
+		return c.Game.RunInterval
+	}
+	return 600
+}
+
+func (c *ServerConfig) GetSpeedHackMax() int {
+	if c.Game.SpeedHackMax > 0 {
+		return c.Game.SpeedHackMax
+	}
+	return 4
 }
 
 // GetServerHostPort returns the server address as host/port pair.

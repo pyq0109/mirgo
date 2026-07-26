@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"encoding/json"
@@ -42,12 +42,19 @@ type DatabaseSection struct {
 
 // GameSection contains game world settings.
 type GameSection struct {
-	HomeMap         string `json:"homeMap"`
-	HomeX           int    `json:"homeX"`
-	HomeY           int    `json:"homeY"`
-	GroupMembersMax int    `json:"groupMembersMax"`
-	BuildGuild      int    `json:"buildGuild"`
-	GuildWarFee     int    `json:"guildWarFee"`
+	HomeMap         string         `json:"homeMap"`
+	HomeX           int            `json:"homeX"`
+	HomeY           int            `json:"homeY"`
+	GroupMembersMax int            `json:"groupMembersMax"`
+	BuildGuild      int            `json:"buildGuild"`
+	GuildWarFee     int            `json:"guildWarFee"`
+	DisableRun      bool           `json:"disableRun"`
+	GMRunAll        bool           `json:"gmRunAll"`
+	GMAccounts      map[string]int `json:"gmAccounts"`
+	WalkInterval    int64          `json:"walkInterval"`
+	RunInterval     int64          `json:"runInterval"`
+	SpeedHackKick   bool           `json:"speedHackKick"`
+	SpeedHackMax    int            `json:"speedHackMax"`
 }
 
 // CommandsSection contains GM command definitions.
@@ -109,6 +116,13 @@ func ConvertServer(inputDir, outputDir string) error {
 			GroupMembersMax: getINIInt(setup, "Setup", "GroupMembersMax", 10),
 			BuildGuild:      getINIInt(setup, "Setup", "BuildGuild", 1000000),
 			GuildWarFee:     getINIInt(setup, "Setup", "GuildWarFee", 30000),
+			DisableRun:      getINIBool(setup, "Setup", "DiableHumanRun", false),
+			GMRunAll:        getINIBool(setup, "Setup", "GMRunAll", true),
+			GMAccounts:      make(map[string]int),
+			WalkInterval:    int64(getINIInt(setup, "Setup", "WalkIntervalTime", 600)),
+			RunInterval:     int64(getINIInt(setup, "Setup", "RunIntervalTime", 600)),
+			SpeedHackKick:   getINIBool(setup, "Setup", "KickOverSpeed", false),
+			SpeedHackMax:    getINIInt(setup, "Setup", "OverSpeedKickCount", 4),
 		},
 		Commands: CommandsSection{
 			Names:       getINISection(commands, "Command"),
@@ -178,6 +192,15 @@ func getINISectionInt(ini map[string]map[string]string, section string) map[stri
 		return result
 	}
 	return make(map[string]int)
+}
+
+func getINIBool(ini map[string]map[string]string, section, key string, defaultVal bool) bool {
+	if sec, ok := ini[section]; ok {
+		if val, ok := sec[key]; ok {
+			return val == "1" || val == "true" || val == "TRUE"
+		}
+	}
+	return defaultVal
 }
 
 func getINISectionBool(ini map[string]map[string]string, section string) map[string]bool {

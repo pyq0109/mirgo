@@ -14,6 +14,10 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 		return false
 	}
 
+	if p.Permission < 10 {
+		return false
+	}
+
 	command := strings.ToLower(parts[0])
 
 	switch command {

@@ -106,6 +106,12 @@ func NewEnvironment(name string, m *mapformat.MapData) *Environment {
 
 // CanWalk checks if a position is walkable (terrain + entities + doors).
 func (e *Environment) CanWalk(x, y int) bool {
+	return e.CanWalkEx(x, y, false)
+}
+
+// CanWalkEx checks walkability. When ignoreEntities is true, only terrain and
+// doors are checked — entity collision is skipped (Delphi CanWalkEx boFlag).
+func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return false
 	}
@@ -118,6 +124,9 @@ func (e *Environment) CanWalk(x, y int) bool {
 		if info != nil && info.FrontDoorIndex&0x80 != 0 && info.FrontDoorOffset&0x80 == 0 {
 			return false
 		}
+	}
+	if ignoreEntities {
+		return true
 	}
 	for _, o := range e.Cells[idx].ObjList {
 		if o.Type != OS_MOVINGOBJECT {

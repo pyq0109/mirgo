@@ -337,6 +337,16 @@ func (s *TCPServer) SendRaw(sessionID int64, raw string) error {
 	}
 }
 
+// CloseSession forcibly disconnects a session (e.g. speed hack kick).
+func (s *TCPServer) CloseSession(sessionID int64) {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if ok {
+		s.removeSession(session)
+	}
+}
+
 // GetSessionCount returns the number of connected sessions.
 func (s *TCPServer) GetSessionCount() int {
 	s.mu.RLock()

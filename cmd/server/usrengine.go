@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"sync"
@@ -11,6 +11,8 @@ import (
 type UserEngine struct {
 	PlayObjectList map[int32]*PlayObject
 	mu             sync.RWMutex
+
+	Config *ServerConfig
 
 	db     *storage.Database
 	mapMgr *MapManager

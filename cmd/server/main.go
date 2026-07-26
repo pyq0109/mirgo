@@ -92,6 +92,7 @@ func main() {
 
 	sessionMgr := NewSessionManager()
 	userEngine := NewUserEngine(db, mapMgr)
+	userEngine.Config = config
 	userEngine.ItemDB = itemDB
 	userEngine.MagicDB = magicDB
 	userEngine.MonsterDB = monsterDB
@@ -183,6 +184,9 @@ func main() {
 		player.SessionID = session.ID
 		player.AccountName = session.AccountName
 		player.LastPkDecayTick = time.Now().UnixMilli()
+		if perm, ok := config.Game.GMAccounts[player.AccountName]; ok {
+			player.Permission = byte(perm)
+		}
 
 		// Find and set map environment
 		envir := mapMgr.FindMap(charData.Map)

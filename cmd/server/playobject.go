@@ -32,9 +32,10 @@ type PlayObject struct {
 	deathTick      int64
 	skeletonSent   bool
 
-	WalkTick  int64
-	WalkSpeed int64
-	RunSpeed  int64
+	WalkTick       int64
+	WalkSpeed      int64
+	RunSpeed       int64
+	OverSpeedCount int
 
 	HitTick     int64
 	FireHitTick int64
@@ -80,6 +81,7 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 		knownItems:    make(map[int32]bool),
 		WalkSpeed:     1400,
 		RunSpeed:      1400,
+		WalkTick:      time.Now().UnixMilli(),
 	}
 }
 
@@ -247,17 +249,13 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	now := time.Now().UnixMilli()
-	speed := p.WalkSpeed
-	if speed == 0 {
-		speed = 1400
-	}
+	interval := p.Engine.Config.GetWalkInterval()
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
-		speed = speed * 2
+		interval *= 2
 	}
-	if now-p.WalkTick < speed {
+	if !p.checkMoveSpeed(now, interval, server) {
 		return
 	}
-	p.WalkTick = now
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
@@ -277,17 +275,13 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	now := time.Now().UnixMilli()
-	speed := p.RunSpeed
-	if speed == 0 {
-		speed = 1400
-	}
+	interval := p.Engine.Config.GetRunInterval()
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
-		speed = speed * 2
+		interval *= 2
 	}
-	if now-p.WalkTick < speed {
+	if !p.checkMoveSpeed(now, interval, server) {
 		return
 	}
-	p.WalkTick = now
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
@@ -296,7 +290,8 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	dx, dy := dirToOffset(dir)
 	x1, y1 := p.CurrX+dx, p.CurrY+dy
 	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
-	if p.envir == nil || !p.envir.CanWalk(x1, y1) || !p.envir.CanWalk(x2, y2) {
+	ignore := p.runIgnoreEntities()
+	if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) {
 		p.sendMoveFail(server)
 		return
 	}
@@ -310,6 +305,17 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer) {
+	if !p.CanMoveCheck() {
+		return
+	}
+	now := time.Now().UnixMilli()
+	interval := p.Engine.Config.GetRunInterval()
+	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
+		interval *= 2
+	}
+	if !p.checkMoveSpeed(now, interval, server) {
+		return
+	}
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		return
@@ -322,7 +328,8 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	x1, y1 := p.CurrX+dx, p.CurrY+dy
 	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
 	x3, y3 := p.CurrX+dx*3, p.CurrY+dy*3
-	if p.envir == nil || !p.envir.CanWalk(x1, y1) || !p.envir.CanWalk(x2, y2) || !p.envir.CanWalk(x3, y3) {
+	ignore := p.runIgnoreEntities()
+	if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) || !p.envir.CanWalkEx(x3, y3, ignore) {
 		p.sendMoveFail(server)
 		return
 	}
@@ -330,9 +337,32 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	p.CurrX, p.CurrY = x3, y3
 	p.Dir = dir
 	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
-	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
+	p.SendRefMsg(RM_HORSERUN, dir, p.CurrX, p.CurrY, "")
 	server.SendRaw(p.Session.ID, "#+GOOD!")
 	p.CheckMapRoute(server)
+}
+
+func (p *PlayObject) runIgnoreEntities() bool {
+	cfg := p.Engine.Config
+	return cfg.Game.DisableRun || (p.Permission > 9 && cfg.Game.GMRunAll)
+}
+
+// checkMoveSpeed validates movement interval and tracks overspeed violations.
+// Returns true if the move is allowed, false if rejected (too fast).
+func (p *PlayObject) checkMoveSpeed(now, interval int64, server *netserver.TCPServer) bool {
+	if now-p.WalkTick < interval {
+		p.OverSpeedCount++
+		cfg := p.Engine.Config
+		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
+			log.Logf(log.LevelWarn, "Server", "Speed hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
+			server.CloseSession(p.Session.ID)
+			return false
+		}
+		server.SendRaw(p.Session.ID, "#+FAIL!")
+		return false
+	}
+	p.WalkTick = now
+	return true
 }
 
 func hitSkillMagID(ident int) (int, bool) {
