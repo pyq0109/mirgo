@@ -205,8 +205,8 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 	}
 
 	drawn := false
-	if s.resources.ChrSel != nil && imgIdx >= 0 && imgIdx < len(s.resources.ChrSel.Images) {
-		img := s.resources.ChrSel.Images[imgIdx]
+	if s.resources.ChrSel != nil && imgIdx >= 0 && imgIdx < s.resources.ChrSel.Count {
+		img := s.resources.ChrSel.GetImage(imgIdx)
 		if img != nil && img.Width > 0 && img.Height > 0 {
 			tex := s.resources.GetTexture(s.resources.ChrSel, imgIdx)
 			if tex != 0 {
@@ -307,6 +307,10 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 	s.text.DrawText(s.createName, 444, 262, 1.0, 1.0, 0.8, 1.0, proj)
 
 	showCursor := time.Since(s.cursorBlink) < 250*time.Millisecond
+	if time.Since(s.cursorBlink) > 500*time.Millisecond {
+		s.cursorBlink = time.Now()
+		showCursor = true
+	}
 	if showCursor {
 		cx := float32(444) + float32(s.text.MeasureText(s.createName))
 		s.text.DrawText("|", cx, 262, 1.0, 1.0, 0.0, 1.0, proj)
@@ -638,20 +642,19 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 
 	if selectedIdx >= 0 && selectedIdx < 2 && s.Characters[selectedIdx].Valid {
 		s.Selected = selectedIdx
-		s.Characters[selectedIdx].FreezeState = false
-		s.Characters[selectedIdx].Unfreezing = false
+		s.Characters[selectedIdx].Unfreezing = true
 	} else if s.Characters[0].Valid {
 		s.Selected = 0
-		s.Characters[0].FreezeState = false
+		s.Characters[0].Unfreezing = true
 	}
 	log.Logf(log.LevelInfo, "SelectChrScene", "Final selected=%d", s.Selected)
 }
 
 func (s *SelectChrScene) getPrguseSize(index int) (int, int) {
-	if s.resources.Prguse == nil || index >= len(s.resources.Prguse.Images) {
+	if s.resources.Prguse == nil || index >= s.resources.Prguse.Count {
 		return 0, 0
 	}
-	img := s.resources.Prguse.Images[index]
+	img := s.resources.Prguse.GetImage(index)
 	if img == nil {
 		return 0, 0
 	}

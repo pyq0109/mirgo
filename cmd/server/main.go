@@ -239,6 +239,33 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 	case protocol.CMProtocol:
 		log.Logf(log.LevelInfo, "Server", "Protocol version: %d", msg.Recog)
 
+	case protocol.CMAddNewUser:
+		username, password := parseCredentials(body)
+		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] Register attempt: %s", username)
+		if username == "" || len(username) > 10 || password == "" || len(password) > 10 {
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 2, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		_, _, err := db.GetAccountByUsername(username)
+		if err == nil {
+			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] Account already exists: %s", username)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 1, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		hash := simpleHash(password)
+		_, err = db.CreateAccount(username, hash)
+		if err != nil {
+			log.Logf(log.LevelError, "Server", "[CMAddNewUser] Create failed: %v", err)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] Account created: %s", username)
+		resp := protocol.MakeDefaultMsg(protocol.SMNewIDSuccess, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+
 	case protocol.CMIDPassword:
 		// Parse username/password from body (format: "username/password")
 		username, password := parseCredentials(body)

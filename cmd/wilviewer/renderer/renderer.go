@@ -57,22 +57,22 @@ func (r *WILRenderer) GetOrCreateTexture(idx int) uint32 {
 
 // GetImage returns the image data for the given index, or nil if not available.
 func (r *WILRenderer) GetImage(idx int) *wil.Image {
-	if r.WILFile == nil || idx < 0 || idx >= len(r.WILFile.Images) {
+	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
 		return nil
 	}
-	return r.WILFile.Images[idx]
+	return r.WILFile.GetImage(idx)
 }
 
 // getTexture returns a GL texture for the given image index, caching as needed.
 func (r *WILRenderer) getTexture(idx int) uint32 {
-	if idx < 0 || idx >= len(r.WILFile.Images) {
+	if idx < 0 || idx >= r.WILFile.Count {
 		return 0
 	}
 	if tex, ok := r.texCache[idx]; ok {
 		mlog.Logf(mlog.LevelTrace, "Renderer", "纹理缓存命中: idx=%d, tex=%d", idx, tex)
 		return tex
 	}
-	img := r.WILFile.Images[idx]
+	img := r.WILFile.GetImage(idx)
 	if img == nil || img.RGBA == nil {
 		mlog.Logf(mlog.LevelWarn, "Renderer", "图像为空: idx=%d", idx)
 		return 0
@@ -86,7 +86,7 @@ func (r *WILRenderer) getTexture(idx int) uint32 {
 // Render draws the specified WIL image in the given viewport.
 // vpX, vpY, vpW, vpH define the GL viewport in screen pixels.
 func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
-	if r.WILFile == nil || idx < 0 || idx >= len(r.WILFile.Images) {
+	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
 		return
 	}
 
@@ -95,7 +95,7 @@ func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
 		return
 	}
 
-	img := r.WILFile.Images[idx]
+	img := r.WILFile.GetImage(idx)
 	if img == nil || img.Width <= 0 || img.Height <= 0 {
 		return
 	}
@@ -132,11 +132,11 @@ func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
 
 // ExportPNG exports the specified image to a PNG file.
 func (r *WILRenderer) ExportPNG(idx int, path string) error {
-	if r.WILFile == nil || idx < 0 || idx >= len(r.WILFile.Images) {
+	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
 		mlog.Logf(mlog.LevelError, "Export", "导出失败: 无效索引 idx=%d", idx)
 		return os.ErrInvalid
 	}
-	img := r.WILFile.Images[idx]
+	img := r.WILFile.GetImage(idx)
 	if img == nil || img.RGBA == nil {
 		mlog.Logf(mlog.LevelError, "Export", "导出失败: 图像为空 idx=%d", idx)
 		return os.ErrInvalid

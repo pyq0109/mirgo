@@ -249,7 +249,7 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 	selectedIdx := state.CurrentIdx
 	col := 0
 	for i := 0; i < wf.Count; i++ {
-		img := wf.Images[i]
+		img := wf.GetImage(i)
 		if img == nil || img.RGBA == nil {
 			col++
 			if col >= cols {
@@ -365,8 +365,8 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	ig.Separator()
 
 	// Current image info.
-	if state.CurrentIdx >= 0 && state.CurrentIdx < len(wf.Images) {
-		img := wf.Images[state.CurrentIdx]
+	if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
+		img := wf.GetImage(state.CurrentIdx)
 		if img != nil {
 			ig.Text(fmt.Sprintf("Index: %d", state.CurrentIdx))
 			ig.Text(fmt.Sprintf("Size: %d x %d", img.Width, img.Height))
@@ -412,7 +412,7 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 
 	// Export.
 	if ig.Button("Export PNG") {
-		if state.CurrentIdx >= 0 && state.CurrentIdx < len(wf.Images) {
+		if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
 			dir := state.DataDir + "/export"
 			os.MkdirAll(dir, 0755)
 			path := dir + "/" + formatIdx(state.CurrentIdx) + ".png"
@@ -465,8 +465,8 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	}
 
 	// Browse mode: show selected image as ImGui Image.
-	if state.CurrentIdx >= 0 && state.CurrentIdx < len(wf.Images) {
-		img := wf.Images[state.CurrentIdx]
+	if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
+		img := wf.GetImage(state.CurrentIdx)
 		if img != nil && img.RGBA != nil {
 			tex := state.Renderer.GetOrCreateTexture(state.CurrentIdx)
 			if tex != 0 {

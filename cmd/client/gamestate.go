@@ -5,12 +5,14 @@ import (
 )
 
 type GameState struct {
-	MySelf   *Actor
-	Actors   *ActorManager
-	UseItems [13]*protocol.UserItem
+	MySelf    *Actor
+	Actors    *ActorManager
+	UseItems  [13]*protocol.UserItem
 	MagicList []protocol.UserMagic
 	DayBright int
 	MapName   string
+	MapTitle  string
+	LightLevel int
 }
 
 func NewGameState() *GameState {

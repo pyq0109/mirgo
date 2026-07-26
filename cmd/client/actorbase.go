@@ -416,10 +416,10 @@ func (a *Actor) getHumanBodyImage(resources *engine.ResourceManager) *wil.Image 
 		return nil
 	}
 	idx := HumanFrame*a.Dress + a.CurrentFrame
-	if idx < 0 || idx >= len(resources.Hum.Images) {
+	if idx < 0 || idx >= resources.Hum.Count {
 		return nil
 	}
-	return resources.Hum.Images[idx]
+	return resources.Hum.GetImage(idx)
 }
 
 func (a *Actor) getHumanHairImage(resources *engine.ResourceManager) *wil.Image {
@@ -427,10 +427,10 @@ func (a *Actor) getHumanHairImage(resources *engine.ResourceManager) *wil.Image 
 		return nil
 	}
 	idx := HumanFrame*a.Hair + a.CurrentFrame
-	if idx < 0 || idx >= len(resources.Hair.Images) {
+	if idx < 0 || idx >= resources.Hair.Count {
 		return nil
 	}
-	return resources.Hair.Images[idx]
+	return resources.Hair.GetImage(idx)
 }
 
 func (a *Actor) getHumanWeaponImage(resources *engine.ResourceManager) *wil.Image {
@@ -438,10 +438,10 @@ func (a *Actor) getHumanWeaponImage(resources *engine.ResourceManager) *wil.Imag
 		return nil
 	}
 	idx := HumanFrame*a.Weapon + a.CurrentFrame
-	if idx < 0 || idx >= len(resources.Weapon.Images) {
+	if idx < 0 || idx >= resources.Weapon.Count {
 		return nil
 	}
-	return resources.Weapon.Images[idx]
+	return resources.Weapon.GetImage(idx)
 }
 
 func (a *Actor) getMonsterBodyImage(resources *engine.ResourceManager) *wil.Image {
@@ -451,10 +451,10 @@ func (a *Actor) getMonsterBodyImage(resources *engine.ResourceManager) *wil.Imag
 	}
 	offset := GetMonOffset(a.Appearance)
 	idx := offset + a.CurrentFrame
-	if idx < 0 || idx >= len(monFile.Images) {
+	if idx < 0 || idx >= monFile.Count {
 		return nil
 	}
-	return monFile.Images[idx]
+	return monFile.GetImage(idx)
 }
 
 func (a *Actor) getMonFile(resources *engine.ResourceManager) *wil.File {
@@ -470,10 +470,10 @@ func (a *Actor) getNPCBodyImage(resources *engine.ResourceManager) *wil.Image {
 		return nil
 	}
 	idx := GetNpcOffset(a.Appearance) + a.CurrentFrame
-	if idx < 0 || idx >= len(resources.Npc.Images) {
+	if idx < 0 || idx >= resources.Npc.Count {
 		return nil
 	}
-	return resources.Npc.Images[idx]
+	return resources.Npc.GetImage(idx)
 }
 
 func (a *Actor) Draw(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
@@ -507,8 +507,8 @@ func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, 
 
 func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
 	bodyIdx := HumanFrame*a.Dress + a.CurrentFrame
-	if resources.Hum != nil && bodyIdx >= 0 && bodyIdx < len(resources.Hum.Images) {
-		img := resources.Hum.Images[bodyIdx]
+	if resources.Hum != nil && bodyIdx >= 0 && bodyIdx < resources.Hum.Count {
+		img := resources.Hum.GetImage(bodyIdx)
 		if img != nil && img.RGBA != nil {
 			tex := resources.GetTexture(resources.Hum, bodyIdx)
 			if tex != 0 {
@@ -520,8 +520,8 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 	}
 
 	hairIdx := HumanFrame*a.Hair + a.CurrentFrame
-	if a.Hair > 0 && resources.Hair != nil && hairIdx >= 0 && hairIdx < len(resources.Hair.Images) {
-		img := resources.Hair.Images[hairIdx]
+	if a.Hair > 0 && resources.Hair != nil && hairIdx >= 0 && hairIdx < resources.Hair.Count {
+		img := resources.Hair.GetImage(hairIdx)
 		if img != nil && img.RGBA != nil {
 			tex := resources.GetTexture(resources.Hair, hairIdx)
 			if tex != 0 {
@@ -533,8 +533,8 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 	}
 
 	weaponIdx := HumanFrame*a.Weapon + a.CurrentFrame
-	if a.Weapon > 0 && resources.Weapon != nil && weaponIdx >= 0 && weaponIdx < len(resources.Weapon.Images) {
-		img := resources.Weapon.Images[weaponIdx]
+	if a.Weapon > 0 && resources.Weapon != nil && weaponIdx >= 0 && weaponIdx < resources.Weapon.Count {
+		img := resources.Weapon.GetImage(weaponIdx)
 		if img != nil && img.RGBA != nil {
 			tex := resources.GetTexture(resources.Weapon, weaponIdx)
 			if tex != 0 {

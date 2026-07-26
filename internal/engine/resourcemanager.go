@@ -168,7 +168,7 @@ func (rm *ResourceManager) loadAll() error {
 
 // GetTexture returns a cached texture for the given WIL file and image index.
 func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
-	if f == nil || index < 0 || index >= len(f.Images) {
+	if f == nil || index < 0 || index >= f.Count {
 		return 0
 	}
 
@@ -181,8 +181,7 @@ func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 	}
 	rm.mu.RUnlock()
 
-	// Load the image
-	img := f.Images[index]
+	img := f.GetImage(index)
 	if img == nil || img.RGBA == nil {
 		return 0
 	}
@@ -198,10 +197,14 @@ func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 
 // GetImage returns the raw image for the given WIL file and index.
 func (rm *ResourceManager) GetImage(f *wil.File, index int) *image.RGBA {
-	if f == nil || index < 0 || index >= len(f.Images) {
+	if f == nil || index < 0 || index >= f.Count {
 		return nil
 	}
-	return f.Images[index].RGBA
+	img := f.GetImage(index)
+	if img == nil {
+		return nil
+	}
+	return img.RGBA
 }
 
 // ClearCache clears the texture cache.
@@ -217,4 +220,29 @@ func (rm *ResourceManager) ClearCache() {
 // Destroy frees all resources.
 func (rm *ResourceManager) Destroy() {
 	rm.ClearCache()
+	rm.closeAllWils()
+}
+
+func (rm *ResourceManager) closeAllWils() {
+	files := []*wil.File{
+		rm.Tiles, rm.SmTiles, rm.Hum, rm.Hair, rm.Weapon, rm.Npc,
+		rm.Magic, rm.Magic2, rm.Items, rm.StateItem, rm.DnItems,
+		rm.Prguse, rm.Prguse2, rm.Prguse3, rm.ChrSel, rm.Mmap,
+		rm.Effect, rm.Dragon, rm.Event, rm.HumEffect, rm.MagIcon,
+	}
+	for _, f := range files {
+		if f != nil {
+			f.Close()
+		}
+	}
+	for _, f := range rm.Objects {
+		if f != nil {
+			f.Close()
+		}
+	}
+	for _, f := range rm.Mon {
+		if f != nil {
+			f.Close()
+		}
+	}
 }

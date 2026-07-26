@@ -85,13 +85,13 @@ func (r *GLRenderer) getObjectsLoader(area int) *wil.File {
 }
 
 func (r *GLRenderer) getTex(cache map[int]uint32, file *wil.File, idx int) uint32 {
-	if idx < 0 || file == nil || idx >= len(file.Images) {
+	if idx < 0 || file == nil || idx >= file.Count {
 		return 0
 	}
 	if tex, ok := cache[idx]; ok {
 		return tex
 	}
-	img := file.Images[idx]
+	img := file.GetImage(idx)
 	if img == nil || img.RGBA == nil {
 		return 0
 	}
@@ -164,7 +164,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 				if tex == 0 {
 					continue
 				}
-				img := r.Tiles.Images[info.BackImage]
+				img := r.Tiles.GetImage(info.BackImage)
 				wx := float32(x * TileWidth)
 				wy := float32(y * TileHeight)
 				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
@@ -184,7 +184,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 				if tex == 0 {
 					continue
 				}
-				img := r.SmTiles.Images[info.MiddleImage]
+				img := r.SmTiles.GetImage(info.MiddleImage)
 				wx := float32(x * TileWidth)
 				wy := float32(y * TileHeight)
 				r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
@@ -263,7 +263,7 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]floa
 		}
 	}
 
-	if idx < 0 || idx >= len(loader.Images) {
+	if idx < 0 || idx >= loader.Count {
 		return
 	}
 
@@ -271,7 +271,7 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]floa
 	if tex == 0 {
 		return
 	}
-	img := loader.Images[idx]
+	img := loader.GetImage(idx)
 
 	cellWorldX := float32(x * TileWidth)
 	cellWorldY := float32(y * TileHeight)

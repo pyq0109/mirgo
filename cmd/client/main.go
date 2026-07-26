@@ -113,6 +113,24 @@ func main() {
 		log.Logf(log.LevelInfo, "Client", "[Callback] CloseFunc: closing window")
 		glfwWindow.SetShouldClose(true)
 	})
+	loginScene.SetRegisterFunc(func(id, password string) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] RegisterFunc: id=%s", id)
+		if handler == nil {
+			var err error
+			handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
+			if err != nil {
+				log.Logf(log.LevelError, "Client", "[Callback] RegisterFunc: connect failed: %v", err)
+				loginScene.SetError("连接服务器失败")
+				handler = nil
+				return
+			}
+			handler.onFail = func() {
+				handler = nil
+			}
+		}
+		regMsg := protocol.MakeDefaultMsg(protocol.CMAddNewUser, 0, 0, 0, 0)
+		handler.Send(regMsg, id+"/"+password)
+	})
 
 	// Wire server selection scene callbacks.
 	selectServerScene.SetSelectFunc(func(serverName string) {
@@ -159,12 +177,12 @@ func main() {
 		handler.SendDelChr(name)
 	})
 	selectChrScene.SetExitFunc(func() {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ChrExitFunc: exiting")
+		log.Logf(log.LevelInfo, "Client", "[Callback] ChrExitFunc: returning to login")
 		if handler != nil {
 			handler.Close()
 			handler = nil
 		}
-		glfwWindow.SetShouldClose(true)
+		sceneMgr.ChangeScene(engine.SceneLogin)
 	})
 
 	// Wire notice scene callbacks.
@@ -696,6 +714,62 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		if h.onFail != nil {
 			h.onFail()
 		}
+
+	case protocol.SMNewIDSuccess:
+		log.Logf(log.LevelInfo, "Client", "Registration successful")
+		if h.loginScene != nil {
+			h.loginScene.registerMode = false
+			h.loginScene.connecting = false
+			h.loginScene.errorMsg = "注册成功，请登录"
+		}
+
+	case protocol.SMNewIDFail:
+		log.Logf(log.LevelWarn, "Client", "Registration failed: code=%d", msg.Recog)
+		if h.loginScene != nil {
+			h.loginScene.connecting = false
+			switch msg.Recog {
+			case 1:
+				h.loginScene.errorMsg = "账号已存在"
+			case 2:
+				h.loginScene.errorMsg = "账号名不合法"
+			default:
+				h.loginScene.errorMsg = "注册失败"
+			}
+		}
+
+	case protocol.SMSendUseItems:
+		log.Logf(log.LevelInfo, "Client", "Received use items (equipment)")
+
+	case protocol.SMSendMyMagic:
+		log.Logf(log.LevelInfo, "Client", "Received magic list")
+
+	case protocol.SMDayChanging:
+		log.Logf(log.LevelInfo, "Client", "Day changing: bright=%d", msg.Recog)
+		h.playScene.State.DayBright = int(msg.Recog)
+
+	case protocol.SMMapDescription:
+		log.Logf(log.LevelInfo, "Client", "Map description: %s", body)
+		h.playScene.State.MapTitle = body
+
+	case protocol.SMSubAbility:
+		log.Logf(log.LevelInfo, "Client", "Received sub ability")
+
+	case protocol.SMUsername:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.UserName = protocol.DecodeString(body)
+			log.Logf(log.LevelDebug, "Client", "Actor name: %s", actor.UserName)
+		}
+
+	case protocol.SMChangeLight:
+		log.Logf(log.LevelInfo, "Client", "Light change: %d", msg.Recog)
+		h.playScene.State.LightLevel = int(msg.Recog)
+
+	case protocol.SMHealthSpellChanged:
+		log.Logf(log.LevelDebug, "Client", "Health/spell changed")
+
+	case protocol.SMCharStatusChanged:
+		log.Logf(log.LevelDebug, "Client", "Char status changed")
 
 	default:
 		log.Logf(log.LevelDebug, "Client", "Unhandled: %d", msg.Ident)

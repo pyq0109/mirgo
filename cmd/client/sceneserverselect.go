@@ -235,10 +235,10 @@ func (s *SelectServerScene) confirmSelection() {
 
 // getPrguseSize gets the size of a texture from Prguse.wil.
 func (s *SelectServerScene) getPrguseSize(index int) (int, int) {
-	if s.resources.Prguse == nil || index >= len(s.resources.Prguse.Images) {
+	if s.resources.Prguse == nil || index >= s.resources.Prguse.Count {
 		return 0, 0
 	}
-	img := s.resources.Prguse.Images[index]
+	img := s.resources.Prguse.GetImage(index)
 	if img == nil {
 		return 0, 0
 	}
@@ -247,10 +247,10 @@ func (s *SelectServerScene) getPrguseSize(index int) (int, int) {
 
 // getChrSelSize gets the size of a texture from ChrSel.wil.
 func (s *SelectServerScene) getChrSelSize(index int) (int, int) {
-	if s.resources.ChrSel == nil || index >= len(s.resources.ChrSel.Images) {
+	if s.resources.ChrSel == nil || index >= s.resources.ChrSel.Count {
 		return 0, 0
 	}
-	img := s.resources.ChrSel.Images[index]
+	img := s.resources.ChrSel.GetImage(index)
 	if img == nil {
 		return 0, 0
 	}

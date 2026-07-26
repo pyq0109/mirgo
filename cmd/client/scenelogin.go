@@ -42,14 +42,22 @@ type LoginScene struct {
 	focusedField int // 0=id, 1=password, -1=none
 	cursorBlink  time.Time
 
+	// Register mode
+	registerMode    bool
+	regUser         string
+	regPass         string
+	regConfirm      string
+	regFocus        int // 0=user, 1=pass, 2=confirm
+
 	// Feedback
 	errorMsg   string
 	connecting bool
 
 	// Callbacks
 	loginFunc        func(id, password string)
+	registerFunc     func(id, password string)
 	closeFunc        func()
-	doorCompleteFunc func() // Called when door animation finishes
+	doorCompleteFunc func()
 }
 
 // Screen offset: 800x600 game area centered in 1024x768 window.
@@ -145,8 +153,12 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 
 	// Login UI (only shown when door is not opening)
 	if s.showLoginUI && !s.doorOpening {
-		s.renderButtons(gl, proj, ox, oy)
-		s.renderInputFields(gl, proj, ox, oy)
+		if s.registerMode {
+			s.renderRegisterDialog(gl, proj, ox, oy)
+		} else {
+			s.renderButtons(gl, proj, ox, oy)
+			s.renderInputFields(gl, proj, ox, oy)
+		}
 	}
 }
 
@@ -232,19 +244,38 @@ func (s *LoginScene) OnChar(char rune) {
 	if !s.showLoginUI || s.doorOpening || s.connecting {
 		return
 	}
-	if s.focusedField < 0 {
-		return
-	}
-	// Only accept printable ASCII (space to tilde).
 	if char < 32 || char > 126 {
 		return
 	}
+
+	if s.registerMode {
+		switch s.regFocus {
+		case 0:
+			if len(s.regUser) < 10 {
+				s.regUser += string(char)
+			}
+		case 1:
+			if len(s.regPass) < 10 {
+				s.regPass += string(char)
+			}
+		case 2:
+			if len(s.regConfirm) < 10 {
+				s.regConfirm += string(char)
+			}
+		}
+		s.cursorBlink = time.Now()
+		return
+	}
+
+	if s.focusedField < 0 {
+		return
+	}
 	switch s.focusedField {
-	case 0: // ID
+	case 0:
 		if len(s.userID) < 10 {
 			s.userID += string(char)
 		}
-	case 1: // Password
+	case 1:
 		if len(s.password) < 10 {
 			s.password += string(char)
 		}
@@ -254,10 +285,15 @@ func (s *LoginScene) OnChar(char rune) {
 
 // OnKey handles keyboard input.
 func (s *LoginScene) OnKey(key int, action int) {
-	if action != 1 { // Only on press
+	if action != 1 {
 		return
 	}
 	if !s.showLoginUI || s.doorOpening {
+		return
+	}
+
+	if s.registerMode {
+		s.handleRegisterKey(key)
 		return
 	}
 
@@ -282,7 +318,6 @@ func (s *LoginScene) OnKey(key int, action int) {
 		if s.connecting {
 			return
 		}
-		// Toggle between ID and password fields.
 		if s.focusedField == 0 {
 			s.focusedField = 1
 		} else {
@@ -296,6 +331,56 @@ func (s *LoginScene) OnKey(key int, action int) {
 	}
 }
 
+func (s *LoginScene) handleRegisterKey(key int) {
+	switch key {
+	case keyBackspace:
+		switch s.regFocus {
+		case 0:
+			if len(s.regUser) > 0 {
+				s.regUser = s.regUser[:len(s.regUser)-1]
+			}
+		case 1:
+			if len(s.regPass) > 0 {
+				s.regPass = s.regPass[:len(s.regPass)-1]
+			}
+		case 2:
+			if len(s.regConfirm) > 0 {
+				s.regConfirm = s.regConfirm[:len(s.regConfirm)-1]
+			}
+		}
+		s.cursorBlink = time.Now()
+	case keyTab:
+		s.regFocus = (s.regFocus + 1) % 3
+		s.cursorBlink = time.Now()
+	case keyEnter, keyKPEnter:
+		s.submitRegister()
+	case keyEscape:
+		log.Logf(log.LevelInfo, "LoginScene", "Register cancelled")
+		s.registerMode = false
+		s.errorMsg = ""
+	}
+}
+
+func (s *LoginScene) submitRegister() {
+	if s.regUser == "" || s.regPass == "" {
+		s.errorMsg = "请输入账号和密码"
+		return
+	}
+	if s.regPass != s.regConfirm {
+		s.errorMsg = "两次密码不一致"
+		return
+	}
+	if s.registerFunc == nil {
+		s.errorMsg = "未连接到服务器"
+		return
+	}
+	log.Logf(log.LevelInfo, "LoginScene", "Submitting registration: %s", s.regUser)
+	s.errorMsg = ""
+	s.connecting = true
+	pw := strings.ReplaceAll(strings.ReplaceAll(s.regPass, "~", "_"), "'", "_")
+	s.registerFunc(s.regUser, pw)
+}
+
 // OnMouse handles mouse button input.
 func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
 	if !s.showLoginUI || s.doorOpening {
@@ -303,7 +388,11 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
 	}
 	fx, fy := float32(x), float32(y)
 
-	// Check input field clicks.
+	if s.registerMode {
+		s.handleRegisterMouse(fx, fy)
+		return
+	}
+
 	for i, field := range inputFields {
 		if hitTest(fx, fy, field) {
 			s.focusedField = i
@@ -312,7 +401,6 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
 		}
 	}
 
-	// Check button clicks.
 	for i, btn := range buttonAreas {
 		if hitTest(fx, fy, btn) {
 			s.handleButton(i)
@@ -320,8 +408,34 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
 		}
 	}
 
-	// Click outside — unfocus.
 	s.focusedField = -1
+}
+
+var regFieldAreas = []loginArea{
+	{loginOX + 300, loginOY + 250, 200, 22},
+	{loginOX + 300, loginOY + 290, 200, 22},
+	{loginOX + 300, loginOY + 330, 200, 22},
+}
+var regConfirmArea = loginArea{loginOX + 300, loginOY + 380, 80, 24}
+var regCancelArea = loginArea{loginOX + 420, loginOY + 380, 80, 24}
+
+func (s *LoginScene) handleRegisterMouse(x, y float32) {
+	for i, area := range regFieldAreas {
+		if hitTest(x, y, area) {
+			s.regFocus = i
+			s.cursorBlink = time.Now()
+			return
+		}
+	}
+	if hitTest(x, y, regConfirmArea) {
+		s.submitRegister()
+		return
+	}
+	if hitTest(x, y, regCancelArea) {
+		log.Logf(log.LevelInfo, "LoginScene", "Register cancelled by mouse")
+		s.registerMode = false
+		s.errorMsg = ""
+	}
 }
 
 // handleButton handles button click actions.
@@ -336,7 +450,13 @@ func (s *LoginScene) handleButton(index int) {
 	case 1: // ChangePW
 		s.errorMsg = "功能暂未开放"
 	case 2: // NewAccount
-		s.errorMsg = "功能暂未开放"
+		log.Logf(log.LevelInfo, "LoginScene", "Entering register mode")
+		s.registerMode = true
+		s.regUser = ""
+		s.regPass = ""
+		s.regConfirm = ""
+		s.regFocus = 0
+		s.errorMsg = ""
 	case 3: // Close
 		if s.closeFunc != nil {
 			s.closeFunc()
@@ -367,6 +487,11 @@ func (s *LoginScene) submitLogin() {
 // SetLoginFunc sets the callback for login attempts.
 func (s *LoginScene) SetLoginFunc(fn func(id, password string)) {
 	s.loginFunc = fn
+}
+
+// SetRegisterFunc sets the callback for registration attempts.
+func (s *LoginScene) SetRegisterFunc(fn func(id, password string)) {
+	s.registerFunc = fn
 }
 
 // SetCloseFunc sets the callback for closing the application.
@@ -414,10 +539,10 @@ func (s *LoginScene) getChrSelTexture(index int) (uint32, error) {
 
 // getChrSelSize gets the size of a texture from ChrSel.wil.
 func (s *LoginScene) getChrSelSize(index int) (int, int) {
-	if s.resources.ChrSel == nil || index >= len(s.resources.ChrSel.Images) {
+	if s.resources.ChrSel == nil || index >= s.resources.ChrSel.Count {
 		return 0, 0
 	}
-	img := s.resources.ChrSel.Images[index]
+	img := s.resources.ChrSel.GetImage(index)
 	if img == nil {
 		return 0, 0
 	}
@@ -434,10 +559,10 @@ func (s *LoginScene) getPrguseTexture(index int) (uint32, error) {
 
 // getPrguseSize gets the size of a texture from Prguse.wil.
 func (s *LoginScene) getPrguseSize(index int) (int, int) {
-	if s.resources.Prguse == nil || index >= len(s.resources.Prguse.Images) {
+	if s.resources.Prguse == nil || index >= s.resources.Prguse.Count {
 		return 0, 0
 	}
-	img := s.resources.Prguse.Images[index]
+	img := s.resources.Prguse.GetImage(index)
 	if img == nil {
 		return 0, 0
 	}
@@ -446,4 +571,60 @@ func (s *LoginScene) getPrguseSize(index int) (int, int) {
 
 // OnScroll handles mouse scroll input.
 func (s *LoginScene) OnScroll(x, y float64) {
+}
+
+func (s *LoginScene) renderRegisterDialog(gl *engine.GLState, proj [16]float32, ox, oy float32) {
+	gl.DrawQuadColor(ox+250, oy+200, 300, 230, 0.1, 0.1, 0.15, 0.95, proj)
+	gl.DrawQuadColor(ox+252, oy+202, 296, 26, 0.2, 0.2, 0.3, 1.0, proj)
+
+	if s.text == nil {
+		return
+	}
+
+	s.text.DrawText("新用户注册", ox+340, oy+206, 1.0, 1.0, 1.0, 1.0, proj)
+	s.text.DrawText("账号:", ox+260, oy+252, 0.8, 0.8, 0.8, 1.0, proj)
+	s.text.DrawText("密码:", ox+260, oy+292, 0.8, 0.8, 0.8, 1.0, proj)
+	s.text.DrawText("确认:", ox+260, oy+332, 0.8, 0.8, 0.8, 1.0, proj)
+
+	fields := []string{s.regUser, s.regPass, s.regConfirm}
+	for i, area := range regFieldAreas {
+		gl.DrawQuadColor(area.X, area.Y, area.W, area.H, 0.05, 0.05, 0.1, 1.0, proj)
+		if s.regFocus == i {
+			gl.DrawQuadColor(area.X, area.Y, area.W, 1, 1.0, 1.0, 0.0, 1.0, proj)
+		}
+		text := fields[i]
+		if i > 0 {
+			masked := ""
+			for range text {
+				masked += "*"
+			}
+			text = masked
+		}
+		s.text.DrawText(text, area.X+4, area.Y+3, 1.0, 1.0, 0.8, 1.0, proj)
+	}
+
+	if time.Since(s.cursorBlink) > 500*time.Millisecond {
+		s.cursorBlink = time.Now()
+	}
+	if time.Since(s.cursorBlink) < 250*time.Millisecond {
+		area := regFieldAreas[s.regFocus]
+		text := fields[s.regFocus]
+		if s.regFocus > 0 {
+			text = strings.Repeat("*", len([]rune(text)))
+		}
+		cx := area.X + 4 + float32(s.text.MeasureText(text))
+		s.text.DrawText("|", cx, area.Y+3, 1.0, 1.0, 0.0, 1.0, proj)
+	}
+
+	gl.DrawQuadColor(regConfirmArea.X, regConfirmArea.Y, regConfirmArea.W, regConfirmArea.H, 0.1, 0.4, 0.1, 1.0, proj)
+	s.text.DrawText("确定", regConfirmArea.X+24, regConfirmArea.Y+4, 1.0, 1.0, 1.0, 1.0, proj)
+	gl.DrawQuadColor(regCancelArea.X, regCancelArea.Y, regCancelArea.W, regCancelArea.H, 0.4, 0.1, 0.1, 1.0, proj)
+	s.text.DrawText("取消", regCancelArea.X+24, regCancelArea.Y+4, 1.0, 1.0, 1.0, 1.0, proj)
+
+	if s.errorMsg != "" {
+		s.text.DrawText(s.errorMsg, ox+280, oy+420, 1.0, 0.3, 0.3, 1.0, proj)
+	}
+	if s.connecting {
+		s.text.DrawText("注册中...", ox+350, oy+420, 0.5, 0.8, 1.0, 1.0, proj)
+	}
 }
