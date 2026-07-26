@@ -46,6 +46,8 @@ type PlayScene struct {
 	mapData   *mapformat.MapData
 	minimap      *Minimap
 	minimapDirty bool
+	lighting     *LightingSystem
+	lightingDirty bool
 
 	texCache       map[int]uint32
 	smTexCache     map[int]uint32
@@ -73,6 +75,18 @@ type PlayScene struct {
 
 	ActionLock     bool
 	ActionLockTime int64
+
+	actionFailLock     bool
+	actionFailLockTime int64
+
+	lastHitTick int64
+
+	targetX, targetY int
+
+	showMinimap bool
+	deathGray   bool
+
+	effects *EffectManager
 }
 
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
@@ -86,6 +100,10 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		objectsCaches:  make(map[int]map[int]uint32),
 		State:          NewGameState(),
 		groundItems:    make(map[int32]*GroundItemInfo),
+		targetX:        -1,
+		targetY:        -1,
+		showMinimap:    true,
+		effects:        NewEffectManager(),
 	}
 }
 
@@ -154,6 +172,7 @@ func (s *PlayScene) LoadMap(mapName string) error {
 		s.minimap = nil
 	}
 	s.minimapDirty = true
+	s.lightingDirty = true
 
 	if s.resources.Objects[0] != nil {
 		s.objectsLoaders[0] = s.resources.Objects[0]
@@ -179,6 +198,14 @@ func (s *PlayScene) Update(dt float64) {
 		s.minimapDirty = false
 	}
 
+	if s.lightingDirty {
+		if s.lighting != nil {
+			s.lighting.Destroy()
+		}
+		s.lighting = NewLightingSystem(s.gl, s.resources.DataDir())
+		s.lightingDirty = false
+	}
+
 	now := time.Now().UnixMilli()
 
 	if len(s.floatingTexts) > 0 {
@@ -200,6 +227,7 @@ func (s *PlayScene) Update(dt float64) {
 	}
 
 	s.State.Actors.Update(now, moveTick)
+	s.effects.Update(now)
 
 	if s.State.MySelf != nil && s.cam != nil && s.mapData != nil {
 		my := s.State.MySelf
@@ -207,6 +235,33 @@ func (s *PlayScene) Update(dt float64) {
 		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
 		s.cam.CenterOn(wx, wy)
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
+	}
+
+	if s.targetX >= 0 && s.State.MySelf != nil && moveTick && s.sendMove != nil {
+		my := s.State.MySelf
+		if my.CurrX == s.targetX && my.CurrY == s.targetY {
+			s.targetX = -1
+			s.targetY = -1
+		} else if my.IsIdle() && s.ServerAcceptNextAction() {
+			dir := dirToward(my.CurrX, my.CurrY, s.targetX, s.targetY)
+			dx, dy := dirOffset(dir)
+			nx, ny := my.CurrX+dx, my.CurrY+dy
+			if s.CanWalk(nx, ny) {
+				dist := absInt(my.CurrX-s.targetX) + absInt(my.CurrY-s.targetY)
+				if dist >= 3 {
+					my.UpdateMsg(protocol.CMRun, nx+dx, ny+dy, dir, 0, 0)
+					s.sendMove(protocol.CMRun, dir)
+				} else {
+					my.UpdateMsg(protocol.CMWalk, nx, ny, dir, 0, 0)
+					s.sendMove(protocol.CMWalk, dir)
+				}
+				s.ActionLock = true
+				s.ActionLockTime = time.Now().UnixMilli()
+			} else {
+				s.targetX = -1
+				s.targetY = -1
+			}
+		}
 	}
 }
 
@@ -292,6 +347,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
+	s.effects.Render(s.gl, s.resources, proj)
 
 	for _, ft := range s.floatingTexts {
 		if s.text != nil {
@@ -299,14 +355,28 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	if s.minimap != nil {
+	if s.showMinimap && s.minimap != nil {
 		s.minimap.Render(s.cam, s.mapData.Width, s.mapData.Height)
+	}
+
+	if s.deathGray {
+		s.gl.DrawQuadColor(float32(s.cam.X), float32(s.cam.Y),
+			float32(float64(s.cam.ViewW)/s.cam.Zoom), float32(float64(s.cam.ViewH)/s.cam.Zoom),
+			0.3, 0.3, 0.3, 0.4, proj)
+	}
+
+	if s.lighting != nil {
+		darkness := s.calcDarkness()
+		if darkness > 0.01 {
+			lights := s.collectLightSources()
+			s.lighting.Render(proj, s.cam.X, s.cam.Y, s.cam.ViewW, s.cam.ViewH, s.cam.Zoom, darkness, lights)
+		}
 	}
 
 	s.animCounter++
 
 	uiProj := engine.OrthoProj(1024, 768)
-	if s.minimap != nil {
+	if s.showMinimap && s.minimap != nil {
 		glState.DrawQuad(s.minimap.GetTexture(), 814, 10, minimapSize, minimapSize, uiProj)
 	}
 	s.RenderUI(uiProj)
@@ -328,6 +398,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 			worldY := float32(float64(a.Ry*engine.TileHeight) + a.ShiftY)
 			a.Draw(s.gl, s.resources, worldX, worldY, proj)
 			s.drawActorLabel(a, worldX, worldY, proj)
+			s.drawChatBubble(a, worldX, worldY, proj)
 			actorIdx++
 		}
 	}
@@ -338,25 +409,32 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		worldY := float32(float64(a.Ry*engine.TileHeight) + a.ShiftY)
 		a.Draw(s.gl, s.resources, worldX, worldY, proj)
 		s.drawActorLabel(a, worldX, worldY, proj)
+		s.drawChatBubble(a, worldX, worldY, proj)
 	}
 
 	for _, gi := range s.groundItems {
 		if gi.X < fStartX || gi.X > fEndX || gi.Y < fStartY || gi.Y > fEndY {
 			continue
 		}
-		worldX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - 8
-		worldY := float32(gi.Y*engine.TileHeight) + float32(engine.TileHeight)/2 - 8
-		var r, g, b float32
-		if gi.Looks == 112 {
-			r, g, b = 1.0, 0.84, 0.0
+		ix := float32(gi.X*engine.TileWidth) + 16
+		iy := float32(gi.Y*engine.TileHeight) + 8
+		if s.resources.DnItems != nil && gi.Looks >= 0 && gi.Looks < s.resources.DnItems.Count {
+			img := s.resources.DnItems.GetImage(gi.Looks)
+			if img != nil && img.RGBA != nil {
+				tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
+				if tex != 0 {
+					s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
+				}
+			} else {
+				s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
+			}
 		} else {
-			r, g, b = 1.0, 1.0, 1.0
+			s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
 		}
-		s.gl.DrawQuadColor(worldX, worldY, 16, 16, r, g, b, 0.9, proj)
 		if s.text != nil && gi.Name != "" {
 			nameW := float32(s.text.MeasureText(gi.Name))
 			nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
-			s.text.DrawText(gi.Name, nameX, worldY-16, r, g, b, 1.0, proj)
+			s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
 		}
 	}
 }
@@ -376,6 +454,21 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 		barY := worldY - 52
 		s.gl.DrawQuadColor(barX, barY, barW, barH, 0.2, 0.0, 0.0, 0.8, proj)
 		s.gl.DrawQuadColor(barX, barY, barW, barH, 0.0, 0.8, 0.0, 0.8, proj)
+	}
+}
+
+func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]float32) {
+	if s.text == nil || a.SayLineCount == 0 {
+		return
+	}
+	if time.Now().UnixMilli()-a.SayTime > 5000 {
+		return
+	}
+	bubbleY := worldY - 70
+	for i := 0; i < a.SayLineCount && i < 5; i++ {
+		if a.SayingArr[i] != "" {
+			s.text.DrawText(a.SayingArr[i], worldX-20, bubbleY+float32(i)*14, 1.0, 1.0, 1.0, 0.9, proj)
+		}
 	}
 }
 
@@ -485,6 +578,13 @@ func clamp(v, min, max int) int {
 	return v
 }
 
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 func (s *PlayScene) CanWalk(x, y int) bool {
 	if s.mapData == nil {
 		return false
@@ -519,6 +619,56 @@ func (s *PlayScene) ServerAcceptNextAction() bool {
 		return true
 	}
 	return false
+}
+
+func (s *PlayScene) calcDarkness() float32 {
+	bright := s.State.DayBright
+	if bright >= 3 {
+		return 0
+	}
+	switch bright {
+	case 0:
+		return 0.7
+	case 1:
+		return 0.45
+	case 2:
+		return 0.2
+	default:
+		return 0
+	}
+}
+
+func (s *PlayScene) collectLightSources() []LightSource {
+	var lights []LightSource
+	if s.State.MySelf != nil {
+		my := s.State.MySelf
+		lights = append(lights, LightSource{
+			X:     float64(my.Rx)*engine.TileWidth + engine.TileWidth/2,
+			Y:     float64(my.Ry)*engine.TileHeight + engine.TileHeight/2,
+			Level: 2,
+		})
+	}
+	lights = append(lights, s.effects.LightSources()...)
+	if s.mapData != nil {
+		startX, startY, endX, endY := s.cam.ViewportTiles(2, 2)
+		startX = clamp(startX, 0, s.mapData.Width-1)
+		startY = clamp(startY, 0, s.mapData.Height-1)
+		endX = clamp(endX, 0, s.mapData.Width-1)
+		endY = clamp(endY, 0, s.mapData.Height-1)
+		for y := startY; y <= endY; y++ {
+			for x := startX; x <= endX; x++ {
+				info := s.mapData.InfoAt(x, y)
+				if info.Light > 0 {
+					lights = append(lights, LightSource{
+						X:     float64(x)*engine.TileWidth + engine.TileWidth/2,
+						Y:     float64(y)*engine.TileHeight + engine.TileHeight/2,
+						Level: int(info.Light) - 1,
+					})
+				}
+			}
+		}
+	}
+	return lights
 }
 
 func (s *PlayScene) OnChar(char rune) {
@@ -571,6 +721,15 @@ func (s *PlayScene) OnKey(key int, action int) {
 		case 78: // N
 			s.State.ShowEquip = !s.State.ShowEquip
 			return
+		case 77: // M
+			s.showMinimap = !s.showMinimap
+			return
+		case 72: // H
+			log.Logf(log.LevelInfo, "PlayScene", "Attack mode toggled")
+			return
+		case 80: // P
+			s.State.ShowChar = !s.State.ShowChar
+			return
 		}
 
 		if !s.chatMode && key >= 290 && key <= 297 {
@@ -596,6 +755,13 @@ func (s *PlayScene) OnKey(key int, action int) {
 	}
 	if s.State.MySelf == nil || s.sendMove == nil {
 		return
+	}
+	if s.actionFailLock {
+		if time.Now().UnixMilli()-s.actionFailLockTime > 1000 {
+			s.actionFailLock = false
+		} else {
+			return
+		}
 	}
 	if !s.State.MySelf.IsIdle() || !s.ServerAcceptNextAction() {
 		return
@@ -624,6 +790,9 @@ func (s *PlayScene) OnKey(key int, action int) {
 	if dir < 0 {
 		return
 	}
+
+	s.targetX = -1
+	s.targetY = -1
 
 	dx, dy := dirOffset(dir)
 	newX := s.State.MySelf.CurrX + dx
@@ -693,6 +862,11 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 				dx := a.CurrX - my.CurrX
 				dy := a.CurrY - my.CurrY
 				if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
+					now := time.Now().UnixMilli()
+					if now-s.lastHitTick < 1400 {
+						return
+					}
+					s.lastHitTick = now
 					if s.sendAttack != nil {
 						s.sendAttack(protocol.CMHit, dir)
 					}
@@ -712,6 +886,9 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 				}
 			}
 		}
+
+		s.targetX = tx
+		s.targetY = ty
 	}
 }
 
@@ -825,6 +1002,9 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 	if st.ShowEquip {
 		s.renderEquipPanel(proj)
 	}
+	if st.ShowChar {
+		s.renderCharPanel(proj)
+	}
 	if st.InDeal {
 		s.renderTradePanel(proj)
 	}
@@ -838,25 +1018,36 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 func (s *PlayScene) renderBagPanel(proj [16]float32) {
 	st := s.State
 	px, py := float32(600), float32(200)
-	s.gl.DrawQuadColor(px, py, 320, 350, 0.08, 0.08, 0.12, 0.92, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 316, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("背包", px+140, py+5, 1.0, 1.0, 0.8, 1.0, proj)
+	s.gl.DrawQuadColor(px, py, 360, 380, 0.08, 0.08, 0.12, 0.92, proj)
+	s.gl.DrawQuadColor(px+2, py+2, 356, 24, 0.15, 0.15, 0.25, 1.0, proj)
+	s.text.DrawText("背包", px+155, py+5, 1.0, 1.0, 0.8, 1.0, proj)
+	s.text.DrawText(fmt.Sprintf("%d/46", len(st.BagItems)), px+310, py+5, 0.7, 0.7, 0.7, 1.0, proj)
 
-	cellSize := float32(36)
+	cellSize := float32(40)
 	startX := px + 10
 	startY := py + 32
 	for i := 0; i < 46; i++ {
 		col := i % 8
 		row := i / 8
-		cx := startX + float32(col)*cellSize + float32(col)*2
-		cy := startY + float32(row)*cellSize + float32(row)*2
+		cx := startX + float32(col)*(cellSize+3)
+		cy := startY + float32(row)*(cellSize+3)
 
 		s.gl.DrawQuadColor(cx, cy, cellSize, cellSize, 0.12, 0.12, 0.18, 1.0, proj)
 
 		if i < len(st.BagItems) {
 			item := st.BagItems[i]
 			s.gl.DrawQuadColor(cx+2, cy+2, cellSize-4, cellSize-4, 0.3, 0.25, 0.15, 1.0, proj)
-			s.text.DrawText(fmt.Sprintf("%d", item.Idx), cx+6, cy+10, 0.8, 0.8, 0.6, 1.0, proj)
+			if s.resources.Items != nil && int(item.Idx) < s.resources.Items.Count {
+				tex := s.resources.GetTexture(s.resources.Items, int(item.Idx))
+				if tex != 0 {
+					img := s.resources.Items.GetImage(int(item.Idx))
+					if img != nil {
+						s.gl.DrawQuad(tex, cx+4, cy+4, float32(img.Width), float32(img.Height), proj)
+					}
+				}
+			} else {
+				s.text.DrawText(fmt.Sprintf("%d", item.Idx), cx+8, cy+12, 0.8, 0.8, 0.6, 1.0, proj)
+			}
 		}
 	}
 }
@@ -869,9 +1060,17 @@ func (s *PlayScene) renderEquipPanel(proj [16]float32) {
 	s.text.DrawText("装备", px+80, py+5, 1.0, 1.0, 0.8, 1.0, proj)
 
 	slotNames := []string{"衣服", "武器", "右手", "项链", "头盔", "左手镯", "右手镯", "左戒指", "右戒指", "护身符", "腰带", "鞋子", "宝石"}
+	slotColors := [][3]float32{
+		{0.15, 0.12, 0.20}, {0.20, 0.12, 0.12}, {0.12, 0.15, 0.20},
+		{0.12, 0.18, 0.15}, {0.18, 0.15, 0.12}, {0.12, 0.12, 0.18},
+		{0.12, 0.12, 0.18}, {0.18, 0.12, 0.15}, {0.18, 0.12, 0.15},
+		{0.15, 0.18, 0.12}, {0.14, 0.14, 0.14}, {0.14, 0.14, 0.14},
+		{0.18, 0.16, 0.10},
+	}
 	for i := 0; i < 13; i++ {
 		sy := py + 32 + float32(i)*24
-		s.gl.DrawQuadColor(px+10, sy, 180, 20, 0.12, 0.12, 0.18, 1.0, proj)
+		sc := slotColors[i]
+		s.gl.DrawQuadColor(px+10, sy, 180, 20, sc[0], sc[1], sc[2], 1.0, proj)
 		s.text.DrawText(slotNames[i], px+14, sy+3, 0.7, 0.7, 0.7, 1.0, proj)
 		if st.UseItems[i] != nil {
 			s.text.DrawText(fmt.Sprintf("#%d", st.UseItems[i].WIndex), px+100, sy+3, 1.0, 1.0, 0.5, 1.0, proj)
@@ -898,5 +1097,25 @@ func (s *PlayScene) renderGuildPanel(proj [16]float32) {
 		s.text.DrawText("职位: "+s.State.GuildRank, px+10, py+55, 0.9, 0.9, 0.9, 1.0, proj)
 	} else {
 		s.text.DrawText("未加入行会", px+70, py+80, 0.7, 0.7, 0.7, 1.0, proj)
+	}
+}
+
+func (s *PlayScene) renderCharPanel(proj [16]float32) {
+	px, py := float32(100), float32(150)
+	s.gl.DrawQuadColor(px, py, 220, 280, 0.08, 0.08, 0.12, 0.92, proj)
+	s.gl.DrawQuadColor(px+2, py+2, 216, 24, 0.15, 0.15, 0.25, 1.0, proj)
+	s.text.DrawText("角色信息", px+80, py+5, 1.0, 1.0, 0.8, 1.0, proj)
+	st := s.State
+	y := py + 35
+	s.text.DrawText(fmt.Sprintf("等级: %d", st.Level), px+10, y, 0.9, 0.9, 0.9, 1.0, proj)
+	y += 20
+	s.text.DrawText(fmt.Sprintf("HP: %d/%d", st.HP, st.MaxHP), px+10, y, 0.9, 0.3, 0.3, 1.0, proj)
+	y += 20
+	s.text.DrawText(fmt.Sprintf("MP: %d/%d", st.MP, st.MaxMP), px+10, y, 0.3, 0.3, 0.9, 1.0, proj)
+	y += 20
+	s.text.DrawText(fmt.Sprintf("金币: %d", st.Gold), px+10, y, 1.0, 0.9, 0.3, 1.0, proj)
+	y += 20
+	if st.GuildName != "" {
+		s.text.DrawText("行会: "+st.GuildName, px+10, y, 0.8, 0.9, 0.8, 1.0, proj)
 	}
 }

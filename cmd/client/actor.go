@@ -73,7 +73,7 @@ func CalcFrame(action ActionInfo, dir int) (startFrame, endFrame int) {
 }
 
 // GetRaceByPM returns the monster action template for a given race.
-func GetRaceByPM(race int) *MonsterAction {
+func GetRaceByPM(race int, appr int) *MonsterAction {
 	switch race {
 	case 9:
 		return &MA9
@@ -105,6 +105,8 @@ func GetRaceByPM(race int) *MonsterAction {
 		return &MA21
 	case 47:
 		return &MA22
+	case 50:
+		return getRaceByPM50(appr)
 	case 54:
 		return &MA28
 	case 55:
@@ -133,6 +135,23 @@ func GetRaceByPM(race int) *MonsterAction {
 		return &MA26
 	default:
 		return &MA19
+	}
+}
+
+func getRaceByPM50(appr int) *MonsterAction {
+	switch {
+	case appr == 23:
+		return &MA36
+	case appr == 24 || appr == 25 || appr == 27 || appr == 32:
+		return &MA37
+	case appr >= 35 && appr <= 41:
+		return &MA41
+	case appr >= 42 && appr <= 47:
+		return &MA46
+	case appr >= 48 && appr <= 50 || appr >= 52 && appr <= 53:
+		return &MA41
+	default:
+		return &MA35
 	}
 }
 

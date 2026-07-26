@@ -50,6 +50,7 @@ type Actor struct {
 	Death    bool
 	Skeleton bool
 	WarMode  bool
+	MsgMuch  bool
 
 	BodySurface   *wil.Image
 	HairSurface   *wil.Image
@@ -81,6 +82,19 @@ type Actor struct {
 
 	MonAction *MonsterAction
 	NpcAppr   int
+
+	HitEffectNumber int
+
+	UseMagic    bool
+	SpellFrame  int
+	CurEffFrame int
+
+	Effect int
+	State  int32
+
+	SayingArr    [5]string
+	SayTime      int64
+	SayLineCount int
 }
 
 func NewActor(recogID int32, x, y, dir int) *Actor {
@@ -223,6 +237,10 @@ func (a *Actor) updateFeatureFromBody(body string) {
 		feature := int32(binary.LittleEndian.Uint32(raw[0:4]))
 		a.updateFeature(int(feature))
 	}
+	if len(raw) >= 8 {
+		featureEx := int32(binary.LittleEndian.Uint32(raw[4:8]))
+		a.Effect = int((featureEx >> 8) & 0xFF)
+	}
 }
 
 func (a *Actor) CalcActorFrame() {
@@ -252,7 +270,7 @@ func (a *Actor) calcHumanFrame() {
 	case SMHorseRun:
 		action = HA.ActRun
 		a.MoveStep = 3
-	case protocol.SMRush, protocol.SMRushKung:
+	case protocol.SMRush:
 		if a.RushDir == 0 {
 			a.RushDir = 1
 			action = HA.ActRushLeft
@@ -260,6 +278,9 @@ func (a *Actor) calcHumanFrame() {
 			a.RushDir = 0
 			action = HA.ActRushRight
 		}
+		a.MoveStep = 1
+	case protocol.SMRushKung:
+		action = HA.ActRun
 		a.MoveStep = 1
 	case protocol.SMBackStep:
 		action = HA.ActWalk
@@ -269,19 +290,67 @@ func (a *Actor) calcHumanFrame() {
 		a.MoveStep = 0
 	case protocol.SMThrow:
 		action = HA.ActHit
+		a.HitEffectNumber = 0
 		a.WarMode = true
 		a.WarModeTime = time.Now().UnixMilli()
-	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit,
-		protocol.SMPowerHit, protocol.SMLongHit, protocol.SMWideHit,
-		protocol.SMCrsHit, protocol.SMTwinHit, protocol.SMFireHit:
+	case protocol.SMHeavyHit:
+		action = HA.ActHeavyHit
+		a.HitEffectNumber = 0
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMBigHit:
+		action = HA.ActBigHit
+		a.HitEffectNumber = 0
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMHit:
 		action = HA.ActHit
+		a.HitEffectNumber = 0
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMPowerHit:
+		action = HA.ActHit
+		a.HitEffectNumber = 1
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMLongHit:
+		action = HA.ActHit
+		a.HitEffectNumber = 2
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMWideHit:
+		action = HA.ActHit
+		a.HitEffectNumber = 3
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMFireHit:
+		action = HA.ActHit
+		a.HitEffectNumber = 4
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMCrsHit:
+		action = HA.ActHit
+		a.HitEffectNumber = 6
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
+	case protocol.SMTwinHit:
+		action = HA.ActHit
+		a.HitEffectNumber = 7
 		a.WarMode = true
 		a.WarModeTime = time.Now().UnixMilli()
 	case protocol.SMSpell:
 		action = HA.ActSpell
+		a.UseMagic = true
+		a.SpellFrame = 10
+		a.CurEffFrame = 0
+		a.WarMode = true
+		a.WarModeTime = time.Now().UnixMilli()
 	case protocol.SMStruck:
 		action = HA.ActStruck
 	case protocol.SMDeath, protocol.SMNowDeath:
+		action = HA.ActDie
+	case protocol.SMSkeleton:
+		a.Skeleton = true
 		action = HA.ActDie
 	case protocol.SMAlive:
 		a.Death = false
@@ -296,6 +365,15 @@ func (a *Actor) calcHumanFrame() {
 	a.CurrentFrame = a.StartFrame
 	a.FrameTime = action.FTime
 	a.LastFrameTick = 0
+
+	if a.CurrentAction == protocol.SMBackStep {
+		a.CurrentFrame = a.EndFrame
+		a.Shift((a.Dir+4)%8, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
+	}
+
+	if a.CurrentAction == protocol.SMSkeleton {
+		a.CurrentFrame = a.EndFrame
+	}
 }
 
 func (a *Actor) calcMonsterFrame() {
@@ -317,6 +395,11 @@ func (a *Actor) calcMonsterFrame() {
 		action = a.MonAction.ActAttack
 	case protocol.SMDeath, protocol.SMNowDeath:
 		action = a.MonAction.ActDie
+	case protocol.SMSkeleton:
+		a.Skeleton = true
+		if a.MonAction != nil {
+			action = a.MonAction.ActDeath
+		}
 	default:
 		action = a.MonAction.ActStand
 	}
@@ -346,21 +429,33 @@ func (a *Actor) Move(now int64) bool {
 	}
 	a.LastFrameTick = now
 
-	if a.CurrentFrame < a.EndFrame {
-		a.CurrentFrame++
-		cur := a.CurrentFrame - a.StartFrame + 1
-		max := a.EndFrame - a.StartFrame + 1
-		shiftDir := a.Dir
-		if a.CurrentAction == protocol.SMBackStep {
-			shiftDir = (a.Dir + 4) % 8
+	if a.CurrentAction == protocol.SMBackStep {
+		if a.CurrentFrame > a.StartFrame {
+			a.CurrentFrame--
+			cur := a.EndFrame - a.CurrentFrame + 1
+			max := a.EndFrame - a.StartFrame + 1
+			a.Shift((a.Dir+4)%8, a.MoveStep, cur, max)
 		}
-		a.Shift(shiftDir, a.MoveStep, cur, max)
-	}
-
-	if a.CurrentFrame >= a.EndFrame {
-		a.CurrentAction = 0
-		a.LockEndFrame = true
-		a.SmoothMoveTime = now
+		if a.CurrentFrame <= a.StartFrame {
+			a.CurrentAction = 0
+			a.LockEndFrame = true
+			a.SmoothMoveTime = now
+		}
+	} else {
+		if a.CurrentFrame < a.EndFrame {
+			a.CurrentFrame++
+			if a.MsgMuch && a.CurrentFrame < a.EndFrame {
+				a.CurrentFrame++
+			}
+			cur := a.CurrentFrame - a.StartFrame + 1
+			max := a.EndFrame - a.StartFrame + 1
+			a.Shift(a.Dir, a.MoveStep, cur, max)
+		}
+		if a.CurrentFrame >= a.EndFrame {
+			a.CurrentAction = 0
+			a.LockEndFrame = true
+			a.SmoothMoveTime = now
+		}
 	}
 	return true
 }
@@ -402,6 +497,24 @@ func (a *Actor) Run(now int64) {
 func (a *Actor) DefaultMotion(now int64) {
 	if a.Death {
 		a.CurrentFrame = a.getEndFrame()
+		a.Shift(a.Dir, 0, 0, 1)
+		return
+	}
+
+	if a.Type == ActorMonster || a.Type == ActorNPC {
+		if a.MonAction != nil {
+			action := a.MonAction.ActStand
+			a.DefFrameCount = action.Frame
+			if now-a.DefFrameTime > int64(action.FTime) {
+				a.DefFrameTime = now
+				a.CurrentDefFrame++
+				if a.CurrentDefFrame >= a.DefFrameCount {
+					a.CurrentDefFrame = 0
+				}
+			}
+			start, _ := CalcFrame(action, a.Dir)
+			a.CurrentFrame = start + a.CurrentDefFrame
+		}
 		a.Shift(a.Dir, 0, 0, 1)
 		return
 	}
@@ -456,35 +569,44 @@ func (a *Actor) Shift(dir, step, cur, max int) {
 
 	var dx, dy int
 	switch dir {
-	case protocol.DRUp:
+	case 0:
 		dx, dy = 0, -1
-	case protocol.DRUpRight:
+	case 1:
 		dx, dy = 1, -1
-	case protocol.DRRight:
+	case 2:
 		dx, dy = 1, 0
-	case protocol.DRDownRight:
+	case 3:
 		dx, dy = 1, 1
-	case protocol.DRDown:
+	case 4:
 		dx, dy = 0, 1
-	case protocol.DRDownLeft:
+	case 5:
 		dx, dy = -1, 1
-	case protocol.DRLeft:
+	case 6:
 		dx, dy = -1, 0
-	case protocol.DRUpLeft:
+	case 7:
 		dx, dy = -1, -1
 	}
 
 	fCur := float64(cur)
 	fMax := float64(max)
 
-	a.Rx = a.CurrX - dx*step + int(math.Round((fMax-fCur)/fMax))*dx*step
-	a.Ry = a.CurrY - dy*step + int(math.Round((fMax-fCur)/fMax))*dy*step
+	ss := int(math.Round((fMax-fCur)/fMax)) * step
 
-	remainX := unx * (1.0 - fCur/fMax)
-	remainY := uny * (1.0 - fCur/fMax)
+	a.Rx = a.CurrX - dx*ss
+	a.Ry = a.CurrY - dy*ss
 
-	a.ShiftX = -float64(dx) * remainX
-	a.ShiftY = -float64(dy) * remainY
+	if ss == step {
+		a.ShiftX = float64(dx) * unx / fMax * fCur
+		a.ShiftY = float64(dy) * uny / fMax * fCur
+	} else {
+		a.ShiftX = -float64(dx) * unx / fMax * (fMax - fCur)
+		a.ShiftY = -float64(dy) * uny / fMax * (fMax - fCur)
+	}
+
+	if dx != 0 && dy != 0 {
+		a.ShiftX *= 0.7071
+		a.ShiftY *= 0.7071
+	}
 }
 
 func (a *Actor) GetBodyImage(resources *engine.ResourceManager) *wil.Image {
@@ -596,6 +718,10 @@ func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, 
 func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
 	wpord := getWordOrder(a.Sex, a.CurrentFrame)
 
+	if a.Effect > 0 && (a.Dir == 3 || a.Dir == 4 || a.Dir == 5) {
+		a.drawWingLayer(gl, resources, screenX, screenY, proj)
+	}
+
 	if wpord == 0 && a.Weapon >= 2 {
 		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
 	}
@@ -608,7 +734,13 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 			if tex != 0 {
 				w := float32(img.Width)
 				h := float32(img.Height)
-				gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+				if a.State < 0 {
+					gl.DrawQuadTint(tex, screenX, screenY-h+engine.TileHeight, w, h, 0.3, 1.0, 0.3, 1.0, proj)
+				} else if a.State&0x40000000 != 0 {
+					gl.DrawQuadTint(tex, screenX, screenY-h+engine.TileHeight, w, h, 1.0, 0.3, 0.3, 1.0, proj)
+				} else {
+					gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+				}
 			}
 		}
 	}
@@ -629,6 +761,10 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 	if wpord == 1 && a.Weapon >= 2 {
 		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
 	}
+
+	if a.Effect > 0 && (a.Dir == 0 || a.Dir == 1 || a.Dir == 2 || a.Dir == 6 || a.Dir == 7) {
+		a.drawWingLayer(gl, resources, screenX, screenY, proj)
+	}
 }
 
 func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
@@ -641,6 +777,27 @@ func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceMa
 		return
 	}
 	tex := resources.GetTexture(resources.Weapon, weaponIdx)
+	if tex == 0 {
+		return
+	}
+	w := float32(img.Width)
+	h := float32(img.Height)
+	gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+}
+
+func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+	if resources.HumEffect == nil {
+		return
+	}
+	wingIdx := (a.Effect-1)*HumanFrame + a.CurrentFrame
+	if wingIdx < 0 || wingIdx >= resources.HumEffect.Count {
+		return
+	}
+	img := resources.HumEffect.GetImage(wingIdx)
+	if img == nil || img.RGBA == nil {
+		return
+	}
+	tex := resources.GetTexture(resources.HumEffect, wingIdx)
 	if tex == 0 {
 		return
 	}
@@ -753,4 +910,24 @@ func GetNpcOffset(appr int) int {
 		}
 		return 0
 	}
+}
+
+func (a *Actor) Say(text string) {
+	a.SayingArr = [5]string{}
+	a.SayLineCount = 0
+	a.SayTime = time.Now().UnixMilli()
+
+	runes := []rune(text)
+	line := 0
+	start := 0
+	for start < len(runes) && line < 5 {
+		end := start + 20
+		if end > len(runes) {
+			end = len(runes)
+		}
+		a.SayingArr[line] = string(runes[start:end])
+		line++
+		start = end
+	}
+	a.SayLineCount = line
 }

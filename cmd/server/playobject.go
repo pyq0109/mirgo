@@ -140,6 +140,18 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.sendDisappearToClient(server, msg)
 	case RM_HIT:
 		p.sendHitToClient(server, protocol.SMHit, msg)
+	case RM_HEAVYHIT:
+		p.sendHitToClient(server, protocol.SMHeavyHit, msg)
+	case RM_BIGHIT:
+		p.sendHitToClient(server, protocol.SMBigHit, msg)
+	case RM_POWERHIT:
+		p.sendHitToClient(server, protocol.SMPowerHit, msg)
+	case RM_LONGHIT:
+		p.sendHitToClient(server, protocol.SMLongHit, msg)
+	case RM_WIDEHIT:
+		p.sendHitToClient(server, protocol.SMWideHit, msg)
+	case RM_FIREHIT:
+		p.sendHitToClient(server, protocol.SMFireHit, msg)
 	case RM_STRUCK:
 		p.sendStruckToClient(server, msg)
 	case RM_DEATH:
@@ -178,11 +190,17 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	if dir < 0 || dir > 7 {
 		return
 	}
-	if !p.WalkTo(dir) {
+	dx, dy := dirToOffset(dir)
+	x1, y1 := p.CurrX+dx, p.CurrY+dy
+	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
+	if p.envir == nil || !p.envir.CanWalk(x1, y1) || !p.envir.CanWalk(x2, y2) {
 		p.sendMoveFail(server)
 		return
 	}
-	p.WalkTo(dir)
+	p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+	p.CurrX, p.CurrY = x2, y2
+	p.Dir = dir
+	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
 	server.SendRaw(p.Session.ID, "#+GOOD!")
 	p.CheckMapRoute(server)
@@ -194,17 +212,18 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 		return
 	}
 	p.OnHorse = true
-	moved := false
-	for i := 0; i < 3; i++ {
-		if !p.WalkTo(dir) {
-			break
-		}
-		moved = true
-	}
-	if !moved {
+	dx, dy := dirToOffset(dir)
+	x1, y1 := p.CurrX+dx, p.CurrY+dy
+	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
+	x3, y3 := p.CurrX+dx*3, p.CurrY+dy*3
+	if p.envir == nil || !p.envir.CanWalk(x1, y1) || !p.envir.CanWalk(x2, y2) || !p.envir.CanWalk(x3, y3) {
 		p.sendMoveFail(server)
 		return
 	}
+	p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+	p.CurrX, p.CurrY = x3, y3
+	p.Dir = dir
+	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
 	server.SendRaw(p.Session.ID, "#+GOOD!")
 	p.CheckMapRoute(server)
@@ -216,7 +235,23 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	p.Dir = dir
-	p.SendRefMsg(RM_HIT, dir, p.CurrX, p.CurrY, "")
+
+	rmIdent := RM_HIT
+	switch msg.Ident {
+	case protocol.CMHeavyHit:
+		rmIdent = RM_HEAVYHIT
+	case protocol.CMBigHit:
+		rmIdent = RM_BIGHIT
+	case protocol.CMPowerHit:
+		rmIdent = RM_POWERHIT
+	case protocol.CMLongHit:
+		rmIdent = RM_LONGHIT
+	case protocol.CMWideHit:
+		rmIdent = RM_WIDEHIT
+	case protocol.CMFireHit:
+		rmIdent = RM_FIREHIT
+	}
+	p.SendRefMsg(rmIdent, dir, p.CurrX, p.CurrY, "")
 
 	if p.envir == nil {
 		return
@@ -326,17 +361,25 @@ func (p *PlayObject) findAttackTarget(x, y int) *BaseObject {
 }
 
 func (p *PlayObject) calcDamage(target *BaseObject) int {
-	dc := int(p.WAbil.DC&0xFFFF) + int(p.WAbil.DC>>16)
-	ac := int(target.WAbil.AC & 0xFFFF)
+	loDC := int(p.WAbil.DC & 0xFFFF)
+	hiDC := int(p.WAbil.DC >> 16)
+	loAC := int(target.WAbil.AC & 0xFFFF)
+	hiAC := int(target.WAbil.AC >> 16)
 
-	damage := dc - ac
-	if damage < 1 {
-		damage = 1
+	attack := loDC
+	if hiDC > loDC {
+		attack = loDC + rand.Intn(hiDC-loDC+1)
 	}
-	variance := damage / 5
-	if variance > 0 {
-		damage = damage - variance + rand.Intn(variance*2+1)
+	if p.Luck > 0 && rand.Intn(100) < p.Luck {
+		attack = hiDC
 	}
+
+	armor := loAC
+	if hiAC > loAC {
+		armor = loAC + rand.Intn(hiAC-loAC+1)
+	}
+
+	damage := attack - armor
 	if damage < 1 {
 		damage = 1
 	}

@@ -57,6 +57,7 @@ func (m *ActorManager) Update(now int64, moveTick bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, actor := range m.actors {
+		actor.MsgMuch = len(actor.MsgList) >= 2
 		if moveTick {
 			actor.LockEndFrame = false
 		}
@@ -101,9 +102,9 @@ func NewActorFromMessage(msg protocol.DefaultMessage, body string) *Actor {
 				actor.Type = ActorNPC
 				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
 			} else {
-				actor.Type = ActorMonster
-				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
-				actor.MonAction = GetRaceByPM(int(raceImg))
+			actor.Type = ActorMonster
+			actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
+			actor.MonAction = GetRaceByPM(int(raceImg), actor.Appearance)
 			}
 		}
 	}

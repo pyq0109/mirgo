@@ -457,6 +457,8 @@ func (h *NetHandler) handleControlMsg(payload string) {
 	case strings.HasPrefix(payload, "+FAIL"):
 		log.Logf(log.LevelDebug, "Client", "<<< +FAIL")
 		h.playScene.ActionLock = false
+		h.playScene.actionFailLock = true
+		h.playScene.actionFailLockTime = time.Now().UnixMilli()
 		if h.playScene.State.MySelf != nil {
 			h.playScene.State.MySelf.MoveFail()
 		}
@@ -805,7 +807,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelDebug, "Client", "Health/spell changed")
 
 	case protocol.SMCharStatusChanged:
-		log.Logf(log.LevelDebug, "Client", "Char status changed")
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.State = int32(msg.Param)<<16 | int32(msg.Tag)
+		}
 
 	case protocol.SMClearObjects:
 		log.Logf(log.LevelInfo, "Client", "Clear objects (map switch)")
@@ -848,6 +853,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		if actor != nil {
 			actor.Death = true
 			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), 0, 0, 0)
+			if h.playScene.State.MySelf != nil && actor.RecogID == h.playScene.State.MySelf.RecogID {
+				h.playScene.deathGray = true
+			}
 		}
 
 	case protocol.SMAlive:
@@ -856,6 +864,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			actor.Death = false
 			actor.Skeleton = false
 			actor.SendMsg(protocol.SMAlive, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+			if h.playScene.State.MySelf != nil && actor.RecogID == h.playScene.State.MySelf.RecogID {
+				h.playScene.deathGray = false
+			}
 		}
 
 	case protocol.SMWinExp:
@@ -910,6 +921,287 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMGoldChanged:
 		log.Logf(log.LevelInfo, "Client", "Gold: %d", msg.Recog)
 		h.playScene.State.Gold = int(msg.Recog)
+
+	case protocol.SMBackStep:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMBackStep, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMSitdown:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMSitdown, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMRush:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMRush, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMRushKung:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMRushKung, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMSkeleton:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.Skeleton = true
+			actor.SendMsg(protocol.SMSkeleton, int(msg.Param), int(msg.Tag), 0, 0, 0)
+		}
+
+	case protocol.SMThrow:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMThrow, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMSpell:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMSpell, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMMagicFire:
+		log.Logf(log.LevelDebug, "Client", "Magic fire: magID=%d x=%d y=%d", msg.Recog, msg.Param, msg.Tag)
+		h.playScene.effects.AddExplosion(
+			float64(msg.Param)*engine.TileWidth+engine.TileWidth/2,
+			float64(msg.Tag)*engine.TileHeight+engine.TileHeight/2,
+			0, 10, 50)
+
+	case protocol.SMMagicFireFail:
+		log.Logf(log.LevelDebug, "Client", "Magic fire failed")
+
+	case protocol.SMAddMagic:
+		log.Logf(log.LevelInfo, "Client", "Learned magic: %d", msg.Recog)
+
+	case protocol.SMDelMagic:
+		log.Logf(log.LevelInfo, "Client", "Forgot magic: %d", msg.Recog)
+
+	case protocol.SMFeatureChanged:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil && body != "" {
+			actor.updateFeatureFromBody(body)
+		}
+
+	case protocol.SMChangeNameColor:
+		log.Logf(log.LevelDebug, "Client", "Name color changed: %d", msg.Recog)
+
+	case protocol.SMCry:
+		log.Logf(log.LevelInfo, "Client", "Cry: %s", body)
+		h.playScene.AddChatMessage("[喊话] " + body)
+
+	case protocol.SMWhisper:
+		log.Logf(log.LevelInfo, "Client", "Whisper: %s", body)
+		h.playScene.AddChatMessage("[私聊] " + body)
+
+	case protocol.SMGroupMessage:
+		log.Logf(log.LevelInfo, "Client", "Group: %s", body)
+		h.playScene.AddChatMessage("[组队] " + body)
+
+	case protocol.SMAddItem:
+		log.Logf(log.LevelInfo, "Client", "Item added")
+		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
+		h.Send(queryBag, "")
+
+	case protocol.SMDelItem:
+		log.Logf(log.LevelInfo, "Client", "Item deleted: idx=%d", msg.Recog)
+		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
+		h.Send(queryBag, "")
+
+	case protocol.SMUpdateItem:
+		log.Logf(log.LevelInfo, "Client", "Item updated")
+		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
+		h.Send(queryBag, "")
+
+	case protocol.SMDelItems:
+		log.Logf(log.LevelInfo, "Client", "Items cleared")
+
+	case protocol.SMDropItemSuccess:
+		log.Logf(log.LevelInfo, "Client", "Drop item success")
+
+	case protocol.SMDropItemFail:
+		log.Logf(log.LevelInfo, "Client", "Drop item failed")
+
+	case protocol.SMWeightChanged:
+		log.Logf(log.LevelDebug, "Client", "Weight changed")
+
+	case protocol.SMDuraChange:
+		log.Logf(log.LevelDebug, "Client", "Durability changed")
+
+	case protocol.SMEatOK:
+		log.Logf(log.LevelInfo, "Client", "Ate item OK")
+		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
+		h.Send(queryBag, "")
+
+	case protocol.SMEatFail:
+		log.Logf(log.LevelInfo, "Client", "Eat item failed")
+
+	case protocol.SMTakeOnOK:
+		log.Logf(log.LevelInfo, "Client", "Equip OK: slot=%d", msg.Recog)
+
+	case protocol.SMTakeOnFail:
+		log.Logf(log.LevelInfo, "Client", "Equip failed: code=%d", msg.Recog)
+
+	case protocol.SMTakeOffOK:
+		log.Logf(log.LevelInfo, "Client", "Unequip OK: slot=%d", msg.Recog)
+
+	case protocol.SMTakeOffFail:
+		log.Logf(log.LevelInfo, "Client", "Unequip failed")
+
+	case protocol.SMMerchantDlgClose:
+		h.playScene.State.ShowNpcDialog = false
+
+	case protocol.SMSendGoodsList:
+		log.Logf(log.LevelInfo, "Client", "Received goods list")
+
+	case protocol.SMBuyItemSuccess:
+		log.Logf(log.LevelInfo, "Client", "Buy success")
+
+	case protocol.SMBuyItemFail:
+		log.Logf(log.LevelInfo, "Client", "Buy failed: code=%d", msg.Recog)
+
+	case protocol.SMUserSellItemOK:
+		log.Logf(log.LevelInfo, "Client", "Sell success")
+
+	case protocol.SMUserSellItemFail:
+		log.Logf(log.LevelInfo, "Client", "Sell failed")
+
+	case protocol.SMSendBuyPrice:
+		log.Logf(log.LevelInfo, "Client", "Buy price: %d", msg.Recog)
+
+	case protocol.SMUserRepairItemOK:
+		log.Logf(log.LevelInfo, "Client", "Repair success")
+
+	case protocol.SMUserRepairItemFail:
+		log.Logf(log.LevelInfo, "Client", "Repair failed")
+
+	case protocol.SMSendRepairCost:
+		log.Logf(log.LevelInfo, "Client", "Repair cost: %d", msg.Recog)
+
+	case protocol.SMSaveItemList:
+		log.Logf(log.LevelInfo, "Client", "Storage list: count=%d", msg.Series)
+
+	case protocol.SMStorageFail:
+		log.Logf(log.LevelInfo, "Client", "Storage failed")
+
+	case protocol.SMTakeBackStorageItemFail:
+		log.Logf(log.LevelInfo, "Client", "Take back storage failed")
+
+	case protocol.SMGroupModeChanged:
+		log.Logf(log.LevelInfo, "Client", "Group mode: %d", msg.Recog)
+
+	case protocol.SMCreateGroupOK:
+		log.Logf(log.LevelInfo, "Client", "Group created")
+
+	case protocol.SMCreateGroupFail:
+		log.Logf(log.LevelInfo, "Client", "Group create failed: %d", msg.Recog)
+
+	case protocol.SMGroupAddMemOK:
+		log.Logf(log.LevelInfo, "Client", "Group member added")
+
+	case protocol.SMGroupAddMemFail:
+		log.Logf(log.LevelInfo, "Client", "Group add failed: %d", msg.Recog)
+
+	case protocol.SMGroupDelMemOK:
+		log.Logf(log.LevelInfo, "Client", "Group member removed")
+
+	case protocol.SMGroupDelMemFail:
+		log.Logf(log.LevelInfo, "Client", "Group del failed: %d", msg.Recog)
+
+	case protocol.SMGroupCancel:
+		log.Logf(log.LevelInfo, "Client", "Group cancelled")
+
+	case protocol.SMGroupMembers:
+		log.Logf(log.LevelInfo, "Client", "Group members: %s", body)
+
+	case protocol.SMOpenGuildDlg:
+		h.playScene.State.ShowGuild = true
+
+	case protocol.SMOpenGuildDlgFail:
+		log.Logf(log.LevelInfo, "Client", "Guild dlg failed")
+
+	case protocol.SMChangeGuildName:
+		log.Logf(log.LevelInfo, "Client", "Guild name: %s", body)
+		h.playScene.State.GuildName = body
+
+	case protocol.SMSendGuildMemberList:
+		log.Logf(log.LevelInfo, "Client", "Guild members received")
+
+	case protocol.SMGuildAddMemberOK:
+		log.Logf(log.LevelInfo, "Client", "Guild member added")
+
+	case protocol.SMGuildAddMemberFail:
+		log.Logf(log.LevelInfo, "Client", "Guild add failed")
+
+	case protocol.SMGuildDelMemberOK:
+		log.Logf(log.LevelInfo, "Client", "Guild member removed")
+
+	case protocol.SMGuildDelMemberFail:
+		log.Logf(log.LevelInfo, "Client", "Guild del failed")
+
+	case protocol.SMBuildGuildFail:
+		log.Logf(log.LevelInfo, "Client", "Guild build failed: %d", msg.Recog)
+
+	case protocol.SMGuildMakeAllyOK:
+		log.Logf(log.LevelInfo, "Client", "Guild alliance formed")
+
+	case protocol.SMGuildMakeAllyFail:
+		log.Logf(log.LevelInfo, "Client", "Guild alliance failed")
+
+	case protocol.SMGuildBreakAllyOK:
+		log.Logf(log.LevelInfo, "Client", "Guild alliance broken")
+
+	case protocol.SMGuildBreakAllyFail:
+		log.Logf(log.LevelInfo, "Client", "Guild break ally failed")
+
+	case protocol.SMDealTryFail:
+		log.Logf(log.LevelInfo, "Client", "Trade request failed")
+
+	case protocol.SMDealAddItemOK:
+		log.Logf(log.LevelDebug, "Client", "Trade add item OK")
+
+	case protocol.SMDealAddItemFail:
+		log.Logf(log.LevelDebug, "Client", "Trade add item failed")
+
+	case protocol.SMDealDelItemOK:
+		log.Logf(log.LevelDebug, "Client", "Trade del item OK")
+
+	case protocol.SMDealDelItemFail:
+		log.Logf(log.LevelDebug, "Client", "Trade del item failed")
+
+	case protocol.SMDealRemoteAddItem:
+		log.Logf(log.LevelDebug, "Client", "Trade remote add item")
+
+	case protocol.SMDealRemoteDelItem:
+		log.Logf(log.LevelDebug, "Client", "Trade remote del item")
+
+	case protocol.SMSpaceMoveHide:
+		log.Logf(log.LevelDebug, "Client", "Space move hide: %d", msg.Recog)
+
+	case protocol.SMSpaceMoveShow:
+		log.Logf(log.LevelDebug, "Client", "Space move show: %d", msg.Recog)
+
+	case protocol.SMOpenHealth:
+		log.Logf(log.LevelDebug, "Client", "Open health: %d", msg.Recog)
+
+	case protocol.SMCloseHealth:
+		log.Logf(log.LevelDebug, "Client", "Close health: %d", msg.Recog)
+
+	case protocol.SMBreakWeapon:
+		log.Logf(log.LevelInfo, "Client", "Weapon broken!")
+
+	case protocol.SMButch:
+		log.Logf(log.LevelDebug, "Client", "Butch")
+
+	case protocol.SMReadMinimapOK:
+		log.Logf(log.LevelDebug, "Client", "Minimap data received")
+
+	case protocol.SMMonsterSay:
+		log.Logf(log.LevelDebug, "Client", "Monster say: %s", body)
 
 	default:
 		log.Logf(log.LevelDebug, "Client", "Unhandled: %d", msg.Ident)

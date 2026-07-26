@@ -151,7 +151,7 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	id := e.nextMonsterID
 	e.nextMonsterID++
 
-	mon := NewMonsterObject(entry.MonName, id, 19, 50, uint16(id%100+1), 100, 600, 1500, 50)
+	mon := NewMonsterObject(entry.MonName, id, 19, 50, 50, 100, 600, 1500, 50)
 	mon.MapName = entry.MapName
 	mon.CurrX = x
 	mon.CurrY = y
