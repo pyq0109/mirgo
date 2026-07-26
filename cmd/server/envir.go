@@ -62,6 +62,7 @@ type Environment struct {
 	Flag        MapFlag
 	Doors       []Door
 	GroundItems []*GroundItem
+	Events      []*MapEvent
 
 	rawMap *mapformat.MapData
 }

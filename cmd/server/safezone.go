@@ -1,0 +1,93 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+
+	"github.com/pyq0109/mirgo/internal/log"
+)
+
+type SafeZone struct {
+	MapName string
+	X, Y    int
+	Radius  int
+}
+
+type safeZoneManager struct {
+	zones []SafeZone
+}
+
+var globalSafeZones = &safeZoneManager{
+	zones: []SafeZone{
+		{MapName: "0", X: 289, Y: 618, Radius: 5},
+	},
+}
+
+func LoadSafeZones(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Logf(log.LevelWarn, "SafeZone", "Failed to load %s: %v, using defaults", path, err)
+		return
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var clean []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		clean = append(clean, line)
+	}
+
+	var raw struct {
+		StartPoints []struct {
+			MapName string `json:"mapName"`
+			X       int    `json:"x"`
+			Y       int    `json:"y"`
+			Range   int    `json:"range"`
+		} `json:"startPoints"`
+	}
+	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
+		log.Logf(log.LevelWarn, "SafeZone", "Failed to parse %s: %v", path, err)
+		return
+	}
+
+	var zones []SafeZone
+	for _, sp := range raw.StartPoints {
+		radius := sp.Range
+		if radius <= 0 {
+			radius = 5
+		}
+		zones = append(zones, SafeZone{
+			MapName: sp.MapName,
+			X:       sp.X,
+			Y:       sp.Y,
+			Radius:  radius,
+		})
+	}
+
+	globalSafeZones.zones = zones
+	log.Logf(log.LevelInfo, "SafeZone", "Loaded %d safe zones from %s", len(zones), path)
+}
+
+func CheckSafeZone(mapName string, x, y int) bool {
+	for _, zone := range globalSafeZones.zones {
+		if zone.MapName != mapName {
+			continue
+		}
+		dx := x - zone.X
+		dy := y - zone.Y
+		if dx < 0 {
+			dx = -dx
+		}
+		if dy < 0 {
+			dy = -dy
+		}
+		if dx <= zone.Radius && dy <= zone.Radius {
+			return true
+		}
+	}
+	return false
+}

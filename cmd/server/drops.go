@@ -9,37 +9,79 @@ import (
 )
 
 func (m *MonsterObject) DropLoot(envir *Environment, nextItemID *int32, server *netserver.TCPServer) {
+	m.DropLootWithTable(envir, nextItemID, server, nil)
+}
+
+func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32, server *netserver.TCPServer, dt *DropTable) {
 	now := time.Now().UnixMilli()
 	var dropped []*GroundItem
 
-	if rand.Intn(100) < 30 {
-		gold := 10 + rand.Intn(41)
-		item := &GroundItem{
-			ID:       *nextItemID,
-			Name:     "金币",
-			Looks:    112,
-			X:        m.CurrX,
-			Y:        m.CurrY,
-			DropTick: now,
-			Gold:     gold,
+	if dt != nil {
+		drops := dt.GetDrops(m.Name)
+		for _, entry := range drops {
+			if entry.Chance > 0 && rand.Intn(entry.Chance) == 0 {
+				if entry.Gold > 0 {
+					gold := entry.Gold
+					if entry.Count > entry.Gold {
+						gold = entry.Gold + rand.Intn(entry.Count-entry.Gold+1)
+					}
+					item := &GroundItem{
+						ID:       *nextItemID,
+						Name:     "金币",
+						Looks:    112,
+						X:        m.CurrX,
+						Y:        m.CurrY,
+						DropTick: now,
+						Gold:     gold,
+					}
+					*nextItemID++
+					envir.AddGroundItem(item)
+					dropped = append(dropped, item)
+				} else {
+					item := &GroundItem{
+						ID:       *nextItemID,
+						Name:     entry.ItemName,
+						Looks:    0,
+						X:        m.CurrX,
+						Y:        m.CurrY,
+						DropTick: now,
+					}
+					*nextItemID++
+					envir.AddGroundItem(item)
+					dropped = append(dropped, item)
+				}
+			}
 		}
-		*nextItemID++
-		envir.AddGroundItem(item)
-		dropped = append(dropped, item)
-	}
+	} else {
+		if rand.Intn(100) < 30 {
+			gold := 10 + rand.Intn(41)
+			item := &GroundItem{
+				ID:       *nextItemID,
+				Name:     "金币",
+				Looks:    112,
+				X:        m.CurrX,
+				Y:        m.CurrY,
+				DropTick: now,
+				Gold:     gold,
+			}
+			*nextItemID++
+			envir.AddGroundItem(item)
+			dropped = append(dropped, item)
+		}
 
-	if rand.Intn(100) < 10 {
-		item := &GroundItem{
-			ID:       *nextItemID,
-			Name:     "金创药(小)",
-			Looks:    0,
-			X:        m.CurrX,
-			Y:        m.CurrY,
-			DropTick: now,
+		if rand.Intn(100) < 10 {
+			item := &GroundItem{
+				ID:       *nextItemID,
+				Name:     "金创药(小)",
+				Looks:    0,
+				X:        m.CurrX,
+				Y:        m.CurrY,
+				DropTick: now,
+			}
+			*nextItemID++
+			envir.AddGroundItem(item)
+			dropped = append(dropped, item)
 		}
-		*nextItemID++
-		envir.AddGroundItem(item)
-		dropped = append(dropped, item)
 	}
 
 	for _, item := range dropped {

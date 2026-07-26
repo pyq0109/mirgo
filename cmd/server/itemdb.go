@@ -29,6 +29,8 @@ type ItemDef struct {
 	Need      byte   `json:"need"`
 	NeedLevel byte   `json:"needLevel"`
 	Price     uint32 `json:"price"`
+	Source    int16  `json:"source"`
+	AniCount byte   `json:"aniCount"`
 }
 
 type ItemDB struct {

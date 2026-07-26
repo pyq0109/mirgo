@@ -216,6 +216,20 @@ func (d *Database) LoadCharacterItems(charID int64) (bagJSON, equipJSON []byte, 
 	return bagJSON, equipJSON, nil
 }
 
+func (d *Database) SaveCharacterMeta(charID int64, metaJSON []byte) error {
+	_, err := d.db.Exec(`INSERT OR REPLACE INTO character_items (character_id, slot_type, slot_index, item_data) VALUES (?, 2, 0, ?)`, charID, metaJSON)
+	return err
+}
+
+func (d *Database) LoadCharacterMeta(charID int64) ([]byte, error) {
+	var data []byte
+	err := d.db.QueryRow(`SELECT item_data FROM character_items WHERE character_id=? AND slot_type=2`, charID).Scan(&data)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // CharacterInfo is a summary of character data.
 type CharacterInfo struct {
 	ID    int64

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"math/rand"
+
 	"github.com/pyq0109/mirgo/internal/log"
+	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
 const (
@@ -53,5 +56,20 @@ func (p *PlayObject) OnPlayerKilled(victim *PlayObject) {
 		return
 	}
 	p.IncPkPoint(pkKillAddPoints)
+
+	if victim.WAbil.Exp > 0 {
+		penalty := victim.WAbil.Exp / 20
+		victim.WAbil.Exp -= penalty
+	}
+
+	if p.PKLevel() >= 1 && rand.Intn(5) == 0 {
+		if p.UseItems[protocol.UWeapon] != nil && p.UseItems[protocol.UWeapon].Dura > 0 {
+			p.UseItems[protocol.UWeapon].Dura -= 100
+			if p.UseItems[protocol.UWeapon].Dura > p.UseItems[protocol.UWeapon].DuraMax {
+				p.UseItems[protocol.UWeapon].Dura = 0
+			}
+		}
+	}
+
 	log.Logf(log.LevelInfo, "PK", "%s killed %s, PK points: %d (level %d)", p.Name, victim.Name, p.PkPoint, p.PKLevel())
 }

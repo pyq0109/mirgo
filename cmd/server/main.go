@@ -71,10 +71,29 @@ func main() {
 		magicDB = nil
 	}
 
+	var monsterDB *MonsterDB
+	monsterDBPath := filepath.Join(*configDir, "monsters", "monster_db.jsonc")
+	monsterDB, err = LoadMonsterDB(monsterDBPath)
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "Failed to load MonsterDB: %v (using defaults)", err)
+		monsterDB = &MonsterDB{byName: make(map[string]*MonsterDef)}
+	}
+
+	dropTablesDir := filepath.Join(*configDir, "monsters", "mon_items")
+	dropTables := LoadDropTables(dropTablesDir)
+
+	safeZonesPath := filepath.Join(*configDir, "maps", "start_points.jsonc")
+	LoadSafeZones(safeZonesPath)
+
+	monGenPath := filepath.Join(*configDir, "monsters", "mon_gen.jsonc")
+
 	sessionMgr := NewSessionManager()
 	userEngine := NewUserEngine(db, mapMgr)
 	userEngine.ItemDB = itemDB
 	userEngine.MagicDB = magicDB
+	userEngine.MonsterDB = monsterDB
+	userEngine.DropTables = dropTables
+	userEngine.monGenPath = monGenPath
 	userEngine.InitWorld(mapMgr)
 	server := netserver.NewTCPServer(listenAddr)
 
@@ -193,6 +212,23 @@ func main() {
 		// Load or initialize items
 		loadPlayerItems(db, player)
 
+		if metaJSON, err := db.LoadCharacterMeta(charData.ID); err == nil && metaJSON != nil {
+			var meta struct {
+				PkPoint int           `json:"pkPoint"`
+				Magics  []PlayerMagic `json:"magics"`
+				Storage []int         `json:"storage"`
+			}
+			if json.Unmarshal(metaJSON, &meta) == nil {
+				player.PkPoint = meta.PkPoint
+				for i := range meta.Magics {
+					player.LearnedMagics = append(player.LearnedMagics, &meta.Magics[i])
+				}
+				for _, idx := range meta.Storage {
+					player.StorageItems = append(player.StorageItems, &protocol.UserItem{WIndex: uint16(idx)})
+				}
+			}
+		}
+
 		// Recalculate stats from equipment
 		player.RecalcAbilitys()
 
@@ -266,9 +302,11 @@ func main() {
 		select {
 		case <-ticker.C:
 			tickCount++
+			now := time.Now().UnixMilli()
 			userEngine.ProcessHumans(server)
 			userEngine.ProcessMonsters(server, tickCount*100)
 			userEngine.ProcessDoors(tickCount * 100)
+			userEngine.ProcessEvents(server, now)
 			if tickCount%300 == 0 {
 				userEngine.SaveAllPlayers(db)
 			}
@@ -504,7 +542,7 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMWalk, int(msg.Param), 0, 0, "")
 	case protocol.CMRun:
 		player.SendMsg(protocol.CMRun, int(msg.Param), 0, 0, "")
-	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit:
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit, protocol.CMTwinHit:
 		player.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series), "")
 	case protocol.CMSpell:
 		player.SendMsg(protocol.CMSpell, int(msg.Param), int(msg.Tag), int(msg.Series), body)
@@ -542,6 +580,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMOpenGuildDlg, 0, 0, 0, body)
 	case protocol.CMHorseRun:
 		player.SendMsg(protocol.CMHorseRun, int(msg.Param), 0, 0, "")
+	case protocol.CMOpenDoor:
+		player.SendMsg(protocol.CMOpenDoor, 0, 0, 0, "")
 	case protocol.CMLoginNoticeOK:
 		log.Logf(log.LevelInfo, "Server", "Notice acknowledged by %s", player.Name)
 		player.SendLogon(server)
@@ -626,6 +666,30 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 	}
 
 	savePlayerItems(db, player)
+
+	type charMeta struct {
+		PkPoint int           `json:"pkPoint"`
+		Magics  []PlayerMagic `json:"magics"`
+		Storage []int         `json:"storage"`
+	}
+	meta := charMeta{
+		PkPoint: player.PkPoint,
+		Magics:  make([]PlayerMagic, 0, len(player.LearnedMagics)),
+	}
+	for _, pm := range player.LearnedMagics {
+		if pm != nil {
+			meta.Magics = append(meta.Magics, *pm)
+		}
+	}
+	for _, item := range player.StorageItems {
+		if item != nil {
+			meta.Storage = append(meta.Storage, int(item.WIndex))
+		}
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err == nil {
+		db.SaveCharacterMeta(int64(player.ID), metaJSON)
+	}
 }
 
 type savedUserItem struct {

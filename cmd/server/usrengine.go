@@ -16,6 +16,10 @@ type UserEngine struct {
 	mapMgr *MapManager
 	ItemDB *ItemDB
 
+	MonsterDB  *MonsterDB
+	DropTables *DropTable
+	monGenPath string
+
 	Monsters      []*MonsterObject
 	Npcs          []*NpcObject
 	MonGenList    []MonGenEntry
@@ -76,6 +80,14 @@ func (e *UserEngine) ProcessDoors(currentTick int64) {
 	defer e.mapMgr.mu.RUnlock()
 	for _, env := range e.mapMgr.maps {
 		ProcessDoors(env, currentTick)
+	}
+}
+
+func (e *UserEngine) ProcessEvents(server *netserver.TCPServer, now int64) {
+	e.mapMgr.mu.RLock()
+	defer e.mapMgr.mu.RUnlock()
+	for _, env := range e.mapMgr.maps {
+		env.ProcessMapEvents(server, now)
 	}
 }
 

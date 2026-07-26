@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -96,6 +97,21 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 	if def.NeedLevel > 0 && p.WAbil.Level < uint16(def.NeedLevel) {
 		p.sendTakeOnFail(server, 2)
 		return
+	}
+
+	if def != nil {
+		slot := getEquipSlot(def.StdMode)
+		if slot == protocol.UWeapon || slot == protocol.URightHand {
+			if p.WAbil.HandWeight+uint16(def.Weight) > p.WAbil.MaxHandWeight && p.WAbil.MaxHandWeight > 0 {
+				p.sendTakeOnFail(server, 3)
+				return
+			}
+		} else {
+			if p.WAbil.WearWeight+uint16(def.Weight) > p.WAbil.MaxWearWeight && p.WAbil.MaxWearWeight > 0 {
+				p.sendTakeOnFail(server, 3)
+				return
+			}
+		}
 	}
 
 	oldItem := p.UseItems[slot]
@@ -241,6 +257,41 @@ func (p *PlayObject) RecalcAbilitys() {
 			p.WAbil.MC += uint32(def.MC) | uint32(def.MCMax)<<16
 			p.WAbil.SC += uint32(def.SC) | uint32(def.SCMax)<<16
 		}
+
+		var wearWeight, handWeight uint16
+		for i := 0; i < 13; i++ {
+			if p.UseItems[i] == nil {
+				continue
+			}
+			def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+			if def == nil {
+				continue
+			}
+			if i == protocol.UWeapon || i == protocol.URightHand {
+				handWeight += uint16(def.Weight)
+			} else {
+				wearWeight += uint16(def.Weight)
+			}
+		}
+		p.WAbil.WearWeight = wearWeight
+		p.WAbil.HandWeight = handWeight
+
+		var luck int
+		for i := 0; i < 13; i++ {
+			if p.UseItems[i] == nil {
+				continue
+			}
+			def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+			if def == nil {
+				continue
+			}
+			if def.Source > 0 {
+				luck += int(def.Source)
+			}
+		}
+		p.Luck = luck
+
+		p.checkSetBonuses()
 	}
 
 	if p.WAbil.HP > p.WAbil.MaxHP {
@@ -249,6 +300,8 @@ func (p *PlayObject) RecalcAbilitys() {
 	if p.WAbil.MP > p.WAbil.MaxMP {
 		p.WAbil.MP = p.WAbil.MaxMP
 	}
+
+	p.CheckSpecialItemEffects()
 }
 
 func (p *PlayObject) updateAppearance() {
@@ -303,4 +356,116 @@ func (p *PlayObject) sendTakeOffFail(server *netserver.TCPServer) {
 func (p *PlayObject) sendEatFail(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMEatFail, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+}
+
+func (p *PlayObject) CheckSpecialItemEffects() {
+	p.HasParalysis = false
+	p.HasRevival = false
+	p.HasTeleport = false
+	p.HasProbe = false
+	p.HasFlame = false
+	p.HasRecovery = false
+	p.HasAngry = false
+	p.HasMagicShield = false
+	p.HasMuscle = false
+
+	if p.ItemDB == nil {
+		return
+	}
+	for i := 0; i < 13; i++ {
+		if p.UseItems[i] == nil {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+		if def == nil {
+			continue
+		}
+		switch def.AniCount {
+		case 112:
+			p.HasTeleport = true
+		case 113:
+			p.HasParalysis = true
+		case 114:
+			p.HasRevival = true
+		case 115:
+			p.HasFlame = true
+		case 116:
+			p.HasRecovery = true
+		case 117:
+			p.HasAngry = true
+		case 118:
+			p.HasMagicShield = true
+		case 119:
+			p.HasMuscle = true
+		case 121:
+			p.HasProbe = true
+		}
+	}
+}
+
+func (p *PlayObject) checkSetBonuses() {
+	nameCounts := make(map[string]int)
+	for i := 0; i < 13; i++ {
+		if p.UseItems[i] == nil {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+		if def == nil {
+			continue
+		}
+		name := def.Name
+		for _, setName := range []string{"记忆", "魔血", "虹魔", "精神"} {
+			if strings.Contains(name, setName) {
+				nameCounts[setName]++
+			}
+		}
+	}
+
+	if nameCounts["记忆"] >= 4 {
+		p.WAbil.AC += 2 | 2<<16
+		p.WAbil.MAC += 2 | 2<<16
+	}
+	if nameCounts["魔血"] >= 3 {
+		p.WAbil.MaxHP += 50
+	}
+	if nameCounts["虹魔"] >= 3 {
+		p.WAbil.DC += 5 | 5<<16
+	}
+}
+
+func (p *PlayObject) countItem(name string) int {
+	count := 0
+	if p.ItemDB == nil {
+		return 0
+	}
+	def := p.ItemDB.GetByName(name)
+	if def == nil {
+		return 0
+	}
+	for _, item := range p.ItemList {
+		if item != nil && int(item.WIndex) == def.Idx {
+			count++
+		}
+	}
+	return count
+}
+
+func (p *PlayObject) takeItem(name string, count int) {
+	if p.ItemDB == nil {
+		return
+	}
+	def := p.ItemDB.GetByName(name)
+	if def == nil {
+		return
+	}
+	remaining := make([]*protocol.UserItem, 0, len(p.ItemList))
+	taken := 0
+	for _, item := range p.ItemList {
+		if taken < count && item != nil && int(item.WIndex) == def.Idx {
+			taken++
+			continue
+		}
+		remaining = append(remaining, item)
+	}
+	p.ItemList = remaining
 }

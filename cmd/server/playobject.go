@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -25,9 +26,19 @@ type PlayObject struct {
 	LearnedMagics []*PlayerMagic
 
 	VisibleActors  map[int32]*VisibleEntry
+	knownItems     map[int32]bool
 	lastVisionTick int64
 	lastRegenTick  int64
 	deathTick      int64
+	skeletonSent   bool
+
+	WalkTick  int64
+	WalkSpeed int64
+	RunSpeed  int64
+
+	HitTick     int64
+	FireHitTick int64
+	TwinHitTick int64
 
 	PkPoint         int
 	LastPkDecayTick int64
@@ -39,6 +50,16 @@ type PlayObject struct {
 	GuildName    string
 	GuildRank    string
 	StorageItems []*protocol.UserItem
+
+	HasParalysis   bool
+	HasRevival     bool
+	HasTeleport    bool
+	HasProbe       bool
+	HasFlame       bool
+	HasRecovery    bool
+	HasAngry       bool
+	HasMagicShield bool
+	HasMuscle      bool
 }
 
 type VisibleEntry struct {
@@ -53,6 +74,9 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 		Session:       session,
 		AccountName:   session.AccountName,
 		VisibleActors: make(map[int32]*VisibleEntry),
+		knownItems:    make(map[int32]bool),
+		WalkSpeed:     1400,
+		RunSpeed:      1400,
 	}
 }
 
@@ -67,9 +91,14 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 
 	now := time.Now().UnixMilli()
 
+	p.ProcessStatusEffects(server, now)
 	p.DecayPkPoint(now)
 
 	if p.Death {
+		if p.deathTick > 0 && now-p.deathTick > 10000 && !p.skeletonSent {
+			p.skeletonSent = true
+			p.envir.broadcastRefMsg(p.BaseObject, RM_DEATH, p.ID, p.CurrX, p.CurrY, 0)
+		}
 		if now-p.deathTick > 3000 {
 			p.resurrect(server)
 		}
@@ -92,7 +121,7 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleWalk(msg, server)
 	case protocol.CMRun:
 		p.HandleRun(msg, server)
-	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit:
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit, protocol.CMTwinHit:
 		p.HandleHit(msg, server)
 	case protocol.CMSpell:
 		p.HandleSpellFull(msg, server)
@@ -130,6 +159,8 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleBuildGuild(msg, server)
 	case protocol.CMHorseRun:
 		p.HandleHorseRun(msg, server)
+	case protocol.CMOpenDoor:
+		p.HandleOpenDoor(msg, server)
 	case RM_WALK:
 		p.sendMovementToClient(server, protocol.SMWalk, msg)
 	case RM_RUN:
@@ -172,6 +203,22 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
+	if !p.CanMoveCheck() {
+		return
+	}
+	now := time.Now().UnixMilli()
+	speed := p.WalkSpeed
+	if speed == 0 {
+		speed = 1400
+	}
+	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
+		speed = speed * 2
+	}
+	if now-p.WalkTick < speed {
+		return
+	}
+	p.WalkTick = now
+
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		return
@@ -186,6 +233,22 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
+	if !p.CanMoveCheck() {
+		return
+	}
+	now := time.Now().UnixMilli()
+	speed := p.RunSpeed
+	if speed == 0 {
+		speed = 1400
+	}
+	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
+		speed = speed * 2
+	}
+	if now-p.WalkTick < speed {
+		return
+	}
+	p.WalkTick = now
+
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		return
@@ -230,6 +293,26 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 }
 
 func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
+	now := time.Now().UnixMilli()
+	baseSpeed := int64(1400)
+	if now-p.HitTick < baseSpeed {
+		return
+	}
+
+	switch msg.Ident {
+	case protocol.CMFireHit:
+		if now-p.FireHitTick < 10000 {
+			return
+		}
+		p.FireHitTick = now
+	case protocol.CMTwinHit:
+		if now-p.TwinHitTick < 60000 {
+			return
+		}
+		p.TwinHitTick = now
+	}
+	p.HitTick = now
+
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		return
@@ -387,8 +470,47 @@ func (p *PlayObject) calcDamage(target *BaseObject) int {
 }
 
 func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject, damage int, dir int) {
+	if tp := p.envir.getPlayerByBase(target); tp != nil && tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 {
+		absorbed := damage / 2
+		mp := int(tp.WAbil.MP)
+		if mp < absorbed {
+			absorbed = mp
+			tp.StatusTimeArr[STATE_BUBBLEDEFENCE] = 0
+		}
+		tp.WAbil.MP -= uint16(absorbed)
+		damage -= absorbed
+		if damage < 1 {
+			damage = 1
+		}
+	}
+
 	hp := int(target.WAbil.HP)
 	hp -= damage
+
+	if p.HasFlame {
+		bonus := damage / 10
+		if bonus > 0 {
+			hp -= bonus
+		}
+	}
+
+	if p.HasAngry {
+		drain := damage / 5
+		if drain > 0 {
+			newHP := int(p.WAbil.HP) + drain
+			if newHP > int(p.WAbil.MaxHP) {
+				newHP = int(p.WAbil.MaxHP)
+			}
+			p.WAbil.HP = uint16(newHP)
+		}
+	}
+
+	if p.HasParalysis && rand.Intn(20) == 0 {
+		if tp := p.envir.getPlayerByBase(target); tp != nil {
+			tp.MakePoison(POISON_STONE, 50)
+		}
+	}
+
 	if hp < 0 {
 		hp = 0
 	}
@@ -396,17 +518,38 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 
 	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, target.CurrX, target.CurrY, dir)
 
-	if hp <= 0 {
-		target.Death = true
-		p.envir.broadcastRefMsg(target, RM_DEATH, target.ID, target.CurrX, target.CurrY, dir)
-
-		if mon := p.envir.getMonsterByBase(target); mon != nil {
-			mon.DeathTick = time.Now().UnixMilli()
-			p.awardExp(server, mon)
+	if tp := p.envir.getPlayerByBase(target); tp != nil {
+		if tp.UseItems[protocol.UDress] != nil && tp.UseItems[protocol.UDress].Dura > 0 {
+			tp.UseItems[protocol.UDress].Dura--
 		}
-		if tp := p.envir.getPlayerByBase(target); tp != nil {
-			tp.deathTick = time.Now().UnixMilli()
-			p.OnPlayerKilled(tp)
+		for i := 1; i < 13; i++ {
+			if tp.UseItems[i] != nil && tp.UseItems[i].Dura > 0 {
+				if rand.Intn(8) == 0 {
+					tp.UseItems[i].Dura--
+				}
+			}
+		}
+	}
+
+	if hp <= 0 {
+		if tp := p.envir.getPlayerByBase(target); tp != nil && tp.HasRevival {
+			tp.HasRevival = false
+			tp.WAbil.HP = tp.WAbil.MaxHP / 2
+			tp.sendHealthSpell(server)
+		} else {
+			target.Death = true
+			p.envir.broadcastRefMsg(target, RM_DEATH, target.ID, target.CurrX, target.CurrY, dir)
+
+			if mon := p.envir.getMonsterByBase(target); mon != nil {
+				mon.DeathTick = time.Now().UnixMilli()
+				p.awardExp(server, mon)
+			}
+			if tp := p.envir.getPlayerByBase(target); tp != nil {
+				tp.deathTick = time.Now().UnixMilli()
+				tp.Death = true
+				p.OnPlayerKilled(tp)
+				tp.DropDeathItems(server)
+			}
 		}
 	} else {
 		if tp := p.envir.getPlayerByBase(target); tp != nil {
@@ -527,8 +670,45 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 	}
 }
 
+func (p *PlayObject) DropDeathItems(server *netserver.TCPServer) {
+	if p.envir == nil {
+		return
+	}
+	var remaining []*protocol.UserItem
+	for _, item := range p.ItemList {
+		if rand.Intn(10) == 0 {
+			dropX := p.CurrX + rand.Intn(3) - 1
+			dropY := p.CurrY + rand.Intn(3) - 1
+			p.Engine.mu.Lock()
+			id := p.Engine.nextItemID
+			p.Engine.nextItemID++
+			p.Engine.mu.Unlock()
+			gi := &GroundItem{
+				ID:       id,
+				Name:     fmt.Sprintf("Item#%d", item.WIndex),
+				Looks:    0,
+				X:        dropX,
+				Y:        dropY,
+				DropTick: time.Now().UnixMilli(),
+			}
+			p.envir.AddGroundItem(gi)
+			resp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))
+			objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
+			for _, obj := range objs {
+				if other, ok := obj.(*PlayObject); ok && !other.Ghost {
+					server.Send(other.Session.ID, resp, protocol.EncodeString(gi.Name))
+				}
+			}
+		} else {
+			remaining = append(remaining, item)
+		}
+	}
+	p.ItemList = remaining
+}
+
 func (p *PlayObject) resurrect(server *netserver.TCPServer) {
 	p.Death = false
+	p.skeletonSent = false
 	p.WAbil.HP = p.WAbil.MaxHP / 2
 	p.WAbil.MP = p.WAbil.MaxMP / 2
 
@@ -542,19 +722,10 @@ func (p *PlayObject) resurrect(server *netserver.TCPServer) {
 }
 
 func IsSafeZone(envir *Environment, x, y int) bool {
-	if envir == nil || envir.Name != "0" {
+	if envir == nil {
 		return false
 	}
-	homeX, homeY := 289, 618
-	dx := x - homeX
-	dy := y - homeY
-	if dx < 0 {
-		dx = -dx
-	}
-	if dy < 0 {
-		dy = -dy
-	}
-	return dx <= 5 && dy <= 5
+	return CheckSafeZone(envir.Name, x, y)
 }
 
 func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) {
@@ -705,6 +876,24 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 				body += protocol.EncodeString(base.Name)
 			}
 			server.Send(p.Session.ID, resp, body)
+		}
+	}
+
+	for _, item := range p.envir.GroundItems {
+		dx := abs(item.X - p.CurrX)
+		dy := abs(item.Y - p.CurrY)
+		if dx <= viewRange && dy <= viewRange {
+			if !p.knownItems[item.ID] {
+				p.knownItems[item.ID] = true
+				resp := protocol.MakeDefaultMsg(protocol.SMItemShow, item.ID, uint16(item.X), uint16(item.Y), uint16(item.Looks))
+				server.Send(p.Session.ID, resp, protocol.EncodeString(item.Name))
+			}
+		} else {
+			if p.knownItems[item.ID] {
+				delete(p.knownItems, item.ID)
+				resp := protocol.MakeDefaultMsg(protocol.SMItemHide, item.ID, 0, 0, 0)
+				server.Send(p.Session.ID, resp, "")
+			}
 		}
 	}
 }
