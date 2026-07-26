@@ -639,8 +639,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMNewMap:
 		mapName := body
-		x := msg.Param
-		y := msg.Tag
+		x := int(msg.Recog)
+		y := int(msg.Param)
 		log.Logf(log.LevelInfo, "Client", "Map: %s (%d,%d)", mapName, x, y)
 		if err := h.playScene.LoadMap(mapName); err != nil {
 			log.Logf(log.LevelError, "Client", "Failed to load map: %v", err)

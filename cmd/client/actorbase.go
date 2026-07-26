@@ -218,6 +218,7 @@ func (a *Actor) updateFeature(feature int) {
 	a.Dress = int(dress)
 	a.Weapon = int(weapon)
 	a.Hair = int(hair)
+	a.Sex = int(hair) % 2
 }
 
 func (a *Actor) updateFeatureFromLogon(body string) {

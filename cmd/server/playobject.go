@@ -394,7 +394,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	}
 	target.WAbil.HP = uint16(hp)
 
-	p.envir.broadcastRefMsg(target, RM_STRUCK, p.ID, target.CurrX, target.CurrY, dir)
+	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, target.CurrX, target.CurrY, dir)
 
 	if hp <= 0 {
 		target.Death = true
