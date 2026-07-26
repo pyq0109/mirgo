@@ -432,6 +432,11 @@ func (h *NetHandler) ReadLoop() {
 			payload := string(data[1:endIdx])
 			data = data[endIdx+1:]
 
+			if len(payload) > 0 && payload[0] == '+' {
+				h.handleControlMsg(payload)
+				continue
+			}
+
 			if len(payload) >= protocol.DefBlockSize {
 				msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
 				body := ""
@@ -440,6 +445,20 @@ func (h *NetHandler) ReadLoop() {
 				}
 				h.HandleMessage(msg, body)
 			}
+		}
+	}
+}
+
+func (h *NetHandler) handleControlMsg(payload string) {
+	switch {
+	case strings.HasPrefix(payload, "+GOOD"):
+		log.Logf(log.LevelDebug, "Client", "<<< +GOOD")
+		h.playScene.ActionLock = false
+	case strings.HasPrefix(payload, "+FAIL"):
+		log.Logf(log.LevelDebug, "Client", "<<< +FAIL")
+		h.playScene.ActionLock = false
+		if h.playScene.State.MySelf != nil {
+			h.playScene.State.MySelf.MoveFail()
 		}
 	}
 }
@@ -676,7 +695,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.Actors.Remove(msg.Recog)
 
 	case protocol.SMMoveFail:
+		log.Logf(log.LevelDebug, "Client", "MoveFail from server")
+		h.playScene.ActionLock = false
 		if h.playScene.State.MySelf != nil {
+			h.playScene.State.MySelf.MoveFail()
 			my := h.playScene.State.MySelf
 			my.CurrX = int(msg.Param)
 			my.CurrY = int(msg.Tag)
@@ -685,8 +707,6 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			my.Ry = my.CurrY
 			my.ShiftX = 0
 			my.ShiftY = 0
-			my.CurrentAction = 0
-			my.LockEndFrame = false
 		}
 
 	case protocol.SMAbility:

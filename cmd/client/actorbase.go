@@ -34,6 +34,8 @@ type Actor struct {
 	Dir          int
 	ShiftX, ShiftY float64
 
+	OldX, OldY, OldDir int
+
 	Sex        int
 	Race       int
 	Hair       int
@@ -66,6 +68,9 @@ type Actor struct {
 	WarModeTime    int64
 
 	MsgList []ActorMsg
+
+	RealActionMsg ActorMsg
+	HasRealAction bool
 
 	Type ActorType
 
@@ -120,6 +125,15 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 		a.updateFeature(msg.Feature)
 	}
 
+	if msg.Ident >= 3000 && msg.Ident <= 3099 {
+		a.RealActionMsg = msg
+		a.HasRealAction = true
+		a.OldX = a.CurrX
+		a.OldY = a.CurrY
+		a.OldDir = a.Dir
+		msg.Ident = msg.Ident - 3000
+	}
+
 	a.CurrX = msg.X
 	a.CurrY = msg.Y
 	a.Dir = msg.Dir
@@ -130,6 +144,49 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 	if msg.Ident == protocol.SMWalk || msg.Ident == protocol.SMRun {
 		a.Shift(a.Dir, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
 	}
+}
+
+func (a *Actor) IsIdle() bool {
+	return a.CurrentAction == 0 && len(a.MsgList) == 0
+}
+
+func (a *Actor) MoveFail() {
+	a.CurrentAction = 0
+	a.LockEndFrame = true
+	a.CurrX = a.OldX
+	a.CurrY = a.OldY
+	a.Dir = a.OldDir
+	a.Rx = a.CurrX
+	a.Ry = a.CurrY
+	a.ShiftX = 0
+	a.ShiftY = 0
+	a.CleanUserMsgs()
+}
+
+func (a *Actor) CleanUserMsgs() {
+	filtered := a.MsgList[:0]
+	for _, m := range a.MsgList {
+		if m.Ident >= 3000 && m.Ident <= 3099 {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	a.MsgList = filtered
+}
+
+func (a *Actor) UpdateMsg(ident, x, y, dir, feature, state int) {
+	filtered := a.MsgList[:0]
+	for _, m := range a.MsgList {
+		if m.Ident >= 3000 && m.Ident <= 3099 {
+			continue
+		}
+		if m.Ident == ident {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	a.MsgList = filtered
+	a.SendMsg(ident, x, y, dir, feature, state)
 }
 
 func (a *Actor) updateFeature(feature int) {
@@ -143,10 +200,9 @@ func (a *Actor) updateFeature(feature int) {
 }
 
 func (a *Actor) updateFeatureFromLogon(body string) {
-	buf := make([]byte, 16)
-	protocol.DecodeBuffer(body, buf)
-	if len(buf) >= 4 {
-		feature := int32(binary.LittleEndian.Uint32(buf[0:4]))
+	raw := []byte(body)
+	if len(raw) >= 4 {
+		feature := int32(binary.LittleEndian.Uint32(raw[0:4]))
 		a.updateFeature(int(feature))
 	}
 }
@@ -155,10 +211,9 @@ func (a *Actor) updateFeatureFromBody(body string) {
 	if body == "" {
 		return
 	}
-	buf := make([]byte, 8)
-	protocol.DecodeBuffer(body, buf)
-	if len(buf) >= 4 {
-		feature := int32(binary.LittleEndian.Uint32(buf[0:4]))
+	raw := []byte(body)
+	if len(raw) >= 4 {
+		feature := int32(binary.LittleEndian.Uint32(raw[0:4]))
 		a.updateFeature(int(feature))
 	}
 }

@@ -32,10 +32,12 @@ type PlayScene struct {
 
 	animCounter int
 
-	State      *GameState
-	sendMove   func(ident int, dir int)
+	State        *GameState
+	sendMove     func(ident int, dir int)
 	lastMoveTick int64
-	actionLock   bool
+
+	ActionLock     bool
+	ActionLockTime int64
 }
 
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
@@ -324,11 +326,50 @@ func clamp(v, min, max int) int {
 	return v
 }
 
+func (s *PlayScene) CanWalk(x, y int) bool {
+	if s.mapData == nil {
+		return false
+	}
+	if x < 0 || x >= s.mapData.Width || y < 0 || y >= s.mapData.Height {
+		return false
+	}
+	info := s.mapData.InfoAt(x, y)
+	if info == nil {
+		return false
+	}
+	if info.Collision {
+		return false
+	}
+	if info.FrontDoorIndex&0x80 != 0 && info.FrontDoorOffset&0x80 == 0 {
+		return false
+	}
+	for _, a := range s.State.Actors.All() {
+		if a.CurrX == x && a.CurrY == y && !a.Death {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *PlayScene) ServerAcceptNextAction() bool {
+	if !s.ActionLock {
+		return true
+	}
+	if time.Now().UnixMilli()-s.ActionLockTime > 10000 {
+		s.ActionLock = false
+		return true
+	}
+	return false
+}
+
 func (s *PlayScene) OnKey(key int, action int) {
 	if action != 1 && action != 2 {
 		return
 	}
 	if s.State.MySelf == nil || s.sendMove == nil {
+		return
+	}
+	if !s.State.MySelf.IsIdle() || !s.ServerAcceptNextAction() {
 		return
 	}
 
@@ -356,7 +397,42 @@ func (s *PlayScene) OnKey(key int, action int) {
 		return
 	}
 
+	dx, dy := dirOffset(dir)
+	newX := s.State.MySelf.CurrX + dx
+	newY := s.State.MySelf.CurrY + dy
+
+	if !s.CanWalk(newX, newY) {
+		s.State.MySelf.UpdateMsg(protocol.CMTurn, s.State.MySelf.CurrX, s.State.MySelf.CurrY, dir, 0, 0)
+		s.sendMove(protocol.CMTurn, dir)
+		return
+	}
+
+	s.State.MySelf.UpdateMsg(protocol.CMWalk, newX, newY, dir, 0, 0)
 	s.sendMove(protocol.CMWalk, dir)
+	s.ActionLock = true
+	s.ActionLockTime = time.Now().UnixMilli()
+}
+
+func dirOffset(dir int) (dx, dy int) {
+	switch dir {
+	case 0:
+		return 0, -1
+	case 1:
+		return 1, -1
+	case 2:
+		return 1, 0
+	case 3:
+		return 1, 1
+	case 4:
+		return 0, 1
+	case 5:
+		return -1, 1
+	case 6:
+		return -1, 0
+	case 7:
+		return -1, -1
+	}
+	return 0, 0
 }
 
 func (s *PlayScene) OnMouse(x, y float64, button int, action int) {}

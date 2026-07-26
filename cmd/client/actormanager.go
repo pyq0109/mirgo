@@ -87,10 +87,9 @@ func NewActorFromMessage(msg protocol.DefaultMessage, body string) *Actor {
 	actor.Ry = actor.CurrY
 
 	if len(body) > 0 {
-		buf := make([]byte, 8)
-		protocol.DecodeBuffer(body, buf)
-		if len(buf) >= 4 {
-			feature := int32(binary.LittleEndian.Uint32(buf[0:4]))
+		raw := []byte(body)
+		if len(raw) >= 4 {
+			feature := int32(binary.LittleEndian.Uint32(raw[0:4]))
 			_, dress, weapon, hair := protocol.ParseHumanFeature(feature)
 			actor.Dress = int(dress)
 			actor.Weapon = int(weapon)

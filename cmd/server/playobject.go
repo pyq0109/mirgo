@@ -82,6 +82,7 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 	}
 	p.TurnTo(dir)
 	p.SendRefMsg(RM_TURN, dir, p.CurrX, p.CurrY, p.Name)
+	server.SendRaw(p.Session.ID, "#+GOOD!")
 }
 
 func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
@@ -91,6 +92,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	}
 	if p.WalkTo(dir) {
 		p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
+		server.SendRaw(p.Session.ID, "#+GOOD!")
 	} else {
 		p.sendMoveFail(server)
 	}
@@ -107,6 +109,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	}
 	p.WalkTo(dir)
 	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
+	server.SendRaw(p.Session.ID, "#+GOOD!")
 }
 
 func (p *PlayObject) HandleHit(msg SendMessage) {

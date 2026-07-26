@@ -310,6 +310,21 @@ func (s *TCPServer) GetSession(id int64) *Session {
 	return s.sessions[id]
 }
 
+func (s *TCPServer) SendRaw(sessionID int64, raw string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("session %d not found", sessionID)
+	}
+	select {
+	case session.SendChan <- []byte(raw):
+		return nil
+	default:
+		return fmt.Errorf("send buffer full for session %d", sessionID)
+	}
+}
+
 // GetSessionCount returns the number of connected sessions.
 func (s *TCPServer) GetSessionCount() int {
 	s.mu.RLock()
