@@ -6,6 +6,20 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
+const (
+	RM_WALK      = 10002
+	RM_RUN       = 10003
+	RM_HORSERUN  = 10004
+	RM_TURN      = 10005
+	RM_DISAPPEAR = 10006
+	RM_STRUCK    = 10007
+	RM_DEATH     = 10008
+	RM_SKELETON  = 10009
+	RM_LOGON     = 10010
+)
+
+const viewRange = 12
+
 // BaseObject is the base for all game objects on the server.
 type BaseObject struct {
 	// Identity
@@ -13,31 +27,36 @@ type BaseObject struct {
 	ID   int32
 
 	// Position
-	MapName  string
-	CurrX    int
-	CurrY    int
-	Dir      int
+	MapName string
+	CurrX   int
+	CurrY   int
+	Dir     int
 
 	// Appearance
-	Gender byte
-	Hair   byte
-	Job    byte
+	Gender    byte
+	Hair      byte
+	Job       byte
+	DressLook byte
+	WeaponLook byte
 
 	// Stats
 	Abil  protocol.Ability
-	WAbil protocol.Ability // Working abilities (with equipment bonuses)
+	WAbil protocol.Ability
 
 	// Combat
-	HitPoint  int
-	HitSpeed  int
-	Luck      int
+	HitPoint int
+	HitSpeed int
+	Luck     int
 
 	// State
 	StatusTimeArr [12]int16
+	Death         bool
+	Ghost         bool
+	Hidden        bool
 
 	// Inventory
-	UseItems [13]*protocol.UserItem // Equipped items
-	ItemList []*protocol.UserItem   // Bag items
+	UseItems [13]*protocol.UserItem
+	ItemList []*protocol.UserItem
 
 	// Magic
 	MagicList []*protocol.UserMagic
@@ -50,12 +69,12 @@ type BaseObject struct {
 	envir *Environment
 }
 
-// SendMessage represents a message to be processed.
 type SendMessage struct {
 	Ident    int
 	Param1   int
 	Param2   int
 	Param3   int
+	SourceID int32
 	Msg      string
 }
 
@@ -96,7 +115,34 @@ func (o *BaseObject) GetMsg() (SendMessage, bool) {
 
 // Feature returns the appearance feature integer.
 func (o *BaseObject) Feature() int32 {
-	return protocol.MakeHumanFeature(0, byte(o.Gender), 0, byte(o.Hair))
+	dress := o.DressLook
+	weapon := o.WeaponLook
+	hair := o.Hair*2 + o.Gender
+	return protocol.MakeHumanFeature(0, dress, weapon, hair)
+}
+
+func (o *BaseObject) SendRefMsg(ident, param1, param2, param3 int, msg string) {
+	if o.envir == nil {
+		return
+	}
+	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, viewRange)
+	for _, obj := range objs {
+		if p, ok := obj.(*PlayObject); ok {
+			if p.ID == o.ID || p.Ghost {
+				continue
+			}
+			p.msgMu.Lock()
+			p.msgList = append(p.msgList, SendMessage{
+				Ident:    ident,
+				Param1:   param1,
+				Param2:   param2,
+				Param3:   param3,
+				SourceID: o.ID,
+				Msg:      msg,
+			})
+			p.msgMu.Unlock()
+		}
+	}
 }
 
 // WalkTo moves the object in the given direction.

@@ -62,13 +62,12 @@ func main() {
 	})
 
 	server.SetDisconnectHandler(func(session *netserver.Session) {
-		// Clean up PlayObject if player was in game
 		if session.State == netserver.StateInGame {
 			player := userEngine.GetPlayer(int32(session.CharacterID))
 			if player != nil {
-				// Save character data before removing
 				saveCharacterData(db, player)
-				// Remove from map
+				player.Ghost = true
+				player.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
 				if player.envir != nil {
 					player.envir.RemoveObject(player.CurrX, player.CurrY, OS_MOVINGOBJECT, player)
 				}
@@ -216,11 +215,13 @@ func main() {
 
 	log.Logf(log.LevelInfo, "Server", "Server started. Press Ctrl+C to stop.")
 
+	tickCount := int64(0)
 	for {
 		select {
 		case <-ticker.C:
-			// Game tick: process all player actions
-			userEngine.ProcessHumans()
+			tickCount++
+			userEngine.ProcessHumans(server)
+			userEngine.ProcessDoors(tickCount * 100)
 		case sig := <-sigChan:
 			fmt.Println()
 			log.Logf(log.LevelInfo, "Server", "Received signal: %v", sig)
@@ -432,8 +433,13 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMSpell, int(msg.Param), int(msg.Tag), int(msg.Series), body)
 	case protocol.CMLoginNoticeOK:
 		log.Logf(log.LevelInfo, "Server", "Notice acknowledged by %s", player.Name)
-		// Send logon to complete the login sequence
 		player.SendLogon(server)
+		player.SendUseItems(server)
+		player.SendMyMagic(server)
+		player.SendDayChanging(server)
+		player.SendMapDescription(server)
+		player.SendSubAbility(server)
+		player.SendRefMsg(RM_TURN, player.Dir, player.CurrX, player.CurrY, player.Name)
 	default:
 		log.Logf(log.LevelDebug, "Server", "Unhandled game message: %d from %s", msg.Ident, player.Name)
 	}

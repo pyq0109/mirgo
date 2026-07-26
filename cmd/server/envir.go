@@ -91,13 +91,47 @@ func NewEnvironment(name string, m *mapformat.MapData) *Environment {
 	return env
 }
 
-// CanWalk checks if a position is walkable.
+// CanWalk checks if a position is walkable (terrain + entities + doors).
 func (e *Environment) CanWalk(x, y int) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return false
 	}
 	idx := y*e.Width + x
-	return e.Cells[idx].Flag == 0
+	if e.Cells[idx].Flag != 0 {
+		return false
+	}
+	if e.rawMap != nil {
+		info := e.rawMap.InfoAt(x, y)
+		if info != nil && info.FrontDoorIndex&0x80 != 0 && info.FrontDoorOffset&0x80 == 0 {
+			return false
+		}
+	}
+	for _, o := range e.Cells[idx].ObjList {
+		if o.Type != OS_MOVINGOBJECT {
+			continue
+		}
+		switch obj := o.Obj.(type) {
+		case *PlayObject:
+			if !obj.Ghost && !obj.Death && !obj.Hidden {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (e *Environment) getPlayerByID(id int32) *PlayObject {
+	for i := range e.Cells {
+		for _, o := range e.Cells[i].ObjList {
+			if o.Type != OS_MOVINGOBJECT {
+				continue
+			}
+			if p, ok := o.Obj.(*PlayObject); ok && p.ID == id {
+				return p
+			}
+		}
+	}
+	return nil
 }
 
 // AddObject adds an object to the map at the given position.

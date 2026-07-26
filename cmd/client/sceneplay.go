@@ -3,11 +3,13 @@
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/mapformat"
+	"github.com/pyq0109/mirgo/internal/protocol"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
@@ -16,7 +18,6 @@ const (
 	frontCullMargin = 20
 )
 
-// PlayScene renders the game world with 3-layer tiles.
 type PlayScene struct {
 	gl        *engine.GLState
 	resources *engine.ResourceManager
@@ -24,16 +25,19 @@ type PlayScene struct {
 	cam       *engine.Camera2D
 	mapData   *mapformat.MapData
 
-	// Texture caches (matching mapviewer)
-	texCache       map[int]uint32 // Tiles.wil image index -> GL texture
-	smTexCache     map[int]uint32 // SmTiles.wil image index -> GL texture
+	texCache       map[int]uint32
+	smTexCache     map[int]uint32
 	objectsLoaders map[int]*wil.File
 	objectsCaches  map[int]map[int]uint32
 
 	animCounter int
+
+	State      *GameState
+	sendMove   func(ident int, dir int)
+	lastMoveTick int64
+	actionLock   bool
 }
 
-// NewPlayScene creates a new play scene.
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
 	return &PlayScene{
 		gl:             gl,
@@ -43,10 +47,14 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		smTexCache:     make(map[int]uint32),
 		objectsLoaders: make(map[int]*wil.File),
 		objectsCaches:  make(map[int]map[int]uint32),
+		State:          NewGameState(),
 	}
 }
 
-// LoadMap loads a map file by name from local directory.
+func (s *PlayScene) SetSendMove(fn func(ident int, dir int)) {
+	s.sendMove = fn
+}
+
 func (s *PlayScene) LoadMap(mapName string) error {
 	mapPath := filepath.Join(s.mapDir, mapName+".map")
 	m, err := mapformat.Parse(mapPath)
@@ -54,10 +62,12 @@ func (s *PlayScene) LoadMap(mapName string) error {
 		return fmt.Errorf("load map %s: %w", mapName, err)
 	}
 	s.mapData = m
-	s.cam = engine.NewCamera(1024, 768)
+	if s.cam == nil {
+		s.cam = engine.NewCamera(1024, 768)
+	}
 	s.cam.CenterOn(float64(m.Width)*engine.TileWidth/2, float64(m.Height)*engine.TileHeight/2)
+	s.State.MapName = mapName
 
-	// Initialize Objects.wil for area 0
 	if s.resources.Objects[0] != nil {
 		s.objectsLoaders[0] = s.resources.Objects[0]
 		s.objectsCaches[0] = make(map[int]uint32)
@@ -72,14 +82,30 @@ func (s *PlayScene) Open() {
 }
 
 func (s *PlayScene) Close() {
+	s.State.Reset()
 	log.Logf(log.LevelInfo, "PlayScene", "Closed")
 }
 
 func (s *PlayScene) Update(dt float64) {
-	// Animation counter is incremented in Render
+	now := time.Now().UnixMilli()
+
+	moveTick := false
+	if now-s.lastMoveTick >= 100 {
+		s.lastMoveTick = now
+		moveTick = true
+	}
+
+	s.State.Actors.Update(now, moveTick)
+
+	if s.State.MySelf != nil && s.cam != nil && s.mapData != nil {
+		my := s.State.MySelf
+		wx := float64(my.Rx)*engine.TileWidth + my.ShiftX + engine.TileWidth/2
+		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
+		s.cam.CenterOn(wx, wy)
+		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
+	}
 }
 
-// Render matches mapviewer's GLRenderer.Render exactly.
 func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	if s.mapData == nil || s.cam == nil {
 		return
@@ -88,32 +114,27 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	m := s.mapData
 	cam := s.cam
 
-	// Re-establish GL state
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-	// Projection: orthographic Y-down (matching mapviewer)
 	left := float32(cam.X)
 	top := float32(cam.Y)
 	right := float32(cam.X + float64(cam.ViewW)/cam.Zoom)
 	bottom := float32(cam.Y + float64(cam.ViewH)/cam.Zoom)
 	proj = engine.OrthoProj4(left, right, bottom, top)
 
-	// Back/middle cull range
 	startX, startY, endX, endY := cam.ViewportTiles(cullMargin, cullMargin)
 	startX = clamp(startX, 0, m.Width-1)
 	startY = clamp(startY, 0, m.Height-1)
 	endX = clamp(endX, 0, m.Width-1)
 	endY = clamp(endY, 0, m.Height-1)
 
-	// Front cull range (wider margin for tall objects)
 	fStartX, fStartY, fEndX, fEndY := cam.ViewportTiles(frontCullMargin, frontCullMargin)
 	fStartX = clamp(fStartX, 0, m.Width-1)
 	fStartY = clamp(fStartY, 0, m.Height-1)
 	fEndX = clamp(fEndX, 0, m.Width-1)
 	fEndY = clamp(fEndY, 0, m.Height-1)
 
-	// Align to even for back layer stride-2 rendering
 	bStartX, bStartY, bEndX, bEndY := startX, startY, endX, endY
 	if bStartX%2 == 1 {
 		bStartX--
@@ -132,7 +153,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	bEndX = clamp(bEndX, 0, m.Width-1)
 	bEndY = clamp(bEndY, 0, m.Height-1)
 
-	// 1. Back layer: even x, y (2x2 tile blocks)
 	for y := bStartY; y <= bEndY; y += 2 {
 		for x := bStartX; x <= bEndX; x += 2 {
 			info := m.InfoAt(x, y)
@@ -150,7 +170,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	// 2. Middle layer: all cells
 	for y := startY; y <= endY; y++ {
 		for x := startX; x <= endX; x++ {
 			info := m.InfoAt(x, y)
@@ -168,18 +187,37 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	// 3. Front layer — single pass with per-tile blend toggling
-	for y := fStartY; y <= fEndY; y++ {
-		for x := fStartX; x <= fEndX; x++ {
-			info := m.InfoAt(x, y)
-			s.drawFront(info, x, y, proj)
-		}
-	}
+	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
 	s.animCounter++
 }
 
-// drawFront renders a single front-layer cell.
-// Matches mapviewer's GLRenderer.drawFront exactly.
+func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, proj [16]float32) {
+	actors := s.State.Actors.SortedByY()
+	actorIdx := 0
+
+	for y := fStartY; y <= fEndY; y++ {
+		for x := fStartX; x <= fEndX; x++ {
+			info := s.mapData.InfoAt(x, y)
+			s.drawFront(info, x, y, proj)
+		}
+
+		for actorIdx < len(actors) && actors[actorIdx].Ry <= y {
+			a := actors[actorIdx]
+			screenX := float32(float64(a.Rx*engine.TileWidth) - s.cam.X + a.ShiftX)
+			screenY := float32(float64(a.Ry*engine.TileHeight) - s.cam.Y + a.ShiftY)
+			a.Draw(s.gl, s.resources, screenX, screenY, proj)
+			actorIdx++
+		}
+	}
+
+	for ; actorIdx < len(actors); actorIdx++ {
+		a := actors[actorIdx]
+		screenX := float32(float64(a.Rx*engine.TileWidth) - s.cam.X + a.ShiftX)
+		screenY := float32(float64(a.Ry*engine.TileHeight) - s.cam.Y + a.ShiftY)
+		a.Draw(s.gl, s.resources, screenX, screenY, proj)
+	}
+}
+
 func (s *PlayScene) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float32) {
 	if info.FrontLib < 0 {
 		return
@@ -195,7 +233,6 @@ func (s *PlayScene) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float
 	idx := info.FrontImage
 	isBlend := info.FrontAniFrame&0x80 != 0
 
-	// Animation
 	ani := int(info.FrontAniFrame & 0x7F)
 	if ani > 0 {
 		tick := int(info.FrontAniTick)
@@ -209,7 +246,6 @@ func (s *PlayScene) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float
 		}
 	}
 
-	// Door offset
 	if info.FrontDoorOffset&0x80 != 0 {
 		if info.FrontDoorIndex&0x7F != 0 {
 			idx += int(info.FrontDoorOffset & 0x7F)
@@ -230,22 +266,18 @@ func (s *PlayScene) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float
 	cellWorldY := float32(y * engine.TileHeight)
 
 	if isBlend {
-		// Blend objects (fire, light): hotspot-based positioning + additive blending
-		// Delphi formula: (n + ax - 2, m + ay - 68)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 		wx := cellWorldX + float32(img.HotX) - 2
 		wy := cellWorldY + float32(img.HotY) - 68
 		s.gl.DrawQuad(tex, wx, wy, float32(img.Width), float32(img.Height), proj)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	} else {
-		// Non-blend objects: bottom-aligned positioning
 		wx := cellWorldX
 		wy := cellWorldY - float32(img.Height) + engine.TileHeight
 		s.gl.DrawQuad(tex, wx, wy, float32(img.Width), float32(img.Height), proj)
 	}
 }
 
-// getObjectsLoader returns the WIL loader for the given area, lazy-loading if needed.
 func (s *PlayScene) getObjectsLoader(area int) *wil.File {
 	if f, ok := s.objectsLoaders[area]; ok {
 		return f
@@ -265,7 +297,6 @@ func (s *PlayScene) getObjectsLoader(area int) *wil.File {
 	return f
 }
 
-// getTex returns a cached texture, loading if needed.
 func (s *PlayScene) getTex(cache map[int]uint32, file *wil.File, idx int) uint32 {
 	if idx < 0 || file == nil || idx >= len(file.Images) {
 		return 0
@@ -279,7 +310,7 @@ func (s *PlayScene) getTex(cache map[int]uint32, file *wil.File, idx int) uint32
 	}
 	tex := s.gl.UploadTexture(img.RGBA)
 	cache[idx] = tex
-	img.RGBA = nil // Free Go-side pixels; GPU has its own copy
+	img.RGBA = nil
 	return tex
 }
 
@@ -293,8 +324,43 @@ func clamp(v, min, max int) int {
 	return v
 }
 
-func (s *PlayScene) OnKey(key int, action int) {}
+func (s *PlayScene) OnKey(key int, action int) {
+	if action != 1 && action != 2 {
+		return
+	}
+	if s.State.MySelf == nil || s.sendMove == nil {
+		return
+	}
+
+	dir := -1
+	switch key {
+	case 87, 265: // W, Up
+		dir = 0
+	case 69: // E
+		dir = 1
+	case 68, 262: // D, Right
+		dir = 2
+	case 67: // C
+		dir = 3
+	case 83, 264: // S, Down
+		dir = 4
+	case 90: // Z
+		dir = 5
+	case 65, 263: // A, Left
+		dir = 6
+	case 81: // Q
+		dir = 7
+	}
+
+	if dir < 0 {
+		return
+	}
+
+	s.sendMove(protocol.CMWalk, dir)
+}
+
 func (s *PlayScene) OnMouse(x, y float64, button int, action int) {}
+
 func (s *PlayScene) OnScroll(x, y float64) {
 	if s.cam != nil {
 		s.cam.ZoomAt(1.1, x, y)

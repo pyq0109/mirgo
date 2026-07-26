@@ -203,6 +203,11 @@ func main() {
 		}
 	})
 
+	glfwWindow.SetScrollCallback(func(w *glfw.Window, xoff, yoff float64) {
+		x, y := w.GetCursorPos()
+		sceneMgr.OnScroll(x, y)
+	})
+
 	log.Logf(log.LevelInfo, "Client", "Login scene ready")
 	window.Run(func(dt float64) {
 		sceneMgr.Update(dt)
@@ -606,9 +611,65 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMLogon:
 		log.Logf(log.LevelInfo, "Client", "Game started (id=%d x=%d y=%d dir=%d)",
 			msg.Recog, msg.Param, msg.Tag, msg.Series)
+		actor := NewActor(msg.Recog, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF)
+		actor.Type = ActorHuman
+		if body != "" {
+			actor.updateFeatureFromLogon(body)
+		}
+		h.playScene.State.MySelf = actor
+		h.playScene.State.Actors.Add(actor)
+		actor.SendMsg(protocol.SMTurn, actor.CurrX, actor.CurrY, actor.Dir, 0, 0)
 		h.sceneMgr.ChangeScene(engine.ScenePlayGame)
 		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
 		h.Send(queryBag, "")
+
+	case protocol.SMTurn:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor == nil {
+			actor = NewActorFromMessage(msg, body)
+			h.playScene.State.Actors.Add(actor)
+		} else {
+			actor.updateFeatureFromBody(body)
+		}
+		actor.SendMsg(protocol.SMTurn, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+
+	case protocol.SMWalk:
+		if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
+			break
+		}
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMWalk, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMRun:
+		if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
+			break
+		}
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMRun, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
+	case protocol.SMDisappear, protocol.SMGhost, protocol.SMHide:
+		if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
+			break
+		}
+		h.playScene.State.Actors.Remove(msg.Recog)
+
+	case protocol.SMMoveFail:
+		if h.playScene.State.MySelf != nil {
+			my := h.playScene.State.MySelf
+			my.CurrX = int(msg.Param)
+			my.CurrY = int(msg.Tag)
+			my.Dir = int(msg.Series) & 0xFF
+			my.Rx = my.CurrX
+			my.Ry = my.CurrY
+			my.ShiftX = 0
+			my.ShiftY = 0
+			my.CurrentAction = 0
+			my.LockEndFrame = false
+		}
 
 	case protocol.SMAbility:
 		log.Logf(log.LevelInfo, "Client", "Received ability")
@@ -755,6 +816,11 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 	// Send protocol version
 	protoMsg := protocol.MakeDefaultMsg(protocol.CMProtocol, clientVersion, 0, 0, 0)
 	handler.Send(protoMsg, "")
+
+	playScene.SetSendMove(func(ident int, dir int) {
+		moveMsg := protocol.MakeDefaultMsg(uint16(ident), 0, uint16(dir), 0, 0)
+		handler.Send(moveMsg, "")
+	})
 
 	go handler.ReadLoop()
 	return handler, nil
