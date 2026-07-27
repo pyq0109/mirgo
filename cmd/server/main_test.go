@@ -254,7 +254,7 @@ func newTestServer(t *testing.T) *testServer {
 		return true
 	})
 
-	ts.server.SetMessageHandler(func(session *netserver.Session, msg protocol.DefaultMessage, body string) {
+	ts.server.SetMessageHandler(func(session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string) {
 		switch session.State {
 		case netserver.StateConnected:
 			switch msg.Ident {

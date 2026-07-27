@@ -281,6 +281,79 @@ func TestFrameFormatting(t *testing.T) {
 	}
 }
 
+// TestUserEntryRoundTrip verifies the Delphi short-string layout and the
+// two-segment EncodeBuffer split used by CM_ADDNEWUSER (ClMain.pas:2844).
+func TestUserEntryRoundTrip(t *testing.T) {
+	var ue UserEntry
+	ue.SetAccount("tester")
+	ue.SetPassword("secret")
+	ue.SetUserName("Test User")
+	ue.SetSSNo("123456-1234567")
+	ue.SetPhone("010-1234-5678")
+	ue.SetQuiz("quiz one")
+	ue.SetAnswer("answer one")
+	ue.SetEMail("test@example.com")
+
+	var ua UserEntryAdd
+	ua.SetQuiz2("quiz two")
+	ua.SetAnswer2("answer two")
+	ua.SetBirthDay("1990/01/31")
+	ua.SetMobilePhone("13800138000")
+
+	if got := len(ue.Bytes()); got != UserEntrySize {
+		t.Fatalf("UserEntry wire size: got %d, want %d", got, UserEntrySize)
+	}
+	if got := len(ua.Bytes()); got != UserEntryAddSize {
+		t.Fatalf("UserEntryAdd wire size: got %d, want %d", got, UserEntryAddSize)
+	}
+
+	// Client side: two independently encoded segments.
+	raw := EncodeBuffer(ue.Bytes()) + EncodeBuffer(ua.Bytes())
+	if len(raw) != UserEntryEncodedSize+UserEntryAddEncodedSize {
+		t.Fatalf("encoded size: got %d, want %d", len(raw), UserEntryEncodedSize+UserEntryAddEncodedSize)
+	}
+
+	// Server side: split at the fixed boundary and decode separately
+	// (decoding the concatenation at once would misalign the second segment).
+	ueBuf := make([]byte, UserEntrySize)
+	DecodeBuffer(raw[:UserEntryEncodedSize], ueBuf)
+	uaBuf := make([]byte, UserEntryAddSize)
+	DecodeBuffer(raw[UserEntryEncodedSize:], uaBuf)
+
+	gotUE := UserEntryFromBytes(ueBuf)
+	gotUA := UserEntryAddFromBytes(uaBuf)
+
+	if gotUE.Account() != "tester" || gotUE.Password() != "secret" {
+		t.Errorf("account/password: got %q/%q", gotUE.Account(), gotUE.Password())
+	}
+	if string(gotUE.SUserName[1:10]) != "Test User" {
+		t.Errorf("UserName: got %q", string(gotUE.SUserName[1:10]))
+	}
+	if string(gotUE.SQuiz[1:9]) != "quiz one" {
+		t.Errorf("Quiz: got %q", string(gotUE.SQuiz[1:9]))
+	}
+	if string(gotUA.SBirthDay[1:11]) != "1990/01/31" {
+		t.Errorf("BirthDay: got %q", string(gotUA.SBirthDay[1:11]))
+	}
+	if string(gotUA.SMobilePhone[1:12]) != "13800138000" {
+		t.Errorf("MobilePhone: got %q", string(gotUA.SMobilePhone[1:12]))
+	}
+}
+
+// TestUserEntryTruncation verifies fields truncate to their short-string max.
+func TestUserEntryTruncation(t *testing.T) {
+	var ue UserEntry
+	ue.SetAccount("this-account-is-way-too-long")
+	if got := ue.Account(); got != "this-accou" {
+		t.Errorf("Account truncated: got %q, want %q", got, "this-accou")
+	}
+	var ua UserEntryAdd
+	ua.SetMemo("memo")
+	if got := string(ua.SMemo[1:5]); got != "memo" {
+		t.Errorf("Memo: got %q, want %q", got, "memo")
+	}
+}
+
 // TestEncodeMessageWithBody tests message encoding with body.
 func TestEncodeMessageWithBody(t *testing.T) {
 	msg := MakeDefaultMsg(CMIDPassword, 0, 0, 0, 0)

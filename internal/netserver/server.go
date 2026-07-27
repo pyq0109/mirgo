@@ -35,8 +35,11 @@ type Session struct {
 	SendChan      chan []byte
 }
 
-// MessageHandler handles incoming messages from clients.
-type MessageHandler func(session *Session, msg protocol.DefaultMessage, body string)
+// MessageHandler handles incoming messages from clients. body is the
+// 6Bit-decoded body string; rawBody is the still-encoded payload after the
+// message header, for messages whose body is multiple independent
+// EncodeBuffer segments that must be split before decoding (ClMain.pas:2844).
+type MessageHandler func(session *Session, msg protocol.DefaultMessage, body, rawBody string)
 
 // RawMessageHandler handles raw string messages (e.g., **login) before standard parsing.
 // Return true if the message was handled, false to fall through to standard parsing.
@@ -237,13 +240,14 @@ func (s *TCPServer) readLoop(session *Session) {
 
 				if !handled && s.onMessage != nil && len(payload) >= protocol.DefBlockSize {
 					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
-					body := ""
+					body, rawBody := "", ""
 					if len(payload) > protocol.DefBlockSize {
-						body = protocol.DecodeString(payload[protocol.DefBlockSize:])
+						rawBody = payload[protocol.DefBlockSize:]
+						body = protocol.DecodeString(rawBody)
 					}
 					log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
 						session.ID, protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
-					s.onMessage(session, msg, body)
+					s.onMessage(session, msg, body, rawBody)
 				}
 			}
 			// Compact: keep any trailing partial frame, drop the consumed prefix.

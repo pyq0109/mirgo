@@ -393,3 +393,107 @@ func ParseMonsterFeature(feature int32) (raceImg, weapon byte, appr uint16) {
 	appr = uint16((feature >> 16) & 0xFFFF)
 	return
 }
+
+// ============================================================================
+// UserEntry / UserEntryAdd wire encoding (Delphi Grobal2.pas:592-609).
+// Each field is a Delphi short string: [0]=length, [1:1+len]=data, fixed N+1
+// bytes. The structs above are the exact binary layout; EncodeBuffer sends
+// them as two independently 6Bit-encoded segments (ClMain.pas:2844), so the
+// server must split the raw body at UserEntryEncodedSize before decoding.
+// ============================================================================
+
+const (
+	UserEntrySize    = 148 // sizeof(TUserEntry)
+	UserEntryAddSize = 143 // sizeof(TUserEntryAdd)
+	// 6Bit-encoded segment lengths: GetCodeMsgSize(148)=198, (143)=191.
+	UserEntryEncodedSize    = 198
+	UserEntryAddEncodedSize = 191
+)
+
+func putShortString(dst []byte, s string) {
+	max := len(dst) - 1
+	if len(s) > max {
+		s = s[:max]
+	}
+	for i := range dst {
+		dst[i] = 0
+	}
+	dst[0] = byte(len(s))
+	copy(dst[1:], s)
+}
+
+func getShortString(src []byte) string {
+	if len(src) == 0 {
+		return ""
+	}
+	n := int(src[0])
+	if n > len(src)-1 {
+		n = len(src) - 1
+	}
+	return string(src[1 : 1+n])
+}
+
+func (ue *UserEntry) SetAccount(s string)  { putShortString(ue.SAccount[:], s) }
+func (ue *UserEntry) SetPassword(s string) { putShortString(ue.SPassword[:], s) }
+func (ue *UserEntry) SetUserName(s string) { putShortString(ue.SUserName[:], s) }
+func (ue *UserEntry) SetSSNo(s string)     { putShortString(ue.SSSNo[:], s) }
+func (ue *UserEntry) SetPhone(s string)    { putShortString(ue.SPhone[:], s) }
+func (ue *UserEntry) SetQuiz(s string)     { putShortString(ue.SQuiz[:], s) }
+func (ue *UserEntry) SetAnswer(s string)   { putShortString(ue.SAnswer[:], s) }
+func (ue *UserEntry) SetEMail(s string)    { putShortString(ue.SEMail[:], s) }
+
+func (ue *UserEntry) Account() string  { return getShortString(ue.SAccount[:]) }
+func (ue *UserEntry) Password() string { return getShortString(ue.SPassword[:]) }
+
+func (ua *UserEntryAdd) SetQuiz2(s string)       { putShortString(ua.SQuiz2[:], s) }
+func (ua *UserEntryAdd) SetAnswer2(s string)     { putShortString(ua.SAnswer2[:], s) }
+func (ua *UserEntryAdd) SetBirthDay(s string)    { putShortString(ua.SBirthDay[:], s) }
+func (ua *UserEntryAdd) SetMobilePhone(s string) { putShortString(ua.SMobilePhone[:], s) }
+func (ua *UserEntryAdd) SetMemo(s string)        { putShortString(ua.SMemo[:], s) }
+func (ua *UserEntryAdd) SetMemo2(s string)       { putShortString(ua.SMemo2[:], s) }
+
+// Bytes returns the fixed-size wire representation.
+func (ue *UserEntry) Bytes() []byte {
+	buf := make([]byte, UserEntrySize)
+	off := 0
+	for _, f := range [][]byte{ue.SAccount[:], ue.SPassword[:], ue.SUserName[:], ue.SSSNo[:], ue.SPhone[:], ue.SQuiz[:], ue.SAnswer[:], ue.SEMail[:]} {
+		off += copy(buf[off:], f)
+	}
+	return buf
+}
+
+// Bytes returns the fixed-size wire representation.
+func (ua *UserEntryAdd) Bytes() []byte {
+	buf := make([]byte, UserEntryAddSize)
+	off := 0
+	for _, f := range [][]byte{ua.SQuiz2[:], ua.SAnswer2[:], ua.SBirthDay[:], ua.SMobilePhone[:], ua.SMemo[:], ua.SMemo2[:]} {
+		off += copy(buf[off:], f)
+	}
+	return buf
+}
+
+// UserEntryFromBytes parses the fixed-size wire representation.
+func UserEntryFromBytes(buf []byte) UserEntry {
+	var ue UserEntry
+	off := 0
+	for _, f := range [][]byte{ue.SAccount[:], ue.SPassword[:], ue.SUserName[:], ue.SSSNo[:], ue.SPhone[:], ue.SQuiz[:], ue.SAnswer[:], ue.SEMail[:]} {
+		off += copy(f, buf[off:])
+		if off >= len(buf) {
+			break
+		}
+	}
+	return ue
+}
+
+// UserEntryAddFromBytes parses the fixed-size wire representation.
+func UserEntryAddFromBytes(buf []byte) UserEntryAdd {
+	var ua UserEntryAdd
+	off := 0
+	for _, f := range [][]byte{ua.SQuiz2[:], ua.SAnswer2[:], ua.SBirthDay[:], ua.SMobilePhone[:], ua.SMemo[:], ua.SMemo2[:]} {
+		off += copy(f, buf[off:])
+		if off >= len(buf) {
+			break
+		}
+	}
+	return ua
+}

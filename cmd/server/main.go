@@ -281,7 +281,7 @@ func main() {
 		return true
 	})
 
-	server.SetMessageHandler(func(session *netserver.Session, msg protocol.DefaultMessage, body string) {
+	server.SetMessageHandler(func(session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string) {
 		stateNames := map[netserver.SessionState]string{
 			netserver.StateConnected:     "Connected",
 			netserver.StateAuthenticated: "Authenticated",
@@ -292,7 +292,7 @@ func main() {
 
 		switch session.State {
 		case netserver.StateConnected:
-			handleConnectedMessage(server, session, msg, body, config, db)
+			handleConnectedMessage(server, session, msg, body, rawBody, config, db)
 		case netserver.StateAuthenticated:
 			handleAuthenticatedMessage(server, session, msg, body, config, db, userEngine, mapMgr)
 		case netserver.StateInGame:
@@ -338,23 +338,41 @@ func main() {
 }
 
 // handleConnectedMessage handles messages in the Connected state (before authentication).
-func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, config *ServerConfig, db *storage.Database) {
+func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string, config *ServerConfig, db *storage.Database) {
 	switch msg.Ident {
 	case protocol.CMProtocol:
 		log.Logf(log.LevelInfo, "Server", "Protocol version: %d", msg.Recog)
 
 	case protocol.CMAddNewUser:
-		username, password := parseCredentials(body)
+		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd): two
+		// independent 6Bit segments (ClMain.pas:2844). Split the raw payload
+		// at the fixed encoded size before decoding; decoding the whole
+		// string at once would misalign the second segment.
+		if len(rawBody) < protocol.UserEntryEncodedSize+protocol.UserEntryAddEncodedSize {
+			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] Short body (%d chars)", len(rawBody))
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -2, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		ueBuf := make([]byte, protocol.UserEntrySize)
+		protocol.DecodeBuffer(rawBody[:protocol.UserEntryEncodedSize], ueBuf)
+		uaBuf := make([]byte, protocol.UserEntryAddSize)
+		protocol.DecodeBuffer(rawBody[protocol.UserEntryEncodedSize:protocol.UserEntryEncodedSize+protocol.UserEntryAddEncodedSize], uaBuf)
+		ue := protocol.UserEntryFromBytes(ueBuf)
+		_ = protocol.UserEntryAddFromBytes(uaBuf) // additional info, not persisted
+		username := strings.ToLower(ue.Account())
+		password := ue.Password()
 		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] Register attempt: %s", username)
-		if username == "" || len(username) > 10 || password == "" || len(password) > 10 {
-			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 2, 0, 0, 0)
+		// Delphi SM_NEWID_FAIL Recog: 0=exists, -2=system busy, else=illegal (ClMain.pas:3694-3702).
+		if len(username) < 3 || len(username) > 10 || len(password) < 3 || len(password) > 10 {
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -1, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 		_, _, err := db.GetAccountByUsername(username)
 		if err == nil {
 			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] Account already exists: %s", username)
-			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 1, 0, 0, 0)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
@@ -362,12 +380,38 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		_, err = db.CreateAccount(username, hash)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[CMAddNewUser] Create failed: %v", err)
-			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 0, 0, 0, 0)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -2, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] Account created: %s", username)
 		resp := protocol.MakeDefaultMsg(protocol.SMNewIDSuccess, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+
+	case protocol.CMChangePassword:
+		// Body = id + #9 + passwd + #9 + newpasswd (ClMain.pas:2864-2870).
+		parts := strings.Split(body, "\t")
+		if len(parts) != 3 {
+			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -3, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		id, oldpw, newpw := parts[0], parts[1], parts[2]
+		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] Change attempt: %s", id)
+		accountID, hash, err := db.GetAccountByUsername(id)
+		if err != nil || !verifyPassword(oldpw, hash) {
+			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -1, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		if err := db.UpdateAccountPassword(accountID, simpleHash(newpw)); err != nil {
+			log.Logf(log.LevelError, "Server", "[CMChangePassword] Update failed: %v", err)
+			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -3, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] Password changed: %s", id)
+		resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMIDPassword:

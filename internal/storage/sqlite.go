@@ -123,6 +123,15 @@ func (d *Database) GetAccountByUsername(username string) (id int64, passwordHash
 
 // Character operations
 
+// UpdateAccountPassword changes an account's password hash.
+func (d *Database) UpdateAccountPassword(accountID int64, passwordHash string) error {
+	_, err := d.db.Exec(
+		"UPDATE accounts SET password_hash = ? WHERE id = ?",
+		passwordHash, accountID,
+	)
+	return err
+}
+
 // CreateCharacter creates a new character.
 func (d *Database) CreateCharacter(accountID int64, name string, job, sex int) (int64, error) {
 	result, err := d.db.Exec(

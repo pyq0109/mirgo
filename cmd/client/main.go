@@ -118,8 +118,8 @@ func main() {
 		log.Logf(log.LevelInfo, "Client", "[Callback] CloseFunc: closing window")
 		glfwWindow.SetShouldClose(true)
 	})
-	loginScene.SetRegisterFunc(func(id, password string) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] RegisterFunc: id=%s", id)
+	loginScene.SetRegisterFunc(func(ue protocol.UserEntry, ua protocol.UserEntryAdd) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] RegisterFunc: id=%s", ue.Account())
 		if handler == nil {
 			var err error
 			handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
@@ -133,8 +133,27 @@ func main() {
 				handler = nil
 			}
 		}
+		handler.registerID = ue.Account()
 		regMsg := protocol.MakeDefaultMsg(protocol.CMAddNewUser, 0, 0, 0, 0)
-		handler.Send(regMsg, id+"/"+password)
+		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd) (ClMain.pas:2844).
+		handler.SendEncoded(regMsg, protocol.EncodeBuffer(ue.Bytes())+protocol.EncodeBuffer(ua.Bytes()))
+	})
+	loginScene.SetChgPwFunc(func(id, oldpw, newpw string) {
+		log.Logf(log.LevelInfo, "Client", "[Callback] ChgPwFunc: id=%s", id)
+		if handler == nil {
+			var err error
+			handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
+			if err != nil {
+				log.Logf(log.LevelError, "Client", "[Callback] ChgPwFunc: connect failed: %v", err)
+				loginScene.SetError("连接服务器失败")
+				handler = nil
+				return
+			}
+			handler.onFail = func() {
+				handler = nil
+			}
+		}
+		handler.SendChgPw(id, oldpw, newpw)
 	})
 
 	// Wire server selection scene callbacks.
@@ -274,6 +293,7 @@ type NetHandler struct {
 	// Auth state
 	loginID       string
 	password      string // Stored for re-authentication after reconnect
+	registerID    string // Last submitted registration account (Delphi MakeNewId, ClMain.pas:2842)
 	certification int
 	charName      string
 	reconnecting  bool // True when waiting for re-auth after reconnect
@@ -307,6 +327,25 @@ func (h *NetHandler) Send(msg protocol.DefaultMessage, body string) error {
 	frame := protocol.FormatClientFrame(encoded, &h.code)
 	_, err := h.conn.Write([]byte(frame))
 	return err
+}
+
+// SendEncoded sends a message with an already-encoded body. Used for bodies
+// made of multiple independent EncodeBuffer segments (ClMain.pas:2844) that
+// must not pass through EncodeString as a single string.
+func (h *NetHandler) SendEncoded(msg protocol.DefaultMessage, encodedBody string) error {
+	log.Logf(log.LevelInfo, "Client", ">>> SEND %s Recog=%d Param=%d Tag=%d Series=%d (encoded body, %d chars)",
+		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, len(encodedBody))
+	encoded := protocol.EncodeMessage(msg) + encodedBody
+	frame := protocol.FormatClientFrame(encoded, &h.code)
+	_, err := h.conn.Write([]byte(frame))
+	return err
+}
+
+// SendChgPw sends a password change request: id + #9 + passwd + #9 + newpasswd
+// (ClMain.pas:2864-2870).
+func (h *NetHandler) SendChgPw(id, passwd, newpasswd string) {
+	msg := protocol.MakeDefaultMsg(protocol.CMChangePassword, 0, 0, 0, 0)
+	h.Send(msg, id+"\t"+passwd+"\t"+newpasswd)
 }
 
 // SendRawString sends a raw string without TDefaultMessage header.
@@ -502,21 +541,22 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	// =====================================================================
 
 	case protocol.SMPasswdFail:
+		// Wording aligned with ClMain.pas:3708-3713.
 		log.Logf(log.LevelWarn, "Client", "Login failed: code=%d", msg.Recog)
 		if h.loginScene != nil {
 			switch msg.Recog {
 			case -1:
-				h.loginScene.SetError("密码错误")
+				h.loginScene.SetError("密码错误！")
 			case -2:
-				h.loginScene.SetError("密码错误超过3次，账号被锁定")
+				h.loginScene.SetError("密码输入错误超过3次，您的账号被暂时锁定，请稍后再登录！")
 			case -3:
-				h.loginScene.SetError("账号已经登录")
+				h.loginScene.SetError("这个账号已经登录，请稍后再登录！")
 			case -4:
-				h.loginScene.SetError("账号服务失败")
+				h.loginScene.SetError("付费账号服务失败！\\请使用免费账号登录.\\或者申请付费注册.")
 			case -5:
-				h.loginScene.SetError("账号被封禁")
+				h.loginScene.SetError("您的游戏账号被禁止了.")
 			default:
-				h.loginScene.SetError("登录失败")
+				h.loginScene.SetError("ID不存在或者未知错误.请稍后重试.")
 			}
 		}
 		// Close connection and reset handler so user can retry
@@ -783,22 +823,40 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMNewIDSuccess:
 		log.Logf(log.LevelInfo, "Client", "Registration successful")
 		if h.loginScene != nil {
-			h.loginScene.registerMode = false
-			h.loginScene.connecting = false
-			h.loginScene.errorMsg = "注册成功，请登录"
+			h.loginScene.RegistrationDone()
 		}
 
 	case protocol.SMNewIDFail:
+		// Recog aligned with ClMain.pas:3694-3702: 0=exists, -2=busy, else=illegal.
 		log.Logf(log.LevelWarn, "Client", "Registration failed: code=%d", msg.Recog)
 		if h.loginScene != nil {
-			h.loginScene.connecting = false
 			switch msg.Recog {
-			case 1:
-				h.loginScene.errorMsg = "账号已存在"
-			case 2:
-				h.loginScene.errorMsg = "账号名不合法"
+			case 0:
+				h.loginScene.RegistrationFailed("\"" + h.registerID + "\"这个账号已经存在了无法使用.\\ 请使用一个不同的名字.")
+			case -2:
+				h.loginScene.RegistrationFailed("创建账号失败，系统繁忙.")
 			default:
-				h.loginScene.errorMsg = "注册失败"
+				h.loginScene.RegistrationFailed(fmt.Sprintf("账号创建失败，请确认账号是否包含空格、非法字符. Code: %d", msg.Recog))
+			}
+		}
+
+	case protocol.SMChgPasswdSuccess:
+		log.Logf(log.LevelInfo, "Client", "Password changed")
+		if h.loginScene != nil {
+			h.loginScene.ChgPwResult("当前密码修改成功.")
+		}
+
+	case protocol.SMChgPasswdFail:
+		// Recog aligned with ClMain.pas:3765-3770: -1=wrong old password, -2=mismatch.
+		log.Logf(log.LevelWarn, "Client", "Password change failed: code=%d", msg.Recog)
+		if h.loginScene != nil {
+			switch msg.Recog {
+			case -1:
+				h.loginScene.ChgPwResult("密码修改错误.确认原密码在进行修改.")
+			case -2:
+				h.loginScene.ChgPwResult("密码修改失败.两个密码不一致.")
+			default:
+				h.loginScene.ChgPwResult("密码修改错误.请稍后重试.")
 			}
 		}
 
