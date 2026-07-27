@@ -17,6 +17,63 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
+// fade implements the Delphi MakeDark transition (ClMain.pas:1114-1130).
+// g_nFadeIndex ranges 1 (fully dark) to 29 (fully bright); each frame
+// the index moves by step until it hits the boundary, then onDone fires.
+type fadeState struct {
+	active bool
+	index  float64 // 1..29
+	step   float64 // +2 (fade in), -2 (fade out), -4 (fast fade out)
+	onDone func()
+}
+
+func (f *fadeState) startOut(fast bool, done func()) {
+	f.active = true
+	f.index = 29
+	if fast {
+		f.step = -4
+	} else {
+		f.step = -2
+	}
+	f.onDone = done
+}
+
+func (f *fadeState) startIn(done func()) {
+	f.active = true
+	f.index = 1
+	f.step = 2
+	f.onDone = done
+}
+
+func (f *fadeState) tick() {
+	if !f.active {
+		return
+	}
+	f.index += f.step
+	if (f.step > 0 && f.index >= 29) || (f.step < 0 && f.index <= 1) {
+		if f.step > 0 {
+			f.index = 29
+		} else {
+			f.index = 1
+		}
+		f.active = false
+		if f.onDone != nil {
+			fn := f.onDone
+			f.onDone = nil
+			fn()
+		}
+	}
+}
+
+func (f *fadeState) alpha() float32 {
+	if !f.active {
+		return 0
+	}
+	return float32(1 - f.index/30)
+}
+
+var globalFade fadeState
+
 const (
 	clientVersion = 120040918
 	runLoginCode  = 9
@@ -30,8 +87,10 @@ func main() {
 	dataDir := flag.String("data", "asset/client/Data", "Path to client data directory")
 	mapDir := flag.String("maps", "asset/client/Map", "Path to map directory")
 	serverAddr := flag.String("server", "localhost:7000", "Server address")
+	logLevel := flag.String("loglevel", "debug", "Log level: trace/debug/info/warn/error")
 	flag.Parse()
 
+	log.SetLevel(log.ParseLevel(*logLevel))
 	log.Logf(log.LevelInfo, "Client", "Starting MIR2 Client...")
 	log.Logf(log.LevelInfo, "Client", "Server: %s", *serverAddr)
 
@@ -200,17 +259,6 @@ func main() {
 		sceneMgr.ChangeScene(engine.SceneLogin)
 	})
 
-	// Wire notice scene callbacks.
-	noticeScene.SetConfirmFunc(func() {
-		log.Logf(log.LevelInfo, "Client", "[Callback] NoticeConfirmFunc")
-		if handler == nil {
-			log.Logf(log.LevelWarn, "Client", "[Callback] NoticeConfirmFunc: handler is nil")
-			return
-		}
-		okMsg := protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0)
-		handler.Send(okMsg, "")
-	})
-
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 		// Esc-quits only in pre-game scenes; the original has no global Esc
 		// in play — quitting goes through the DBotExit button there
@@ -233,10 +281,12 @@ func main() {
 		switch action {
 		case glfw.Press:
 			x, y := w.GetCursorPos()
-			sceneMgr.OnMouse(x, y, int(button), 1)
+			log.Logf(log.LevelDebug, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
+				int(button), int(mods), x, y, sceneMgr.CurrentType())
+			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
 			x, y := w.GetCursorPos()
-			sceneMgr.OnMouse(x, y, int(button), 0)
+			sceneMgr.OnMouse(x, y, int(button), 0, int(mods))
 		}
 	})
 
@@ -251,13 +301,15 @@ func main() {
 	log.Logf(log.LevelInfo, "Client", "Login scene ready")
 	window.Run(func(dt float64) {
 		sceneMgr.Update(dt)
+		globalFade.tick()
 	}, func() {
-		// Keep GL viewport in sync with the framebuffer (HiDPI safety); all
-		// UI coordinates are in the fixed 800×600 logical space.
 		w, h := window.GetFramebufferSize()
 		glState.SetViewport(0, 0, int32(w), int32(h))
 		proj := engine.OrthoProj(800, 600)
 		sceneMgr.Render(glState, proj)
+		if a := globalFade.alpha(); a > 0 {
+			glState.DrawQuadColor(0, 0, 800, 600, 0, 0, 0, a, proj)
+		}
 	})
 
 	if handler != nil {
@@ -567,6 +619,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				h.loginScene.SetDoorCompleteFunc(func() {
 					log.Logf(log.LevelInfo, "Client", "Door animation complete, switching to SelectChr")
 					h.sceneMgr.ChangeScene(engine.SceneSelectChr)
+					globalFade.startIn(nil)
 					time.Sleep(100 * time.Millisecond)
 					h.SendQueryChr()
 				})
@@ -667,7 +720,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.SendRunLogin()
 		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] Run login sent, switching to LoginNotice scene")
 
-		// Switch to notice scene
+		// Delphi: g_boDoFastFadeOut (IntroScn.pas:1199)
+		globalFade.startOut(true, nil)
 		h.sceneMgr.ChangeScene(engine.SceneLoginNotice)
 
 	case protocol.SMStartFail:
@@ -681,13 +735,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	// =====================================================================
 
 	case protocol.SMSendNotice:
-		log.Logf(log.LevelInfo, "Client", "Received notice")
-		if h.noticeScene != nil {
-			// Replace #27 line separators with newlines
-			noticeText := strings.ReplaceAll(body, string(rune(27)), "\n")
-			h.noticeScene.SetNotice(noticeText)
-		}
-		// Do NOT auto-send CMLoginNoticeOK — wait for user to click OK
+		log.Logf(log.LevelInfo, "Client", "Received notice, auto-acknowledging (Delphi empty scene)")
+		h.Send(protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0), "")
 
 	// =====================================================================
 	// Game Phase
@@ -721,6 +770,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.Actors.Add(actor)
 		actor.SendMsg(protocol.SMTurn, actor.CurrX, actor.CurrY, actor.Dir, 0, 0)
 		h.sceneMgr.ChangeScene(engine.ScenePlayGame)
+		globalFade.startIn(nil)
 		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
 		h.Send(queryBag, "")
 
@@ -1848,7 +1898,7 @@ func (s *DebugScene) Render(glState *engine.GLState, proj [16]float32) {
 	glState.DrawQuadColor(350, 250, 100, 100, 1.0, 1.0, 1.0, 1.0, proj)
 }
 func (s *DebugScene) OnKey(key int, action int)                    {}
-func (s *DebugScene) OnMouse(x, y float64, button int, action int) {}
+func (s *DebugScene) OnMouse(x, y float64, button int, action int, mods int) {}
 func (s *DebugScene) OnScroll(x, y float64)                        {}
 
 // parseTradeItem decodes the SMDealAddItemOK/SMDealRemoteAddItem payload

@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/pyq0109/mirgo/internal/engine"
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
@@ -458,6 +459,7 @@ func (m *UIManager) paintControl(c *UIControl, proj [16]float32) {
 	if c.OnDirectPaint != nil {
 		c.OnDirectPaint(c, proj)
 	} else if c.WLib != nil {
+		log.Logf(log.LevelTrace, "UI", "%s img=%d pos=(%d,%d)", c.Name, c.FaceIndex, c.AbsX(), c.AbsY())
 		m.BlitImage(c.WLib, c.FaceIndex, c.AbsX(), c.AbsY(), proj)
 	}
 

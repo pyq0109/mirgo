@@ -66,6 +66,8 @@ go run ./cmd/server
 
 ```PowerShell
 go run ./cmd/client
+
+go run ./cmd/client -server localhost:7000 -loglevel trace
 ```
 
 # 资源

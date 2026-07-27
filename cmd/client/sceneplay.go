@@ -16,7 +16,7 @@ import (
 
 const (
 	cullMargin      = 3
-	frontCullMargin = 20
+	frontCullMargin = 35 // Delphi LONGHEIGHT_IMAGE (PlayScn.pas:17)
 )
 
 type GroundItemInfo struct {
@@ -489,7 +489,13 @@ func (s *PlayScene) Update(dt float64) {
 		my := s.State.MySelf
 		wx := float64(my.Rx)*engine.TileWidth + my.ShiftX + engine.TileWidth/2
 		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
-		s.cam.CenterOn(wx, wy)
+		// Delphi places the player at screen (388, 208) in the 800×445
+		// viewport, not the geometric center (400, 222.5). The constants
+		// come from PlayScn.pas:1741-1748 reverse formula:
+		//   sx = (cx-Rx)*48 + 364 + 24 - ShiftX  →  388 when cx==Rx
+		//   sy = (cy-Ry)*32 + 192 + 16 - ShiftY  →  208 when cy==Ry
+		s.cam.X = wx - 388
+		s.cam.Y = wy - 208
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
@@ -622,6 +628,8 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 
 	if s.deathGray {
+		log.Logf(log.LevelTrace, "Render", "play death-gray viewport=(%.0f,%.0f,%.0f,%.0f)",
+			s.cam.X, s.cam.Y, float64(s.cam.ViewW)/s.cam.Zoom, float64(s.cam.ViewH)/s.cam.Zoom)
 		s.gl.DrawQuadColor(float32(s.cam.X), float32(s.cam.Y),
 			float32(float64(s.cam.ViewW)/s.cam.Zoom), float32(float64(s.cam.ViewH)/s.cam.Zoom),
 			0.3, 0.3, 0.3, 0.4, proj)
@@ -647,13 +655,15 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 			if mmImg != nil && mmImg.RGBA != nil {
 				mmTex := s.resources.GetTexture(s.resources.Mmap, 0)
 				if mmTex != 0 {
-					s.gl.DrawQuad(mmTex, ScreenWidth-120-10, 10, 120, 120, uiProj)
+					// Delphi: (SCREENWIDTH-120, 0), 120×120 (PlayScn.pas:791-842).
+					log.Logf(log.LevelTrace, "Render", "play minimap Mmap[0] pos=(%d,0) size=(120,120)", ScreenWidth-120)
+					s.gl.DrawQuad(mmTex, ScreenWidth-120, 0, 120, 120, uiProj)
 					mmapDrawn = true
 				}
 			}
 		}
 		if !mmapDrawn && s.minimap != nil {
-			glState.DrawQuad(s.minimap.GetTexture(), ScreenWidth-minimapSize-10, 10, minimapSize, minimapSize, uiProj)
+			glState.DrawQuad(s.minimap.GetTexture(), ScreenWidth-120, 0, 120, 120, uiProj)
 		}
 	}
 	s.RenderUI(uiProj)
@@ -689,6 +699,16 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		s.drawChatBubble(a, worldX, worldY, proj)
 	}
 
+	// Re-draw self on top (PlayScn.pas:1290-1295) so the player is never
+	// occluded by other actors walking past.
+	if s.State.MySelf != nil && !s.State.MySelf.Death {
+		my := s.State.MySelf
+		wx := float32(float64(my.Rx*engine.TileWidth) + my.ShiftX)
+		wy := float32(float64(my.Ry*engine.TileHeight) + my.ShiftY)
+		log.Logf(log.LevelTrace, "Render", "play self-redraw pos=(%.0f,%.0f) dir=%d", wx, wy, my.Dir)
+		my.Draw(s.gl, s.resources, wx, wy, proj)
+	}
+
 	for _, gi := range s.groundItems {
 		if gi.X < fStartX || gi.X > fEndX || gi.Y < fStartY || gi.Y > fEndY {
 			continue
@@ -700,6 +720,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 			if img != nil && img.RGBA != nil {
 				tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
 				if tex != 0 {
+					log.Logf(log.LevelTrace, "Render", "play item DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
 					s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
 				}
 			} else {
@@ -708,9 +729,28 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		} else {
 			s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
 		}
+		// Flash effect: Prguse[410..419], 10 frames × 20ms, 5000ms cycle
+		// (PlayScn.pas:1349-1368, FLASHBASE=410).
+		if s.resources.Prguse != nil {
+			now := time.Now().UnixMilli()
+			cycle := now % 5000
+			if cycle < 200 { // 10 frames × 20ms = 200ms active window
+				step := int(cycle / 20)
+				flashIdx := 410 + step
+				if fimg := s.resources.Prguse.GetImage(flashIdx); fimg != nil && fimg.RGBA != nil {
+					if ftex := s.resources.GetTexture(s.resources.Prguse, flashIdx); ftex != 0 {
+						log.Logf(log.LevelTrace, "Render", "play item-flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
+						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+						s.gl.DrawQuad(ftex, ix, iy, float32(fimg.Width), float32(fimg.Height), proj)
+						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+					}
+				}
+			}
+		}
 		if s.text != nil && gi.Name != "" {
 			nameW := float32(s.text.MeasureText(gi.Name))
 			nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
+			log.Logf(log.LevelTrace, "Render", "play item-name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
 			s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
 		}
 	}
@@ -725,17 +765,24 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 			showName = true
 		}
 	}
+	// Delphi SayY: alive = tileRow + ShiftY - 47, dead = tileRow + ShiftY - 12
+	// (PlayScn.pas:1232-1235). In world coords tileRow ≈ worldY.
+	sayY := worldY - 47
+	if a.Death {
+		sayY = worldY - 12
+	}
 	if showName && a.UserName != "" && s.text != nil {
 		nameW := float32(s.text.MeasureText(a.UserName))
 		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
-		nameY := worldY - 75
-		s.text.DrawText(a.UserName, nameX-1, nameY, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX+1, nameY, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, nameY-1, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, nameY+1, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, nameY, 1.0, 1.0, 1.0, 1.0, proj)
+		log.Logf(log.LevelTrace, "Render", "play actor-name '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
+		s.text.DrawText(a.UserName, nameX-1, sayY, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX+1, sayY, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, sayY-1, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, sayY+1, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, sayY, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 
+	// HP bar for all visible actors (DrawScrn.pas:280-301), at SayY - 10.
 	if !a.Death && s.resources.Prguse2 != nil {
 		bgImg := s.resources.Prguse2.GetImage(0)
 		fillImg := s.resources.Prguse2.GetImage(1)
@@ -745,8 +792,9 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 			hpBarW := float32(bgImg.Width)
 			hpBarH := float32(bgImg.Height)
 			hpBarX := worldX + float32(engine.TileWidth)/2 - hpBarW/2
-			hpBarY := worldY - 70
+			hpBarY := sayY - 10
 			if bgTex != 0 {
+				log.Logf(log.LevelTrace, "Render", "play hpbar-bg Prguse2[0] pos=(%.0f,%.0f) size=(%.0f,%.0f)", hpBarX, hpBarY, hpBarW, hpBarH)
 				s.gl.DrawQuad(bgTex, hpBarX, hpBarY, hpBarW, hpBarH, proj)
 			}
 			ratio := float32(1.0)
@@ -758,12 +806,14 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 				s.gl.DrawQuad(fillTex, hpBarX, hpBarY, fillW, hpBarH, proj)
 			}
 		} else {
-			s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
-			s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
+			hpBarY := sayY - 10
+			s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
+			s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
 		}
 	} else if !a.Death {
-		s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
-		s.gl.DrawQuadColor(worldX+4, worldY-70, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
+		hpBarY := sayY - 10
+		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
+		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
 	}
 }
 
@@ -771,13 +821,22 @@ func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]fl
 	if s.text == nil || a.SayLineCount == 0 {
 		return
 	}
-	if time.Now().UnixMilli()-a.SayTime > 5000 {
+	if time.Now().UnixMilli()-a.SayTime > 4000 {
 		return
 	}
-	bubbleY := worldY - 70
+	sayY := worldY - 47
+	if a.Death {
+		sayY = worldY - 12
+	}
+	bubbleY := sayY - float32(a.SayLineCount)*16
+	log.Logf(log.LevelTrace, "Render", "play chat-bubble lines=%d pos=(%.0f,%.0f)", a.SayLineCount, worldX-20, bubbleY)
 	for i := 0; i < a.SayLineCount && i < 5; i++ {
 		if a.SayingArr[i] != "" {
-			s.text.DrawText(a.SayingArr[i], worldX-20, bubbleY+float32(i)*14, 1.0, 1.0, 1.0, 0.9, proj)
+			r, g, b := float32(1.0), float32(1.0), float32(1.0)
+			if a.Death {
+				r, g, b = 0.5, 0.5, 0.5
+			}
+			s.text.DrawText(a.SayingArr[i], worldX-20, bubbleY+float32(i)*14, r, g, b, 0.9, proj)
 		}
 	}
 }
@@ -1179,7 +1238,7 @@ func absF(v float64) float64 {
 	return v
 }
 
-func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
+func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	s.mouseX, s.mouseY = x, y
 	ix, iy := int(x), int(y)
 
@@ -1191,14 +1250,44 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 		return
 	}
 
-	// Right-click cancels an item drag (ClMain.pas:2193); otherwise it
-	// inspects the clicked player.
+	const (
+		modShift = 0x0001
+		modCtrl  = 0x0002
+		modAlt   = 0x0004
+	)
+	_ = modAlt // butcher placeholder
+
+	// Right-click (ClMain.pas:2200-2229): Ctrl+right = inspect, otherwise move.
 	if button == 1 {
 		if s.itemMove.Moving {
 			s.itemMove.Cancel(s.State)
 			return
 		}
-		s.tryInspect(x, y)
+		if mods&modCtrl != 0 {
+			s.tryInspect(x, y)
+			return
+		}
+		if y >= MapSurfaceH {
+			return
+		}
+		if s.State.MySelf == nil || s.sendMove == nil || s.State.MySelf.Death {
+			return
+		}
+		if s.cam == nil || s.mapData == nil {
+			return
+		}
+		wx, wy := s.cam.ScreenToWorld(x, y)
+		tx, ty := s.cam.WorldToTile(wx, wy)
+		log.Logf(log.LevelDebug, "Mouse", "play right-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
+		my := s.State.MySelf
+		if absInt(my.CurrX-tx) <= 2 && absInt(my.CurrY-ty) <= 2 {
+			dir := dirToward(my.CurrX, my.CurrY, tx, ty)
+			my.UpdateMsg(protocol.CMTurn, my.CurrX, my.CurrY, dir, 0, 0)
+			s.sendMove(protocol.CMTurn, dir)
+		} else {
+			s.targetX = tx
+			s.targetY = ty
+		}
 		return
 	}
 
@@ -1215,15 +1304,12 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 		}
 	}
 	if dbl {
-		// The second press of a double-click is not a standalone down
-		// (Windows sends DOWN, UP, DBLCLK, UP).
 		s.ui.RouteDblClick(ix, iy)
 		return
 	}
 	if s.ui.RouteMouseDown(ix, iy, button) {
 		return
 	}
-	// Below the map surface is HUD territory (bottom bar, y>=445).
 	if y >= MapSurfaceH {
 		return
 	}
@@ -1233,12 +1319,14 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 	if s.State.MySelf.Death {
 		return
 	}
+	// Left-click (ClMain.pas:2246-2275): attack / NPC dialog / pickup.
 	if button == 0 {
 		if s.cam == nil || s.mapData == nil {
 			return
 		}
 		wx, wy := s.cam.ScreenToWorld(x, y)
 		tx, ty := s.cam.WorldToTile(wx, wy)
+		log.Logf(log.LevelDebug, "Mouse", "play left-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
 
 		my := s.State.MySelf
 		for _, a := range s.State.Actors.All() {
@@ -1280,9 +1368,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
 				}
 			}
 		}
-
-		s.targetX = tx
-		s.targetY = ty
 	}
 }
 

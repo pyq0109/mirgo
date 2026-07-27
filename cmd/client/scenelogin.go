@@ -51,7 +51,6 @@ const (
 const (
 	doorFrameCount = 10
 	doorFrameTime  = 300 * time.Millisecond
-	doorFadeTime   = 0.8 // seconds, fade to black after the last frame (g_nFadeIndex:=29, IntroScn.pas:835)
 )
 
 // Login input fields (IntroScn.pas:499-512).
@@ -135,8 +134,9 @@ type serverInfo struct {
 	Status int
 }
 
-// Server-select dialog: Prguse[256] background, six [79] buttons at window+65,
-// close button [83] at window+(245,31) (FState.pas:810-847).
+// Server-select dialog: Prguse[256] background, [79] buttons (pressed [80]),
+// close [83] (FState.pas:810-847 English version). The Chinese version
+// [160-166] images are 1×1 placeholders in this asset build.
 const (
 	srvDlgImg   = 256
 	srvBtnImg   = 79
@@ -148,8 +148,7 @@ const (
 )
 
 // srvButtonTop returns the window-relative Top of server button i for the
-// given server count (FState.pas:2456-2474): 1 server -> 204; 2 -> 190/235;
-// 3+ -> 100 stepping by 45.
+// given server count (FState.pas:2456-2474).
 func srvButtonTop(i, count int) float32 {
 	switch count {
 	case 1:
@@ -247,12 +246,11 @@ type LoginScene struct {
 	resources *engine.ResourceManager
 	text      *engine.TextRenderer
 
-	// Door animation + fade out (IntroScn.pas:804-851)
+	// Door animation (IntroScn.pas:804-851); fade handled by globalFade.
 	doorOpening   bool
 	doorFading    bool
 	doorFrame     int
 	doorStartTime time.Time
-	fadeAlpha     float32
 
 	// Mode (TLoginState)
 	mode        loginMode
@@ -293,6 +291,10 @@ type LoginScene struct {
 	doorCompleteFunc func()
 }
 
+func (s *LoginScene) traceDraw(tag, wil string, idx int, x, y, w, h float32) {
+	log.Logf(log.LevelTrace, "Render", "login %s %s[%d] pos=(%.0f,%.0f) size=(%.0f,%.0f)", tag, wil, idx, x, y, w, h)
+}
+
 // NewLoginScene creates a new login scene.
 func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *LoginScene {
 	return &LoginScene{
@@ -314,7 +316,6 @@ func (s *LoginScene) Open() {
 	s.doorOpening = false
 	s.doorFading = false
 	s.doorFrame = 0
-	s.fadeAlpha = 0
 	s.userID = ""
 	s.password = ""
 	s.focusedField = 0
@@ -332,7 +333,8 @@ func (s *LoginScene) Close() {
 	log.Logf(log.LevelInfo, "LoginScene", "Closed")
 }
 
-// Update advances the door animation and the fade to black.
+// Update advances the door animation; the fade to black is handled by
+// the global MakeDark system (ClMain.pas:1114-1130).
 func (s *LoginScene) Update(dt float64) {
 	if !s.doorOpening {
 		return
@@ -342,20 +344,16 @@ func (s *LoginScene) Update(dt float64) {
 			s.doorStartTime = time.Now()
 			if s.doorFrame < doorFrameCount-1 {
 				s.doorFrame++
-				log.Logf(log.LevelDebug, "LoginScene", "Door animation frame %d/%d", s.doorFrame, doorFrameCount)
 			} else {
 				s.doorFading = true
+				log.Logf(log.LevelInfo, "LoginScene", "Door animation complete, starting fade out")
+				globalFade.startOut(false, func() {
+					if s.doorCompleteFunc != nil {
+						s.doorCompleteFunc()
+						s.doorCompleteFunc = nil
+					}
+				})
 			}
-		}
-		return
-	}
-	s.fadeAlpha += float32(dt / doorFadeTime)
-	if s.fadeAlpha >= 1 {
-		s.fadeAlpha = 1
-		log.Logf(log.LevelInfo, "LoginScene", "Door animation complete")
-		if s.doorCompleteFunc != nil {
-			s.doorCompleteFunc()
-			s.doorCompleteFunc = nil // Only call once
 		}
 	}
 }
@@ -365,9 +363,14 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 	ox, oy := loginOX, loginOY
 
 	// Background: ChrSel.wil[22] (IntroScn.pas:818,821)
-	if bgTex, err := s.getChrSelTexture(22); err == nil {
+	bgTex, bgErr := s.getChrSelTexture(22)
+	if bgErr == nil && bgTex != 0 {
 		w, h := s.getChrSelSize(22)
+		s.traceDraw("bg", "ChrSel", 22, ox, oy, float32(w), float32(h))
 		gl.DrawQuad(bgTex, ox, oy, float32(w), float32(h), proj)
+	} else {
+		log.Logf(log.LevelWarn, "LoginScene", "ChrSel[22] background unavailable (tex=%d err=%v)", bgTex, bgErr)
+		gl.DrawQuadColor(0, 0, 800, 600, 0.05, 0.05, 0.1, 1, proj)
 	}
 
 	// Door animation: ChrSel.wil[23..32] (IntroScn.pas:841,845)
@@ -375,6 +378,7 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 		doorIdx := 23 + s.doorFrame
 		if doorTex, err := s.getChrSelTexture(doorIdx); err == nil {
 			w, h := s.getChrSelSize(doorIdx)
+			s.traceDraw("door", "ChrSel", doorIdx, ox+252, oy+106, float32(w), float32(h))
 			gl.DrawQuad(doorTex, ox+252, oy+106, float32(w), float32(h), proj)
 		}
 	}
@@ -397,24 +401,24 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 	if s.dlgMsg != "" {
 		s.renderDialog(gl, proj)
 	}
-
-	// Fade to black after the door opens (g_nFadeIndex, IntroScn.pas:835).
-	if s.fadeAlpha > 0 {
-		gl.DrawQuadColor(0, 0, 800, 600, 0, 0, 0, s.fadeAlpha, proj)
-	}
 }
 
-// renderButtons draws only the pressed button's overlay image; the normal
-// state is the artwork baked into the background (DLoginNewDirectPaint draws
-// only when Downed, FState.pas:2342-2354).
+// renderButtons draws the four bottom login buttons. The Delphi original
+// bakes normal-state art into ChrSel[22] and only draws the overlay when
+// pressed (DLoginNewDirectPaint, FState.pas:2342-2354). Since this asset
+// build's ChrSel[22] lacks button art, we always draw the Prguse images.
 func (s *LoginScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy float32) {
-	if s.pressedButton < 0 {
-		return
-	}
-	idx := buttonImages[s.pressedButton]
-	if tex, err := s.getPrguseTexture(idx); err == nil {
-		w, h := s.getPrguseSize(idx)
-		gl.DrawQuad(tex, buttonAreas[s.pressedButton].X, buttonAreas[s.pressedButton].Y, float32(w), float32(h), proj)
+	for i, idx := range buttonImages {
+		a := s.buttonArea(i)
+		if tex, err := s.getPrguseTexture(idx); err == nil {
+			w, h := s.getPrguseSize(idx)
+			dx, dy := float32(0), float32(0)
+			if s.pressedButton == i {
+				dx, dy = 2, 2
+			}
+			s.traceDraw("btn", "Prguse", idx, a.X+dx, a.Y+dy, float32(w), float32(h))
+			gl.DrawQuad(tex, a.X+dx, a.Y+dy, float32(w), float32(h), proj)
+		}
 	}
 }
 
@@ -437,7 +441,9 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 
 	// TEdit Color=clBlack: opaque black box under the white text
 	// (IntroScn.pas:258,270).
+	s.traceDraw("field", "quad", -1, idX, idY, 112, 19)
 	gl.DrawQuadColor(idX, idY, 112, 19, 0, 0, 0, 1, proj)
+	s.traceDraw("field", "quad", -1, passX, passY, 112, 19)
 	gl.DrawQuadColor(passX, passY, 112, 19, 0, 0, 0, 1, proj)
 
 	s.text.DrawText(s.userID, idX, idY, 1.0, 1.0, 1.0, 1.0, proj)
@@ -470,6 +476,7 @@ func (s *LoginScene) windowOrigin(index int) (float32, float32, int, int) {
 func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	if tex, err := s.getPrguseTexture(63); err == nil {
 		wx, wy, w, h := s.windowOrigin(63)
+		s.traceDraw("reg-bg", "Prguse", 63, wx, wy, float32(w), float32(h))
 		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
 	}
 
@@ -479,6 +486,7 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 		idx := regButtonImages[i]
 		if tex, err := s.getPrguseTexture(idx); err == nil {
 			w, h := s.getPrguseSize(idx)
+			s.traceDraw("reg-btn", "Prguse", idx, area.X, area.Y, float32(w), float32(h))
 			gl.DrawQuad(tex, area.X, area.Y, float32(w), float32(h), proj)
 		}
 	}
@@ -486,6 +494,7 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 	if s.text != nil {
 		// Title NewAccountTitle at (362,121), white + black outline
 		// (FState.pas:2669).
+		log.Logf(log.LevelTrace, "Render", "login title pos=(%.0f,%.0f)", float32(362), float32(121))
 		s.text.DrawTextOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		// Per-field help NAHelps in clSilver, switching with the focused edit
 		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14).
@@ -505,6 +514,7 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 	wx, wy, _, _ := s.windowOrigin(50)
 	if tex, err := s.getPrguseTexture(50); err == nil {
 		w, h := s.getPrguseSize(50)
+		s.traceDraw("chgpw-bg", "Prguse", 50, wx, wy, float32(w), float32(h))
 		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
 	}
 
@@ -514,6 +524,7 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 		idx := chgButtonImages[i]
 		if tex, err := s.getPrguseTexture(idx); err == nil {
 			w, h := s.getPrguseSize(idx)
+			s.traceDraw("chgpw-btn", "Prguse", idx, off.X, off.Y, float32(w), float32(h))
 			gl.DrawQuad(tex, off.X, off.Y, float32(w), float32(h), proj)
 		}
 	}
@@ -526,21 +537,19 @@ func (s *LoginScene) srvWindowOrigin() (float32, float32) {
 	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2
 }
 
-// renderServerSelect renders DSelServerDlg as an overlay on the login
-// background: dialog [256], up to six [79] buttons (pressed -> [80]) with the
-// centered server name + status color, and close button [83] (FState.pas:
-// 810-847, 2220-2280).
+// renderServerSelect renders DSelServerDlg: dialog [256], up to six [79]
+// buttons (pressed -> [80]), close [83] (FState.pas:810-847, 2220-2280).
 func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 	wx, wy := s.srvWindowOrigin()
 	if tex, err := s.getPrguseTexture(srvDlgImg); err == nil {
 		w, h := s.getPrguseSize(srvDlgImg)
+		s.traceDraw("srv-bg", "Prguse", srvDlgImg, wx, wy, float32(w), float32(h))
 		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
 	}
 
-	// Close button [83] window+(245,31) (FState.pas:816-818); in this asset it
-	// is 1×1 and invisible, but still drawn here.
 	if tex, err := s.getPrguseTexture(srvCloseImg); err == nil {
 		cw, ch := s.getPrguseSize(srvCloseImg)
+		s.traceDraw("srv-close", "Prguse", srvCloseImg, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch))
 		gl.DrawQuad(tex, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch), proj)
 	}
 
@@ -551,9 +560,10 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 		by := wy + srvButtonTop(i, count)
 		idx := srvBtnImg
 		if s.pressedButton == i {
-			idx = srvBtnImg + 1 // pressed -> FaceIndex+1 (FState.pas:2220-2224)
+			idx = srvBtnImg + 1
 		}
 		if tex, err := s.getPrguseTexture(idx); err == nil {
+			s.traceDraw("srv-btn", "Prguse", idx, bx, by, float32(bw), float32(bh))
 			gl.DrawQuad(tex, bx, by, float32(bw), float32(bh), proj)
 		}
 		if s.text != nil {
@@ -563,9 +573,10 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 			tx := bx + (float32(bw)-tw)/2
 			ty := by + (float32(bh)-th)/2
 			if s.pressedButton == i {
-				tx += 2 // pressed text shifts +2px (FState.pas:2276-2277)
+				tx += 2
 				ty += 2
 			}
+			log.Logf(log.LevelTrace, "Render", "login srv-btn-text %q pos=(%.0f,%.0f)", name, tx, ty)
 			s.text.DrawTextOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
 		}
 	}
@@ -576,6 +587,7 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 // cursor on the focused field.
 func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs []fieldDef, values []string, focus int) {
 	for _, def := range defs {
+		s.traceDraw("field", "quad", -1, def.x, def.y, def.w, def.h)
 		gl.DrawQuadColor(def.x, def.y, def.w, def.h, 0, 0, 0, 1, proj)
 	}
 	if s.text == nil {
@@ -618,6 +630,7 @@ func (s *LoginScene) dlgGeometry() (win, ok loginArea) {
 func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 	win, ok := s.dlgGeometry()
 	if tex, err := s.getPrguseTexture(360); err == nil {
+		s.traceDraw("dlg-bg", "Prguse", 360, win.X, win.Y, win.W, win.H)
 		gl.DrawQuad(tex, win.X, win.Y, win.W, win.H, proj)
 	}
 	idx := 361
@@ -625,6 +638,7 @@ func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 		idx = 362
 	}
 	if tex, err := s.getPrguseTexture(idx); err == nil {
+		s.traceDraw("dlg-ok", "Prguse", idx, ok.X, ok.Y, ok.W, ok.H)
 		gl.DrawQuad(tex, ok.X, ok.Y, ok.W, ok.H, proj)
 	}
 	if s.text == nil {
@@ -634,6 +648,7 @@ func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 	// outline (FState.pas:2023-2024, 2314-2323).
 	y := win.Y + 38
 	for _, ln := range s.dlgLines {
+		log.Logf(log.LevelTrace, "Render", "login dlg-text %q pos=(%.0f,%.0f)", ln, win.X+39, y)
 		s.text.DrawTextOutline(ln, win.X+39, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		y += 14
 	}
@@ -802,7 +817,8 @@ func (s *LoginScene) keyChgPw(key int) {
 
 // OnMouse handles mouse button input. Clicks fire on release inside the same
 // region (TDButton.MouseUp, DWinCtl.pas:677-695).
-func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
+func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
+	log.Logf(log.LevelDebug, "Mouse", "login pos=(%.0f,%.0f) button=%d action=%d", x, y, button, action)
 	if !s.showLoginUI || s.doorOpening {
 		return
 	}
@@ -965,8 +981,8 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 // (FState.pas:2220-2224; DSelServerDlg close == FrmMain.Close).
 func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 	wx, wy := s.srvWindowOrigin()
-	bw, bh := s.getPrguseSize(srvBtnImg)
 	count := len(s.servers)
+	bw, bh := s.getPrguseSize(srvBtnImg)
 	closeArea := loginArea{wx + srvCloseDX, wy + srvCloseDY, srvCloseW, srvCloseH}
 	btnArea := func(i int) loginArea {
 		return loginArea{wx + 65, wy + srvButtonTop(i, count), float32(bw), float32(bh)}
@@ -1268,7 +1284,6 @@ func (s *LoginScene) OpenLoginDoor() {
 	s.doorOpening = true
 	s.doorFading = false
 	s.doorFrame = 0
-	s.fadeAlpha = 0
 	s.doorStartTime = time.Now()
 	s.showLoginUI = false
 }

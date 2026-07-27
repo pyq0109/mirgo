@@ -13,6 +13,7 @@ const (
 	selectedFrame   = 16
 	freezeFrame     = 13
 	selectEffFrames = 14 // ChrSel[4..17] selection-effect loop (IntroScn:1442-1454)
+	darkLevelMax    = 30 // brightness-transition overlay start value (IntroScn:1299)
 )
 
 // CharacterSlot represents a character in the selection screen.
@@ -29,6 +30,12 @@ type CharacterSlot struct {
 	Freezing    bool
 	AniIndex    int
 	AniTick     time.Time
+
+	// DarkLevel drives the brightness transition on selection: the portrait is
+	// covered by a black overlay at alpha DarkLevel/darkLevelMax that fades out
+	// as DarkLevel decrements every 25ms (IntroScn:1299,1485-1494,1510-1514).
+	DarkLevel int
+	DarkTick  time.Time
 }
 
 // jobNames maps job ID to display name.
@@ -116,6 +123,10 @@ func NewSelectChrScene(gl *engine.GLState, resources *engine.ResourceManager, te
 	}
 }
 
+func (s *SelectChrScene) traceDraw(tag, wil string, idx int, x, y, w, h float32) {
+	log.Logf(log.LevelTrace, "Render", "selchr %s %s[%d] pos=(%.0f,%.0f) size=(%.0f,%.0f)", tag, wil, idx, x, y, w, h)
+}
+
 func (s *SelectChrScene) Open() {
 	log.Logf(log.LevelInfo, "SelectChrScene", "Opened")
 	s.errorMsg = ""
@@ -133,6 +144,10 @@ func (s *SelectChrScene) Update(dt float64) {
 		ch := &s.Characters[i]
 		if !ch.Valid {
 			continue
+		}
+		if ch.DarkLevel > 0 && now.Sub(ch.DarkTick) > 25*time.Millisecond {
+			ch.DarkTick = now
+			ch.DarkLevel--
 		}
 		if ch.Unfreezing {
 			if now.Sub(ch.AniTick) > 50*time.Millisecond {
@@ -179,6 +194,7 @@ func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 		tex := s.resources.GetTexture(s.resources.Prguse, ImgSelBg)
 		if tex != 0 {
 			w, h := s.getPrguseSize(ImgSelBg)
+			s.traceDraw("bg", "Prguse", ImgSelBg, ox, oy, float32(w), float32(h))
 			gl.DrawQuad(tex, ox, oy, float32(w), float32(h), proj)
 		}
 	} else {
@@ -254,6 +270,7 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 	}
 
 	drawn := false
+	var sprW, sprH float32
 	if s.resources.ChrSel != nil && imgIdx >= 0 && imgIdx < s.resources.ChrSel.Count {
 		img := s.resources.ChrSel.GetImage(imgIdx)
 		if img != nil && img.Width > 0 && img.Height > 0 {
@@ -261,7 +278,9 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 			if tex != 0 {
 				// Delphi draws the portrait top-left at the slot origin
 				// (IntroScn:1443,1469,1494,1501).
-				gl.DrawQuad(tex, slotX, slotY, float32(img.Width), float32(img.Height), proj)
+				sprW, sprH = float32(img.Width), float32(img.Height)
+				s.traceDraw("portrait", "ChrSel", imgIdx, slotX, slotY, sprW, sprH)
+				gl.DrawQuad(tex, slotX, slotY, sprW, sprH, proj)
 				drawn = true
 			}
 		}
@@ -277,7 +296,16 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 		case 2:
 			r, g, b = 0.3, 0.8, 0.3
 		}
-		gl.DrawQuadColor(slotX, slotY, 100, 200, r, g, b, 0.8, proj)
+		sprW, sprH = 100, 200
+		gl.DrawQuadColor(slotX, slotY, sprW, sprH, r, g, b, 0.8, proj)
+	}
+
+	// Brightness transition: a black overlay fades out over the selected
+	// portrait while DarkLevel counts down (IntroScn:1485-1494).
+	if idx == s.Selected && ch.DarkLevel > 0 {
+		alpha := float32(ch.DarkLevel) / darkLevelMax
+		log.Logf(log.LevelTrace, "Render", "selchr dark overlay slot=%d alpha=%.3f", idx, alpha)
+		gl.DrawQuadColor(slotX, slotY, sprW, sprH, 0, 0, 0, alpha, proj)
 	}
 
 	if idx == s.Selected {
@@ -309,6 +337,7 @@ func (s *SelectChrScene) renderCreatePreview(gl *engine.GLState, proj [16]float3
 	if tex == 0 {
 		return
 	}
+	s.traceDraw("portrait", "ChrSel", imgIdx, slotX, slotY, float32(img.Width), float32(img.Height))
 	gl.DrawQuad(tex, slotX, slotY, float32(img.Width), float32(img.Height), proj)
 }
 
@@ -334,8 +363,10 @@ func (s *SelectChrScene) renderSelectEffect(gl *engine.GLState, proj [16]float32
 	if idx == 1 {
 		ex, ey = 430, 60
 	}
-	// Delphi blends additively (DrawBlend) and fades via DarkLevel; both are
-	// approximated/omitted here (normal alpha, no fade — low priority).
+	// Delphi blends additively (DrawBlend); approximated here with normal
+	// alpha. The DarkLevel fade applies to the portrait itself, drawn in
+	// renderCharSlot (IntroScn:1485-1494).
+	s.traceDraw("effect", "ChrSel", imgIdx, ox+ex, oy+ey, float32(img.Width), float32(img.Height))
 	gl.DrawQuad(tex, ox+ex, oy+ey, float32(img.Width), float32(img.Height), proj)
 }
 
@@ -350,6 +381,8 @@ func (s *SelectChrScene) renderButtons(gl *engine.GLState, proj [16]float32, ox,
 		return
 	}
 	btn := selButtons[s.downButton]
+	bw, bh := s.getPrguseSize(btn.img)
+	s.traceDraw("btn", "Prguse", btn.img, btn.x, btn.y, float32(bw), float32(bh))
 	s.drawPrguseImage(btn.img, btn.x, btn.y, proj)
 }
 
@@ -373,18 +406,23 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 
 		// Name/level/class are white with a black outline (BoldTextOut,
 		// IntroScn:1522-1534); the level is a bare number (IntToStr, :1523).
+		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", ch.Name, ox+tp.nameX, oy+tp.nameY)
 		s.text.DrawTextOutline(ch.Name, ox+tp.nameX, oy+tp.nameY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
-		s.text.DrawTextOutline(fmt.Sprintf("%d", ch.Level), ox+tp.levelX, oy+tp.levelY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+		levelStr := fmt.Sprintf("%d", ch.Level)
+		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", levelStr, ox+tp.levelX, oy+tp.levelY)
+		s.text.DrawTextOutline(levelStr, ox+tp.levelX, oy+tp.levelY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		jobName := "未知"
 		if int(ch.Job) < len(jobNames) {
 			jobName = jobNames[ch.Job]
 		}
+		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", jobName, ox+tp.jobX, oy+tp.jobY)
 		s.text.DrawTextOutline(jobName, ox+tp.jobX, oy+tp.jobY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
 	// Server name centered at the top (IntroScn:1539-1545).
 	if s.ServerName != "" {
 		x := float32(ScreenWidth)/2 - float32(s.text.MeasureText(s.ServerName))/2
+		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", s.ServerName, x, oy+8)
 		s.text.DrawTextOutline(s.ServerName, x, oy+8, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
@@ -417,12 +455,15 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 
 	// Creation window background [73]; labels and button faces are baked into
 	// it, so there is no fullscreen dim and no separate label text (DCreateChr).
+	cw, ch := s.getPrguseSize(ImgCreateBg)
+	s.traceDraw("create-bg", "Prguse", ImgCreateBg, winX, winY, float32(cw), float32(ch))
 	if !s.drawPrguseImage(ImgCreateBg, winX, winY, proj) {
 		gl.DrawQuadColor(winX, winY, 260, 320, 0.12, 0.12, 0.2, 0.95, proj)
 	}
 
 	// Name edit field: black background, white text, window+(63,79) 129×21,
 	// MaxLength 14 (IntroScn:1109-1121,1282-1283).
+	log.Logf(log.LevelTrace, "Render", "selchr name-box pos=(%.0f,%.0f) size=(%.0f,%.0f)", winX+63, winY+79, float32(129), float32(21))
 	gl.DrawQuadColor(winX+63, winY+79, 129, 21, 0, 0, 0, 1, proj)
 	if s.text != nil {
 		s.text.DrawText(s.createName, winX+65, winY+81, 1, 1, 1, 1, proj)
@@ -454,7 +495,11 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 
 	// OK [51] / Cancel [52] are real buttons (not baked in), always drawn
 	// (window-relative 46/138,273 — FState:962-965).
+	okW, okH := s.getPrguseSize(ImgCreateOk)
+	s.traceDraw("create-ok", "Prguse", ImgCreateOk, winX+46, winY+273, float32(okW), float32(okH))
 	s.drawButton(ImgCreateOk, winX+46, winY+273, proj)
+	cancelW, cancelH := s.getPrguseSize(ImgCreateCancel)
+	s.traceDraw("create-ok", "Prguse", ImgCreateCancel, winX+138, winY+273, float32(cancelW), float32(cancelH))
 	s.drawButton(ImgCreateCancel, winX+138, winY+273, proj)
 }
 
@@ -464,8 +509,12 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 func (s *SelectChrScene) renderCreateChoice(gl *engine.GLState, proj [16]float32, faceIdx, hiIdx int, x, y float32, selected, downed bool) {
 	switch {
 	case downed:
+		w, h := s.getPrguseSize(faceIdx)
+		s.traceDraw("create-btn", "Prguse", faceIdx, x, y, float32(w), float32(h))
 		s.drawPrguseImage(faceIdx, x, y, proj)
 	case selected:
+		w, h := s.getPrguseSize(hiIdx)
+		s.traceDraw("highlight", "Prguse", hiIdx, x, y, float32(w), float32(h))
 		s.drawPrguseImage(hiIdx, x, y, proj)
 	}
 }
@@ -513,6 +562,8 @@ func (s *SelectChrScene) deleteButtonAreas() [3]loginArea {
 func (s *SelectChrScene) renderDeleteDialog(gl *engine.GLState, proj [16]float32) {
 	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.5, proj)
 	winX, winY := s.deleteWinPos()
+	dw, dh := s.getPrguseSize(ImgModalNormal)
+	s.traceDraw("del-bg", "Prguse", ImgModalNormal, winX, winY, float32(dw), float32(dh))
 	if !s.drawPrguseImage(ImgModalNormal, winX, winY, proj) {
 		gl.DrawQuadColor(winX, winY, 380, 180, 0.12, 0.12, 0.2, 0.95, proj)
 	}
@@ -523,6 +574,8 @@ func (s *SelectChrScene) renderDeleteDialog(gl *engine.GLState, proj [16]float32
 	areas := s.deleteButtonAreas()
 	imgs := [3]int{ImgModalYes, ImgModalNo, ImgModalCancel}
 	for i, img := range imgs {
+		bw, bh := s.getPrguseSize(img)
+		s.traceDraw("del-btn", "Prguse", img, areas[i].X, areas[i].Y, float32(bw), float32(bh))
 		s.drawButton(img, areas[i].X, areas[i].Y, proj)
 	}
 }
@@ -578,7 +631,8 @@ func (s *SelectChrScene) OnKey(key int, action int) {
 	}
 }
 
-func (s *SelectChrScene) OnMouse(x, y float64, button int, action int) {
+func (s *SelectChrScene) OnMouse(x, y float64, button int, action int, mods int) {
+	log.Logf(log.LevelDebug, "Mouse", "selchr pos=(%.0f,%.0f) button=%d action=%d", x, y, button, action)
 	fx, fy := float32(x), float32(y)
 	switch {
 	case s.createMode:
@@ -708,6 +762,8 @@ func (s *SelectChrScene) selectChar(idx int) {
 		ch.Freezing = false
 		ch.AniIndex = 0
 		ch.AniTick = time.Now()
+		ch.DarkLevel = darkLevelMax
+		ch.DarkTick = time.Now()
 	}
 }
 
@@ -834,9 +890,13 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 	if selectedIdx >= 0 && selectedIdx < 2 && s.Characters[selectedIdx].Valid {
 		s.Selected = selectedIdx
 		s.Characters[selectedIdx].Unfreezing = true
+		s.Characters[selectedIdx].DarkLevel = darkLevelMax
+		s.Characters[selectedIdx].DarkTick = time.Now()
 	} else if s.Characters[0].Valid {
 		s.Selected = 0
 		s.Characters[0].Unfreezing = true
+		s.Characters[0].DarkLevel = darkLevelMax
+		s.Characters[0].DarkTick = time.Now()
 	}
 	log.Logf(log.LevelInfo, "SelectChrScene", "Final selected=%d", s.Selected)
 }

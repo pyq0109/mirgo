@@ -756,10 +756,26 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 			if tex != 0 {
 				w := float32(img.Width)
 				h := float32(img.Height)
-				if a.State < 0 {
-					gl.DrawQuadTint(tex, screenX, screenY-h+engine.TileHeight, w, h, 0.3, 1.0, 0.3, 1.0, proj)
-				} else if a.State&0x40000000 != 0 {
-					gl.DrawQuadTint(tex, screenX, screenY-h+engine.TileHeight, w, h, 1.0, 0.3, 0.3, 1.0, proj)
+				var tr, tg, tb float32
+				tinted := true
+				switch {
+				case a.State < 0: // $80000000 ceGreen
+					tr, tg, tb = 0.3, 1.0, 0.3
+				case a.State&0x40000000 != 0: // ceRed
+					tr, tg, tb = 1.0, 0.3, 0.3
+				case a.State&0x20000000 != 0: // ceBlue
+					tr, tg, tb = 0.3, 0.3, 1.0
+				case a.State&0x10000000 != 0: // ceYellow
+					tr, tg, tb = 1.0, 1.0, 0.3
+				case a.State&0x08000000 != 0: // ceFuchsia
+					tr, tg, tb = 1.0, 0.3, 1.0
+				case a.State&0x04000000 != 0: // ceGrayScale
+					tr, tg, tb = 0.6, 0.6, 0.6
+				default:
+					tinted = false
+				}
+				if tinted {
+					gl.DrawQuadTint(tex, screenX, screenY-h+engine.TileHeight, w, h, tr, tg, tb, 1.0, proj)
 				} else {
 					gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
 				}

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"encoding/binary"
@@ -77,7 +77,14 @@ func (m *ActorManager) SortedByY() []*Actor {
 	}
 	m.mu.RUnlock()
 	sort.Slice(actors, func(i, j int) bool {
-		return actors[i].Ry < actors[j].Ry
+		if actors[i].Ry != actors[j].Ry {
+			return actors[i].Ry < actors[j].Ry
+		}
+		// Dead actors drawn after living at same row (PlayScn.pas:2151-2169).
+		if actors[i].Death != actors[j].Death {
+			return actors[j].Death
+		}
+		return false
 	})
 	return actors
 }

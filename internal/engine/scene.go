@@ -53,8 +53,8 @@ type Scene interface {
 	Render(gl *GLState, proj [16]float32)
 	// OnKey handles keyboard input.
 	OnKey(key int, action int)
-	// OnMouse handles mouse button input.
-	OnMouse(x, y float64, button int, action int)
+	// OnMouse handles mouse button input. mods is a bitmask of GLFW modifier keys.
+	OnMouse(x, y float64, button int, action int, mods int)
 	// OnScroll handles mouse scroll input.
 	OnScroll(x, y float64)
 }
@@ -123,9 +123,9 @@ func (m *SceneManager) OnKey(key int, action int) {
 }
 
 // OnMouse forwards mouse button input to the current scene.
-func (m *SceneManager) OnMouse(x, y float64, button int, action int) {
+func (m *SceneManager) OnMouse(x, y float64, button int, action int, mods int) {
 	if m.current != nil {
-		m.current.OnMouse(x, y, button, action)
+		m.current.OnMouse(x, y, button, action, mods)
 	}
 }
 
