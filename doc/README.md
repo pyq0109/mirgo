@@ -26,6 +26,11 @@ asset/
 $env:CGO_ENABLED=1
 ```
 
+```bash
+go mod tidy
+go mod vendor
+```
+
 ## serverconfig
 
 ```PowerShell
