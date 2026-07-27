@@ -725,9 +725,13 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.sceneMgr.ChangeScene(engine.SceneLoginNotice)
 
 	case protocol.SMStartFail:
+		// Delphi: DMessageDlg('此服务器满员') then ClientGetSelectServer
+		// (ClMain.pas:3782-3788).
 		log.Logf(log.LevelWarn, "Client", "Start play failed: server full")
-		if h.selectChrScene != nil {
-			h.selectChrScene.SetError("服务器已满")
+		h.sceneMgr.ChangeScene(engine.SceneLogin)
+		if h.loginScene != nil {
+			h.loginScene.SetError("此服务器满员，请稍后重试.")
+			h.loginScene.ShowServerSelect(h.loginScene.Servers())
 		}
 
 	// =====================================================================

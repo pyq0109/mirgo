@@ -29,6 +29,7 @@ type TextRenderer struct {
 	cache    map[rune]*glyphEntry
 	cacheMu  sync.RWMutex
 	size     float64
+	fontData []byte // stored for WithSize
 }
 
 // fontSearchPaths lists common Windows Chinese font paths.
@@ -93,11 +94,45 @@ func NewTextRenderer(glState *GLState, fontPath string, size float64) (*TextRend
 	ascent := metrics.Ascent.Ceil()
 
 	return &TextRenderer{
-		gl:     glState,
-		face:   face,
-		ascent: ascent,
-		cache:  make(map[rune]*glyphEntry),
-		size:   size,
+		gl:       glState,
+		face:     face,
+		ascent:   ascent,
+		cache:    make(map[rune]*glyphEntry),
+		size:     size,
+		fontData: fontData,
+	}, nil
+}
+
+// WithSize creates a new TextRenderer with the same font at a different size.
+func (tr *TextRenderer) WithSize(size float64) (*TextRenderer, error) {
+	f, parseErr := opentype.Parse(tr.fontData)
+	if parseErr != nil {
+		col, colErr := opentype.ParseCollection(tr.fontData)
+		if colErr != nil {
+			return nil, fmt.Errorf("parse font: single=%v, collection=%v", parseErr, colErr)
+		}
+		f, colErr = col.Font(0)
+		if colErr != nil {
+			return nil, fmt.Errorf("get font from collection: %w", colErr)
+		}
+	}
+
+	face, err := opentype.NewFace(f, &opentype.FaceOptions{
+		Size:    size,
+		DPI:     96,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create face: %w", err)
+	}
+
+	return &TextRenderer{
+		gl:       tr.gl,
+		face:     face,
+		ascent:   face.Metrics().Ascent.Ceil(),
+		cache:    make(map[rune]*glyphEntry),
+		size:     size,
+		fontData: tr.fontData,
 	}, nil
 }
 
@@ -189,6 +224,27 @@ func (tr *TextRenderer) DrawTextOutline(text string, x, y float32, r, g, b, a fl
 	tr.DrawText(text, x, y-1, or, og, ob, oa, proj)
 	tr.DrawText(text, x, y+1, or, og, ob, oa, proj)
 	tr.DrawText(text, x, y, r, g, b, a, proj)
+}
+
+// DrawTextBold renders pseudo-bold text by drawing twice with 1px horizontal
+// offset. Approximates Delphi fsBold style.
+func (tr *TextRenderer) DrawTextBold(text string, x, y float32, r, g, b, a float32, proj [16]float32) {
+	tr.DrawText(text, x, y, r, g, b, a, proj)
+	tr.DrawText(text, x+1, y, r, g, b, a, proj)
+}
+
+// DrawTextBoldOutline renders pseudo-bold text with a 1px outline.
+// Mirrors Delphi BoldTextOut with fsBold style (FState.pas:2274-2279).
+func (tr *TextRenderer) DrawTextBoldOutline(text string, x, y float32, r, g, b, a float32, or, og, ob, oa float32, proj [16]float32) {
+	tr.DrawText(text, x-1, y, or, og, ob, oa, proj)
+	tr.DrawText(text, x+1, y, or, og, ob, oa, proj)
+	tr.DrawText(text, x+2, y, or, og, ob, oa, proj)
+	tr.DrawText(text, x, y-1, or, og, ob, oa, proj)
+	tr.DrawText(text, x+1, y-1, or, og, ob, oa, proj)
+	tr.DrawText(text, x, y+1, or, og, ob, oa, proj)
+	tr.DrawText(text, x+1, y+1, or, og, ob, oa, proj)
+	tr.DrawText(text, x, y, r, g, b, a, proj)
+	tr.DrawText(text, x+1, y, r, g, b, a, proj)
 }
 
 // MeasureText returns the pixel width of the text.

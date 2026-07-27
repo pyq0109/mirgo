@@ -48,7 +48,7 @@ func NewWindow(width, height int, title string) (*Window, error) {
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-	gl.ClearColor(0.1, 0.1, 0.1, 1.0)
+	gl.ClearColor(0, 0, 0, 1)
 
 	return &Window{
 		window: window,

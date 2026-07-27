@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/log"
@@ -244,7 +245,9 @@ var regHelps = [13]string{
 type LoginScene struct {
 	gl        *engine.GLState
 	resources *engine.ResourceManager
-	text      *engine.TextRenderer
+	text      *engine.TextRenderer // default 16px
+	textSmall *engine.TextRenderer // 13px for input fields (Delphi Font.Size=10)
+	textSrv   *engine.TextRenderer // 15px for server names (Delphi Font.Size=11)
 
 	// Door animation (IntroScn.pas:804-851); fade handled by globalFade.
 	doorOpening   bool
@@ -271,11 +274,13 @@ type LoginScene struct {
 
 	// Mouse: currently pressed button index per mode (-1 = none)
 	pressedButton int
-	dlgOkPressed  bool
 
 	// Modal dialog (Delphi DMessageDlg, FState.pas:1938-2158)
-	dlgMsg   string
-	dlgLines []string
+	dlgMsg        string
+	dlgLines      []string
+	dlgSize       int   // 0=small[381], 1=medium[360], 2=large[380]
+	dlgButtons    []int // button image indices (361=Ok, 363=Yes, 365=Cancel, 367=No)
+	dlgPressedBtn int   // index into dlgButtons, -1=none
 
 	connecting bool
 
@@ -297,15 +302,26 @@ func (s *LoginScene) traceDraw(tag, wil string, idx int, x, y, w, h float32) {
 
 // NewLoginScene creates a new login scene.
 func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *LoginScene {
-	return &LoginScene{
+	s := &LoginScene{
 		gl:            gl,
 		resources:     resources,
 		text:          text,
+		textSmall:     text,
+		textSrv:       text,
 		showLoginUI:   true,
 		focusedField:  0,
 		pressedButton: -1,
 		cursorBlink:   time.Now(),
 	}
+	// Delphi input fields use Font.Size=10 ≈ 13px @96DPI (IntroScn.pas:260).
+	if t, err := text.WithSize(13); err == nil {
+		s.textSmall = t
+	}
+	// Delphi server names use Font.Size=11 ≈ 15px @96DPI (FState.pas:2274).
+	if t, err := text.WithSize(15); err == nil {
+		s.textSrv = t
+	}
+	return s
 }
 
 // Open is called when the scene becomes active.
@@ -407,17 +423,14 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 // bakes normal-state art into ChrSel[22] and only draws the overlay when
 // pressed (DLoginNewDirectPaint, FState.pas:2342-2354). Since this asset
 // build's ChrSel[22] lacks button art, we always draw the Prguse images.
+// Pressed state draws at the same position (no offset, FState.pas:2351).
 func (s *LoginScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	for i, idx := range buttonImages {
 		a := s.buttonArea(i)
 		if tex, err := s.getPrguseTexture(idx); err == nil {
 			w, h := s.getPrguseSize(idx)
-			dx, dy := float32(0), float32(0)
-			if s.pressedButton == i {
-				dx, dy = 2, 2
-			}
-			s.traceDraw("btn", "Prguse", idx, a.X+dx, a.Y+dy, float32(w), float32(h))
-			gl.DrawQuad(tex, a.X+dx, a.Y+dy, float32(w), float32(h), proj)
+			s.traceDraw("btn", "Prguse", idx, a.X, a.Y, float32(w), float32(h))
+			gl.DrawQuad(tex, a.X, a.Y, float32(w), float32(h), proj)
 		}
 	}
 }
@@ -446,8 +459,8 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 	s.traceDraw("field", "quad", -1, passX, passY, 112, 19)
 	gl.DrawQuadColor(passX, passY, 112, 19, 0, 0, 0, 1, proj)
 
-	s.text.DrawText(s.userID, idX, idY, 1.0, 1.0, 1.0, 1.0, proj)
-	s.text.DrawText(masked, passX, passY, 1.0, 1.0, 1.0, 1.0, proj)
+	s.textSmall.DrawText(s.userID, idX, idY, 1.0, 1.0, 1.0, 1.0, proj)
+	s.textSmall.DrawText(masked, passX, passY, 1.0, 1.0, 1.0, 1.0, proj)
 
 	if time.Since(s.cursorBlink) > 500*time.Millisecond {
 		s.cursorBlink = time.Now()
@@ -455,13 +468,14 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 	if time.Since(s.cursorBlink) < 250*time.Millisecond && s.focusedField >= 0 {
 		var cx, cy float32
 		if s.focusedField == 0 {
-			cx = idX + float32(s.text.MeasureText(s.userID))
+			cx = idX + float32(s.textSmall.MeasureText(s.userID))
 			cy = idY
 		} else {
-			cx = passX + float32(s.text.MeasureText(masked))
+			cx = passX + float32(s.textSmall.MeasureText(masked))
 			cy = passY
 		}
-		s.text.DrawText("|", cx, cy, 1.0, 1.0, 0.0, 1.0, proj)
+		// 1px white vertical line matching native TEdit caret (IntroScn.pas:255-274).
+		gl.DrawQuadColor(cx, cy, 1, 19, 1, 1, 1, 1, proj)
 	}
 }
 
@@ -492,14 +506,14 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 	}
 
 	if s.text != nil {
-		// Title NewAccountTitle at (362,121), white + black outline
+		// Title NewAccountTitle at (362,121), white + black outline, bold
 		// (FState.pas:2669).
 		log.Logf(log.LevelTrace, "Render", "login title pos=(%.0f,%.0f)", float32(362), float32(121))
-		s.text.DrawTextOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+		s.text.DrawTextBoldOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		// Per-field help NAHelps in clSilver, switching with the focused edit
 		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14).
 		if s.regFocus >= 0 && s.regFocus < len(regHelps) {
-			s.text.DrawText(regHelps[s.regFocus], 507, 124, 0.75, 0.75, 0.75, 1, proj)
+			s.textSmall.DrawText(regHelps[s.regFocus], 507, 124, 0.75, 0.75, 0.75, 1, proj)
 		}
 	}
 
@@ -566,10 +580,10 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 			s.traceDraw("srv-btn", "Prguse", idx, bx, by, float32(bw), float32(bh))
 			gl.DrawQuad(tex, bx, by, float32(bw), float32(bh), proj)
 		}
-		if s.text != nil {
+		if s.textSrv != nil {
 			name, r, g, b := serverDisplayName(s.servers[i])
-			tw := float32(s.text.MeasureText(name))
-			th := float32(s.text.LineHeight())
+			tw := float32(s.textSrv.MeasureText(name))
+			th := float32(s.textSrv.LineHeight())
 			tx := bx + (float32(bw)-tw)/2
 			ty := by + (float32(bh)-th)/2
 			if s.pressedButton == i {
@@ -577,7 +591,7 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 				ty += 2
 			}
 			log.Logf(log.LevelTrace, "Render", "login srv-btn-text %q pos=(%.0f,%.0f)", name, tx, ty)
-			s.text.DrawTextOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
+			s.textSrv.DrawTextBoldOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
 		}
 	}
 }
@@ -590,7 +604,7 @@ func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs
 		s.traceDraw("field", "quad", -1, def.x, def.y, def.w, def.h)
 		gl.DrawQuadColor(def.x, def.y, def.w, def.h, 0, 0, 0, 1, proj)
 	}
-	if s.text == nil {
+	if s.textSmall == nil {
 		return
 	}
 	for i, def := range defs {
@@ -598,7 +612,7 @@ func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs
 		if def.masked {
 			text = strings.Repeat("*", len(text))
 		}
-		s.text.DrawText(text, def.x+2, def.y, 1.0, 1.0, 1.0, 1.0, proj)
+		s.textSmall.DrawText(text, def.x+2, def.y, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 
 	if time.Since(s.cursorBlink) > 500*time.Millisecond {
@@ -610,46 +624,74 @@ func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs
 		if def.masked {
 			text = strings.Repeat("*", len(text))
 		}
-		cx := def.x + 2 + float32(s.text.MeasureText(text))
-		s.text.DrawText("|", cx, def.y, 1.0, 1.0, 0.0, 1.0, proj)
+		cx := def.x + 2 + float32(s.textSmall.MeasureText(text))
+		gl.DrawQuadColor(cx, def.y, 1, def.h, 1, 1, 1, 1, proj)
 	}
 }
 
-// dlgGeometry returns the dialog window rect and its Ok button rect.
-// The Ok button's left edge is anchored at lx=324 (FState.pas:2078-2081).
-func (s *LoginScene) dlgGeometry() (win, ok loginArea) {
-	w, h := s.getPrguseSize(360)
-	x := loginOX + float32(800-w)/2
-	y := loginOY + float32(600-h)/2
-	bw, bh := s.getPrguseSize(361)
-	return loginArea{x, y, float32(w), float32(h)}, loginArea{x + 324, y + 126, float32(bw), float32(bh)}
+// dlgGeom holds layout parameters for each DMessageDlg size
+// (FState.pas:2002-2042).
+type dlgGeom struct {
+	bgImg                    int
+	msgLX, msgLY             float32
+	btnLX, btnLY             float32
 }
 
-// renderDialog renders DMsgDlg: Prguse[360] centered, wrapped white text
-// lines from +36, Ok button [361] (pressed +1, FState.pas:739-752).
+var dlgSizes = [3]dlgGeom{
+	{bgImg: 381, msgLX: 39, msgLY: 38, btnLX: 90, btnLY: 36},   // small
+	{bgImg: 360, msgLX: 39, msgLY: 38, btnLX: 324, btnLY: 126}, // medium
+	{bgImg: 380, msgLX: 23, msgLY: 20, btnLX: 105, btnLY: 305}, // large
+}
+
+// dlgButtonAreas returns the window rect and per-button rects for the current
+// dialog. Buttons are laid out right-to-left from btnLX with 110px spacing
+// (FState.pas:2060-2083).
+func (s *LoginScene) dlgButtonAreas() (loginArea, []loginArea) {
+	g := dlgSizes[s.dlgSize]
+	w, h := s.getPrguseSize(g.bgImg)
+	wx := loginOX + float32(800-w)/2
+	wy := loginOY + float32(600-h)/2
+	win := loginArea{wx, wy, float32(w), float32(h)}
+
+	btns := make([]loginArea, len(s.dlgButtons))
+	lx := g.btnLX
+	for i, img := range s.dlgButtons {
+		bw, bh := s.getPrguseSize(img)
+		btns[i] = loginArea{wx + lx, wy + g.btnLY, float32(bw), float32(bh)}
+		lx -= 110
+	}
+	return win, btns
+}
+
+// renderDialog renders DMessageDlg with the configured size and buttons
+// (FState.pas:739-752, 2002-2083, 2291-2325).
 func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
-	win, ok := s.dlgGeometry()
-	if tex, err := s.getPrguseTexture(360); err == nil {
-		s.traceDraw("dlg-bg", "Prguse", 360, win.X, win.Y, win.W, win.H)
+	g := dlgSizes[s.dlgSize]
+	win, btns := s.dlgButtonAreas()
+
+	if tex, err := s.getPrguseTexture(g.bgImg); err == nil {
+		s.traceDraw("dlg-bg", "Prguse", g.bgImg, win.X, win.Y, win.W, win.H)
 		gl.DrawQuad(tex, win.X, win.Y, win.W, win.H, proj)
 	}
-	idx := 361
-	if s.dlgOkPressed {
-		idx = 362
+
+	for i, img := range s.dlgButtons {
+		idx := img
+		if s.dlgPressedBtn == i {
+			idx = img + 1
+		}
+		if tex, err := s.getPrguseTexture(idx); err == nil {
+			s.traceDraw("dlg-btn", "Prguse", idx, btns[i].X, btns[i].Y, btns[i].W, btns[i].H)
+			gl.DrawQuad(tex, btns[i].X, btns[i].Y, btns[i].W, btns[i].H, proj)
+		}
 	}
-	if tex, err := s.getPrguseTexture(idx); err == nil {
-		s.traceDraw("dlg-ok", "Prguse", idx, ok.X, ok.Y, ok.W, ok.H)
-		gl.DrawQuad(tex, ok.X, ok.Y, ok.W, ok.H, proj)
-	}
+
 	if s.text == nil {
 		return
 	}
-	// Body left-aligned at window+(39,38), line spacing 14, white + black
-	// outline (FState.pas:2023-2024, 2314-2323).
-	y := win.Y + 38
+	y := win.Y + g.msgLY
 	for _, ln := range s.dlgLines {
-		log.Logf(log.LevelTrace, "Render", "login dlg-text %q pos=(%.0f,%.0f)", ln, win.X+39, y)
-		s.text.DrawTextOutline(ln, win.X+39, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+		log.Logf(log.LevelTrace, "Render", "login dlg-text %q pos=(%.0f,%.0f)", ln, win.X+g.msgLX, y)
+		s.text.DrawTextBoldOutline(ln, win.X+g.msgLX, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		y += 14
 	}
 }
@@ -659,7 +701,7 @@ func (s *LoginScene) OnChar(char rune) {
 	if !s.showLoginUI || s.doorOpening || s.connecting || s.dlgMsg != "" {
 		return
 	}
-	if char < 32 || char > 126 {
+	if char < 32 {
 		return
 	}
 	switch s.mode {
@@ -668,7 +710,7 @@ func (s *LoginScene) OnChar(char rune) {
 		if def.password && (char == '~' || char == '\'' || char == ' ') {
 			return // filtered at input time (IntroScn.pas:640-641)
 		}
-		if len(s.regFields[s.regFocus]) < def.maxLen {
+		if utf8.RuneCountInString(s.regFields[s.regFocus]) < def.maxLen {
 			s.regFields[s.regFocus] += string(char)
 		}
 	case modeChgPw:
@@ -676,7 +718,7 @@ func (s *LoginScene) OnChar(char rune) {
 		if def.password && (char == '~' || char == '\'' || char == ' ') {
 			return
 		}
-		if len(s.chgFields[s.chgFocus]) < def.maxLen {
+		if utf8.RuneCountInString(s.chgFields[s.chgFocus]) < def.maxLen {
 			s.chgFields[s.chgFocus] += string(char)
 		}
 	case modeServerSelect:
@@ -686,10 +728,10 @@ func (s *LoginScene) OnChar(char rune) {
 			return
 		}
 		if s.focusedField == 0 {
-			if len(s.userID) < 10 {
+			if utf8.RuneCountInString(s.userID) < 10 {
 				s.userID += string(char)
 			}
-		} else if len(s.password) < 10 {
+		} else if utf8.RuneCountInString(s.password) < 10 {
 			s.password += string(char)
 		}
 	}
@@ -734,11 +776,13 @@ func (s *LoginScene) keyLogin(key int) {
 		switch s.focusedField {
 		case 0:
 			if len(s.userID) > 0 {
-				s.userID = s.userID[:len(s.userID)-1]
+				_, size := utf8.DecodeLastRuneInString(s.userID)
+				s.userID = s.userID[:len(s.userID)-size]
 			}
 		case 1:
 			if len(s.password) > 0 {
-				s.password = s.password[:len(s.password)-1]
+				_, size := utf8.DecodeLastRuneInString(s.password)
+				s.password = s.password[:len(s.password)-size]
 			}
 		}
 		s.cursorBlink = time.Now()
@@ -774,7 +818,8 @@ func (s *LoginScene) keyRegister(key int) {
 			return
 		}
 		if f := s.regFields[s.regFocus]; len(f) > 0 {
-			s.regFields[s.regFocus] = f[:len(f)-1]
+			_, size := utf8.DecodeLastRuneInString(f)
+			s.regFields[s.regFocus] = f[:len(f)-size]
 		}
 		s.cursorBlink = time.Now()
 	case keyTab:
@@ -798,7 +843,8 @@ func (s *LoginScene) keyChgPw(key int) {
 			return
 		}
 		if f := s.chgFields[s.chgFocus]; len(f) > 0 {
-			s.chgFields[s.chgFocus] = f[:len(f)-1]
+			_, size := utf8.DecodeLastRuneInString(f)
+			s.chgFields[s.chgFocus] = f[:len(f)-size]
 		}
 		s.cursorBlink = time.Now()
 	case keyTab:
@@ -825,16 +871,19 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
 	fx, fy := float32(x), float32(y)
 
 	if s.dlgMsg != "" {
-		_, ok := s.dlgGeometry()
+		_, btns := s.dlgButtonAreas()
 		switch action {
 		case mousePress:
-			if hitTest(fx, fy, ok) {
-				s.dlgOkPressed = true
+			for i, b := range btns {
+				if hitTest(fx, fy, b) {
+					s.dlgPressedBtn = i
+					break
+				}
 			}
 		case mouseRelease:
-			pressed := s.dlgOkPressed
-			s.dlgOkPressed = false
-			if pressed && hitTest(fx, fy, ok) {
+			pressed := s.dlgPressedBtn
+			s.dlgPressedBtn = -1
+			if pressed >= 0 && pressed < len(btns) && hitTest(fx, fy, btns[pressed]) {
 				s.closeDialog()
 			}
 		}
@@ -1192,20 +1241,31 @@ func (s *LoginScene) submitChgPw() {
 	s.chgFields = [4]string{}
 }
 
-// ShowMessage displays a modal DMessageDlg (FState.pas:1938-2158) and resets
-// the waiting/connecting state (PassWdFail, IntroScn.pas:560-566).
+// ShowMessage displays a modal DMessageDlg with medium size and Ok button
+// (FState.pas:1938-2158).
 func (s *LoginScene) ShowMessage(msg string) {
+	s.ShowMessageEx(msg, 1, []int{361})
+}
+
+// ShowMessageEx displays a modal DMessageDlg with the given size
+// (0=small, 1=medium, 2=large) and button set (361=Ok, 363=Yes,
+// 365=Cancel, 367=No). Buttons are laid out right-to-left
+// (FState.pas:2002-2083).
+func (s *LoginScene) ShowMessageEx(msg string, size int, buttons []int) {
 	s.dlgMsg = msg
 	s.dlgLines = strings.Split(msg, "\\")
+	s.dlgSize = size
+	s.dlgButtons = buttons
+	s.dlgPressedBtn = -1
 	s.connecting = false
 	s.waitingResponse = false
-	s.dlgOkPressed = false
 }
 
 func (s *LoginScene) closeDialog() {
 	s.dlgMsg = ""
 	s.dlgLines = nil
-	s.dlgOkPressed = false
+	s.dlgButtons = nil
+	s.dlgPressedBtn = -1
 	if s.mode == modeLogin {
 		s.focusedField = 0
 		s.cursorBlink = time.Now()
@@ -1266,6 +1326,11 @@ func (s *LoginScene) ShowServerSelect(servers []serverInfo) {
 	s.mode = modeServerSelect
 	s.pressedButton = -1
 	s.showLoginUI = true
+}
+
+// Servers returns the stored server list.
+func (s *LoginScene) Servers() []serverInfo {
+	return s.servers
 }
 
 // SetCloseFunc sets the callback for closing the application.
