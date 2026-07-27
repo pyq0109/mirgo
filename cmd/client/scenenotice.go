@@ -50,7 +50,7 @@ func (s *NoticeScene) Update(dt float64) {
 
 // Render renders the notice scene.
 func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, 1024, 768, 0, 0, 0, 0.7, proj)
+	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.7, proj)
 
 	if s.resources != nil && s.resources.Prguse != nil {
 		bgImg := s.resources.Prguse.GetImage(360)
@@ -59,8 +59,8 @@ func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
 			if bgTex != 0 {
 				bgW := float32(bgImg.Width)
 				bgH := float32(bgImg.Height)
-				bgX := (1024 - bgW) / 2
-				bgY := (768 - bgH) / 2
+				bgX := (ScreenWidth - bgW) / 2
+				bgY := (ScreenHeight - bgH) / 2
 				gl.DrawQuad(bgTex, bgX, bgY, bgW, bgH, proj)
 
 				if s.text != nil {

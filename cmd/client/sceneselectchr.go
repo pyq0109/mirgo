@@ -61,8 +61,8 @@ type SelectChrScene struct {
 }
 
 const (
-	selOX = float32(112)
-	selOY = float32(84)
+	selOX = float32(0)
+	selOY = float32(0)
 )
 
 var selButtonAreas = []loginArea{
@@ -159,7 +159,7 @@ func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 			gl.DrawQuad(tex, ox, oy, float32(w), float32(h), proj)
 		}
 	} else {
-		gl.DrawQuadColor(0, 0, 1024, 768, 0.1, 0.15, 0.1, 1.0, proj)
+		gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0.1, 0.15, 0.1, 1.0, proj)
 	}
 
 	for i := 0; i < 2; i++ {
@@ -312,7 +312,7 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 }
 
 func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, 1024, 768, 0, 0, 0, 0.5, proj)
+	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.5, proj)
 
 	if !s.drawPrguseImage(73, 352, 200, proj) {
 		gl.DrawQuadColor(352, 200, 320, 260, 0.12, 0.12, 0.2, 0.95, proj)
@@ -382,7 +382,7 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 }
 
 func (s *SelectChrScene) renderDeleteDialog(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, 1024, 768, 0, 0, 0, 0.5, proj)
+	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.5, proj)
 	gl.DrawQuadColor(352, 280, 320, 140, 0.12, 0.12, 0.2, 0.95, proj)
 	gl.DrawQuadColor(354, 282, 316, 136, 0.18, 0.18, 0.28, 0.95, proj)
 

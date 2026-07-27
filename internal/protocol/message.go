@@ -361,6 +361,10 @@ const (
 	SMMakeDrugSuccess    = 713
 	SMMakeDrugFail       = 714
 
+	// SMStdItems delivers the item definition DB once at login (Go closed
+	// loop; Delphi embeds TStdItem in every item message instead).
+	SMStdItems = 715
+
 	// Guild operations (750-772)
 	SMChangeGuildName     = 750
 	SMSendUserState       = 751
@@ -778,6 +782,8 @@ func MsgName(ident uint16) string {
 		return "SM_MAKEDRUGSUCCESS"
 	case SMMakeDrugFail:
 		return "SM_MAKEDRUGFAIL"
+	case SMStdItems:
+		return "SM_STDITEMS"
 	// SM - Guild
 	case SMChangeGuildName:
 		return "SM_CHANGEGUILDNAME"

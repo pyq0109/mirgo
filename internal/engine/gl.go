@@ -14,6 +14,11 @@ type GLState struct {
 	VAO           uint32
 	VBO           uint32
 	WhiteTex      uint32
+
+	// Current viewport in framebuffer pixels (updated by SetViewport).
+	ViewX, ViewY, ViewW, ViewH int32
+
+	scissorStack [][4]int32
 }
 
 // NewGLState initializes OpenGL resources.
@@ -94,14 +99,50 @@ func (s *GLState) DeleteTexture(id uint32) {
 	}
 }
 
-// DrawQuad draws a textured quad at (x, y) with size (w, h).
-func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
+// SetViewport sets the GL viewport and remembers it (used for scissor math).
+func (s *GLState) SetViewport(x, y, w, h int32) {
+	s.ViewX, s.ViewY, s.ViewW, s.ViewH = x, y, w, h
+	gl.Viewport(x, y, w, h)
+}
+
+// PushScissor enables a scissor rect. Coordinates are top-down within the
+// current viewport. Callers drawing UI at logical 800x600 while the
+// framebuffer is scaled (HiDPI) must convert logical to viewport pixels
+// themselves: pix = logical * ViewW / 800.
+func (s *GLState) PushScissor(x, y, w, h int32) {
+	s.scissorStack = append(s.scissorStack, [4]int32{x, y, w, h})
+	gl.Enable(gl.SCISSOR_TEST)
+	gl.Scissor(s.ViewX+x, s.ViewY+s.ViewH-y-h, w, h)
+}
+
+// PopScissor restores the previous scissor rect, or disables scissoring.
+func (s *GLState) PopScissor() {
+	if len(s.scissorStack) == 0 {
+		gl.Disable(gl.SCISSOR_TEST)
+		return
+	}
+	s.scissorStack = s.scissorStack[:len(s.scissorStack)-1]
+	if len(s.scissorStack) == 0 {
+		gl.Disable(gl.SCISSOR_TEST)
+		return
+	}
+	r := s.scissorStack[len(s.scissorStack)-1]
+	gl.Scissor(s.ViewX+r[0], s.ViewY+s.ViewH-r[1]-r[3], r[2], r[3])
+}
+
+func (s *GLState) bindTexture(texID uint32) {
+	gl.ActiveTexture(gl.TEXTURE0)
+	if texID != 0 {
+		gl.BindTexture(gl.TEXTURE_2D, texID)
+	} else {
+		gl.BindTexture(gl.TEXTURE_2D, s.WhiteTex)
+	}
+}
+
+func (s *GLState) setModel(x, y, w, h float32, proj [16]float32) {
 	gl.UseProgram(s.TextureShader.ID)
 	gl.BindVertexArray(s.VAO)
-
 	gl.UniformMatrix4fv(s.TextureShader.ProjLoc, 1, false, &proj[0])
-
-	// Model matrix: translate(x,y) scale(w,h)
 	model := [16]float32{
 		w, 0, 0, 0,
 		0, h, 0, 0,
@@ -109,69 +150,54 @@ func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
 		x, y, 0, 1,
 	}
 	gl.UniformMatrix4fv(s.TextureShader.ModelLoc, 1, false, &model[0])
+}
 
+// DrawQuad draws a textured quad at (x, y) with size (w, h).
+func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
+	s.setModel(x, y, w, h, proj)
+	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
+	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
 	gl.Uniform1i(s.TextureShader.UseTexLoc, 1)
 	gl.Uniform4f(s.TextureShader.ColorLoc, 1, 1, 1, 1)
-
-	gl.ActiveTexture(gl.TEXTURE0)
-	if texID != 0 {
-		gl.BindTexture(gl.TEXTURE_2D, texID)
-	} else {
-		gl.BindTexture(gl.TEXTURE_2D, s.WhiteTex)
-	}
-
+	s.bindTexture(texID)
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
 // DrawQuadTint draws a textured quad with color tinting (frag_color = texture * color).
 func (s *GLState) DrawQuadTint(texID uint32, x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
-	gl.UseProgram(s.TextureShader.ID)
-	gl.BindVertexArray(s.VAO)
-
-	gl.UniformMatrix4fv(s.TextureShader.ProjLoc, 1, false, &proj[0])
-
-	model := [16]float32{
-		w, 0, 0, 0,
-		0, h, 0, 0,
-		0, 0, 1, 0,
-		x, y, 0, 1,
-	}
-	gl.UniformMatrix4fv(s.TextureShader.ModelLoc, 1, false, &model[0])
-
+	s.setModel(x, y, w, h, proj)
+	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
+	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
 	gl.Uniform1i(s.TextureShader.UseTexLoc, 1)
 	gl.Uniform4f(s.TextureShader.ColorLoc, r, g, b, a)
+	s.bindTexture(texID)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+}
 
-	gl.ActiveTexture(gl.TEXTURE0)
-	if texID != 0 {
-		gl.BindTexture(gl.TEXTURE_2D, texID)
-	} else {
-		gl.BindTexture(gl.TEXTURE_2D, s.WhiteTex)
+// DrawQuadSub draws a sub-rectangle (sx, sy, sw, sh in texture pixels of a
+// texW×texH texture) into the destination quad (x, y, w, h), with tint.
+// Used for cropped bars (HP/MP orbs, exp/weight) and partial sprites.
+func (s *GLState) DrawQuadSub(texID uint32, texW, texH float32, sx, sy, sw, sh, x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
+	if texW <= 0 || texH <= 0 {
+		return
 	}
-
+	s.setModel(x, y, w, h, proj)
+	gl.Uniform2f(s.TextureShader.UVScaleLoc, sw/texW, sh/texH)
+	gl.Uniform2f(s.TextureShader.UVOffLoc, sx/texW, sy/texH)
+	gl.Uniform1i(s.TextureShader.UseTexLoc, 1)
+	gl.Uniform4f(s.TextureShader.ColorLoc, r, g, b, a)
+	s.bindTexture(texID)
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
 // DrawQuadColor draws a colored quad (no texture).
 func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
-	gl.UseProgram(s.TextureShader.ID)
-	gl.BindVertexArray(s.VAO)
-
-	gl.UniformMatrix4fv(s.TextureShader.ProjLoc, 1, false, &proj[0])
-
-	model := [16]float32{
-		w, 0, 0, 0,
-		0, h, 0, 0,
-		0, 0, 1, 0,
-		x, y, 0, 1,
-	}
-	gl.UniformMatrix4fv(s.TextureShader.ModelLoc, 1, false, &model[0])
-
+	s.setModel(x, y, w, h, proj)
+	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
+	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
 	gl.Uniform1i(s.TextureShader.UseTexLoc, 0)
 	gl.Uniform4f(s.TextureShader.ColorLoc, r, g, b, a)
-
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, s.WhiteTex)
-
+	s.bindTexture(s.WhiteTex)
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 

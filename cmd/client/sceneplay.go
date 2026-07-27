@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
@@ -64,9 +63,40 @@ type PlayScene struct {
 	sendSpell    func(magID int, x, y int)
 	sendNpcClick   func(npcID int)
 	sendDealCancel func()
-	sendUseItem    func(bagIdx int)
+	sendUseItem    func(makeIndex int32) // CMEat, item addressed by MakeIndex
 	sendBuyItem    func(itemIdx int)
-	sendSellItem   func(bagIdx int)
+	sendSellItem   func(makeIndex int32) // CMUserSellItem, addressed by MakeIndex
+	sendDropItem   func(makeIndex int32) // CMDropItem, addressed by MakeIndex
+	sendDropGold   func(amount int)      // CMDropGold, amount in Recog
+	sendDealTry    func()                // CMDealTry
+	sendTakeOn     func(makeIndex int32, slot int) // CMTakeOnItem
+	sendTakeOff       func(slot int)               // CMTakeOffItem
+	sendMagicKey      func(magID, key int)         // CMMagicKeyChange
+	sendMerchantSelect func(npcID int32, tag string) // CMMerchantDlgSelect
+	sendQueryPrice    func(makeIndex int32)        // CMMerchantQuerySellPrice
+	sendQueryRepair   func(makeIndex int32)        // CMMerchantQueryRepairCost
+	sendRepairItem    func(makeIndex int32)        // CMUserRepairItem
+	sendStorageItem   func(makeIndex int32)        // CMUserStorageItem
+	sendTakeBackStorage func(makeIndex int32)      // CMUserTakeBackStorageItem
+	sendDealAdd       func(makeIndex int32)        // CMDealAddItem
+	sendDealDel       func(makeIndex int32)        // CMDealDelItem
+	sendDealChgGold   func(amount int)             // CMDealChgGold
+	sendDealEnd       func()                       // CMDealEnd
+	sendOpenGuild        func()                    // CMOpenGuildDlg
+	sendGuildMemberList  func()                    // CMGuildMemberList
+	sendGuildAdd         func(name string)         // CMGuildAddMember
+	sendGuildDel         func(name string)         // CMGuildDelMember
+	sendGuildUpdateNotice func(text string)        // CMGuildUpdateNotice
+	sendGuildUpdateRank  func(text string)         // CMGuildUpdateRankInfo
+	sendGuildAlly        func(name string)         // CMGuildAlly
+	sendGuildBreakAlly   func(name string)         // CMGuildBreakAlly
+	sendGuildHome        func()                    // CMGuildHome
+	sendGroupMode        func(allow int)           // CMGroupMode
+	sendCreateGroup      func(name string)         // CMCreateGroup
+	sendAddGroupMember   func(name string)         // CMAddGroupMember
+	sendDelGroupMember   func(name string)         // CMDelGroupMember
+	sendAdjustBonus      func(remaining int, deltas [9]int) // CMAdjustBonus
+	sendQueryUserState   func(targetID int32)               // CMQueryUserState
 	sendAttackMode func(mode int)
 	lastMoveTick   int64
 	text         *engine.TextRenderer
@@ -85,6 +115,59 @@ type PlayScene struct {
 
 	lastHitTick int64
 
+	// UI framework (DWinCtl port): panels, buttons, grids, modals.
+	ui            *UIManager
+	itemMove      ItemMoveState
+	tooltip       Tooltip
+	hudPlusAbil   *UIControl
+	hudBag        *UIControl
+	hudState      *UIControl
+	stateSlotBtns [13]*UIControl
+	stateMagBtns  [5]*UIControl
+	statePageUp   *UIControl
+	statePageDown *UIControl
+	magicPage     int
+	chatScroll    int // lines the chat board is scrolled back from newest
+
+	// Trade windows (uideal.go).
+	hudDealOwn, hudDealRemote *UIControl
+	dealActionTick            int64
+
+	// Guild + group panels (uiguild.go).
+	hudGuild, hudGroup *UIControl
+	guildAdminBtns     []*UIControl
+	guildChatMode      bool
+
+	// Adjust-ability + inspect windows (uiabil.go).
+	hudAbil, hudInspect *UIControl
+	abilDeltas          [9]int
+	abilPointsLeft      int
+	showInspect         bool
+	inspectItems        [13]*protocol.UserItem
+	inspectName         string
+
+	// NPC dialog + shop state (uinpc.go).
+	hudNpc, hudMenu, hudSell *UIControl
+	npcLines                 [][]npcSegment
+	npcClicks                []npcClickPoint
+	npcSelectTag             string
+	npcLastClickTick         int64
+	menuTop                  int
+	menuIndex                int
+	lastBuyTick              int64
+	sellItem                 *BagItem
+	sellPriceStr             string
+	queryPrice               bool
+	queryPriceTick           int64
+	merchantWasOpen          bool
+
+	// Cursor position in logical 800×600 space (updated on every move).
+	mouseX, mouseY float64
+	// Double-click synthesis (GLFW has no native event): Delphi gets
+	// WM_LBUTTONDBLCLK; we detect two left presses <400ms and <4px apart.
+	lastPressTick        int64
+	lastPressX, lastPressY float64
+
 	targetX, targetY int
 
 	showMinimap bool
@@ -95,7 +178,7 @@ type PlayScene struct {
 }
 
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
-	return &PlayScene{
+	s := &PlayScene{
 		gl:             gl,
 		resources:      resources,
 		mapDir:         mapDir,
@@ -110,6 +193,54 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		showMinimap:    true,
 		effects:        NewEffectManager(),
 		events:         NewEventManager(),
+		ui:             NewUIManager(gl, resources, nil),
+	}
+	// Clicking empty space while holding an item drops it on the ground
+	// (FState.pas:1865-1886 DBackgroundBackgroundClick). WantReturn stays
+	// false so the click still reaches the game world when nothing is held.
+	s.ui.Root.OnBackgroundClick = func(c *UIControl) {
+		s.backgroundClick()
+	}
+	s.buildHUD()
+	s.buildBag()
+	s.buildState()
+	s.buildNpcPanels()
+	s.buildDealPanels()
+	s.buildGuildPanels()
+	s.buildAbilPanel()
+	return s
+}
+
+// backgroundClick handles clicks that fell through every control.
+func (s *PlayScene) backgroundClick() {
+	if !s.itemMove.Moving {
+		return
+	}
+	switch {
+	case s.itemMove.Index >= 0:
+		// Drop the item on the ground (FState.pas:1842-1854).
+		if s.sendDropItem != nil {
+			s.sendDropItem(s.itemMove.Item.MakeIndex)
+			if slot := s.State.FindBagItemByMakeIndex(s.itemMove.Item.MakeIndex); slot >= 0 {
+				s.State.BagItems[slot] = nil
+			}
+			s.itemMove.End()
+		}
+	case s.itemMove.Index == moveIdxBagGold:
+		// Drop gold: ask the amount (FState.pas:1870-1882).
+		gold := s.State.Gold
+		ShowInput(s, "Drop how much gold?", func(ok bool, text string) {
+			if !ok {
+				return
+			}
+			amount := atoiClamped(text, 0, gold)
+			if amount > 0 && s.sendDropGold != nil {
+				s.sendDropGold(amount)
+			}
+		})
+		s.itemMove.End()
+	default:
+		s.itemMove.Cancel(s.State)
 	}
 }
 
@@ -141,7 +272,7 @@ func (s *PlayScene) SetSendDealCancel(fn func()) {
 	s.sendDealCancel = fn
 }
 
-func (s *PlayScene) SetSendUseItem(fn func(bagIdx int)) {
+func (s *PlayScene) SetSendUseItem(fn func(makeIndex int32)) {
 	s.sendUseItem = fn
 }
 
@@ -149,9 +280,91 @@ func (s *PlayScene) SetSendBuyItem(fn func(itemIdx int)) {
 	s.sendBuyItem = fn
 }
 
-func (s *PlayScene) SetSendSellItem(fn func(bagIdx int)) {
+func (s *PlayScene) SetSendSellItem(fn func(makeIndex int32)) {
 	s.sendSellItem = fn
 }
+
+func (s *PlayScene) SetSendDropItem(fn func(makeIndex int32)) {
+	s.sendDropItem = fn
+}
+
+func (s *PlayScene) SetSendDropGold(fn func(amount int)) {
+	s.sendDropGold = fn
+}
+
+func (s *PlayScene) SetSendDealTry(fn func()) {
+	s.sendDealTry = fn
+}
+
+func (s *PlayScene) SetSendTakeOn(fn func(makeIndex int32, slot int)) {
+	s.sendTakeOn = fn
+}
+
+func (s *PlayScene) SetSendTakeOff(fn func(slot int)) {
+	s.sendTakeOff = fn
+}
+
+func (s *PlayScene) SetSendMagicKey(fn func(magID, key int)) {
+	s.sendMagicKey = fn
+}
+
+func (s *PlayScene) SetSendMerchantSelect(fn func(npcID int32, tag string)) {
+	s.sendMerchantSelect = fn
+}
+
+func (s *PlayScene) SetSendQueryPrice(fn func(makeIndex int32)) {
+	s.sendQueryPrice = fn
+}
+
+func (s *PlayScene) SetSendQueryRepair(fn func(makeIndex int32)) {
+	s.sendQueryRepair = fn
+}
+
+func (s *PlayScene) SetSendRepairItem(fn func(makeIndex int32)) {
+	s.sendRepairItem = fn
+}
+
+func (s *PlayScene) SetSendStorageItem(fn func(makeIndex int32)) {
+	s.sendStorageItem = fn
+}
+
+func (s *PlayScene) SetSendTakeBackStorage(fn func(makeIndex int32)) {
+	s.sendTakeBackStorage = fn
+}
+
+func (s *PlayScene) SetSendDealAdd(fn func(makeIndex int32)) {
+	s.sendDealAdd = fn
+}
+
+func (s *PlayScene) SetSendDealDel(fn func(makeIndex int32)) {
+	s.sendDealDel = fn
+}
+
+func (s *PlayScene) SetSendDealChgGold(fn func(amount int)) {
+	s.sendDealChgGold = fn
+}
+
+func (s *PlayScene) SetSendDealEnd(fn func()) {
+	s.sendDealEnd = fn
+}
+
+func (s *PlayScene) SetSendOpenGuild(fn func())                          { s.sendOpenGuild = fn }
+func (s *PlayScene) SetSendGuildMemberList(fn func())                    { s.sendGuildMemberList = fn }
+func (s *PlayScene) SetSendGuildAdd(fn func(name string))                { s.sendGuildAdd = fn }
+func (s *PlayScene) SetSendGuildDel(fn func(name string))                { s.sendGuildDel = fn }
+func (s *PlayScene) SetSendGuildUpdateNotice(fn func(text string))       { s.sendGuildUpdateNotice = fn }
+func (s *PlayScene) SetSendGuildUpdateRank(fn func(text string))         { s.sendGuildUpdateRank = fn }
+func (s *PlayScene) SetSendGuildAlly(fn func(name string))               { s.sendGuildAlly = fn }
+func (s *PlayScene) SetSendGuildBreakAlly(fn func(name string))          { s.sendGuildBreakAlly = fn }
+func (s *PlayScene) SetSendGuildHome(fn func())                          { s.sendGuildHome = fn }
+func (s *PlayScene) SetSendGroupMode(fn func(allow int))                 { s.sendGroupMode = fn }
+func (s *PlayScene) SetSendCreateGroup(fn func(name string))             { s.sendCreateGroup = fn }
+func (s *PlayScene) SetSendAddGroupMember(fn func(name string))          { s.sendAddGroupMember = fn }
+func (s *PlayScene) SetSendDelGroupMember(fn func(name string))          { s.sendDelGroupMember = fn }
+func (s *PlayScene) SetSendAdjustBonus(fn func(remaining int, deltas [9]int)) {
+	s.sendAdjustBonus = fn
+}
+func (s *PlayScene) SetSendQueryUserState(fn func(targetID int32)) { s.sendQueryUserState = fn }
 
 func (s *PlayScene) SetSendAttackMode(fn func(mode int)) {
 	s.sendAttackMode = fn
@@ -174,6 +387,7 @@ func (s *PlayScene) RemoveGroundItem(id int32) {
 
 func (s *PlayScene) SetText(t *engine.TextRenderer) {
 	s.text = t
+	s.ui.SetText(t)
 }
 
 func (s *PlayScene) LoadMap(mapName string) error {
@@ -184,7 +398,9 @@ func (s *PlayScene) LoadMap(mapName string) error {
 	}
 	s.mapData = m
 	if s.cam == nil {
-		s.cam = engine.NewCamera(1024, 768)
+		// Map surface is 800×445 (Delphi MAPSURFACEHEIGHT, Share.pas:31);
+		// the bottom 155px belong to the HUD bar.
+		s.cam = engine.NewCamera(ScreenWidth, MapSurfaceH)
 	}
 	s.cam.CenterOn(float64(m.Width)*engine.TileWidth/2, float64(m.Height)*engine.TileHeight/2)
 	s.State.MapName = mapName
@@ -251,6 +467,7 @@ func (s *PlayScene) Update(dt float64) {
 	s.State.Actors.Update(now, moveTick)
 	s.effects.Update(now)
 	s.events.Update(now)
+	s.pumpSellQuery()
 
 	if s.State.MySelf != nil && s.cam != nil && s.mapData != nil {
 		my := s.State.MySelf
@@ -298,6 +515,11 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+
+	// World renders into the top 445 logical rows; the bottom 155px is HUD.
+	fbW, fbH := s.gl.ViewW, s.gl.ViewH
+	worldH := int32(float64(MapSurfaceH) * float64(fbH) / float64(ScreenHeight))
+	s.gl.SetViewport(0, fbH-worldH, fbW, worldH)
 
 	left := float32(cam.X)
 	top := float32(cam.Y)
@@ -399,7 +621,9 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 
 	s.animCounter++
 
-	uiProj := engine.OrthoProj(1024, 768)
+	// UI layers use the full viewport in 800×600 logical space.
+	s.gl.SetViewport(0, 0, fbW, fbH)
+	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 	if s.showMinimap {
 		mmapDrawn := false
 		if s.resources.Mmap != nil && s.resources.Mmap.Count > 0 {
@@ -407,13 +631,13 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 			if mmImg != nil && mmImg.RGBA != nil {
 				mmTex := s.resources.GetTexture(s.resources.Mmap, 0)
 				if mmTex != 0 {
-					s.gl.DrawQuad(mmTex, 904, 10, 120, 120, uiProj)
+					s.gl.DrawQuad(mmTex, ScreenWidth-120-10, 10, 120, 120, uiProj)
 					mmapDrawn = true
 				}
 			}
 		}
 		if !mmapDrawn && s.minimap != nil {
-			glState.DrawQuad(s.minimap.GetTexture(), 814, 10, minimapSize, minimapSize, uiProj)
+			glState.DrawQuad(s.minimap.GetTexture(), ScreenWidth-minimapSize-10, 10, minimapSize, minimapSize, uiProj)
 		}
 	}
 	s.RenderUI(uiProj)
@@ -742,6 +966,9 @@ func (s *PlayScene) collectLightSources() []LightSource {
 }
 
 func (s *PlayScene) OnChar(char rune) {
+	if s.ui.RouteChar(char) {
+		return
+	}
 	if s.chatMode && char >= 32 && char <= 126 {
 		if len(s.chatInput) < 80 {
 			s.chatInput += string(char)
@@ -750,6 +977,14 @@ func (s *PlayScene) OnChar(char rune) {
 }
 
 func (s *PlayScene) OnKey(key int, action int) {
+	// UI (modals / focused edit controls) gets keys first.
+	if s.ui.RouteKeyDown(key) {
+		return
+	}
+	if key == 256 && s.itemMove.Moving { // Esc releases the held item
+		s.itemMove.Cancel(s.State)
+		return
+	}
 	if s.State.ShowNpcDialog {
 		s.State.ShowNpcDialog = false
 		return
@@ -761,6 +996,7 @@ func (s *PlayScene) OnKey(key int, action int) {
 			if s.State.InDeal {
 				s.State.InDeal = false
 				s.State.DealPartner = ""
+				s.resetDeal()
 				if s.sendDealCancel != nil {
 					s.sendDealCancel()
 				}
@@ -770,9 +1006,8 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.State.ShowShop = false
 				return
 			}
-			if s.State.ShowGuild || s.State.ShowStorage {
+			if s.State.ShowGuild {
 				s.State.ShowGuild = false
-				s.State.ShowStorage = false
 				return
 			}
 		case 257: // Enter
@@ -790,7 +1025,7 @@ func (s *PlayScene) OnKey(key int, action int) {
 			s.State.ShowBag = !s.State.ShowBag
 			return
 		case 71: // G
-			s.State.ShowGuild = !s.State.ShowGuild
+			s.toggleGuild()
 			return
 		case 78: // N
 			s.State.ShowEquip = !s.State.ShowEquip
@@ -806,8 +1041,11 @@ func (s *PlayScene) OnKey(key int, action int) {
 			modes := []string{"和平", "组队", "行会", "全体", "PK"}
 			s.addChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
 			return
-		case 80: // P
-			s.State.ShowChar = !s.State.ShowChar
+		case 80: // P — character stats (state panel page 1)
+			s.State.ShowEquip = !s.State.ShowEquip
+			if s.State.ShowEquip {
+				s.State.StatePage = 1
+			}
 			return
 		}
 
@@ -827,10 +1065,8 @@ func (s *PlayScene) OnKey(key int, action int) {
 		}
 
 		if !s.chatMode && key >= 49 && key <= 54 {
-			beltIdx := key - 49
-			bagIdx := s.State.BeltItems[beltIdx]
-			if bagIdx >= 0 && bagIdx < len(s.State.BagItems) && s.sendUseItem != nil {
-				s.sendUseItem(bagIdx)
+			if item := s.State.BeltItems[key-49]; item != nil && s.sendUseItem != nil {
+				s.sendUseItem(item.MakeIndex)
 			}
 			return
 		}
@@ -923,8 +1159,64 @@ func dirOffset(dir int) (dx, dy int) {
 	return 0, 0
 }
 
+func (s *PlayScene) OnMouseMove(x, y float64) {
+	s.mouseX, s.mouseY = x, y
+	s.ui.RouteMouseMove(int(x), int(y))
+}
+
+func absF(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func (s *PlayScene) OnMouse(x, y float64, button int, action int) {
+	s.mouseX, s.mouseY = x, y
+	ix, iy := int(x), int(y)
+
+	if action == 0 { // release
+		s.ui.RouteMouseUp(ix, iy, button)
+		return
+	}
 	if action != 1 {
+		return
+	}
+
+	// Right-click cancels an item drag (ClMain.pas:2193); otherwise it
+	// inspects the clicked player.
+	if button == 1 {
+		if s.itemMove.Moving {
+			s.itemMove.Cancel(s.State)
+			return
+		}
+		s.tryInspect(x, y)
+		return
+	}
+
+	// Left press: double-click synthesis (Delphi WM_LBUTTONDBLCLK).
+	dbl := false
+	if button == 0 {
+		now := time.Now().UnixMilli()
+		if now-s.lastPressTick < 400 && absF(x-s.lastPressX) < 4 && absF(y-s.lastPressY) < 4 {
+			dbl = true
+			s.lastPressTick = 0
+		} else {
+			s.lastPressTick = now
+			s.lastPressX, s.lastPressY = x, y
+		}
+	}
+	if dbl {
+		// The second press of a double-click is not a standalone down
+		// (Windows sends DOWN, UP, DBLCLK, UP).
+		s.ui.RouteDblClick(ix, iy)
+		return
+	}
+	if s.ui.RouteMouseDown(ix, iy, button) {
+		return
+	}
+	// Below the map surface is HUD territory (bottom bar, y>=445).
+	if y >= MapSurfaceH {
 		return
 	}
 	if s.State.MySelf == nil || s.sendMove == nil {
@@ -1016,16 +1308,37 @@ func dirToward(fromX, fromY, toX, toY int) int {
 	return 2
 }
 
-func (s *PlayScene) OnScroll(x, y float64) {
+func (s *PlayScene) OnScroll(offX, offY float64) {
+	// Wheel over the chat board scrolls chat history; elsewhere zooms
+	// (Delphi scrolls ChatBoardTop from PlayScn).
+	if s.mouseX >= chatBoardX && s.mouseX <= chatBoardX+474 &&
+		s.mouseY >= float64(chatBoardTop) && s.mouseY < float64(chatBoardTop+chatLineH*ViewChatLine) {
+		maxScroll := len(s.chatMessages) - ViewChatLine
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		s.chatScroll -= int(offY) // wheel up (offY>0) goes back in history
+		if s.chatScroll < 0 {
+			s.chatScroll = 0
+		}
+		if s.chatScroll > maxScroll {
+			s.chatScroll = maxScroll
+		}
+		return
+	}
 	if s.cam != nil {
-		s.cam.ZoomAt(1.1, x, y)
+		if offY > 0 {
+			s.cam.ZoomAt(1.1, s.mouseX, s.mouseY)
+		} else {
+			s.cam.ZoomAt(1/1.1, s.mouseX, s.mouseY)
+		}
 	}
 }
 
 func (s *PlayScene) addChatMessage(text string) {
 	s.chatMessages = append(s.chatMessages, ChatMessage{Text: text, Time: time.Now().UnixMilli()})
-	if len(s.chatMessages) > 10 {
-		s.chatMessages = s.chatMessages[len(s.chatMessages)-10:]
+	if len(s.chatMessages) > 100 {
+		s.chatMessages = s.chatMessages[len(s.chatMessages)-100:]
 	}
 }
 
@@ -1049,380 +1362,56 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 	if s.text == nil {
 		return
 	}
-	st := s.State
 
-	if s.resources.Prguse != nil {
-		barImg := s.resources.Prguse.GetImage(1)
-		if barImg != nil && barImg.RGBA != nil {
-			barTex := s.resources.GetTexture(s.resources.Prguse, 1)
-			if barTex != 0 {
-				barW := float32(barImg.Width)
-				barH := float32(barImg.Height)
-				barX := (1024 - barW) / 2
-				barY := 768 - barH
-				s.gl.DrawQuad(barTex, barX, barY, barW, barH, proj)
-			}
-		}
+	// Bottom bar, HP/MP orbs, buttons, belt, chat, bag, state panel — all
+	// drawn by the control tree (uihud.go / uibag.go / uistate.go) via
+	// s.ui.Paint below.
+	s.syncBagWindow()
+	s.syncStateWindow()
+	s.syncMerchantWindows()
+	s.syncDealWindows()
+	s.syncGuildWindows()
+	s.syncAbilWindows()
+
+	// UI control tree (DWinCtl port) paints on top of the legacy hand-drawn
+	// panels; legacy panels are migrated into the tree phase by phase.
+	s.ui.Paint(proj)
+
+	// Hint panel, then the item held on the cursor — Delphi paint order
+	// (ClMain.pas: DrawHint :1079, held item :1093).
+	s.tooltip.Render(s, proj)
+	s.renderHeldItem(proj)
+}
+
+// renderHeldItem draws the dragged item centered on the cursor with a name
+// label (ClMain.pas:1093-1113).
+func (s *PlayScene) renderHeldItem(proj [16]float32) {
+	if !s.itemMove.Moving {
+		return
+	}
+	var looks int
+	var name string
+	if s.itemMove.Index == moveIdxBagGold || s.itemMove.Index == moveIdxDealGold {
+		looks = ItemImgGold
+		name = "Gold"
 	} else {
-		s.gl.DrawQuadColor(0, 628, 1024, 140, 0.08, 0.08, 0.12, 0.95, proj)
-	}
-
-	if s.resources.Prguse != nil {
-		barImg := s.resources.Prguse.GetImage(4)
-		if barImg != nil && barImg.RGBA != nil {
-			barTex := s.resources.GetTexture(s.resources.Prguse, 4)
-			if barTex != 0 {
-				barX := float32(40)
-				barY := float32(640)
-				barW := float32(barImg.Width)
-				barH := float32(barImg.Height)
-				s.gl.DrawQuad(barTex, barX, barY, barW, barH, proj)
-				hpRatio := float32(0)
-				if st.MaxHP > 0 {
-					hpRatio = float32(st.HP) / float32(st.MaxHP)
-				}
-				halfW := barW / 2
-				if hpRatio < 1.0 {
-					emptyX := barX + halfW*hpRatio
-					emptyW := halfW * (1.0 - hpRatio)
-					s.gl.DrawQuadColor(emptyX, barY, emptyW, barH, 0, 0, 0, 0.6, proj)
-				}
-				mpRatio := float32(0)
-				if st.MaxMP > 0 {
-					mpRatio = float32(st.MP) / float32(st.MaxMP)
-				}
-				if mpRatio < 1.0 {
-					emptyX := barX + halfW + halfW*mpRatio
-					emptyW := halfW * (1.0 - mpRatio)
-					s.gl.DrawQuadColor(emptyX, barY, emptyW, barH, 0, 0, 0, 0.6, proj)
-				}
-			}
+		looks = int(s.itemMove.Item.Looks())
+		if s.itemMove.Item.Def != nil {
+			name = s.itemMove.Item.Def.Name
 		}
 	}
-	s.text.DrawText(fmt.Sprintf("%d/%d", st.HP, st.MaxHP), 42, 642, 1.0, 1.0, 1.0, 1.0, proj)
-	s.text.DrawText(fmt.Sprintf("%d/%d", st.MP, st.MaxMP), 90, 642, 1.0, 1.0, 1.0, 1.0, proj)
-	s.text.DrawText(fmt.Sprintf("Lv.%d", st.Level), 50, 684, 1.0, 1.0, 0.5, 1.0, proj)
-
-	if s.resources.Prguse != nil {
-		buttons := []struct {
-			idx   int
-			x, y  float32
-			label string
-		}{
-			{8, 843, 680, "状态"},
-			{9, 882, 660, "背包"},
-			{10, 922, 640, "魔法"},
-			{11, 964, 620, "设置"},
-		}
-		for _, btn := range buttons {
-			if !s.drawWilImage(s.resources.Prguse, btn.idx, btn.x, btn.y, proj) {
-				s.gl.DrawQuadColor(btn.x, btn.y, 28, 28, 0.15, 0.15, 0.2, 0.9, proj)
-				s.text.DrawText(btn.label, btn.x+2, btn.y+8, 0.7, 0.7, 0.7, 1.0, proj)
-			}
+	if s.resources.Items != nil && looks >= 0 && looks < s.resources.Items.Count {
+		img := s.resources.Items.GetImage(looks)
+		tex := s.resources.GetTexture(s.resources.Items, looks)
+		if img != nil && img.RGBA != nil && tex != 0 {
+			s.gl.DrawQuad(tex, float32(s.mouseX)-float32(img.Width)/2,
+				float32(s.mouseY)-float32(img.Height)/2,
+				float32(img.Width), float32(img.Height), proj)
 		}
 	}
-
-	skillX := float32(380)
-	skillY := float32(720)
-	for i := 0; i < 8; i++ {
-		sx := skillX + float32(i)*38
-		s.gl.DrawQuadColor(sx, skillY, 34, 34, 0.1, 0.1, 0.15, 0.7, proj)
-		if i < len(st.Magics) && s.resources.MagIcon != nil {
-			magIdx := int(st.Magics[i].MagID)
-			if magIdx >= 0 && magIdx < s.resources.MagIcon.Count {
-				iconImg := s.resources.MagIcon.GetImage(magIdx)
-				if iconImg != nil && iconImg.RGBA != nil {
-					iconTex := s.resources.GetTexture(s.resources.MagIcon, magIdx)
-					if iconTex != 0 {
-						s.gl.DrawQuad(iconTex, sx+1, skillY+1, 32, 32, proj)
-					}
-				}
-			}
-		}
-		s.text.DrawText(fmt.Sprintf("F%d", i+1), sx+2, skillY+24, 0.7, 0.7, 0.7, 1.0, proj)
-	}
-
-	beltX := float32(160)
-	beltY := float32(720)
-	for i := 0; i < 6; i++ {
-		bx := beltX + float32(i)*36
-		s.gl.DrawQuadColor(bx, beltY, 32, 32, 0.12, 0.12, 0.18, 0.8, proj)
-		bagIdx := st.BeltItems[i]
-		if bagIdx >= 0 && bagIdx < len(st.BagItems) && s.resources.Items != nil {
-			item := st.BagItems[bagIdx]
-			looks := int(item.Idx)
-			if looks >= 0 && looks < s.resources.Items.Count {
-				itemImg := s.resources.Items.GetImage(looks)
-				if itemImg != nil && itemImg.RGBA != nil {
-					itemTex := s.resources.GetTexture(s.resources.Items, looks)
-					if itemTex != 0 {
-						s.gl.DrawQuad(itemTex, bx+2, beltY+2, 28, 28, proj)
-					}
-				}
-			}
-		}
-		s.text.DrawText(fmt.Sprintf("%d", i+1), bx+2, beltY+22, 0.6, 0.6, 0.6, 1.0, proj)
-	}
-
-	amNames := []string{"和平", "组队", "行会", "全体", "PK"}
-	amColors := [][4]float32{{0.5, 1.0, 0.5, 1}, {0.5, 0.5, 1.0, 1}, {0.5, 1.0, 1.0, 1}, {1.0, 1.0, 1.0, 1}, {1.0, 0.3, 0.3, 1}}
-	ac := amColors[st.AttackMode]
-	s.text.DrawText("["+amNames[st.AttackMode]+"]", 10, 620, ac[0], ac[1], ac[2], 1.0, proj)
-
-	chatX := float32(208)
-	chatY := float32(620)
-	for i := len(s.chatMessages) - 1; i >= 0; i-- {
-		msg := s.chatMessages[i]
-		r, g, b := float32(1.0), float32(1.0), float32(0.8)
-		if strings.HasPrefix(msg.Text, "[系统]") {
-			r, g, b = 1.0, 0.5, 0.5
-		}
-		if strings.HasPrefix(msg.Text, "[行会]") {
-			r, g, b = 0.5, 1.0, 0.5
-		}
-		if strings.HasPrefix(msg.Text, "[组队]") {
-			r, g, b = 0.5, 0.5, 1.0
-		}
-		if strings.HasPrefix(msg.Text, "[私聊]") {
-			r, g, b = 1.0, 0.5, 1.0
-		}
-		if strings.HasPrefix(msg.Text, "[喊话]") {
-			r, g, b = 1.0, 1.0, 0.0
-		}
-		s.text.DrawText(msg.Text, chatX, chatY, r, g, b, 1.0, proj)
-		chatY -= 14
-	}
-
-	if s.chatMode {
-		s.gl.DrawQuadColor(208, 750, 386, 16, 0.7, 0.7, 0.7, 0.9, proj)
-		s.text.DrawText(s.chatInput+"|", 212, 752, 0.0, 0.0, 0.0, 1.0, proj)
-	}
-
-	if st.ShowNpcDialog {
-		s.renderNpcDialog(proj)
-	}
-	if st.ShowBag {
-		s.renderBagPanel(proj)
-	}
-	if st.ShowEquip {
-		s.renderEquipPanel(proj)
-	}
-	if st.ShowChar {
-		s.renderCharPanel(proj)
-	}
-	if st.InDeal {
-		s.renderTradePanel(proj)
-	}
-	if st.ShowGuild {
-		s.renderGuildPanel(proj)
-	}
-	if st.ShowShop {
-		s.renderShopPanel(proj)
-	}
-	if st.ShowStorage {
-		s.renderStoragePanel(proj)
+	if name != "" && s.text != nil {
+		s.text.DrawText(name, float32(s.mouseX)+9, float32(s.mouseY)+3, 1, 1, 0, 1, proj)
 	}
 }
 
-func (s *PlayScene) renderBagPanel(proj [16]float32) {
-	st := s.State
-	px, py := float32(0), float32(0)
 
-	if !s.drawWilImage(s.resources.Prguse, 3, px, py, proj) {
-		s.gl.DrawQuadColor(px, py, 320, 380, 0.08, 0.08, 0.12, 0.92, proj)
-	}
-
-	s.text.DrawText("背包", px+140, py+8, 1.0, 1.0, 0.8, 1.0, proj)
-
-	cellSize := float32(36)
-	startX := px + 16
-	startY := py + 36
-	for i := 0; i < 46; i++ {
-		col := i % 8
-		row := i / 8
-		cx := startX + float32(col)*(cellSize+2)
-		cy := startY + float32(row)*(cellSize+2)
-		s.gl.DrawQuadColor(cx, cy, cellSize, cellSize, 0.15, 0.15, 0.2, 0.8, proj)
-		if i < len(st.BagItems) && s.resources.Items != nil {
-			item := st.BagItems[i]
-			looks := int(item.Idx)
-			if looks >= 0 && looks < s.resources.Items.Count {
-				itemImg := s.resources.Items.GetImage(looks)
-				if itemImg != nil && itemImg.RGBA != nil {
-					itemTex := s.resources.GetTexture(s.resources.Items, looks)
-					if itemTex != 0 {
-						iw := float32(itemImg.Width)
-						ih := float32(itemImg.Height)
-						if iw > cellSize {
-							iw = cellSize
-						}
-						if ih > cellSize {
-							ih = cellSize
-						}
-						s.gl.DrawQuad(itemTex, cx+(cellSize-iw)/2, cy+(cellSize-ih)/2, iw, ih, proj)
-					}
-				}
-			}
-		}
-	}
-
-	s.text.DrawText(fmt.Sprintf("金币: %d", st.Gold), px+16, py+360, 1.0, 0.9, 0.3, 1.0, proj)
-}
-
-func (s *PlayScene) renderEquipPanel(proj [16]float32) {
-	st := s.State
-	px, py := float32(780), float32(0)
-
-	if !s.drawWilImage(s.resources.Prguse, 370, px, py, proj) {
-		s.gl.DrawQuadColor(px, py, 240, 350, 0.08, 0.08, 0.12, 0.92, proj)
-	}
-
-	s.text.DrawText("装备", px+100, py+8, 1.0, 1.0, 0.8, 1.0, proj)
-
-	slotNames := []string{"衣服", "武器", "右手", "项链", "头盔", "左手镯", "右手镯", "左戒指", "右戒指", "护身符", "腰带", "鞋子", "宝石"}
-	for i := 0; i < 13; i++ {
-		sy := py + 35 + float32(i)*24
-		s.gl.DrawQuadColor(px+10, sy, 220, 20, 0.12, 0.12, 0.18, 0.7, proj)
-		s.text.DrawText(slotNames[i], px+14, sy+3, 0.7, 0.7, 0.7, 1.0, proj)
-		if st.UseItems[i] != nil {
-			s.text.DrawText(fmt.Sprintf("#%d", st.UseItems[i].WIndex), px+120, sy+3, 1.0, 1.0, 0.5, 1.0, proj)
-		}
-	}
-}
-
-func (s *PlayScene) renderNpcDialog(proj [16]float32) {
-	st := s.State
-	px, py := float32(250), float32(150)
-
-	if !s.drawWilImage(s.resources.Prguse, 384, px, py, proj) {
-		s.gl.DrawQuadColor(px, py, 400, 250, 0.05, 0.05, 0.1, 0.95, proj)
-	}
-
-	lines := strings.Split(st.NpcDialog, "\n")
-	for i, line := range lines {
-		if i > 10 {
-			break
-		}
-		s.text.DrawText(line, px+15, py+15+float32(i)*18, 0.9, 0.9, 0.9, 1.0, proj)
-	}
-}
-
-func (s *PlayScene) renderTradePanel(proj [16]float32) {
-	px, py := float32(300), float32(250)
-	s.gl.DrawQuadColor(px, py, 300, 200, 0.08, 0.08, 0.12, 0.95, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 296, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("交易 - "+s.State.DealPartner, px+80, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-	s.text.DrawText("等待双方确认...", px+80, py+100, 0.8, 0.8, 0.8, 1.0, proj)
-	s.text.DrawText("[ESC取消交易]", px+100, py+175, 0.6, 0.6, 0.6, 1.0, proj)
-}
-
-func (s *PlayScene) renderGuildPanel(proj [16]float32) {
-	px, py := float32(350), float32(200)
-	s.gl.DrawQuadColor(px, py, 250, 200, 0.08, 0.08, 0.12, 0.92, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 246, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("行会", px+105, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-	if s.State.GuildName != "" {
-		s.text.DrawText("名称: "+s.State.GuildName, px+10, py+35, 0.9, 0.9, 0.9, 1.0, proj)
-		s.text.DrawText("职位: "+s.State.GuildRank, px+10, py+55, 0.9, 0.9, 0.9, 1.0, proj)
-	} else {
-		s.text.DrawText("未加入行会", px+70, py+80, 0.7, 0.7, 0.7, 1.0, proj)
-	}
-}
-
-func (s *PlayScene) renderCharPanel(proj [16]float32) {
-	px, py := float32(100), float32(150)
-	s.gl.DrawQuadColor(px, py, 220, 280, 0.08, 0.08, 0.12, 0.92, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 216, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("角色信息", px+80, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-	st := s.State
-	y := py + 35
-	s.text.DrawText(fmt.Sprintf("等级: %d", st.Level), px+10, y, 0.9, 0.9, 0.9, 1.0, proj)
-	y += 20
-	s.text.DrawText(fmt.Sprintf("HP: %d/%d", st.HP, st.MaxHP), px+10, y, 0.9, 0.3, 0.3, 1.0, proj)
-	y += 20
-	s.text.DrawText(fmt.Sprintf("MP: %d/%d", st.MP, st.MaxMP), px+10, y, 0.3, 0.3, 0.9, 1.0, proj)
-	y += 20
-	s.text.DrawText(fmt.Sprintf("金币: %d", st.Gold), px+10, y, 1.0, 0.9, 0.3, 1.0, proj)
-	y += 20
-	if st.GuildName != "" {
-		s.text.DrawText("行会: "+st.GuildName, px+10, y, 0.8, 0.9, 0.8, 1.0, proj)
-	}
-}
-
-func (s *PlayScene) renderShopPanel(proj [16]float32) {
-	st := s.State
-	px, py := float32(550), float32(100)
-	s.gl.DrawQuadColor(px, py, 280, 400, 0.08, 0.08, 0.12, 0.95, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 276, 24, 0.15, 0.15, 0.25, 1.0, proj)
-
-	title := "商店"
-	if st.ShopMode == 1 {
-		title = "出售"
-	} else if st.ShopMode == 2 {
-		title = "修理"
-	}
-	s.text.DrawText(title, px+120, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-
-	if st.ShopMode == 0 {
-		for i, item := range st.ShopGoods {
-			if i > 14 {
-				break
-			}
-			iy := py + 32 + float32(i)*24
-			s.gl.DrawQuadColor(px+6, iy, 268, 22, 0.12, 0.12, 0.18, 0.7, proj)
-			name := item.Name
-			if name == "" {
-				name = fmt.Sprintf("物品#%d", item.ItemIdx)
-			}
-			s.text.DrawText(name, px+10, iy+4, 0.9, 0.9, 0.9, 1.0, proj)
-			s.text.DrawText(fmt.Sprintf("%d金", item.Price), px+200, iy+4, 1.0, 0.9, 0.3, 1.0, proj)
-		}
-	} else {
-		for i, item := range st.BagItems {
-			if i > 14 {
-				break
-			}
-			iy := py + 32 + float32(i)*24
-			s.gl.DrawQuadColor(px+6, iy, 268, 22, 0.12, 0.12, 0.18, 0.7, proj)
-			s.text.DrawText(fmt.Sprintf("物品#%d", item.Idx), px+10, iy+4, 0.9, 0.9, 0.9, 1.0, proj)
-			if item.DuraMax > 0 {
-				s.text.DrawText(fmt.Sprintf("%d/%d", item.Dura, item.DuraMax), px+200, iy+4, 0.7, 0.7, 0.7, 1.0, proj)
-			}
-		}
-	}
-
-	s.text.DrawText("[ESC关闭]", px+100, py+380, 0.6, 0.6, 0.6, 1.0, proj)
-}
-
-func (s *PlayScene) renderStoragePanel(proj [16]float32) {
-	st := s.State
-	px, py := float32(350), float32(150)
-	s.gl.DrawQuadColor(px, py, 300, 350, 0.08, 0.08, 0.12, 0.95, proj)
-	s.gl.DrawQuadColor(px+2, py+2, 296, 24, 0.15, 0.15, 0.25, 1.0, proj)
-	s.text.DrawText("仓库", px+130, py+5, 1.0, 1.0, 0.8, 1.0, proj)
-
-	cellSize := float32(36)
-	startX := px + 12
-	startY := py + 32
-	for i := 0; i < 39; i++ {
-		col := i % 8
-		row := i / 8
-		cx := startX + float32(col)*(cellSize+2)
-		cy := startY + float32(row)*(cellSize+2)
-		s.gl.DrawQuadColor(cx, cy, cellSize, cellSize, 0.15, 0.15, 0.2, 0.8, proj)
-		if i < len(st.StorageItems) && s.resources.Items != nil {
-			item := st.StorageItems[i]
-			looks := int(item.Idx)
-			if looks >= 0 && looks < s.resources.Items.Count {
-				itemImg := s.resources.Items.GetImage(looks)
-				if itemImg != nil && itemImg.RGBA != nil {
-					itemTex := s.resources.GetTexture(s.resources.Items, looks)
-					if itemTex != 0 {
-						s.gl.DrawQuad(itemTex, cx+2, cy+2, cellSize-4, cellSize-4, proj)
-					}
-				}
-			}
-		}
-	}
-	s.text.DrawText("[ESC关闭]", px+110, py+330, 0.6, 0.6, 0.6, 1.0, proj)
-}

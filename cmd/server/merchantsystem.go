@@ -75,6 +75,9 @@ func getMerchantConfig(npcName string) *MerchantConfig {
 	return merchantConfigs[strings.ToLower(npcName)]
 }
 
+// HandleMerchantDlgSelect processes a clicked NPC dialog link. The body
+// carries the tag value after '/' in <text/tag> (Delphi
+// SendMerchantDlgSelect, ClMain.pas:3094-3110): @buy/@sell/@switch etc.
 func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.TCPServer) {
 	if p.envir == nil {
 		return
@@ -83,14 +86,34 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 	if !ok {
 		return
 	}
-	sel := msg.Param2
-	switch sel {
-	case 0:
+	tag := strings.TrimSpace(msg.Msg)
+	switch strings.ToLower(tag) {
+	case "@buy":
 		p.sendGoodsList(server, npc)
-	case 1:
+	case "@sell":
 		p.sendSellMode(server, npc)
-	case 2:
+	case "@repair":
 		p.sendRepairMode(server, npc)
+	default:
+		// '@@' tags arrive as "@@cmd\r\ninput" (ClMain.pas:3100-3105).
+		if strings.HasPrefix(tag, "@@") {
+			cmd, input := tag, ""
+			if i := strings.Index(tag, "\r\n"); i >= 0 {
+				cmd, input = tag[:i], tag[i+2:]
+			}
+			if cmd == "@@buildguildnow" && input != "" {
+				build := msg
+				build.Msg = input
+				p.HandleBuildGuild(build, server)
+				return
+			}
+		}
+		// Jump to the script label (labels are stored without '@').
+		if npc.Script != "" {
+			if script, err := LoadNpcScript(npc.Script); err == nil {
+				script.Execute(strings.TrimPrefix(tag, "@"), p, npc, server)
+			}
+		}
 	}
 }
 
@@ -191,7 +214,9 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 
 	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(itemIdx), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
+	p.sendWeightChanged(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
@@ -199,8 +224,9 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := int(msg.Param1)
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	bagIdx := p.findBagItem(int32(msg.Param1))
+	if bagIdx < 0 {
 		p.sendSellFail(server)
 		return
 	}
@@ -231,7 +257,9 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 
 	resp := protocol.MakeDefaultMsg(protocol.SMUserSellItemOK, int32(price), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
+	p.sendWeightChanged(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
@@ -239,8 +267,8 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 }
 
 func (p *PlayObject) HandleQuerySellPrice(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := int(msg.Param1)
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	bagIdx := p.findBagItem(int32(msg.Param1))
+	if bagIdx < 0 {
 		return
 	}
 	item := p.ItemList[bagIdx]
@@ -261,13 +289,13 @@ func (p *PlayObject) HandleQuerySellPrice(msg SendMessage, server *netserver.TCP
 			price = 1
 		}
 	}
-	resp := protocol.MakeDefaultMsg(protocol.SMSendBuyPrice, int32(price), uint16(bagIdx), 0, 0)
+	resp := protocol.MakeDefaultMsg(protocol.SMSendBuyPrice, int32(price), uint16(msg.Param1), 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 
 func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := int(msg.Param1)
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	bagIdx := p.findBagItem(int32(msg.Param1))
+	if bagIdx < 0 {
 		p.sendRepairFail(server)
 		return
 	}
@@ -306,8 +334,9 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 }
 
 func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := int(msg.Param1)
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	makeIndex := int32(msg.Param1)
+	bagIdx := p.findBagItem(makeIndex)
+	if bagIdx < 0 {
 		return
 	}
 	item := p.ItemList[bagIdx]
@@ -319,7 +348,7 @@ func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TC
 		return
 	}
 	cost := p.calcRepairCost(def, item)
-	resp := protocol.MakeDefaultMsg(protocol.SMSendRepairCost, int32(cost), uint16(bagIdx), 0, 0)
+	resp := protocol.MakeDefaultMsg(protocol.SMSendRepairCost, int32(cost), uint16(makeIndex), 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 

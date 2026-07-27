@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
@@ -91,6 +93,80 @@ func (g *Guild) GetRank(name string) string {
 		return r
 	}
 	return "成员"
+}
+
+// HandleOpenGuildDlg answers CMOpenGuildDlg with the guild overview
+// (Delphi SMOpenGuildDlg; the old mis-route created a guild here).
+func (p *PlayObject) HandleOpenGuildDlg(msg SendMessage, server *netserver.TCPServer) {
+	guild := p.Engine.PlayerGuild(p.Name)
+	if guild == nil {
+		resp := protocol.MakeDefaultMsg(protocol.SMOpenGuildDlgFail, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, "")
+		return
+	}
+	rank := guild.GetRank(p.Name)
+	perm := 0
+	if guild.Leader == p.Name || rank == "掌门人" || rank == "长老" {
+		perm = 1
+	}
+	p.GuildName = guild.Name
+	p.GuildRank = rank
+	body := guild.Name + "\n" + rank + "\n" + strconv.Itoa(perm) + "\n" + guild.Notice
+	resp := protocol.MakeDefaultMsg(protocol.SMOpenGuildDlg, int32(len(guild.Members)), 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(body))
+}
+
+// HandleGuildMemberListRequest answers CMGuildMemberList with
+// "name/rank/online" lines (Delphi member list content).
+func (p *PlayObject) HandleGuildMemberListRequest(msg SendMessage, server *netserver.TCPServer) {
+	guild := p.Engine.PlayerGuild(p.Name)
+	if guild == nil {
+		return
+	}
+	var sb strings.Builder
+	for i, name := range guild.Members {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		online := 0
+		if p.Engine.GetPlayerByName(name) != nil {
+			online = 1
+		}
+		sb.WriteString(name)
+		sb.WriteByte('/')
+		sb.WriteString(guild.GetRank(name))
+		sb.WriteByte('/')
+		sb.WriteString(strconv.Itoa(online))
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMSendGuildMemberList, int32(len(guild.Members)), 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(sb.String()))
+}
+
+// HandleGuildUpdateRankInfo stores "name/rank" lines from the rank editor.
+func (p *PlayObject) HandleGuildUpdateRankInfo(msg SendMessage, server *netserver.TCPServer) {
+	guild := p.Engine.PlayerGuild(p.Name)
+	if guild == nil || guild.Leader != p.Name {
+		resp := protocol.MakeDefaultMsg(protocol.SMGuildRankUpdateFail, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, "")
+		return
+	}
+	if guild.Ranks == nil {
+		guild.Ranks = make(map[string]string)
+	}
+	for _, line := range strings.Split(msg.Msg, "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), "/", 2)
+		if len(parts) == 2 && parts[0] != "" && guild.IsMember(parts[0]) {
+			guild.Ranks[parts[0]] = parts[1]
+		}
+	}
+	confirm := protocol.MakeDefaultMsg(protocol.SMDlgMsg, 0, 0, 0, 0)
+	server.Send(p.Session.ID, confirm, protocol.EncodeString("Rank info updated"))
+}
+
+// HandleGuildHome is a stub until guild maps exist.
+func (p *PlayObject) HandleGuildHome(msg SendMessage, server *netserver.TCPServer) {
+	confirm := protocol.MakeDefaultMsg(protocol.SMDlgMsg, 0, 0, 0, 0)
+	server.Send(p.Session.ID, confirm, protocol.EncodeString("Guild home is not configured"))
 }
 
 func (p *PlayObject) HandleBuildGuild(msg SendMessage, server *netserver.TCPServer) {

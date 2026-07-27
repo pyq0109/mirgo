@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/pyq0109/mirgo/internal/protocol"
@@ -311,5 +312,122 @@ func TestClientFrameWithCode(t *testing.T) {
 	}
 	if frame[len(frame)-1] != '!' {
 		t.Errorf("frame[-1] = %c, want !", frame[len(frame)-1])
+	}
+}
+
+// ============================================================================
+// P2 Data Sync — body layout mirrors (server side pinned in cmd/server
+// uidata_test.go; these pin the client parsers to the same layouts)
+// ============================================================================
+
+func TestParseAbilityLayout(t *testing.T) {
+	gs := NewGameState()
+	raw := make([]byte, 60)
+	u16 := func(o int, v uint16) { binary.LittleEndian.PutUint16(raw[o:o+2], v) }
+	u32 := func(o int, v uint32) { binary.LittleEndian.PutUint32(raw[o:o+4], v) }
+	u16(0, 42)          // Level
+	u32(2, 0x00030001)  // AC lo=1 hi=3
+	u16(22, 321)        // HP
+	u16(24, 654)        // MaxHP
+	u16(26, 111)        // MP
+	u16(28, 222)        // MaxMP
+	u32(30, 12345)      // Exp
+	u32(34, 99999)      // MaxExp
+	u16(38, 30)         // Weight
+	u16(40, 500)        // MaxWeight
+	u16(50, 9)          // Hit
+	u16(52, 18)         // Speed
+	u16(54, 3)          // BonusPoint
+	u32(56, 777)        // Gold
+
+	gs.ParseAbility(string(raw))
+
+	if gs.Level != 42 || gs.HP != 321 || gs.MaxHP != 654 || gs.MP != 111 || gs.MaxMP != 222 {
+		t.Errorf("core stats = %d/%d/%d/%d/%d, want 42/321/654/111/222",
+			gs.Level, gs.HP, gs.MaxHP, gs.MP, gs.MaxMP)
+	}
+	if gs.AC != 0x00030001 {
+		t.Errorf("AC = %#x, want 0x00030001", gs.AC)
+	}
+	if gs.Exp != 12345 || gs.MaxExp != 99999 {
+		t.Errorf("exp = %d/%d, want 12345/99999", gs.Exp, gs.MaxExp)
+	}
+	if gs.Weight != 30 || gs.MaxWeight != 500 {
+		t.Errorf("weight = %d/%d, want 30/500", gs.Weight, gs.MaxWeight)
+	}
+	if gs.Hit != 9 || gs.Speed != 18 || gs.BonusPoint != 3 || gs.Gold != 777 {
+		t.Errorf("hit/speed/bonus/gold = %d/%d/%d/%d, want 9/18/3/777",
+			gs.Hit, gs.Speed, gs.BonusPoint, gs.Gold)
+	}
+}
+
+func TestParseItemDefsAndRelink(t *testing.T) {
+	gs := NewGameState()
+	// A bag item parsed before the DB arrives has no Def.
+	gs.BagItems[0] = &BagItem{Idx: 7, Dura: 900, DuraMax: 1000, MakeIndex: 1}
+	if gs.BagItems[0].Def != nil {
+		t.Fatal("expected nil Def before DB sync")
+	}
+	if got := gs.BagItems[0].Looks(); got != 7 {
+		t.Errorf("Looks fallback = %d, want raw Idx 7", got)
+	}
+
+	// Build one record: fixed 32 bytes + name.
+	raw := make([]byte, 2, 64)
+	binary.LittleEndian.PutUint16(raw, 1) // count
+	rec := make([]byte, 32)
+	binary.LittleEndian.PutUint16(rec[0:2], 7)   // Idx
+	binary.LittleEndian.PutUint16(rec[2:4], 42)  // Looks
+	rec[4], rec[5], rec[6], rec[7] = 5, 1, 10, 2 // StdMode/Shape/Weight/NeedLevel
+	binary.LittleEndian.PutUint16(rec[16:18], 1) // DC
+	binary.LittleEndian.PutUint16(rec[18:20], 3) // DCMax
+	binary.LittleEndian.PutUint32(rec[28:32], 100) // Price
+	raw = append(raw, rec...)
+	raw = append(raw, byte(len("WoodSword")))
+	raw = append(raw, "WoodSword"...)
+
+	gs.ParseItemDefs(string(raw))
+
+	def := gs.ItemDefs[7]
+	if def == nil {
+		t.Fatal("def idx 7 not parsed")
+	}
+	if def.Name != "WoodSword" || def.Looks != 42 || def.StdMode != 5 || def.NeedLevel != 2 ||
+		def.DC != 1 || def.DCMax != 3 || def.Price != 100 {
+		t.Errorf("def = %+v, fields mismatch", def)
+	}
+	// Existing bag item got relinked and now resolves Looks via the def.
+	if gs.BagItems[0].Def != def {
+		t.Fatal("bag item not relinked to def")
+	}
+	if got := gs.BagItems[0].Looks(); got != 42 {
+		t.Errorf("Looks = %d, want 42 from def", got)
+	}
+}
+
+func TestParseMagicsExtendedLayout(t *testing.T) {
+	gs := NewGameState()
+	raw := make([]byte, 2, 32)
+	binary.LittleEndian.PutUint16(raw, 1) // count
+	rec := make([]byte, 10)
+	binary.LittleEndian.PutUint16(rec[0:2], 1)   // MagID
+	rec[2] = 2                                   // Level
+	rec[3] = '3'                                 // Key
+	binary.LittleEndian.PutUint16(rec[4:6], 8)   // IconIdx
+	binary.LittleEndian.PutUint16(rec[6:8], 120) // CurTrain
+	binary.LittleEndian.PutUint16(rec[8:10], 600) // MaxTrain
+	raw = append(raw, rec...)
+	raw = append(raw, byte(len("FireBall")))
+	raw = append(raw, "FireBall"...)
+
+	gs.ParseMagics(string(raw))
+
+	if len(gs.Magics) != 1 {
+		t.Fatalf("magics = %d, want 1", len(gs.Magics))
+	}
+	m := gs.Magics[0]
+	if m.MagID != 1 || m.Level != 2 || m.Key != '3' || m.IconIdx != 8 ||
+		m.CurTrain != 120 || m.MaxTrain != 600 || m.Name != "FireBall" {
+		t.Errorf("magic = %+v, fields mismatch", m)
 	}
 }

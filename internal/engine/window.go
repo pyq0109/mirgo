@@ -153,3 +153,12 @@ func (w *Window) SetCharCallback(cb func(window *glfw.Window, char rune)) {
 func (w *Window) GetWindow() *glfw.Window {
 	return w.window
 }
+
+// SetResizable enables or disables window resizing.
+func (w *Window) SetResizable(v bool) {
+	if v {
+		w.window.SetAttrib(glfw.Resizable, glfw.True)
+	} else {
+		w.window.SetAttrib(glfw.Resizable, glfw.False)
+	}
+}

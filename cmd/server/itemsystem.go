@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"math"
 	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
@@ -22,14 +23,72 @@ func (p *PlayObject) GiveItem(itemIdx int) bool {
 	if def == nil {
 		return false
 	}
+	// Unique instance id (Delphi g_MakeItemIdx); DB idx would collide across
+	// stacks of the same item and break MakeIndex-addressed operations.
+	makeIndex := int32(itemIdx)
+	if p.Engine != nil {
+		p.Engine.mu.Lock()
+		makeIndex = int32(p.Engine.nextItemID)
+		p.Engine.nextItemID++
+		p.Engine.mu.Unlock()
+	}
 	userItem := &protocol.UserItem{
-		MakeIndex: int32(itemIdx),
+		MakeIndex: makeIndex,
 		WIndex:    uint16(itemIdx),
 		Dura:      uint16(def.DuraMax),
 		DuraMax:   uint16(def.DuraMax),
 	}
 	p.ItemList = append(p.ItemList, userItem)
 	return true
+}
+
+// HandleAdjustBonus applies spent bonus points (CMAdjustBonus: Recog =
+// remaining points, body = 9×u16 deltas in TNakedAbility order
+// DC,MC,SC,AC,MAC,HP,MP,Hit,Speed — Delphi SendAdjustBonus,
+// ClMain.pas:3373-3379).
+func (p *PlayObject) HandleAdjustBonus(msg SendMessage, server *netserver.TCPServer) {
+	raw := []byte(msg.Msg)
+	if len(raw) < 18 {
+		return
+	}
+	var deltas [9]int
+	spent := 0
+	for i := 0; i < 9; i++ {
+		deltas[i] = int(binary.LittleEndian.Uint16(raw[i*2 : i*2+2]))
+		spent += deltas[i]
+	}
+	if spent <= 0 || spent > p.BonusPoint {
+		return
+	}
+	p.BonusPoint -= spent
+	// Per-point effects (closed-loop values).
+	p.WAbil.DC += uint32(deltas[0]) << 16
+	p.WAbil.MC += uint32(deltas[1]) << 16
+	p.WAbil.SC += uint32(deltas[2]) << 16
+	p.WAbil.AC += uint32(deltas[3]) << 16
+	p.WAbil.MAC += uint32(deltas[4]) << 16
+	p.WAbil.MaxHP += uint16(deltas[5] * 5)
+	p.WAbil.MaxMP += uint16(deltas[6] * 5)
+	p.HitPoint += deltas[7]
+	p.SpeedPoint += deltas[8]
+	p.RecalcAbilitys()
+	p.SendAbility(server)
+	p.sendHealthSpell(server)
+	resp := protocol.MakeDefaultMsg(protocol.SMAdjustBonus, int32(p.BonusPoint), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+	log.Logf(log.LevelInfo, "Items", "%s spent %d bonus points", p.Name, spent)
+}
+
+// findBagItem returns the bag position of the item with the given MakeIndex,
+// or -1. All client item CMs address instances by MakeIndex: client-side slot
+// layout is client-owned, so bag indices are not authoritative.
+func (p *PlayObject) findBagItem(makeIndex int32) int {
+	for i, item := range p.ItemList {
+		if item != nil && item.MakeIndex == makeIndex {
+			return i
+		}
+	}
+	return -1
 }
 
 func (p *PlayObject) sendDuraChange(server *netserver.TCPServer, item *protocol.UserItem) {
@@ -73,14 +132,15 @@ func (p *PlayObject) SendUseItemsFull(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := msg.Param1
+	// Param1 = MakeIndex (instance id), Param2 = target slot.
+	bagIdx := p.findBagItem(int32(msg.Param1))
 	slot := msg.Param2
 
 	if slot < 0 || slot > 12 {
 		p.sendTakeOnFail(server, 0)
 		return
 	}
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	if bagIdx < 0 {
 		p.sendTakeOnFail(server, 0)
 		return
 	}
@@ -140,6 +200,8 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 	p.SendBagItemsFull(server)
 	p.SendUseItemsFull(server)
 	p.sendHealthSpell(server)
+	p.SendAbility(server)
+	p.sendWeightChanged(server)
 
 	log.Logf(log.LevelInfo, "Items", "%s equipped %s to slot %d", p.Name, def.Name, slot)
 }
@@ -173,6 +235,8 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 	p.SendBagItemsFull(server)
 	p.SendUseItemsFull(server)
 	p.sendHealthSpell(server)
+	p.SendAbility(server)
+	p.sendWeightChanged(server)
 
 	name := "?"
 	if p.ItemDB != nil {
@@ -184,9 +248,9 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 }
 
 func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := msg.Param1
-
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	bagIdx := p.findBagItem(int32(msg.Param1))
+	if bagIdx < 0 {
 		p.sendEatFail(server)
 		return
 	}
@@ -234,21 +298,93 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 
 	resp := protocol.MakeDefaultMsg(protocol.SMEatOK, int32(bagIdx), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
 	p.sendHealthSpell(server)
+	p.SendAbility(server)
+	p.sendWeightChanged(server)
 
 	log.Logf(log.LevelInfo, "Items", "%s used %s", p.Name, def.Name)
 }
 
+// makeLong packs lo/hi stat bounds the way Delphi MakeLong does (lo word | hi word<<16).
+func makeLong(lo, hi int) uint32 {
+	return uint32(uint16(lo)) | uint32(uint16(hi))<<16
+}
+
+// levelFormula mirrors Delphi Round((Level / X) * Level) with float division.
+func levelFormula(level int, divisor float64) int {
+	return int(math.Round(float64(level) / divisor * float64(level)))
+}
+
 func (p *PlayObject) RecalcAbilitys() {
 	level := int(p.WAbil.Level)
-	p.WAbil.MaxHP = uint16(50 + level*15)
-	p.WAbil.MaxMP = uint16(20 + level*10)
-	p.WAbil.AC = uint32(level / 2)
-	p.WAbil.MAC = uint32(level / 3)
-	p.WAbil.DC = uint32(level/2) | uint32(level)<<16
-	p.WAbil.MC = uint32(level/3) | uint32(level/2)<<16
-	p.WAbil.SC = uint32(level/3) | uint32(level/2)<<16
+	if level < 1 {
+		level = 1
+	}
+
+	// Per-job base stats, Delphi RecalcLevelAbilitys (ObjBase.pas:1880-1941),
+	// the commented legacy formulas (config-free equivalents).
+	switch p.Job {
+	case 0: // Warrior (jWarr, :1921-1936)
+		p.WAbil.MaxHP = uint16(min(65535, 14+int(math.Round((float64(level)/4.0+4.5+float64(level)/20.0)*float64(level)))))
+		p.WAbil.MaxMP = uint16(min(65535, 11+int(math.Round(float64(level)*3.5))))
+		p.WAbil.MaxWeight = uint16(50 + levelFormula(level, 3))
+		p.WAbil.MaxWearWeight = uint16(15 + levelFormula(level, 20))
+		p.WAbil.MaxHandWeight = uint16(12 + levelFormula(level, 13))
+		p.WAbil.DC = makeLong(max(level/5-1, 1), max(1, level/5))
+		p.WAbil.MC = 0
+		p.WAbil.SC = 0
+		p.WAbil.AC = makeLong(0, level/7)
+		p.WAbil.MAC = 0
+	case 1: // Mage (jWizard, :1904-1920)
+		p.WAbil.MaxHP = uint16(min(65535, 14+int(math.Round((float64(level)/15.0+1.8)*float64(level)))))
+		p.WAbil.MaxMP = uint16(min(65535, 13+int(math.Round((float64(level)/5.0+2.0)*2.2*float64(level)))))
+		p.WAbil.MaxWeight = uint16(50 + levelFormula(level, 5))
+		p.WAbil.MaxWearWeight = uint16(15 + levelFormula(level, 100))
+		p.WAbil.MaxHandWeight = uint16(12 + levelFormula(level, 90))
+		n := level / 7
+		p.WAbil.DC = makeLong(max(n-1, 0), max(1, n))
+		p.WAbil.MC = makeLong(max(n-1, 0), max(1, n))
+		p.WAbil.SC = 0
+		p.WAbil.AC = 0
+		p.WAbil.MAC = 0
+	default: // Taoist (jTaos, :1883-1903)
+		p.WAbil.MaxHP = uint16(min(65535, 14+int(math.Round((float64(level)/6.0+2.5)*float64(level)))))
+		p.WAbil.MaxMP = uint16(min(65535, 13+int(math.Round(float64(level)/8.0*2.2*float64(level)))))
+		p.WAbil.MaxWeight = uint16(50 + levelFormula(level, 4))
+		p.WAbil.MaxWearWeight = uint16(15 + levelFormula(level, 50))
+		p.WAbil.MaxHandWeight = uint16(12 + levelFormula(level, 42))
+		n := level / 7
+		p.WAbil.DC = makeLong(max(n-1, 0), max(1, n))
+		p.WAbil.MC = 0
+		p.WAbil.SC = makeLong(max(n-1, 0), max(1, n))
+		p.WAbil.AC = 0
+		n = int(math.Round(float64(level) / 6.0))
+		p.WAbil.MAC = makeLong(n/2, n+1)
+	}
+
+	// Hit/agility base (ObjBase.pas:18563-18566; DEFHIT=5, DEFSPEED=15,
+	// taoists get +3 innate speed).
+	p.HitPoint = 5
+	p.SpeedPoint = 15
+	if p.Job == 2 {
+		p.SpeedPoint += 3
+	}
+
+	// Current bag weight (sum of item def weights).
+	var bagWeight int
+	if p.ItemDB != nil {
+		for _, item := range p.ItemList {
+			if item == nil {
+				continue
+			}
+			if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil {
+				bagWeight += int(def.Weight)
+			}
+		}
+	}
+	p.WAbil.Weight = uint16(min(65535, bagWeight))
 
 	if p.ItemDB != nil {
 		for i := 0; i < 13; i++ {

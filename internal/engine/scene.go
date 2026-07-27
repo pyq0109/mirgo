@@ -142,3 +142,10 @@ func (m *SceneManager) OnChar(char rune) {
 		s.OnChar(char)
 	}
 }
+
+// OnMouseMove forwards cursor movement to the current scene if it supports it.
+func (m *SceneManager) OnMouseMove(x, y float64) {
+	if s, ok := m.current.(interface{ OnMouseMove(x, y float64) }); ok {
+		s.OnMouseMove(x, y)
+	}
+}

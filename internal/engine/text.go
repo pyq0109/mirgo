@@ -181,6 +181,16 @@ func (tr *TextRenderer) DrawText(text string, x, y float32, r, g, b, a float32, 
 	}
 }
 
+// DrawTextOutline renders text with a 1px outline in (or, og, ob, oa) behind
+// the main color. Mirrors Delphi BoldTextOut used for NPC dialog and hints.
+func (tr *TextRenderer) DrawTextOutline(text string, x, y float32, r, g, b, a float32, or, og, ob, oa float32, proj [16]float32) {
+	tr.DrawText(text, x-1, y, or, og, ob, oa, proj)
+	tr.DrawText(text, x+1, y, or, og, ob, oa, proj)
+	tr.DrawText(text, x, y-1, or, og, ob, oa, proj)
+	tr.DrawText(text, x, y+1, or, og, ob, oa, proj)
+	tr.DrawText(text, x, y, r, g, b, a, proj)
+}
+
 // MeasureText returns the pixel width of the text.
 func (tr *TextRenderer) MeasureText(text string) int {
 	width := 0

@@ -60,10 +60,10 @@ type LoginScene struct {
 	doorCompleteFunc func()
 }
 
-// Screen offset: 800x600 game area centered in 1024x768 window.
+// Screen offset: the window is the fixed 800×600 Delphi game area.
 const (
-	loginOX = float32(112) // (1024-800)/2
-	loginOY = float32(84)  // (768-600)/2
+	loginOX = float32(0)
+	loginOY = float32(0)
 )
 
 // Input field positions (from Delphi IntroScn.pas).

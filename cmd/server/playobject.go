@@ -52,6 +52,12 @@ type PlayObject struct {
 	GuildRank    string
 	StorageItems []*protocol.UserItem
 	AttackMode   byte
+	AllowGroup   bool // accepts party invites (CMGroupMode)
+
+	// Computed combat stats (Delphi m_btHitPoint/m_btSpeedPoint, ObjBase.pas:1241-1242).
+	HitPoint   int
+	SpeedPoint int
+	BonusPoint int
 
 	HasParalysis   bool
 	HasRevival     bool
@@ -73,10 +79,14 @@ type VisibleEntry struct {
 
 func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObject {
 	base := NewBaseObject(name, id)
+	account := ""
+	if session != nil {
+		account = session.AccountName
+	}
 	return &PlayObject{
 		BaseObject:    base,
 		Session:       session,
-		AccountName:   session.AccountName,
+		AccountName:   account,
 		VisibleActors: make(map[int32]*VisibleEntry),
 		knownItems:    make(map[int32]bool),
 		WalkSpeed:     1400,
@@ -145,18 +155,34 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleTakeOffItem(msg, server)
 	case protocol.CMEat:
 		p.HandleEatItem(msg, server)
+	case protocol.CMMagicKeyChange:
+		p.HandleMagicKeyChange(msg, server)
 	case protocol.CMSay:
 		p.HandleSay(msg, server)
 	case protocol.CMClickNPC:
 		p.HandleNpcClick(msg, server)
 	case protocol.CMCreateGroup:
 		p.HandleCreateGroup(msg, server)
+	case protocol.CMGroupMode:
+		p.HandleGroupMode(msg, server)
+	case protocol.CMAddGroupMember:
+		p.HandleAddGroupMember(msg, server)
+	case protocol.CMDelGroupMember:
+		p.HandleDelGroupMember(msg, server)
+	case protocol.CMOpenGuildDlg:
+		p.HandleOpenGuildDlg(msg, server)
+	case protocol.CMGuildMemberList:
+		p.HandleGuildMemberListRequest(msg, server)
+	case protocol.CMGuildUpdateRankInfo:
+		p.HandleGuildUpdateRankInfo(msg, server)
+	case protocol.CMGuildHome:
+		p.HandleGuildHome(msg, server)
 	case protocol.CMDealTry:
 		p.HandleDealTry(msg, server)
 	case protocol.CMDealAddItem:
 		p.HandleDealAddItem(msg, server)
 	case protocol.CMDealDelItem:
-		p.HandleDealCancel(server)
+		p.HandleDealDelItem(msg, server)
 	case protocol.CMDealCancel:
 		p.HandleDealCancel(server)
 	case protocol.CMDealChgGold:
@@ -167,8 +193,6 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleStorageItem(msg, server)
 	case protocol.CMUserTakeBackStorageItem:
 		p.HandleTakeBackStorageItem(msg, server)
-	case protocol.CMOpenGuildDlg:
-		p.HandleBuildGuild(msg, server)
 	case protocol.CMGuildAddMember:
 		p.HandleGuildAddMember(msg, server)
 	case protocol.CMGuildDelMember:
@@ -201,6 +225,10 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleDropGold(msg, server)
 	case protocol.CMChangeAttackMode:
 		p.HandleChangeAttackMode(msg, server)
+	case protocol.CMAdjustBonus:
+		p.HandleAdjustBonus(msg, server)
+	case protocol.CMQueryUserState:
+		p.HandleQueryUserState(msg, server)
 	case RM_WALK:
 		p.sendMovementToClient(server, protocol.SMWalk, msg)
 	case RM_RUN:
@@ -696,18 +724,29 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	server.Send(p.Session.ID, expMsg, "")
 
 	maxExp := p.GetMaxExp()
+	leveledUp := false
 	if p.WAbil.Exp >= maxExp {
 		p.WAbil.Exp -= maxExp
 		p.WAbil.Level++
-		p.WAbil.MaxHP += 15
+		// Stat growth now comes from the job formulas in RecalcAbilitys.
+		p.RecalcAbilitys()
 		p.WAbil.HP = p.WAbil.MaxHP
-		p.WAbil.MaxMP += 10
 		p.WAbil.MP = p.WAbil.MaxMP
 
 		levelMsg := protocol.MakeDefaultMsg(protocol.SMLevelUp, int32(p.WAbil.Level), 0, 0, 0)
 		server.Send(p.Session.ID, levelMsg, "")
 
+		// Bonus points to spend (Delphi GetBonusPoint per level).
+		p.BonusPoint += 3
+
 		log.Logf(log.LevelInfo, "Combat", "%s leveled up to %d", p.Name, p.WAbil.Level)
+		leveledUp = true
+	}
+	// Keep the client's exp/weight/level bars in sync.
+	p.SendAbility(server)
+	p.sendHealthSpell(server)
+	if leveledUp {
+		p.sendWeightChanged(server)
 	}
 }
 
@@ -720,9 +759,10 @@ func (p *PlayObject) GetMaxExp() uint32 {
 }
 
 func (p *PlayObject) sendHealthSpell(server *netserver.TCPServer) {
+	// Recog=HP, Param=MaxHP, Tag=MP, Series=MaxMP (both ends changed together;
+	// the old HP<<16|MP packing made the client read MP as HP).
 	resp := protocol.MakeDefaultMsg(protocol.SMHealthSpellChanged,
-		int32(p.WAbil.HP)<<16|int32(p.WAbil.MP),
-		uint16(p.WAbil.MaxHP), uint16(p.WAbil.MaxMP), 0)
+		int32(p.WAbil.HP), uint16(p.WAbil.MaxHP), uint16(p.WAbil.MP), uint16(p.WAbil.MaxMP))
 	server.Send(p.Session.ID, resp, "")
 }
 
@@ -865,9 +905,20 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 		server.Send(p.Session.ID, resp, "")
 		log.Logf(log.LevelInfo, "PlayObject", "%s picked up %d gold (total: %d)", p.Name, item.Gold, p.Gold)
 	} else {
-		resp := protocol.MakeDefaultMsg(protocol.SMDropItemSuccess, 1, 0, 0, 0)
-		server.Send(p.Session.ID, resp, protocol.EncodeString(item.Name))
-		log.Logf(log.LevelInfo, "PlayObject", "%s picked up %s", p.Name, item.Name)
+		added := false
+		if p.ItemDB != nil {
+			if def := p.ItemDB.GetByName(item.Name); def != nil {
+				added = p.GiveItem(def.Idx)
+			}
+		}
+		if added {
+			resp := protocol.MakeDefaultMsg(protocol.SMDropItemSuccess, 1, 0, 0, 0)
+			server.Send(p.Session.ID, resp, protocol.EncodeString(item.Name))
+			p.RecalcAbilitys()
+			p.SendBagItemsFull(server)
+			p.sendWeightChanged(server)
+			log.Logf(log.LevelInfo, "PlayObject", "%s picked up %s", p.Name, item.Name)
+		}
 	}
 
 	p.envir.RemoveGroundItem(item.ID)
@@ -1041,6 +1092,34 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 	}
 }
 
+// HandleQueryUserState answers an inspect request (CMQueryUserState:
+// Recog = target player id): 130 bytes of equipment (13 × WIndex u16,
+// Dura u16, DuraMax u16, MakeIndex u32) followed by the player name.
+func (p *PlayObject) HandleQueryUserState(msg SendMessage, server *netserver.TCPServer) {
+	if p.Engine == nil {
+		return
+	}
+	target := p.Engine.GetPlayer(int32(msg.Param1))
+	if target == nil {
+		return
+	}
+	buf := make([]byte, 130, 130+len(target.Name))
+	for i := 0; i < 13; i++ {
+		it := target.UseItems[i]
+		if it == nil {
+			continue
+		}
+		off := i * 10
+		binary.LittleEndian.PutUint16(buf[off:off+2], it.WIndex)
+		binary.LittleEndian.PutUint16(buf[off+2:off+4], it.Dura)
+		binary.LittleEndian.PutUint16(buf[off+4:off+6], it.DuraMax)
+		binary.LittleEndian.PutUint32(buf[off+6:off+10], uint32(it.MakeIndex))
+	}
+	buf = append(buf, []byte(target.Name)...)
+	resp := protocol.MakeDefaultMsg(protocol.SMSendUserState, target.ID, 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+}
+
 func (p *PlayObject) SendMapInfo(server *netserver.TCPServer) {
 	mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, int32(p.CurrX), uint16(p.CurrY), 0, 0)
 	server.Send(p.Session.ID, mapResp, protocol.EncodeString(p.MapName))
@@ -1056,14 +1135,107 @@ func (p *PlayObject) encodeLogonBody() string {
 	buf := make([]byte, 16)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(p.Feature()))
 	binary.LittleEndian.PutUint32(buf[4:8], uint32(p.FeatureEx()))
-	binary.LittleEndian.PutUint32(buf[8:12], 0)
+	// Third slot carries the job (0 warrior / 1 mage / 2 taoist); feature
+	// does not encode it and the client needs it for the HUD/class UI.
+	binary.LittleEndian.PutUint32(buf[8:12], uint32(p.Job))
 	binary.LittleEndian.PutUint32(buf[12:16], 0)
 	return protocol.EncodeBuffer(buf)
 }
 
+// encodeAbilityBody builds the SMAbility body: fixed 60-byte layout, both
+// ends defined together (Go closed loop). See GameState.ParseAbility for the
+// client-side mirror.
+func (p *PlayObject) encodeAbilityBody() string {
+	buf := make([]byte, 0, 60)
+	var tmp [4]byte
+	putU16 := func(v uint16) {
+		binary.LittleEndian.PutUint16(tmp[:2], v)
+		buf = append(buf, tmp[:2]...)
+	}
+	putU32 := func(v uint32) {
+		binary.LittleEndian.PutUint32(tmp[:4], v)
+		buf = append(buf, tmp[:4]...)
+	}
+	putU16(p.WAbil.Level)
+	putU32(p.WAbil.AC)
+	putU32(p.WAbil.MAC)
+	putU32(p.WAbil.DC)
+	putU32(p.WAbil.MC)
+	putU32(p.WAbil.SC)
+	putU16(p.WAbil.HP)
+	putU16(p.WAbil.MaxHP)
+	putU16(p.WAbil.MP)
+	putU16(p.WAbil.MaxMP)
+	putU32(p.WAbil.Exp)
+	putU32(p.GetMaxExp())
+	putU16(p.WAbil.Weight)
+	putU16(p.WAbil.MaxWeight)
+	putU16(p.WAbil.WearWeight)
+	putU16(p.WAbil.MaxWearWeight)
+	putU16(p.WAbil.HandWeight)
+	putU16(p.WAbil.MaxHandWeight)
+	putU16(uint16(p.HitPoint))
+	putU16(uint16(p.SpeedPoint))
+	putU16(uint16(p.BonusPoint))
+	putU32(uint32(p.Gold))
+	return protocol.EncodeBuffer(buf)
+}
+
+// SendAbility sends the full ability block. Header Recog keeps the level for
+// legacy consumers; the body carries everything.
 func (p *PlayObject) SendAbility(server *netserver.TCPServer) {
 	abilResp := protocol.MakeDefaultMsg(protocol.SMAbility, int32(p.WAbil.Level), 0, 0, 0)
-	server.Send(p.Session.ID, abilResp, "")
+	server.Send(p.Session.ID, abilResp, p.encodeAbilityBody())
+}
+
+func (p *PlayObject) sendWeightChanged(server *netserver.TCPServer) {
+	resp := protocol.MakeDefaultMsg(protocol.SMWeightChanged,
+		int32(p.WAbil.Weight), uint16(p.WAbil.MaxWeight), 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
+// encodeStdItemsBody serializes the item definition DB. Layout: count u16,
+// then per item: Idx u16, Looks u16, StdMode/Shape/Weight/NeedLevel u8×4,
+// AC/ACMax/MAC/MACMax/DC/DCMax/MC/MCMax/SC/SCMax u16×10, Price u32,
+// NameLen u8 + Name (UTF-8). Client mirror: GameState.ParseItemDefs.
+func encodeStdItemsBody(items []ItemDef) string {
+	buf := make([]byte, 2, 2+len(items)*40)
+	binary.LittleEndian.PutUint16(buf, uint16(len(items)))
+	var tmp [4]byte
+	for i := range items {
+		def := &items[i]
+		binary.LittleEndian.PutUint16(tmp[:2], uint16(def.Idx))
+		buf = append(buf, tmp[:2]...)
+		binary.LittleEndian.PutUint16(tmp[:2], def.Looks)
+		buf = append(buf, tmp[:2]...)
+		buf = append(buf, def.StdMode, def.Shape, def.Weight, def.NeedLevel)
+		for _, v := range []uint16{
+			uint16(def.AC), uint16(def.ACMax), uint16(def.MAC), uint16(def.MACMax),
+			uint16(def.DC), uint16(def.DCMax), uint16(def.MC), uint16(def.MCMax),
+			uint16(def.SC), uint16(def.SCMax),
+		} {
+			binary.LittleEndian.PutUint16(tmp[:2], v)
+			buf = append(buf, tmp[:2]...)
+		}
+		binary.LittleEndian.PutUint32(tmp[:4], def.Price)
+		buf = append(buf, tmp[:4]...)
+		name := []byte(def.Name)
+		if len(name) > 255 {
+			name = name[:255]
+		}
+		buf = append(buf, byte(len(name)))
+		buf = append(buf, name...)
+	}
+	return protocol.EncodeBuffer(buf)
+}
+
+// SendStdItems delivers the whole item definition DB once at login.
+func (p *PlayObject) SendStdItems(server *netserver.TCPServer) {
+	if p.ItemDB == nil {
+		return
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMStdItems, int32(len(p.ItemDB.Items)), 0, 0, 0)
+	server.Send(p.Session.ID, resp, encodeStdItemsBody(p.ItemDB.Items))
 }
 
 func (p *PlayObject) SendUseItems(server *netserver.TCPServer) {

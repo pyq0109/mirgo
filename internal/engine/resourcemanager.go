@@ -1,4 +1,4 @@
-﻿package engine
+package engine
 
 import (
 	"fmt"
@@ -42,6 +42,11 @@ type ResourceManager struct {
 	// Texture cache
 	mu       sync.RWMutex
 	texCache map[string]uint32 // "wilName:index" -> texture ID
+
+	// Lazily loaded auxiliary WILs (St<N>.wil equipment looks files); nil
+	// values cache failed loads.
+	extraMu sync.Mutex
+	extras  map[string]*wil.File
 }
 
 // NewResourceManager creates a new resource manager and loads all WIL files.
@@ -207,6 +212,27 @@ func (rm *ResourceManager) GetImage(f *wil.File, index int) *image.RGBA {
 	return img.RGBA
 }
 
+// GetExtraWil lazily loads an auxiliary WIL by file name (e.g. "St1.wil",
+// used for equipment Looks >= 10000; ClMain.pas:6179-6210). Returns nil when
+// the file is absent.
+func (rm *ResourceManager) GetExtraWil(name string) *wil.File {
+	rm.extraMu.Lock()
+	defer rm.extraMu.Unlock()
+	if rm.extras == nil {
+		rm.extras = make(map[string]*wil.File)
+	}
+	if f, ok := rm.extras[name]; ok {
+		return f
+	}
+	f, err := wil.Load(filepath.Join(rm.dataDir, name))
+	if err != nil {
+		rm.extras[name] = nil
+		return nil
+	}
+	rm.extras[name] = f
+	return f
+}
+
 // ClearCache clears the texture cache.
 func (rm *ResourceManager) ClearCache() {
 	rm.mu.Lock()
@@ -245,4 +271,12 @@ func (rm *ResourceManager) closeAllWils() {
 			f.Close()
 		}
 	}
+	rm.extraMu.Lock()
+	for _, f := range rm.extras {
+		if f != nil {
+			f.Close()
+		}
+	}
+	rm.extras = nil
+	rm.extraMu.Unlock()
 }

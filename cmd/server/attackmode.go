@@ -84,8 +84,9 @@ func (p *PlayObject) isGroupMember(other *PlayObject) bool {
 }
 
 func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer) {
-	bagIdx := int(msg.Param1)
-	if bagIdx < 0 || bagIdx >= len(p.ItemList) {
+	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	bagIdx := p.findBagItem(int32(msg.Param1))
+	if bagIdx < 0 {
 		resp := protocol.MakeDefaultMsg(protocol.SMDropItemFail, 0, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 		return
@@ -118,7 +119,9 @@ func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer
 
 	resp := protocol.MakeDefaultMsg(protocol.SMDropItemSuccess, gi.ID, uint16(gi.X), uint16(gi.Y), 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(name))
+	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
+	p.sendWeightChanged(server)
 
 	if p.envir != nil {
 		showResp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))

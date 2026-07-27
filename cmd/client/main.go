@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,11 +35,13 @@ func main() {
 	log.Logf(log.LevelInfo, "Client", "Starting MIR2 Client...")
 	log.Logf(log.LevelInfo, "Client", "Server: %s", *serverAddr)
 
-	window, err := engine.NewWindow(1024, 768, "MIR2 Client")
+	// Delphi runs at fixed 800×600 (SWH800, Share.pas:22-24).
+	window, err := engine.NewWindow(800, 600, "MIR2 Client")
 	if err != nil {
 		log.Logf(log.LevelError, "Client", "Failed to create window: %v", err)
 		os.Exit(1)
 	}
+	window.SetResizable(false)
 	defer window.Destroy()
 
 	glState, err := engine.NewGLState()
@@ -201,7 +204,7 @@ func main() {
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 		if action == glfw.Press && key == glfw.KeyEscape &&
 			!playScene.State.ShowNpcDialog && !playScene.State.InDeal &&
-			!playScene.State.ShowGuild && !playScene.State.ShowStorage {
+			!playScene.State.ShowGuild && !playScene.State.ShowShop {
 			if handler != nil {
 				handler.Close()
 				handler = nil
@@ -216,23 +219,33 @@ func main() {
 	})
 
 	glfwWindow.SetMouseButtonCallback(func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
-		if action == glfw.Press {
+		switch action {
+		case glfw.Press:
 			x, y := w.GetCursorPos()
 			sceneMgr.OnMouse(x, y, int(button), 1)
+		case glfw.Release:
+			x, y := w.GetCursorPos()
+			sceneMgr.OnMouse(x, y, int(button), 0)
 		}
 	})
 
+	glfwWindow.SetCursorPosCallback(func(w *glfw.Window, xpos, ypos float64) {
+		sceneMgr.OnMouseMove(xpos, ypos)
+	})
+
 	glfwWindow.SetScrollCallback(func(w *glfw.Window, xoff, yoff float64) {
-		x, y := w.GetCursorPos()
-		sceneMgr.OnScroll(x, y)
+		sceneMgr.OnScroll(xoff, yoff)
 	})
 
 	log.Logf(log.LevelInfo, "Client", "Login scene ready")
 	window.Run(func(dt float64) {
 		sceneMgr.Update(dt)
 	}, func() {
+		// Keep GL viewport in sync with the framebuffer (HiDPI safety); all
+		// UI coordinates are in the fixed 800×600 logical space.
 		w, h := window.GetFramebufferSize()
-		proj := engine.OrthoProj(float32(w), float32(h))
+		glState.SetViewport(0, 0, int32(w), int32(h))
+		proj := engine.OrthoProj(800, 600)
 		sceneMgr.Render(glState, proj)
 	})
 
@@ -666,8 +679,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor.Type = ActorHuman
 		if body != "" {
 			actor.updateFeatureFromBody(body)
+			// Body slot 3 carries the job (see PlayObject.encodeLogonBody).
+			if raw := []byte(body); len(raw) >= 12 {
+				h.playScene.State.Job = int(binary.LittleEndian.Uint32(raw[8:12]))
+			}
 		}
 		h.playScene.State.MySelf = actor
+		h.playScene.State.Sex = actor.Sex
+		h.playScene.State.Hair = actor.Hair
 		h.playScene.State.Actors.Add(actor)
 		actor.SendMsg(protocol.SMTurn, actor.CurrX, actor.CurrY, actor.Dir, 0, 0)
 		h.sceneMgr.ChangeScene(engine.ScenePlayGame)
@@ -724,11 +743,18 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMAbility:
-		log.Logf(log.LevelInfo, "Client", "Ability: level=%d hp=%d mp=%d maxhp=%d", msg.Recog, msg.Param, msg.Tag, msg.Series)
-		h.playScene.State.Level = int(msg.Recog)
-		h.playScene.State.HP = int(msg.Param)
-		h.playScene.State.MP = int(msg.Tag)
-		h.playScene.State.MaxHP = int(msg.Series)
+		st := h.playScene.State
+		if len(body) >= 60 {
+			st.ParseAbility(body)
+		} else {
+			st.Level = int(msg.Recog)
+		}
+		log.Logf(log.LevelInfo, "Client", "Ability: level=%d hp=%d/%d mp=%d/%d exp=%d/%d weight=%d/%d",
+			st.Level, st.HP, st.MaxHP, st.MP, st.MaxMP, st.Exp, st.MaxExp, st.Weight, st.MaxWeight)
+
+	case protocol.SMStdItems:
+		h.playScene.State.ParseItemDefs(body)
+		log.Logf(log.LevelInfo, "Client", "Item DB synced: %d defs", len(h.playScene.State.ItemDefs))
 
 	case protocol.SMBagItems:
 		log.Logf(log.LevelInfo, "Client", "Received bag items: count=%d", msg.Recog)
@@ -790,7 +816,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMMerchantSay:
 		log.Logf(log.LevelInfo, "Client", "NPC says: %s", body)
-		h.playScene.State.NpcDialog = body
+		h.playScene.parseNpcDialog(body)
 		h.playScene.State.ShowNpcDialog = true
 
 	case protocol.SMDayChanging:
@@ -816,18 +842,13 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.LightLevel = int(msg.Recog)
 
 	case protocol.SMHealthSpellChanged:
-		hp := int(msg.Recog & 0xFFFF)
-		maxHP := int(msg.Param)
-		maxMP := int(msg.Tag)
-		if hp > 0 {
-			h.playScene.State.HP = hp
-		}
-		if maxHP > 0 {
-			h.playScene.State.MaxHP = maxHP
-		}
-		if maxMP > 0 {
-			h.playScene.State.MaxMP = maxMP
-		}
+		// Recog=HP, Param=MaxHP, Tag=MP, Series=MaxMP (server changed in
+		// tandem; the old HP<<16|MP packing made HP show the MP value).
+		st := h.playScene.State
+		st.HP = int(msg.Recog)
+		st.MaxHP = int(msg.Param)
+		st.MP = int(msg.Tag)
+		st.MaxMP = int(msg.Series)
 
 	case protocol.SMCharStatusChanged:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
@@ -893,9 +914,13 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMWinExp:
+		// The server follows up with a full SMAbility; apply the delta now so
+		// the exp bar moves immediately.
+		h.playScene.State.Exp += int(msg.Recog)
 		log.Logf(log.LevelInfo, "Client", "Won exp: %d", msg.Recog)
 
 	case protocol.SMLevelUp:
+		h.playScene.State.Level = int(msg.Recog)
 		log.Logf(log.LevelInfo, "Client", "Level up: %d", msg.Recog)
 
 	case protocol.SMItemShow:
@@ -908,6 +933,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMDealMenu:
 		log.Logf(log.LevelInfo, "Client", "Trade: partner=%s", body)
+		h.playScene.resetDeal()
 		h.playScene.State.InDeal = true
 		h.playScene.State.DealPartner = body
 
@@ -915,14 +941,23 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Trade completed")
 		h.playScene.State.InDeal = false
 		h.playScene.State.DealPartner = ""
+		h.playScene.resetDeal()
 
 	case protocol.SMDealCancel:
 		log.Logf(log.LevelInfo, "Client", "Trade cancelled")
 		h.playScene.State.InDeal = false
 		h.playScene.State.DealPartner = ""
+		h.playScene.resetDeal()
+
+	case protocol.SMDealChgGoldOK:
+		h.playScene.State.DealGold = int(msg.Recog)
+		h.playScene.State.Gold = int(msg.Param)
+
+	case protocol.SMDealRemoteChgGold:
+		h.playScene.State.DealRemoteGold = int(msg.Recog)
 
 	case protocol.SMBuildGuildOK:
-		log.Logf(log.LevelInfo, "Client", "Guild created")
+		h.playScene.addChatMessage("Guild created")
 
 	case protocol.SMGuildMessage:
 		log.Logf(log.LevelInfo, "Client", "Guild chat: %s", body)
@@ -1069,7 +1104,21 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Drop item failed")
 
 	case protocol.SMWeightChanged:
-		log.Logf(log.LevelDebug, "Client", "Weight changed")
+		h.playScene.State.Weight = int(msg.Recog)
+		h.playScene.State.MaxWeight = int(msg.Param)
+		log.Logf(log.LevelDebug, "Client", "Weight changed: %d/%d", msg.Recog, msg.Param)
+
+	case protocol.SMAdjustBonus:
+		h.playScene.State.BonusPoint = int(msg.Recog)
+
+	case protocol.SMSendUserState:
+		// Body: 130 bytes of equipment followed by the player name.
+		raw := []byte(body)
+		name := ""
+		if len(raw) > 130 {
+			name = string(raw[130:])
+		}
+		h.playScene.parseInspect(name, body)
 
 	case protocol.SMDuraChange:
 		log.Logf(log.LevelDebug, "Client", "Durability changed: makeIndex=%d dura=%d/%d", msg.Recog, msg.Param, msg.Tag)
@@ -1079,10 +1128,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				it.DuraMax = msg.Tag
 			}
 		}
-		for i := range h.playScene.State.BagItems {
-			if h.playScene.State.BagItems[i].MakeIndex == msg.Recog {
-				h.playScene.State.BagItems[i].Dura = msg.Param
-				h.playScene.State.BagItems[i].DuraMax = msg.Tag
+		for _, it := range h.playScene.State.BagItems {
+			if it != nil && it.MakeIndex == msg.Recog {
+				it.Dura = msg.Param
+				it.DuraMax = msg.Tag
 			}
 		}
 
@@ -1113,6 +1162,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 0
 		h.playScene.State.ShopNpcID = msg.Recog
+		h.playScene.menuTop = 0
+		h.playScene.menuIndex = -1
 		raw := []byte(body)
 		if len(raw) >= 2 {
 			count := int(binary.LittleEndian.Uint16(raw[0:2]))
@@ -1132,11 +1183,15 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 1
 		h.playScene.State.ShopNpcID = msg.Recog
+		h.playScene.sellItem = nil
+		h.playScene.sellPriceStr = ""
 
 	case protocol.SMSendUserRepair:
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 2
 		h.playScene.State.ShopNpcID = msg.Recog
+		h.playScene.sellItem = nil
+		h.playScene.sellPriceStr = ""
 
 	case protocol.SMBuyItemSuccess:
 		log.Logf(log.LevelInfo, "Client", "Buy success")
@@ -1151,6 +1206,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Sell failed")
 
 	case protocol.SMSendBuyPrice:
+		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
 		log.Logf(log.LevelInfo, "Client", "Buy price: %d", msg.Recog)
 
 	case protocol.SMUserRepairItemOK:
@@ -1160,14 +1216,31 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Repair failed")
 
 	case protocol.SMSendRepairCost:
+		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
 		log.Logf(log.LevelInfo, "Client", "Repair cost: %d", msg.Recog)
 
+	case protocol.SMSendUserStorageItem:
+		// Storage reuses the shop panels (Delphi BoStorageMenu): the list is
+		// DMenuDlg in storage mode, deposits go through the DSellDlg spot.
+		h.playScene.State.ShowShop = true
+		h.playScene.State.ShopMode = 3
+		h.playScene.menuTop = 0
+		h.playScene.menuIndex = -1
+		h.playScene.sellItem = nil
+		h.playScene.sellPriceStr = ""
+
 	case protocol.SMSaveItemList:
-		h.playScene.State.ShowStorage = true
+		// Storage list rows: name from the item DB, "price" carries the
+		// MakeIndex used to take the item back (Delphi
+		// ClientGetSaveItemList, ClMain.pas:5651-5690).
+		st := h.playScene.State
+		st.ShowShop = true
+		st.ShopMode = 3
+		st.ShopGoods = nil
 		raw := []byte(body)
 		if len(raw) >= 2 {
 			count := int(binary.LittleEndian.Uint16(raw[0:2]))
-			h.playScene.State.StorageItems = make([]BagItem, 0, count)
+			st.StorageItems = make([]BagItem, 0, count)
 			for i := 0; i < count; i++ {
 				off := 2 + i*10
 				if off+10 > len(raw) {
@@ -1179,7 +1252,17 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 					DuraMax:   binary.LittleEndian.Uint16(raw[off+4 : off+6]),
 					MakeIndex: int32(binary.LittleEndian.Uint32(raw[off+6 : off+10])),
 				}
-				h.playScene.State.StorageItems = append(h.playScene.State.StorageItems, item)
+				item.Def = st.ItemDefs[int(item.Idx)]
+				st.StorageItems = append(st.StorageItems, item)
+				name := ""
+				if item.Def != nil {
+					name = item.Def.Name
+				}
+				st.ShopGoods = append(st.ShopGoods, ShopItem{
+					ItemIdx: item.Idx,
+					Price:   int(item.MakeIndex),
+					Name:    name,
+				})
 			}
 		}
 
@@ -1190,92 +1273,143 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Take back storage failed")
 
 	case protocol.SMGroupModeChanged:
-		log.Logf(log.LevelInfo, "Client", "Group mode: %d", msg.Recog)
+		h.playScene.State.AllowGroup = msg.Recog != 0
 
 	case protocol.SMCreateGroupOK:
-		log.Logf(log.LevelInfo, "Client", "Group created")
+		h.playScene.addChatMessage("[Group] created")
 
 	case protocol.SMCreateGroupFail:
-		log.Logf(log.LevelInfo, "Client", "Group create failed: %d", msg.Recog)
+		h.playScene.addChatMessage("[Group] create failed (target unavailable?)")
 
 	case protocol.SMGroupAddMemOK:
-		log.Logf(log.LevelInfo, "Client", "Group member added")
+		h.playScene.addChatMessage("[Group] added " + body)
 
 	case protocol.SMGroupAddMemFail:
-		log.Logf(log.LevelInfo, "Client", "Group add failed: %d", msg.Recog)
+		h.playScene.addChatMessage("[Group] add failed")
 
 	case protocol.SMGroupDelMemOK:
-		log.Logf(log.LevelInfo, "Client", "Group member removed")
+		h.playScene.addChatMessage("[Group] removed " + body)
 
 	case protocol.SMGroupDelMemFail:
-		log.Logf(log.LevelInfo, "Client", "Group del failed: %d", msg.Recog)
+		h.playScene.addChatMessage("[Group] remove failed")
 
 	case protocol.SMGroupCancel:
-		log.Logf(log.LevelInfo, "Client", "Group cancelled")
+		h.playScene.State.GroupMembers = nil
+		h.playScene.addChatMessage("[Group] disbanded")
 
 	case protocol.SMGroupMembers:
-		log.Logf(log.LevelInfo, "Client", "Group members: %s", body)
+		if strings.TrimSpace(body) == "" {
+			h.playScene.State.GroupMembers = nil
+		} else {
+			h.playScene.State.GroupMembers = strings.Split(body, "\n")
+		}
 
 	case protocol.SMOpenGuildDlg:
-		h.playScene.State.ShowGuild = true
+		// Body: name\nrank\nperm\nnotice (server HandleOpenGuildDlg).
+		st := h.playScene.State
+		parts := strings.SplitN(body, "\n", 4)
+		if len(parts) > 0 {
+			st.GuildName = parts[0]
+		}
+		if len(parts) > 1 {
+			st.GuildRank = parts[1]
+		}
+		if len(parts) > 2 {
+			st.GuildCommander = parts[2] == "1"
+		}
+		if len(parts) > 3 {
+			st.GuildNotice = parts[3]
+		}
+		st.ShowGuild = true
+		st.GuildTopLine = 0
 
 	case protocol.SMOpenGuildDlgFail:
-		log.Logf(log.LevelInfo, "Client", "Guild dlg failed")
+		h.playScene.addChatMessage("You are not in a guild")
 
 	case protocol.SMChangeGuildName:
-		log.Logf(log.LevelInfo, "Client", "Guild name: %s", body)
 		h.playScene.State.GuildName = body
 
 	case protocol.SMSendGuildMemberList:
-		log.Logf(log.LevelInfo, "Client", "Guild members received")
+		if strings.TrimSpace(body) == "" {
+			h.playScene.State.GuildMembers = nil
+		} else {
+			h.playScene.State.GuildMembers = strings.Split(body, "\n")
+		}
 
 	case protocol.SMGuildAddMemberOK:
-		log.Logf(log.LevelInfo, "Client", "Guild member added")
+		h.playScene.addChatMessage("[Guild] added " + body)
 
 	case protocol.SMGuildAddMemberFail:
-		log.Logf(log.LevelInfo, "Client", "Guild add failed")
+		h.playScene.addChatMessage("[Guild] add failed")
 
 	case protocol.SMGuildDelMemberOK:
-		log.Logf(log.LevelInfo, "Client", "Guild member removed")
+		h.playScene.addChatMessage("[Guild] removed " + body)
 
 	case protocol.SMGuildDelMemberFail:
-		log.Logf(log.LevelInfo, "Client", "Guild del failed")
+		h.playScene.addChatMessage("[Guild] remove failed")
 
 	case protocol.SMBuildGuildFail:
-		log.Logf(log.LevelInfo, "Client", "Guild build failed: %d", msg.Recog)
+		h.playScene.addChatMessage("Guild creation failed")
 
 	case protocol.SMGuildMakeAllyOK:
-		log.Logf(log.LevelInfo, "Client", "Guild alliance formed")
+		h.playScene.addChatMessage("[Guild] alliance formed")
 
 	case protocol.SMGuildMakeAllyFail:
-		log.Logf(log.LevelInfo, "Client", "Guild alliance failed")
+		h.playScene.addChatMessage("[Guild] alliance failed")
 
 	case protocol.SMGuildBreakAllyOK:
-		log.Logf(log.LevelInfo, "Client", "Guild alliance broken")
+		h.playScene.addChatMessage("[Guild] alliance broken")
 
 	case protocol.SMGuildBreakAllyFail:
-		log.Logf(log.LevelInfo, "Client", "Guild break ally failed")
+		h.playScene.addChatMessage("[Guild] break ally failed")
+
+	case protocol.SMDlgMsg:
+		h.playScene.addChatMessage(body)
 
 	case protocol.SMDealTryFail:
 		log.Logf(log.LevelInfo, "Client", "Trade request failed")
 
 	case protocol.SMDealAddItemOK:
-		log.Logf(log.LevelDebug, "Client", "Trade add item OK")
+		// Recog = grid slot; body carries the offered item.
+		if item := h.parseTradeItem(body); item != nil {
+			slot := int(msg.Recog)
+			if slot >= 0 && slot < len(h.playScene.State.DealItems) {
+				h.playScene.State.DealItems[slot] = item
+			}
+		}
 
 	case protocol.SMDealAddItemFail:
 		log.Logf(log.LevelDebug, "Client", "Trade add item failed")
 
 	case protocol.SMDealDelItemOK:
-		log.Logf(log.LevelDebug, "Client", "Trade del item OK")
+		// Recog = MakeIndex taken back; the bag re-sync returns it.
+		st := h.playScene.State
+		for i, it := range st.DealItems {
+			if it != nil && it.MakeIndex == msg.Recog {
+				st.DealItems[i] = nil
+				break
+			}
+		}
 
 	case protocol.SMDealDelItemFail:
 		log.Logf(log.LevelDebug, "Client", "Trade del item failed")
 
 	case protocol.SMDealRemoteAddItem:
-		log.Logf(log.LevelDebug, "Client", "Trade remote add item")
+		if item := h.parseTradeItem(body); item != nil {
+			slot := int(msg.Recog)
+			if slot >= 0 && slot < len(h.playScene.State.DealRemoteItems) {
+				h.playScene.State.DealRemoteItems[slot] = item
+			}
+		}
 
 	case protocol.SMDealRemoteDelItem:
-		log.Logf(log.LevelDebug, "Client", "Trade remote del item")
+		st := h.playScene.State
+		for i, it := range st.DealRemoteItems {
+			if it != nil && it.MakeIndex == msg.Recog {
+				st.DealRemoteItems[i] = nil
+				break
+			}
+		}
 
 	case protocol.SMSpaceMoveHide:
 		log.Logf(log.LevelDebug, "Client", "Space move hide: %d", msg.Recog)
@@ -1456,8 +1590,9 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 		handler.Send(cancelMsg, "")
 	})
 
-	playScene.SetSendUseItem(func(bagIdx int) {
-		msg := protocol.MakeDefaultMsg(protocol.CMEat, 0, uint16(bagIdx), 0, 0)
+	playScene.SetSendUseItem(func(makeIndex int32) {
+		// Recog carries the 32-bit MakeIndex (Delphi SendEatItem convention).
+		msg := protocol.MakeDefaultMsg(protocol.CMEat, makeIndex, 0, 0, 0)
 		handler.Send(msg, "")
 	})
 
@@ -1471,8 +1606,156 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 		handler.Send(msg, "")
 	})
 
-	playScene.SetSendSellItem(func(bagIdx int) {
-		msg := protocol.MakeDefaultMsg(protocol.CMUserSellItem, 0, uint16(bagIdx), 0, 0)
+	playScene.SetSendSellItem(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMUserSellItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDropItem(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDropItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDropGold(func(amount int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDropGold, int32(amount), 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDealTry(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMDealTry, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendTakeOn(func(makeIndex int32, slot int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMTakeOnItem, makeIndex, uint16(slot), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendTakeOff(func(slot int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMTakeOffItem, 0, uint16(slot), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendMagicKey(func(magID, key int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMMagicKeyChange, int32(magID), uint16(key), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendMerchantSelect(func(npcID int32, tag string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMMerchantDlgSelect, npcID, 0, 0, 0)
+		handler.Send(msg, tag)
+	})
+
+	playScene.SetSendQueryPrice(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMMerchantQuerySellPrice, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendQueryRepair(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMMerchantQueryRepairCost, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendRepairItem(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMUserRepairItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendStorageItem(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMUserStorageItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendTakeBackStorage(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMUserTakeBackStorageItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDealAdd(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDealAddItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDealDel(func(makeIndex int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDealDelItem, makeIndex, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDealChgGold(func(amount int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDealChgGold, int32(amount), 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendDealEnd(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMDealEnd, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendOpenGuild(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMOpenGuildDlg, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+	playScene.SetSendGuildMemberList(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildMemberList, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+	playScene.SetSendGuildAdd(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildAddMember, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+	playScene.SetSendGuildDel(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildDelMember, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+	playScene.SetSendGuildUpdateNotice(func(text string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildUpdateNotice, 0, 0, 0, 0)
+		handler.Send(msg, text)
+	})
+	playScene.SetSendGuildUpdateRank(func(text string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildUpdateRankInfo, 0, 0, 0, 0)
+		handler.Send(msg, text)
+	})
+	playScene.SetSendGuildAlly(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildAlly, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+	playScene.SetSendGuildBreakAlly(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildBreakAlly, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+	playScene.SetSendGuildHome(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMGuildHome, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+	playScene.SetSendGroupMode(func(allow int) {
+		msg := protocol.MakeDefaultMsg(protocol.CMGroupMode, 0, uint16(allow), 0, 0)
+		handler.Send(msg, "")
+	})
+	playScene.SetSendCreateGroup(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMCreateGroup, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+	playScene.SetSendAddGroupMember(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMAddGroupMember, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+	playScene.SetSendDelGroupMember(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDelGroupMember, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+
+	playScene.SetSendAdjustBonus(func(remaining int, deltas [9]int) {
+		buf := make([]byte, 18)
+		for i, d := range deltas {
+			binary.LittleEndian.PutUint16(buf[i*2:i*2+2], uint16(d))
+		}
+		// Send encodes the body once; pass raw bytes.
+		msg := protocol.MakeDefaultMsg(protocol.CMAdjustBonus, int32(remaining), 0, 0, 0)
+		handler.Send(msg, string(buf))
+	})
+
+	playScene.SetSendQueryUserState(func(targetID int32) {
+		msg := protocol.MakeDefaultMsg(protocol.CMQueryUserState, targetID, 0, 0, 0)
 		handler.Send(msg, "")
 	})
 
@@ -1503,9 +1786,26 @@ func (s *DebugScene) Render(glState *engine.GLState, proj [16]float32) {
 	case "Login":
 		r, g, b = 0.1, 0.2, 0.3
 	}
-	glState.DrawQuadColor(0, 0, 1024, 768, r, g, b, 1.0, proj)
-	glState.DrawQuadColor(462, 334, 100, 100, 1.0, 1.0, 1.0, 1.0, proj)
+	glState.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, r, g, b, 1.0, proj)
+	glState.DrawQuadColor(350, 250, 100, 100, 1.0, 1.0, 1.0, 1.0, proj)
 }
 func (s *DebugScene) OnKey(key int, action int)                    {}
 func (s *DebugScene) OnMouse(x, y float64, button int, action int) {}
 func (s *DebugScene) OnScroll(x, y float64)                        {}
+
+// parseTradeItem decodes the SMDealAddItemOK/SMDealRemoteAddItem payload
+// (server encodeDealItem: MakeIndex i32, WIndex u16, Dura u16, DuraMax u16).
+func (h *NetHandler) parseTradeItem(body string) *BagItem {
+	raw := []byte(body)
+	if len(raw) < 10 {
+		return nil
+	}
+	item := &BagItem{
+		MakeIndex: int32(binary.LittleEndian.Uint32(raw[0:4])),
+		Idx:       binary.LittleEndian.Uint16(raw[4:6]),
+		Dura:      binary.LittleEndian.Uint16(raw[6:8]),
+		DuraMax:   binary.LittleEndian.Uint16(raw[8:10]),
+	}
+	item.Def = h.playScene.State.ItemDefs[int(item.Idx)]
+	return item
+}

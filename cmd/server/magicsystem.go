@@ -438,20 +438,76 @@ func (p *PlayObject) sendMagicFire(server *netserver.TCPServer, magID, tx, ty in
 	server.Send(p.Session.ID, resp, "")
 }
 
-func (p *PlayObject) SendMyMagicFull(server *netserver.TCPServer) {
-	buf := make([]byte, 0, 2+len(p.LearnedMagics)*6)
-	count := make([]byte, 2)
-	binary.LittleEndian.PutUint16(count, uint16(len(p.LearnedMagics)))
-	buf = append(buf, count...)
+// magicMaxTrain is a placeholder training curve until the magic DB carries
+// per-level MaxTrain (Delphi Magic.MaxTrain[4]).
+var magicMaxTrain = [4]int{150, 600, 1800, 0}
+
+// encodeMyMagicBody serializes the magic list. Per magic: MagID u16,
+// Level u8, Key u8, IconIdx u16 (def.Effect*2 — Delphi draws
+// MagIcon[btEffect*2]), CurTrain u16, MaxTrain u16, NameLen u8 + Name.
+// Client mirror: GameState.ParseMagics.
+func (p *PlayObject) encodeMyMagicBody() string {
+	buf := make([]byte, 0, 2+len(p.LearnedMagics)*20)
+	var count [2]byte
+	binary.LittleEndian.PutUint16(count[:], uint16(len(p.LearnedMagics)))
+	buf = append(buf, count[:]...)
 	for _, pm := range p.LearnedMagics {
-		entry := make([]byte, 6)
+		iconIdx := uint16(0)
+		name := ""
+		if p.MagicDB != nil {
+			if def := p.MagicDB.GetByID(pm.MagID); def != nil {
+				iconIdx = uint16(def.Effect * 2)
+				name = def.MagName
+			}
+		}
+		lv := pm.Level
+		if lv > 3 {
+			lv = 3
+		}
+		// MagID u16, Level u8, Key u8, IconIdx u16, CurTrain u16, MaxTrain u16.
+		entry := make([]byte, 10)
 		binary.LittleEndian.PutUint16(entry[0:2], uint16(pm.MagID))
-		entry[2] = byte(pm.Level)
+		entry[2] = byte(lv)
 		entry[3] = pm.Key
+		binary.LittleEndian.PutUint16(entry[4:6], iconIdx)
+		binary.LittleEndian.PutUint16(entry[6:8], uint16(pm.TrainPoint))
+		binary.LittleEndian.PutUint16(entry[8:10], uint16(magicMaxTrain[lv]))
 		buf = append(buf, entry...)
+		nameBytes := []byte(name)
+		if len(nameBytes) > 255 {
+			nameBytes = nameBytes[:255]
+		}
+		buf = append(buf, byte(len(nameBytes)))
+		buf = append(buf, nameBytes...)
 	}
+	return protocol.EncodeBuffer(buf)
+}
+
+func (p *PlayObject) SendMyMagicFull(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMSendMyMagic, int32(len(p.LearnedMagics)), 0, 0, 0)
-	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+	server.Send(p.Session.ID, resp, p.encodeMyMagicBody())
+}
+
+// HandleMagicKeyChange rebinds a magic's hotkey. Recog=magic id (→Param1),
+// Param=key byte '1'..'8' or 0 to unbind (→Param2) — ClMain.pas:3086-3092.
+func (p *PlayObject) HandleMagicKeyChange(msg SendMessage, server *netserver.TCPServer) {
+	magID := msg.Param1
+	key := byte(msg.Param2)
+	pm := p.findMagic(magID)
+	if pm == nil {
+		return
+	}
+	if key != 0 {
+		// Unbind any other magic currently using this key (client does the
+		// same before sending, ClMain.pas:3522-3528; server enforces it too).
+		for i := range p.LearnedMagics {
+			if p.LearnedMagics[i].MagID != magID && p.LearnedMagics[i].Key == key {
+				p.LearnedMagics[i].Key = 0
+			}
+		}
+	}
+	pm.Key = key
+	p.SendMyMagicFull(server)
 }
 
 func (p *PlayObject) sendSpellToClient(server *netserver.TCPServer, msg SendMessage) {

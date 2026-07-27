@@ -58,6 +58,8 @@ func (e *UserEngine) RemovePlayer(id int32) {
 	log.Logf(log.LevelInfo, "UserEngine", "Player %d removed (total: %d)", id, len(e.PlayObjectList))
 }
 
+
+
 func (e *UserEngine) GetPlayer(id int32) *PlayObject {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

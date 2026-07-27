@@ -274,3 +274,39 @@
 ### 低优先级（锦上添花）
 
 13. 组队面板、加点面板、好友/邮件、设置、查看他人
+
+---
+
+## 实施进度（2026-07-27，计划 1785107348995-playful-falcon.md）
+
+固定 800×600（Delphi SWH800 分支），UI 全部迁入 DWinCtl 语义控件树
+（`cmd/client/ui*.go`：uicontrol/uimanager 框架 + uihud/uibag/uistate/uinpc/
+uideal/uiguild/uiabil 面板），旧手绘面板已删除。
+
+| 审查报告条目 | 状态 | 落点 |
+|---|---|---|
+| UI 鼠标命中检测系统（阻断） | ✅ 完成 | uicontrol.go/uimanager.go（模态/捕获短路、像素级 alpha 命中、按钮"释放时在区域内才点击"、网格 down==up 选中、窗口拖动钳制） |
+| 物品拖拽系统（阻断） | ✅ 完成 | itemmove.go（Delphi 符号 Index 编码、光标持物渲染、取消归位、背景落地/丢金币） |
+| 底部 HUD（差异+缺失） | ✅ 完成 | uihud.go：底栏两段混合、HP/MP 裁剪球（战士<28 级 [5]+[6]）、经验/重量条 [7]、昼夜图标、9 功能按钮+悬停提示、4 状态钮（按压态绘制）、腰带回填（拾放/双击使用/tooltip）、聊天 9×12 滚动+点击私聊 |
+| 背包（缺失交互） | ✅ 完成 | uibag.go：固定 46 格指针槽、拾放/交换、双击使用/自动穿戴、tooltip、关闭钮；物品图标改走 def.Looks（登录 SMStdItems 同步物品库） |
+| 装备面板 4 页（缺失） | ✅ 完成 | uistate.go：纸娃娃（376/377+发型+StateItem 层，HotX/HotY 偏移，St<N>.wil 懒加载）、13 槽精确坐标+穿脱+tooltip、属性/详细属性/魔法页、键位对话框→CMMagicKeyChange |
+| NPC 对话富文本（差异） | ✅ 完成 | uinpc.go：`<文本/链接>` 标签解析、黄色下划线链接（按下变红）、5s 防连点、`@@` 输入提示、CMMerchantDlgSelect 按标签；服务端按标签路由（@buy/@sell/@repair/脚本 label 跳转），#SAY 行以 `\` 连接 |
+| 商店/出售/修理（差异） | ✅ 完成 | uinpc.go：DMenuDlg [385] 列表/滚动/购买、DSellDlg [392] 出售位拖放+500ms 询价泵+修理/寄存模式 |
+| 交易窗口（差异+缺失） | ✅ 完成 | uideal.go + 服务端 tradesystem.go 重写：双方面板 [389]/[390]、本方 5×2/对端 5×4 格（物品 body）、金币输入、确认锁、4s 节流；修复 CMDealDelItem 误路由 |
+| 行会面板（差异+缺失） | ✅ 完成 | uiguild.go：[180]+12 按钮（8 个按权限门控）、成员列表（name/rank/online）、公告/职位/结盟输入；服务端 CMOpenGuildDlg 修复（原误路由建会）、按需成员列表、@@buildguildnow 建会 |
+| 组队面板（缺失） | ✅ 完成 | uiguild.go：[120]+5 按钮、允许组队开关、双列成员列表；服务端 CMGroupMode/Add/Del + 全员名单广播 |
+| 仓库（缺失交互） | ✅ 完成 | 脚本 STORAGE 动作→SMSendUserStorageItem+SMSaveItemList；客户端复用商店面板仓库模式（列表取出+出售位寄存，MakeIndex 寻址） |
+| 通用对话框（缺失） | ✅ 完成 | uidialog.go：DMsgDlg 三尺寸、Ok/Yes/No/Cancel 右起排布、Enter/Esc 语义、输入模式（非阻塞回调版）；uiedit.go EditBox |
+| tooltip（缺失） | ✅ 完成 | uitooltip.go：ShowHint/DrawHint（[394] 背景、`\` 多行）、GetMouseItemInfo |
+| 加点面板（缺失） | ✅ 完成 | uiabil.go：[226] 9 组 +/-、Ok→CMAdjustBonus（9×u16）；服务端升级 +3 点、HandleAdjustBonus |
+| 查看他人（缺失） | ✅ 完成 | uiabil.go：右键查询→CMQueryUserState→DUserState1 [370] 只读装备视图 |
+| 数据基础 | ✅ 完成 | SMAbility 全字段 body（职业公式 MaxHP/MaxWeight 等）、HealthSpell 打包修复（原 MP 被读成 HP）、SMWeightChanged、魔法列表扩展（图标/训练值/名称） |
+
+### 仍未做（登记）
+
+- 好友/邮件/黑名单/备忘录（服务端子系统缺失）
+- 声音系统（DOption 仅聊天行占位）
+- 饥饿指示（服务端无状态，控件预留）、动态昼夜（固定发 3）
+- 商品详情子菜单（CMUserGetDetailItem）、行会宣战/停战、行会主页传送
+- 多行 Memo 控件（公告/职位编辑暂用单行输入）、Ctrl×10 加点步进
+- DBotMemo 坐标越界（待查 DFM 父归属）

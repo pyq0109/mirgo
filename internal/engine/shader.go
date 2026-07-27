@@ -13,10 +13,12 @@ layout(location=0) in vec2 a_pos;
 layout(location=1) in vec2 a_uv;
 uniform mat4 u_proj;
 uniform mat4 u_model;
+uniform vec2 u_uv_scale;
+uniform vec2 u_uv_offset;
 out vec2 v_uv;
 void main() {
     gl_Position = u_proj * u_model * vec4(a_pos, 0.0, 1.0);
-    v_uv = a_uv;
+    v_uv = a_uv * u_uv_scale + u_uv_offset;
 }
 ` + "\x00"
 
@@ -96,12 +98,14 @@ func linkProgram(shaders ...uint32) (uint32, error) {
 
 // TextureShader holds the texture shader program and uniform locations.
 type TextureShader struct {
-	ID       uint32
-	ProjLoc  int32
-	ModelLoc int32
-	TexLoc   int32
-	ColorLoc int32
-	UseTexLoc int32
+	ID         uint32
+	ProjLoc    int32
+	ModelLoc   int32
+	TexLoc     int32
+	ColorLoc   int32
+	UseTexLoc  int32
+	UVScaleLoc int32
+	UVOffLoc   int32
 }
 
 // NewTextureShader compiles and links the texture shader.
@@ -118,14 +122,21 @@ func NewTextureShader() (*TextureShader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TextureShader{
-		ID:       prog,
-		ProjLoc:  gl.GetUniformLocation(prog, gl.Str("u_proj\x00")),
-		ModelLoc: gl.GetUniformLocation(prog, gl.Str("u_model\x00")),
-		TexLoc:   gl.GetUniformLocation(prog, gl.Str("u_tex\x00")),
-		ColorLoc: gl.GetUniformLocation(prog, gl.Str("u_color\x00")),
-		UseTexLoc: gl.GetUniformLocation(prog, gl.Str("u_use_tex\x00")),
-	}, nil
+	ts := &TextureShader{
+		ID:         prog,
+		ProjLoc:    gl.GetUniformLocation(prog, gl.Str("u_proj\x00")),
+		ModelLoc:   gl.GetUniformLocation(prog, gl.Str("u_model\x00")),
+		TexLoc:     gl.GetUniformLocation(prog, gl.Str("u_tex\x00")),
+		ColorLoc:   gl.GetUniformLocation(prog, gl.Str("u_color\x00")),
+		UseTexLoc:  gl.GetUniformLocation(prog, gl.Str("u_use_tex\x00")),
+		UVScaleLoc: gl.GetUniformLocation(prog, gl.Str("u_uv_scale\x00")),
+		UVOffLoc:   gl.GetUniformLocation(prog, gl.Str("u_uv_offset\x00")),
+	}
+	// Default UV transform: identity (samples the full texture).
+	gl.UseProgram(prog)
+	gl.Uniform2f(ts.UVScaleLoc, 1, 1)
+	gl.Uniform2f(ts.UVOffLoc, 0, 0)
+	return ts, nil
 }
 
 // ColorShader holds the color shader program and uniform locations.

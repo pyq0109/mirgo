@@ -113,17 +113,19 @@ func (s *NpcScript) Execute(label string, p *PlayObject, npc *NpcObject, server 
 		conditionsMet = s.evalConditions(section.Conditions, p)
 	}
 
+	// Lines join with '\' — the Delphi NPC dialog line separator, which the
+	// client parser (and its <text/@label> tag handling) splits on.
 	if conditionsMet {
 		s.execActions(section.Actions, p, npc, server)
 		if len(section.SayText) > 0 {
-			text := strings.Join(section.SayText, "\n")
+			text := strings.Join(section.SayText, "\\")
 			resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
 			server.Send(p.Session.ID, resp, protocol.EncodeString(text))
 		}
 	} else {
 		s.execActions(section.ElseAct, p, npc, server)
 		if len(section.ElseSay) > 0 {
-			text := strings.Join(section.ElseSay, "\n")
+			text := strings.Join(section.ElseSay, "\\")
 			resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
 			server.Send(p.Session.ID, resp, protocol.EncodeString(text))
 		}
@@ -384,6 +386,8 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 		label := parts[1]
 		s.Execute(label, p, npc, server)
+	case "STORAGE", "SAVEITEM":
+		p.sendStorageMenu(server)
 	case "CLOSE":
 		resp := protocol.MakeDefaultMsg(protocol.SMMerchantDlgClose, 0, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")

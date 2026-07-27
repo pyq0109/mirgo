@@ -263,6 +263,10 @@ func main() {
 		// Send ability
 		player.SendAbility(server)
 
+		// Item definition DB (client needs Name/Looks/StdMode for icons,
+		// tooltips, drag rules) — once per login.
+		player.SendStdItems(server)
+
 		// Send bag and equipment
 		player.SendBagItemsFull(server)
 		player.SendUseItemsFull(server)
@@ -563,21 +567,27 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMClickNPC:
 		player.SendMsg(protocol.CMClickNPC, int(msg.Recog), 0, 0, "")
 	case protocol.CMCreateGroup:
-		player.SendMsg(protocol.CMCreateGroup, int(msg.Recog), 0, 0, "")
+		// Body = target player name to invite.
+		player.SendMsg(protocol.CMCreateGroup, 0, 0, 0, body)
 	case protocol.CMPickup:
 		player.SendMsg(protocol.CMPickup, 0, 0, 0, "")
 	case protocol.CMTakeOnItem:
-		player.SendMsg(protocol.CMTakeOnItem, int(msg.Param), int(msg.Tag), 0, "")
+		// Recog=MakeIndex, Param=target slot.
+		player.SendMsg(protocol.CMTakeOnItem, int(msg.Recog), int(msg.Param), 0, "")
 	case protocol.CMTakeOffItem:
 		player.SendMsg(protocol.CMTakeOffItem, int(msg.Param), 0, 0, "")
 	case protocol.CMEat:
-		player.SendMsg(protocol.CMEat, int(msg.Param), 0, 0, "")
+		// Item CMs carry the 32-bit MakeIndex in Recog (Delphi convention).
+		player.SendMsg(protocol.CMEat, int(msg.Recog), 0, 0, "")
+	case protocol.CMMagicKeyChange:
+		player.SendMsg(protocol.CMMagicKeyChange, int(msg.Recog), int(msg.Param), 0, "")
 	case protocol.CMDealTry:
 		player.SendMsg(protocol.CMDealTry, 0, 0, 0, body)
 	case protocol.CMDealAddItem:
-		player.SendMsg(protocol.CMDealAddItem, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMDealAddItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMDealDelItem:
-		player.SendMsg(protocol.CMDealDelItem, int(msg.Param), 0, 0, "")
+		// Recog = MakeIndex of the offered item to take back.
+		player.SendMsg(protocol.CMDealDelItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMDealCancel:
 		player.SendMsg(protocol.CMDealCancel, 0, 0, 0, "")
 	case protocol.CMDealChgGold:
@@ -585,11 +595,23 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMDealEnd:
 		player.SendMsg(protocol.CMDealEnd, 0, 0, 0, "")
 	case protocol.CMUserStorageItem:
-		player.SendMsg(protocol.CMUserStorageItem, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMUserStorageItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMUserTakeBackStorageItem:
 		player.SendMsg(protocol.CMUserTakeBackStorageItem, int(msg.Param), 0, 0, "")
 	case protocol.CMOpenGuildDlg:
 		player.SendMsg(protocol.CMOpenGuildDlg, 0, 0, 0, body)
+	case protocol.CMGuildMemberList:
+		player.SendMsg(protocol.CMGuildMemberList, 0, 0, 0, "")
+	case protocol.CMGuildUpdateRankInfo:
+		player.SendMsg(protocol.CMGuildUpdateRankInfo, 0, 0, 0, body)
+	case protocol.CMGuildHome:
+		player.SendMsg(protocol.CMGuildHome, 0, 0, 0, "")
+	case protocol.CMGroupMode:
+		player.SendMsg(protocol.CMGroupMode, int(msg.Param), 0, 0, "")
+	case protocol.CMAddGroupMember:
+		player.SendMsg(protocol.CMAddGroupMember, 0, 0, 0, body)
+	case protocol.CMDelGroupMember:
+		player.SendMsg(protocol.CMDelGroupMember, 0, 0, 0, body)
 	case protocol.CMGuildAddMember:
 		player.SendMsg(protocol.CMGuildAddMember, 0, 0, 0, body)
 	case protocol.CMGuildDelMember:
@@ -607,21 +629,26 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMUserBuyItem:
 		player.SendMsg(protocol.CMUserBuyItem, int(msg.Param), 0, 0, "")
 	case protocol.CMUserSellItem:
-		player.SendMsg(protocol.CMUserSellItem, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMUserSellItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMUserRepairItem:
-		player.SendMsg(protocol.CMUserRepairItem, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMUserRepairItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMMerchantQuerySellPrice:
-		player.SendMsg(protocol.CMMerchantQuerySellPrice, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMMerchantQuerySellPrice, int(msg.Recog), 0, 0, "")
 	case protocol.CMMerchantQueryRepairCost:
-		player.SendMsg(protocol.CMMerchantQueryRepairCost, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMMerchantQueryRepairCost, int(msg.Recog), 0, 0, "")
 	case protocol.CMMerchantDlgSelect:
-		player.SendMsg(protocol.CMMerchantDlgSelect, int(msg.Recog), int(msg.Param), 0, "")
+		// Body carries the clicked link tag.
+		player.SendMsg(protocol.CMMerchantDlgSelect, int(msg.Recog), int(msg.Param), 0, body)
 	case protocol.CMDropItem:
-		player.SendMsg(protocol.CMDropItem, int(msg.Param), 0, 0, "")
+		player.SendMsg(protocol.CMDropItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMDropGold:
 		player.SendMsg(protocol.CMDropGold, int(msg.Recog), 0, 0, "")
 	case protocol.CMChangeAttackMode:
 		player.SendMsg(protocol.CMChangeAttackMode, int(msg.Param), 0, 0, "")
+	case protocol.CMAdjustBonus:
+		player.SendMsg(protocol.CMAdjustBonus, int(msg.Recog), 0, 0, body)
+	case protocol.CMQueryUserState:
+		player.SendMsg(protocol.CMQueryUserState, int(msg.Recog), 0, 0, "")
 	case protocol.CMLoginNoticeOK:
 		log.Logf(log.LevelInfo, "Server", "Notice acknowledged by %s", player.Name)
 		player.SendLogon(server)
