@@ -569,7 +569,7 @@ func (s *SelectChrScene) createWinPos() (float32, float32) {
 func (s *SelectChrScene) imgArea(img int, x, y float32) loginArea {
 	w, h := s.getPrguseSize(img)
 	if w == 0 || h == 0 {
-		w, h = 60, 22
+		w, h = 80, 28
 	}
 	return loginArea{x, y, float32(w), float32(h)}
 }
@@ -617,14 +617,18 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 			winX+sexXs[i], winY+211, s.createSex == i, s.createDown == 3+i)
 	}
 
-	// OK [51] / Cancel [52] are real buttons (not baked in), always drawn
-	// (window-relative 46/138,273 — FState:962-965).
-	okW, okH := s.getPrguseSize(ImgCreateOk)
-	s.traceDraw("create-ok", "Prguse", ImgCreateOk, winX+46, winY+273, float32(okW), float32(okH))
-	s.drawButton(ImgCreateOk, winX+46, winY+273, proj)
-	cancelW, cancelH := s.getPrguseSize(ImgCreateCancel)
-	s.traceDraw("create-ok", "Prguse", ImgCreateCancel, winX+138, winY+273, float32(cancelW), float32(cancelH))
-	s.drawButton(ImgCreateCancel, winX+138, winY+273, proj)
+	// OK [51] / Cancel [52]: only drawn when pressed (Downed), matching
+	// DccCloseDirectPaint — their normal face is baked into Prguse[73].
+	if s.createDown == 5 {
+		okW, okH := s.getPrguseSize(ImgCreateOk)
+		s.traceDraw("create-ok", "Prguse", ImgCreateOk, winX+46, winY+273, float32(okW), float32(okH))
+		s.drawButton(ImgCreateOk, winX+46, winY+273, proj)
+	}
+	if s.createDown == 6 {
+		cancelW, cancelH := s.getPrguseSize(ImgCreateCancel)
+		s.traceDraw("create-cancel", "Prguse", ImgCreateCancel, winX+138, winY+273, float32(cancelW), float32(cancelH))
+		s.drawButton(ImgCreateCancel, winX+138, winY+273, proj)
+	}
 }
 
 // renderCreateChoice mirrors DccCloseDirectPaint (FState:2725-2761): pressed →
@@ -814,19 +818,27 @@ func (s *SelectChrScene) mouseCreate(fx, fy float32, action int) {
 				return
 			}
 		}
+		if hitTest(fx, fy, s.imgArea(ImgCreateOk, winX+46, winY+273)) {
+			s.createDown = 5
+			return
+		}
+		if hitTest(fx, fy, s.imgArea(ImgCreateCancel, winX+142, winY+273)) {
+			s.createDown = 6
+			return
+		}
 	case mouseRelease:
 		down := s.createDown
 		s.createDown = -1
 		switch {
 		case down >= 0 && down < 3 && hitTest(fx, fy, s.imgArea(ImgCreateJob1+down, winX+jobXs[down], winY+139)):
-			s.createJob = down // instant preview (renderCreatePreview reads this)
+			s.createJob = down
 		case down >= 3 && down < 5 && hitTest(fx, fy, s.imgArea(ImgCreateMale+down-3, winX+sexXs[down-3], winY+211)):
 			s.createSex = down - 3
-		case hitTest(fx, fy, s.imgArea(ImgCreateOk, winX+46, winY+273)):
+		case down == 5 && hitTest(fx, fy, s.imgArea(ImgCreateOk, winX+46, winY+273)):
 			log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 OK pos=(%.0f,%.0f)", winX+46, winY+273)
 			s.confirmCreate()
-		case hitTest(fx, fy, s.imgArea(ImgCreateCancel, winX+138, winY+273)):
-			log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 Cancel pos=(%.0f,%.0f)", winX+138, winY+273)
+		case down == 6 && hitTest(fx, fy, s.imgArea(ImgCreateCancel, winX+142, winY+273)):
+			log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 Cancel pos=(%.0f,%.0f)", winX+142, winY+273)
 			s.createMode = false
 		}
 	}

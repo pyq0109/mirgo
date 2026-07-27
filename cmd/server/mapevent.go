@@ -37,7 +37,7 @@ func (e *Environment) ProcessMapEvents(server *netserver.TCPServer, now int64) {
 						o.Death = true
 						o.DeathTick = now
 						o.WAbil.HP = 0
-						e.broadcastRefMsg(o.BaseObject, RM_DEATH, o.ID, o.CurrX, o.CurrY, 0)
+						e.broadcastDeathMsg(o.BaseObject, o.ID, o.CurrX, o.CurrY, o.Dir, true)
 						if owner := e.getPlayerByID(ev.OwnerID); owner != nil {
 							owner.awardExp(server, o)
 						}

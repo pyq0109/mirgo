@@ -84,6 +84,7 @@ type SendMessage struct {
 	Param1   int
 	Param2   int
 	Param3   int
+	Dir      int
 	SourceID int32
 	Msg      string
 }

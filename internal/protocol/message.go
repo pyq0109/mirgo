@@ -202,6 +202,11 @@ const (
 	SMNowDeath  = 34
 )
 
+// Extended movement messages (5000+, Delphi Grobal2.pas:424-432)
+const (
+	SMHorseRun = 5010
+)
+
 // State/Info (40-54)
 const (
 	SMHear             = 40
@@ -529,6 +534,8 @@ func MsgName(ident uint16) string {
 		return "SM_SKELETON"
 	case SMNowDeath:
 		return "SM_NOWDEATH"
+	case SMHorseRun:
+		return "SM_HORSERUN"
 	// SM - State/Info
 	case SMHear:
 		return "SM_HEAR"

@@ -112,7 +112,8 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	if p.Death {
 		if p.deathTick > 0 && now-p.deathTick > 10000 && !p.skeletonSent {
 			p.skeletonSent = true
-			p.envir.broadcastRefMsg(p.BaseObject, RM_DEATH, p.ID, p.CurrX, p.CurrY, 0)
+			// Not a fresh death: SM_DEATH shows the corpse/skeleton directly.
+			p.envir.broadcastDeathMsg(p.BaseObject, p.ID, p.CurrX, p.CurrY, p.Dir, false)
 		}
 		if now-p.deathTick > 180000 {
 			p.resurrect(server)
@@ -233,6 +234,8 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.sendMovementToClient(server, protocol.SMWalk, msg)
 	case RM_RUN:
 		p.sendMovementToClient(server, protocol.SMRun, msg)
+	case RM_HORSERUN:
+		p.sendMovementToClient(server, protocol.SMHorseRun, msg)
 	case RM_TURN:
 		p.sendTurnToClient(server, msg)
 	case RM_DISAPPEAR:
@@ -666,7 +669,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 			tp.sendHealthSpell(server)
 		} else {
 			target.Death = true
-			p.envir.broadcastRefMsg(target, RM_DEATH, target.ID, target.CurrX, target.CurrY, dir)
+			p.envir.broadcastDeathMsg(target, target.ID, target.CurrX, target.CurrY, target.Dir, true)
 
 		if mon := p.envir.getMonsterByBase(target); mon != nil {
 			mon.DeathTick = time.Now().UnixMilli()
@@ -709,7 +712,13 @@ func (p *PlayObject) sendStruckToClient(server *netserver.TCPServer, msg SendMes
 }
 
 func (p *PlayObject) sendDeathToClient(server *netserver.TCPServer, msg SendMessage) {
-	resp := protocol.MakeDefaultMsg(protocol.SMDeath, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), 0)
+	// Param3==1 marks a fresh kill → SM_NOWDEATH (client plays the death
+	// animation); otherwise SM_DEATH (corpse/skeleton shown directly).
+	ident := uint16(protocol.SMDeath)
+	if msg.Param3 == 1 {
+		ident = protocol.SMNowDeath
+	}
+	resp := protocol.MakeDefaultMsg(ident, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), uint16(msg.Dir))
 	server.Send(p.Session.ID, resp, "")
 }
 

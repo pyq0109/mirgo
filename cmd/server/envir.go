@@ -340,6 +340,34 @@ func (e *Environment) broadcastRefMsg(center *BaseObject, ident int, sourceID in
 	}
 }
 
+// broadcastDeathMsg broadcasts a death to nearby players. justDied=true sends
+// SM_NOWDEATH (client plays the death animation); justDied=false sends SM_DEATH
+// (client shows the corpse directly). dir is the facing of the deceased
+// (Delphi ObjBase.pas:5523-5549, :21071).
+func (e *Environment) broadcastDeathMsg(center *BaseObject, sourceID int32, x, y, dir int, justDied bool) {
+	param3 := 0
+	if justDied {
+		param3 = 1
+	}
+	objs := e.GetRangeObjects(center.CurrX, center.CurrY, viewRange)
+	for _, obj := range objs {
+		p, ok := obj.(*PlayObject)
+		if !ok || p.Ghost {
+			continue
+		}
+		p.msgMu.Lock()
+		p.msgList = append(p.msgList, SendMessage{
+			Ident:    RM_DEATH,
+			Param1:   x,
+			Param2:   y,
+			Param3:   param3,
+			Dir:      dir,
+			SourceID: sourceID,
+		})
+		p.msgMu.Unlock()
+	}
+}
+
 func (e *Environment) AddGroundItem(item *GroundItem) {
 	e.GroundItems = append(e.GroundItems, item)
 	e.AddObject(item.X, item.Y, OS_ITEMOBJECT, item)

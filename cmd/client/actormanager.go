@@ -57,7 +57,8 @@ func (m *ActorManager) Update(now int64, moveTick bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, actor := range m.actors {
-		actor.MsgMuch = len(actor.MsgList) >= 2
+		// Delphi only sets the backlog speed-up flag for non-self actors (Actor.pas:2667)
+		actor.MsgMuch = !actor.IsSelf && len(actor.MsgList) >= 2
 		if moveTick {
 			actor.LockEndFrame = false
 		}
@@ -80,11 +81,15 @@ func (m *ActorManager) SortedByY() []*Actor {
 		if actors[i].Ry != actors[j].Ry {
 			return actors[i].Ry < actors[j].Ry
 		}
-		// Dead actors drawn after living at same row (PlayScn.pas:2151-2169).
+		// Dead actors sit on the bottom layer (drawn first) so the living
+		// trample them — ActorDied moves the dead to the list head
+		// (PlayScn.pas:2151-2169); the render loop draws head-first (:1229-1240).
 		if actors[i].Death != actors[j].Death {
-			return actors[j].Death
+			return actors[i].Death
 		}
-		return false
+		// Deterministic tie-break: map iteration order is random, so without a
+		// stable key same-row actors would swap draw order across frames (flicker).
+		return actors[i].RecogID < actors[j].RecogID
 	})
 	return actors
 }

@@ -89,8 +89,14 @@ func GetRaceByPM(race int, appr int) *MonsterAction {
 		return &MA15
 	case 16:
 		return &MA16
-	case 19, 20, 21, 30, 31, 37, 40, 41, 42, 45, 48, 49, 52, 53, 64, 65, 66, 67, 68, 69, 73, 74, 79:
+	case 19, 20, 21, 37, 40, 45, 52, 53, 64, 65, 66, 67, 68, 69, 73, 74, 79:
 		return &MA19
+	case 30, 31:
+		return &MA17
+	case 41, 42:
+		return &MA20
+	case 48, 49:
+		return &MA23
 	case 32:
 		return &MA24
 	case 33:
@@ -226,6 +232,16 @@ var MA16 = MonsterAction{
 	ActDeath:   ActionInfo{Start: 0, Frame: 1, Skip: 0, FTime: 160, UseTick: 0},
 }
 
+var MA17 = MonsterAction{
+	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 60, UseTick: 0},
+	ActWalk:    ActionInfo{Start: 80, Frame: 6, Skip: 4, FTime: 160, UseTick: 3},
+	ActAttack:  ActionInfo{Start: 160, Frame: 6, Skip: 4, FTime: 100, UseTick: 0},
+	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
+	ActStruck:  ActionInfo{Start: 240, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
+	ActDie:     ActionInfo{Start: 260, Frame: 10, Skip: 0, FTime: 100, UseTick: 0},
+	ActDeath:   ActionInfo{Start: 340, Frame: 1, Skip: 0, FTime: 140, UseTick: 0},
+}
+
 var MA19 = MonsterAction{
 	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
 	ActWalk:    ActionInfo{Start: 80, Frame: 6, Skip: 4, FTime: 160, UseTick: 3},
@@ -234,6 +250,16 @@ var MA19 = MonsterAction{
 	ActStruck:  ActionInfo{Start: 240, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 260, Frame: 10, Skip: 0, FTime: 140, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 340, Frame: 1, Skip: 0, FTime: 140, UseTick: 0},
+}
+
+var MA20 = MonsterAction{
+	ActStand:   ActionInfo{Start: 0, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
+	ActWalk:    ActionInfo{Start: 80, Frame: 6, Skip: 4, FTime: 160, UseTick: 3},
+	ActAttack:  ActionInfo{Start: 160, Frame: 6, Skip: 4, FTime: 120, UseTick: 0},
+	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
+	ActStruck:  ActionInfo{Start: 240, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
+	ActDie:     ActionInfo{Start: 260, Frame: 10, Skip: 0, FTime: 100, UseTick: 0},
+	ActDeath:   ActionInfo{Start: 340, Frame: 10, Skip: 0, FTime: 170, UseTick: 0},
 }
 
 var MA21 = MonsterAction{
@@ -254,6 +280,16 @@ var MA22 = MonsterAction{
 	ActStruck:  ActionInfo{Start: 320, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
 	ActDie:     ActionInfo{Start: 340, Frame: 10, Skip: 0, FTime: 160, UseTick: 0},
 	ActDeath:   ActionInfo{Start: 0, Frame: 6, Skip: 4, FTime: 0, UseTick: 0},
+}
+
+var MA23 = MonsterAction{
+	ActStand:   ActionInfo{Start: 20, Frame: 4, Skip: 6, FTime: 200, UseTick: 0},
+	ActWalk:    ActionInfo{Start: 100, Frame: 6, Skip: 4, FTime: 160, UseTick: 3},
+	ActAttack:  ActionInfo{Start: 180, Frame: 6, Skip: 4, FTime: 100, UseTick: 0},
+	ActCritical: ActionInfo{Start: 0, Frame: 0, Skip: 0, FTime: 0, UseTick: 0},
+	ActStruck:  ActionInfo{Start: 260, Frame: 2, Skip: 0, FTime: 100, UseTick: 0},
+	ActDie:     ActionInfo{Start: 280, Frame: 10, Skip: 0, FTime: 160, UseTick: 0},
+	ActDeath:   ActionInfo{Start: 0, Frame: 20, Skip: 0, FTime: 100, UseTick: 0},
 }
 
 var MA24 = MonsterAction{

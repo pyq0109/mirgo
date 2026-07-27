@@ -296,7 +296,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 					mon.Death = true
 					mon.DeathTick = time.Now().UnixMilli()
 					mon.WAbil.HP = 0
-					p.envir.broadcastRefMsg(mon.BaseObject, RM_DEATH, mon.ID, mon.CurrX, mon.CurrY, 0)
+					p.envir.broadcastDeathMsg(mon.BaseObject, mon.ID, mon.CurrX, mon.CurrY, mon.Dir, true)
 					p.awardExp(server, mon)
 				} else {
 					damage := power * 3

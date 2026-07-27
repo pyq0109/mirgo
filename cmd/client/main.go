@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-gl/glfw/v3.4/glfw"
@@ -300,6 +301,11 @@ func main() {
 
 	log.Logf(log.LevelInfo, "Client", "Login scene ready")
 	window.Run(func(dt float64) {
+		// Dispatch network messages queued by the read goroutine on the main
+		// thread, before scene updates, so all state mutation is single-threaded.
+		if handler != nil {
+			handler.Pump()
+		}
 		sceneMgr.Update(dt)
 		globalFade.tick()
 	}, func() {
@@ -322,6 +328,16 @@ func main() {
 // NetHandler
 // ============================================================================
 
+// netEvent is a decoded server message queued by the read goroutine and
+// dispatched on the main thread via Pump, so all actor/scene mutation is
+// single-threaded (no data races between ReadLoop and the render loop).
+type netEvent struct {
+	isCtrl bool
+	ctrl   string
+	msg    protocol.DefaultMessage
+	body   string
+}
+
 // NetHandler handles network communication.
 type NetHandler struct {
 	conn           net.Conn
@@ -341,9 +357,36 @@ type NetHandler struct {
 	charName      string
 	reconnecting  bool // True when waiting for re-auth after reconnect
 
+	// Inbound queue: ReadLoop appends, the main thread drains via Pump.
+	queueMu sync.Mutex
+	queue   []netEvent
+
 	// Callbacks (set by main)
 	onReconnect func(addr string, loginID string, certification int)
 	onFail      func() // Called when login fails, resets handler in main
+}
+
+// enqueue appends a decoded message for main-thread dispatch (called from ReadLoop).
+func (h *NetHandler) enqueue(e netEvent) {
+	h.queueMu.Lock()
+	h.queue = append(h.queue, e)
+	h.queueMu.Unlock()
+}
+
+// Pump drains the inbound queue and dispatches on the calling (main) thread.
+// Call once per frame before scene updates.
+func (h *NetHandler) Pump() {
+	h.queueMu.Lock()
+	events := h.queue
+	h.queue = nil
+	h.queueMu.Unlock()
+	for _, e := range events {
+		if e.isCtrl {
+			h.handleControlMsg(e.ctrl)
+		} else {
+			h.HandleMessage(e.msg, e.body)
+		}
+	}
 }
 
 // Close stops the read loop and closes the connection.
@@ -537,7 +580,7 @@ func (h *NetHandler) ReadLoop() {
 				data = data[endIdx+1:]
 
 				if len(payload) > 0 && payload[0] == '+' {
-					h.handleControlMsg(payload)
+					h.enqueue(netEvent{isCtrl: true, ctrl: payload})
 					continue
 				}
 
@@ -547,7 +590,7 @@ func (h *NetHandler) ReadLoop() {
 					if len(payload) > protocol.DefBlockSize {
 						body = protocol.DecodeString(payload[protocol.DefBlockSize:])
 					}
-					h.HandleMessage(msg, body)
+					h.enqueue(netEvent{msg: msg, body: body})
 				}
 			}
 			// Compact: keep any trailing partial frame, drop the consumed prefix.
@@ -807,6 +850,15 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			actor.SendMsg(protocol.SMRun, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 		}
 
+	case protocol.SMHorseRun:
+		if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
+			break // self uses local prediction
+		}
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(protocol.SMHorseRun, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
 	case protocol.SMDisappear, protocol.SMGhost, protocol.SMHide:
 		if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
 			break
@@ -1001,7 +1053,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
 			actor.Death = true
-			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), 0, 0, 0)
+			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 			if h.playScene.State.MySelf != nil && actor.RecogID == h.playScene.State.MySelf.RecogID {
 				h.playScene.deathGray = true
 			}

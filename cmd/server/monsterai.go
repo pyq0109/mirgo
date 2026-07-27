@@ -87,7 +87,7 @@ func (o *MonsterObject) runExplodeAI(server *netserver.TCPServer, target *PlayOb
 			damage = 50
 		}
 		o.applyMonsterDamageToPlayer(server, target, damage, now)
-		o.envir.broadcastRefMsg(o.BaseObject, RM_DEATH, o.ID, o.CurrX, o.CurrY, 0)
+		o.envir.broadcastDeathMsg(o.BaseObject, o.ID, o.CurrX, o.CurrY, o.Dir, true)
 		o.Death = true
 		o.DeathTick = now
 		o.WAbil.HP = 0

@@ -482,7 +482,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.Death = true
 		p.deathTick = time.Now().UnixMilli()
 		if p.envir != nil {
-			p.envir.broadcastRefMsg(p.BaseObject, RM_DEATH, p.ID, p.CurrX, p.CurrY, 0)
+			p.envir.broadcastDeathMsg(p.BaseObject, p.ID, p.CurrX, p.CurrY, p.Dir, true)
 		}
 	case "CHANGEGENDER":
 		if len(parts) < 2 {

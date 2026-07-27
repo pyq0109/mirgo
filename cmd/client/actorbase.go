@@ -11,8 +11,6 @@ import (
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
-const SMHorseRun = 5010
-
 type ActorType int
 
 const (
@@ -155,7 +153,7 @@ func (a *Actor) ProcMsg() {
 
 func (a *Actor) ReadyAction(msg ActorMsg) {
 	switch msg.Ident {
-	case protocol.SMWalk, protocol.SMRun, protocol.SMTurn, protocol.SMRush, protocol.SMRushKung, protocol.SMBackStep, SMHorseRun:
+	case protocol.SMWalk, protocol.SMRun, protocol.SMTurn, protocol.SMRush, protocol.SMRushKung, protocol.SMBackStep, protocol.SMHorseRun:
 		a.updateFeature(msg.Feature)
 	}
 
@@ -165,7 +163,11 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 		a.OldX = a.CurrX
 		a.OldY = a.CurrY
 		a.OldDir = a.Dir
-		msg.Ident = msg.Ident - 3000
+		if msg.Ident == protocol.CMHorseRun {
+			msg.Ident = protocol.SMHorseRun
+		} else {
+			msg.Ident = msg.Ident - 3000
+		}
 	}
 
 	a.CurrX = msg.X
@@ -175,7 +177,7 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 	a.CurrentAction = msg.Ident
 	a.CalcActorFrame()
 
-	if msg.Ident == protocol.SMWalk || msg.Ident == protocol.SMRun || msg.Ident == SMHorseRun {
+	if msg.Ident == protocol.SMWalk || msg.Ident == protocol.SMRun || msg.Ident == protocol.SMHorseRun {
 		a.Shift(a.Dir, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
 	} else if msg.Ident == protocol.SMBackStep {
 		a.Shift((a.Dir+4)%8, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
@@ -276,7 +278,7 @@ func (a *Actor) calcHumanFrame() {
 	case protocol.SMRun:
 		action = HA.ActRun
 		a.MoveStep = 2
-	case SMHorseRun:
+	case protocol.SMHorseRun:
 		action = HA.ActRun
 		a.MoveStep = 3
 	case protocol.SMRush:
@@ -361,6 +363,7 @@ func (a *Actor) calcHumanFrame() {
 			struckTime = 80
 		}
 		action.FTime = struckTime
+		a.Shift(a.Dir, 0, 0, 1)
 	case protocol.SMDeath:
 		action = HA.ActDie
 	case protocol.SMNowDeath:
@@ -411,8 +414,11 @@ func (a *Actor) calcMonsterFrame() {
 	case protocol.SMRun:
 		action = a.MonAction.ActWalk
 		a.MoveStep = 2
-	case protocol.SMHit, protocol.SMStruck:
+	case protocol.SMHit:
 		action = a.MonAction.ActAttack
+	case protocol.SMStruck:
+		action = a.MonAction.ActStruck
+		a.Shift(a.Dir, 0, 0, 1)
 	case protocol.SMDeath, protocol.SMNowDeath:
 		action = a.MonAction.ActDie
 	case protocol.SMSkeleton:
@@ -427,6 +433,12 @@ func (a *Actor) calcMonsterFrame() {
 	a.CurrentFrame = a.StartFrame
 	a.FrameTime = action.FTime
 	a.LastFrameTick = 0
+
+	// SM_DEATH shows the corpse directly (last die frame); only SM_NOWDEATH
+	// plays the full death animation (Delphi Actor.pas:1415-1429).
+	if a.CurrentAction == protocol.SMDeath {
+		a.CurrentFrame = a.EndFrame
+	}
 }
 
 func (a *Actor) calcNPCFrame() {
@@ -440,19 +452,20 @@ func (a *Actor) calcNPCFrame() {
 
 func (a *Actor) Move(now int64) bool {
 	switch a.CurrentAction {
-	case protocol.SMWalk, protocol.SMRun, protocol.SMRush, protocol.SMRushKung, protocol.SMBackStep, SMHorseRun:
+	case protocol.SMWalk, protocol.SMRun, protocol.SMRush, protocol.SMRushKung, protocol.SMBackStep, protocol.SMHorseRun:
 	default:
 		return false
 	}
 
-	if now-a.LastFrameTick < int64(a.FrameTime) {
-		return true
-	}
-	a.LastFrameTick = now
-
+	// Delphi advances exactly one frame per 100ms movetick with no FrameTime
+	// gate here (Actor.pas:2683); template FTime only drives non-move actions.
 	if a.CurrentAction == protocol.SMBackStep {
 		if a.CurrentFrame > a.StartFrame {
 			a.CurrentFrame--
+			// fastmove: backstep retreats 2 frames per tick (Actor.pas:2733-2734)
+			if a.CurrentFrame > a.StartFrame {
+				a.CurrentFrame--
+			}
 			cur := a.EndFrame - a.CurrentFrame + 1
 			max := a.EndFrame - a.StartFrame + 1
 			a.Shift((a.Dir+4)%8, a.MoveStep, cur, max)
@@ -465,7 +478,8 @@ func (a *Actor) Move(now int64) bool {
 	} else {
 		if a.CurrentFrame < a.EndFrame {
 			a.CurrentFrame++
-			if a.MsgMuch && a.CurrentFrame < a.EndFrame {
+			// Message backlog speed-up, but never for Rush/RushKung (normmove, Actor.pas:2684)
+			if a.MsgMuch && a.CurrentAction != protocol.SMRush && a.CurrentAction != protocol.SMRushKung && a.CurrentFrame < a.EndFrame {
 				a.CurrentFrame++
 			}
 			cur := a.CurrentFrame - a.StartFrame + 1
@@ -484,7 +498,7 @@ func (a *Actor) Move(now int64) bool {
 func (a *Actor) Run(now int64) {
 	if a.CurrentAction == protocol.SMWalk || a.CurrentAction == protocol.SMRun ||
 		a.CurrentAction == protocol.SMRush || a.CurrentAction == protocol.SMRushKung ||
-		a.CurrentAction == protocol.SMBackStep || a.CurrentAction == SMHorseRun {
+		a.CurrentAction == protocol.SMBackStep || a.CurrentAction == protocol.SMHorseRun {
 		return
 	}
 
@@ -617,7 +631,20 @@ func (a *Actor) Shift(dir, step, cur, max int) {
 	fCur := float64(cur)
 	fMax := float64(max)
 
-	ss := int(math.Round((fMax-fCur)/fMax)) * step
+	// Per-direction rounding offset v (Delphi Actor.pas:1773-1865): for max>=6
+	// the diagonals use ±2 and down uses -1 to shift the mid-step tile flip.
+	v := 0
+	if fMax >= 6 {
+		switch dir {
+		case 1, 7:
+			v = 2 // UPRIGHT/UPLEFT: (max-cur+2)
+		case 3, 5:
+			v = -2 // DOWNRIGHT/DOWNLEFT: (max-cur-2)
+		case 4:
+			v = -1 // DOWN: (max-cur-1)
+		}
+	}
+	ss := roundEven((fMax-fCur+float64(v))/fMax) * step
 
 	a.Rx = a.CurrX - dx*ss
 	a.Ry = a.CurrY - dy*ss
@@ -634,6 +661,23 @@ func (a *Actor) Shift(dir, step, cur, max int) {
 		a.ShiftX *= 0.7071
 		a.ShiftY *= 0.7071
 	}
+}
+
+// roundEven implements Delphi's banker's rounding: exact .5 rounds to the
+// nearest even integer (Round(0.5)=0, Round(1.5)=2, Round(2.5)=2).
+func roundEven(x float64) int {
+	f := math.Floor(x)
+	diff := x - f
+	if diff > 0.5 {
+		return int(f) + 1
+	}
+	if diff < 0.5 {
+		return int(f)
+	}
+	if int(f)%2 == 0 {
+		return int(f)
+	}
+	return int(f) + 1
 }
 
 func (a *Actor) GetBodyImage(resources *engine.ResourceManager) *wil.Image {

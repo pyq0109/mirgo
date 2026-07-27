@@ -453,13 +453,14 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 		gl.DrawQuadColor(0, 0, 800, 600, 0.05, 0.05, 0.1, 1, proj)
 	}
 
-	// Door animation: ChrSel.wil[23..32] (IntroScn.pas:841,845)
+	// Door animation: ChrSel.wil[23..32] (IntroScn.pas:841,845 — original
+	// positions {152},{96} match the 10th-anniversary ChrSel.wil assets).
 	if s.doorOpening {
 		doorIdx := 23 + s.doorFrame
 		if doorTex, err := s.getChrSelTexture(doorIdx); err == nil {
 			w, h := s.getChrSelSize(doorIdx)
-			s.traceDraw("door", "ChrSel", doorIdx, ox+252, oy+106, float32(w), float32(h))
-			gl.DrawQuad(doorTex, ox+252, oy+106, float32(w), float32(h), proj)
+			s.traceDraw("door", "ChrSel", doorIdx, ox+152, oy+96, float32(w), float32(h))
+			gl.DrawQuad(doorTex, ox+152, oy+96, float32(w), float32(h), proj)
 		}
 	}
 

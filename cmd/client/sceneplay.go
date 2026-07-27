@@ -494,8 +494,11 @@ func (s *PlayScene) Update(dt float64) {
 		// come from PlayScn.pas:1741-1748 reverse formula:
 		//   sx = (cx-Rx)*48 + 364 + 24 - ShiftX  →  388 when cx==Rx
 		//   sy = (cy-Ry)*32 + 192 + 16 - ShiftY  →  208 when cy==Ry
-		s.cam.X = wx - 388
-		s.cam.Y = wy - 208
+		// The (388,208) anchor is in screen pixels; ScreenToWorld divides by
+		// Zoom (camera.go:28-30), so the world offset must be scaled too —
+		// otherwise the player drifts off-anchor whenever Zoom != 1.
+		s.cam.X = wx - 388/s.cam.Zoom
+		s.cam.Y = wy - 208/s.cam.Zoom
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
@@ -510,7 +513,13 @@ func (s *PlayScene) Update(dt float64) {
 			nx, ny := my.CurrX+dx, my.CurrY+dy
 			if s.CanWalk(nx, ny) {
 				dist := absInt(my.CurrX-s.targetX) + absInt(my.CurrY-s.targetY)
-				if dist >= 3 {
+				// Mounted run advances 3 tiles; the server requires all three
+				// tiles ahead to be walkable (HandleHorseRun x1/x2/x3). The
+				// first tile is already validated by CanWalk(nx, ny) above.
+				if my.OnHorse && dist >= 4 && s.CanWalk(my.CurrX+dx*2, my.CurrY+dy*2) && s.CanWalk(my.CurrX+dx*3, my.CurrY+dy*3) {
+					my.UpdateMsg(protocol.CMHorseRun, my.CurrX+dx*3, my.CurrY+dy*3, dir, 0, 0)
+					s.sendMove(protocol.CMHorseRun, dir)
+				} else if dist >= 3 {
 					my.UpdateMsg(protocol.CMRun, nx+dx, ny+dy, dir, 0, 0)
 					s.sendMove(protocol.CMRun, dir)
 				} else {

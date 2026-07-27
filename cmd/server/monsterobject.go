@@ -297,7 +297,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 		target.Death = true
 		target.deathTick = time.Now().UnixMilli()
 		if o.envir != nil {
-			o.envir.broadcastRefMsg(target.BaseObject, RM_DEATH, target.ID, target.CurrX, target.CurrY, o.Dir)
+			o.envir.broadcastDeathMsg(target.BaseObject, target.ID, target.CurrX, target.CurrY, target.Dir, true)
 		}
 		log.Logf(log.LevelInfo, "Combat", "%s killed %s", o.Name, target.Name)
 	} else {
