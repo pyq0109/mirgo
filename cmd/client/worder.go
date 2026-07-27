@@ -1,50 +1,71 @@
 package main
 
+// WORDER tables from Actor.pas:461-547. Index = frame (0..599), value = 0 (weapon behind body) or 1 (weapon in front).
+var worderMale = [600]byte{
+	// Stand (0-63)
+	0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+	0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1,
+	// Walk (64-127)
+	0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+	0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1,
+	// Run (128-191)
+	0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1,
+	0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1,
+	// WarMode (192-199)
+	0, 1, 1, 1, 0, 0, 0, 0,
+	// Hit (200-263)
+	1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+	1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1,
+	// HeavyHit (264-327)
+	0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1,
+	1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1,
+	// BigHit (328-391)
+	1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0,
+	1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0,
+	1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0,
+	// Spell (392-455)
+	0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1,
+	0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1,
+	// Sitdown (456-471)
+	0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0,
+	// Struck (472-535)
+	0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1,
+	0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1,
+	// Die (536-599)
+	0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1,
+	0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1,
+}
+
+// Female differs from male only at index 192 (WarMode frame 0): male=0, female=1.
+var worderFemale = func() [600]byte {
+	t := worderMale
+	t[192] = 1
+	return t
+}()
+
 func getWordOrder(sex int, frame int) int {
 	if frame < 0 || frame >= 600 {
 		return 0
 	}
-	dirFrame := frame % 8
-	switch {
-	case frame < 64: // Stand
-		if dirFrame >= 2 && dirFrame <= 3 {
-			return 1
-		}
-		return 0
-	case frame < 128: // Walk
-		if dirFrame >= 1 && dirFrame <= 4 {
-			return 1
-		}
-		return 0
-	case frame < 192: // Run
-		if dirFrame >= 1 && dirFrame <= 4 {
-			return 1
-		}
-		return 0
-	case frame < 200: // RushLeft/RushRight/WarMode
-		return 0
-	case frame < 264: // Hit
-		if dirFrame >= 2 && dirFrame <= 5 {
-			return 1
-		}
-		return 0
-	case frame < 328: // HeavyHit
-		if dirFrame >= 2 && dirFrame <= 5 {
-			return 1
-		}
-		return 0
-	case frame < 392: // BigHit
-		if dirFrame >= 3 && dirFrame <= 6 {
-			return 1
-		}
-		return 0
-	case frame < 456: // Spell
-		return 0
-	case frame < 472: // Sitdown
-		return 0
-	case frame < 536: // Struck
-		return 0
-	default: // Die
-		return 0
+	if sex == 1 {
+		return int(worderFemale[frame])
 	}
+	return int(worderMale[frame])
 }

@@ -42,20 +42,47 @@ type MonsterObject struct {
 
 	lastRegenTick int64
 	Engine        *UserEngine
+
+	ViewRange int
+	CoolEye   int
+
+	lastThinkTick int64
 }
 
 func getAIBehavior(race byte) int {
-	switch {
-	case race >= 51 && race <= 55:
-		return 1
-	case race == 56 || race == 57:
-		return 2
-	case race >= 60 && race <= 65:
-		return 3
-	case race >= 70 && race <= 75:
-		return 4
+	// Race→AI mapping based on Delphi factory (UsrEngn.pas:1831-1938).
+	// Animals (50+) are mostly basic melee unless specifically noted.
+	switch race {
+	case 52: // TChickenDeer — flee
+		return AIFlee
+	case 82: // TSpitSpider — ranged + poison
+		return AIRanged
+	case 90: // TGasAttackMonster — area
+		return AIArea
+	case 91: // TMagCowMonster — magic
+		return AIMagicCast
+	case 94: // TLightingZombi — ranged lightning
+		return AIRanged
+	case 95: // TDigOutZombi — burrow
+		return AIBurrow
+	case 102: // TScultureKingMonster — summoner
+		return AISummoner
+	case 105: // TGasMothMonster — area
+		return AIArea
+	case 117: // TExplosionSpider — explode
+		return AIExplode
+	case 118: // THighRiskSpider — ranged
+		return AIRanged
+	case 119: // TBigPoisionSpider — ranged + poison
+		return AIRanged
+	case 200: // TElectronicScolpionMon — ranged
+		return AIRanged
 	default:
-		return 0
+		// 51(chicken), 53(wolf), 80(oma), 81(oma knight), 83(slow),
+		// 84(scorpion), 85(stick), 87(dual axe), 92(cow king TODO),
+		// 96(zilkin TODO), 100(white skeleton), 101(sculpture TODO),
+		// 103(bee queen), 107(centipede king TODO), 130(double critical)
+		return AIMelee
 	}
 }
 
@@ -70,7 +97,7 @@ func NewMonsterObject(name string, id int32, race, raceImg byte, appr uint16, hp
 		WalkSpeed:   walkSpeed,
 		AttackSpeed: attackSpeed,
 		Exp:         exp,
-		AIBehavior:  getExtendedAIBehavior(race),
+		AIBehavior:  getAIBehavior(race),
 		WalkStep:    3,
 		WalkWait:    1000,
 	}
@@ -83,6 +110,14 @@ func (o *MonsterObject) Feature() int32 {
 func (o *MonsterObject) OnStruck(attackerID int32, now int64) {
 	o.LastHiterID = attackerID
 	o.LastHiterTick = now
+	o.WalkTick += 800
+	penalty := int64(150)
+	if lvl := int64(o.WAbil.Level) * 4; lvl < 130 {
+		penalty = 150 - lvl
+	} else {
+		penalty = 20
+	}
+	o.HitTick += penalty
 	if o.TargetID == 0 || rand.Intn(6) == 0 {
 		o.TargetID = attackerID
 		o.FocusTick = now
@@ -103,6 +138,21 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				hp = o.MaxHP
 			}
 			o.WAbil.HP = uint16(hp)
+		}
+	}
+
+	if now-o.lastThinkTick >= 3000 {
+		o.lastThinkTick = now
+		if o.envir != nil {
+			objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, 0)
+			for _, obj := range objs {
+				if obj != o {
+					if _, isMon := obj.(*MonsterObject); isMon {
+						o.WalkTo(rand.Intn(8))
+						break
+					}
+				}
+			}
 		}
 	}
 
@@ -127,7 +177,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
-				o.chaseTarget(target)
+				o.chaseTarget(target, now)
 			}
 		case 1:
 			if dist <= 1 {
@@ -144,7 +194,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 					o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 				}
 			} else {
-				o.chaseTarget(target)
+				o.chaseTarget(target, now)
 			}
 		case 2:
 			if int(o.WAbil.HP) < o.MaxHP/5 {
@@ -158,7 +208,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			} else if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
-				o.chaseTarget(target)
+				o.chaseTarget(target, now)
 			}
 		case 3:
 			if dist <= 1 && now-o.HitTick > o.AttackSpeed {
@@ -180,7 +230,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.FocusTick = now
 				o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 			} else if dist > 1 {
-				o.chaseTarget(target)
+				o.chaseTarget(target, now)
 			}
 		case 4:
 			if now-o.lastSummonTick > 30000 && o.minionCount < 3 {
@@ -191,13 +241,13 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
-				o.chaseTarget(target)
+				o.chaseTarget(target, now)
 			}
 		default:
 			o.runExtendedAI(server, target, dist, now)
 		}
 	} else {
-		if now-o.WalkTick > o.WalkSpeed*3 {
+		if now-o.WalkTick > o.WalkSpeed {
 			if rand.Intn(20) == 0 {
 				o.WalkTick = now
 				if rand.Intn(4) == 0 {
@@ -255,8 +305,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	}
 }
 
-func (o *MonsterObject) chaseTarget(target *PlayObject) {
-	now := time.Now().UnixMilli()
+func (o *MonsterObject) chaseTarget(target *PlayObject, now int64) {
 	if now-o.WalkTick < o.WalkSpeed {
 		return
 	}
@@ -318,12 +367,19 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 		return
 	}
 
-	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, 12)
+	vr := o.ViewRange
+	if vr <= 0 {
+		vr = 5
+	}
+	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr)
 	var best *PlayObject
 	bestDist := 999999
 	for _, obj := range objs {
 		p, ok := obj.(*PlayObject)
-		if !ok || p.Ghost || p.Death || p.Hidden {
+		if !ok || p.Ghost || p.Death {
+			continue
+		}
+		if p.Hidden && rand.Intn(100) >= o.CoolEye {
 			continue
 		}
 		d := abs(p.CurrX-o.CurrX) + abs(p.CurrY-o.CurrY)

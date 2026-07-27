@@ -22,27 +22,6 @@ const (
 	AIGuard     = 11
 )
 
-func getExtendedAIBehavior(race byte) int {
-	switch {
-	case race >= 80 && race <= 82:
-		return AIBurrow
-	case race == 83:
-		return AIExplode
-	case race >= 84 && race <= 86:
-		return AITeleport
-	case race >= 87 && race <= 89:
-		return AIMagicCast
-	case race >= 90 && race <= 92:
-		return AIClone
-	case race >= 93 && race <= 95:
-		return AIPoison
-	case race >= 96 && race <= 98:
-		return AIGuard
-	default:
-		return getAIBehavior(race)
-	}
-}
-
 func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
 	switch o.AIBehavior {
 	case AIBurrow:
@@ -69,7 +48,7 @@ func (o *MonsterObject) runBaseAI(server *netserver.TCPServer, target *PlayObjec
 	case dist <= 1:
 		o.meleeAttack(server, target, now)
 	default:
-		o.chaseTarget(target)
+		o.chaseTarget(target, now)
 	}
 }
 
@@ -89,7 +68,7 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 			o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
 		}
 	} else {
-		o.chaseTarget(target)
+		o.chaseTarget(target, now)
 		if rand.Intn(30) == 0 && dist > 4 {
 			o.Hidden = true
 			o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
@@ -115,7 +94,7 @@ func (o *MonsterObject) runExplodeAI(server *netserver.TCPServer, target *PlayOb
 		log.Logf(log.LevelInfo, "Monster", "%s exploded for %d damage", o.Name, damage)
 		return
 	}
-	o.chaseTarget(target)
+	o.chaseTarget(target, now)
 }
 
 func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -136,7 +115,7 @@ func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayO
 			return
 		}
 	}
-	o.chaseTarget(target)
+	o.chaseTarget(target, now)
 }
 
 func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -155,7 +134,7 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 		return
 	}
 	if dist > 6 {
-		o.chaseTarget(target)
+		o.chaseTarget(target, now)
 	}
 }
 
@@ -163,7 +142,7 @@ func (o *MonsterObject) runCloneAI(server *netserver.TCPServer, target *PlayObje
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target)
+		o.chaseTarget(target, now)
 	}
 
 	if int(o.WAbil.HP) < o.MaxHP/3 && o.minionCount < 2 && now-o.lastSummonTick > 20000 {
@@ -218,7 +197,7 @@ func (o *MonsterObject) runPoisonAI(server *netserver.TCPServer, target *PlayObj
 		o.FocusTick = now
 		return
 	}
-	o.chaseTarget(target)
+	o.chaseTarget(target, now)
 }
 
 func (o *MonsterObject) runGuardAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -228,7 +207,7 @@ func (o *MonsterObject) runGuardAI(server *netserver.TCPServer, target *PlayObje
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else if dist <= 7 {
-		o.chaseTarget(target)
+		o.chaseTarget(target, now)
 	}
 }
 

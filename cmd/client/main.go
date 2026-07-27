@@ -769,6 +769,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			}
 		}
 		h.playScene.State.MySelf = actor
+		actor.IsSelf = true
 		h.playScene.State.Sex = actor.Sex
 		h.playScene.State.Hair = actor.Hair
 		h.playScene.State.Actors.Add(actor)
@@ -976,6 +977,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor := NewActor(msg.Recog, newX, newY, 0)
 		actor.Type = ActorHuman
 		h.playScene.State.MySelf = actor
+		actor.IsSelf = true
 		h.playScene.State.Actors.Add(actor)
 		actor.SendMsg(protocol.SMTurn, newX, newY, 0, 0, 0)
 

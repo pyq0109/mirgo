@@ -275,6 +275,8 @@ type LoginScene struct {
 	// Mouse: currently pressed button index per mode (-1 = none)
 	pressedButton int
 
+	compLoggedModes uint8 // bitmask of modes whose layout has been logged
+
 	// Modal dialog (Delphi DMessageDlg, FState.pas:1938-2158)
 	dlgMsg        string
 	dlgLines      []string
@@ -300,18 +302,79 @@ func (s *LoginScene) traceDraw(tag, wil string, idx int, x, y, w, h float32) {
 	log.Logf(log.LevelTrace, "Render", "login %s %s[%d] pos=(%.0f,%.0f) size=(%.0f,%.0f)", tag, wil, idx, x, y, w, h)
 }
 
+var loginModeNames = [...]string{"login", "register", "chgpw", "serverselect"}
+
+func (s *LoginScene) logComponentLayout() {
+	name := loginModeNames[s.mode]
+	log.Logf(log.LevelInfo, "LoginScene", "=== 组件布局 (mode=%s) ===", name)
+	log.Logf(log.LevelInfo, "LoginScene", "  背景      ChrSel[22]       pos=(%.0f,%.0f) size=(800,600)", loginOX, loginOY)
+
+	switch s.mode {
+	case modeLogin:
+		fieldNames := [2]string{"ID", "Password"}
+		for i, a := range inputFields {
+			log.Logf(log.LevelInfo, "LoginScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", fieldNames[i], a.X, a.Y, a.W, a.H)
+		}
+		btnNames := [4]string{"OK", "ChangePW", "NewAccount", "Close"}
+		for i, a := range buttonAreas {
+			log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", btnNames[i], a.X, a.Y, a.W, a.H, buttonImages[i])
+		}
+
+	case modeRegister:
+		wx, wy, ww, wh := s.windowOrigin(63)
+		log.Logf(log.LevelInfo, "LoginScene", "  窗口      Prguse[63]       pos=(%.0f,%.0f) size=(%d,%d)", wx, wy, ww, wh)
+		regNames := [13]string{"account", "password", "confirm", "name", "SSNo", "birthday", "quiz1", "answer1", "quiz2", "answer2", "phone", "mobile", "email"}
+		for i, def := range regFieldDefs {
+			log.Logf(log.LevelInfo, "LoginScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", regNames[i], def.x, def.y, def.w, def.h)
+		}
+		regBtnNames := [3]string{"Ok", "Cancel", "Close"}
+		for i, a := range regButtonAreas {
+			log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", regBtnNames[i], a.X, a.Y, a.W, a.H, regButtonImages[i])
+		}
+		log.Logf(log.LevelInfo, "LoginScene", "  标题文本  %-12s pos=(362,121)", "创建新账号")
+
+	case modeChgPw:
+		wx, wy, ww, wh := s.windowOrigin(50)
+		log.Logf(log.LevelInfo, "LoginScene", "  窗口      Prguse[50]       pos=(%.0f,%.0f) size=(%d,%d)", wx, wy, ww, wh)
+		chgNames := [4]string{"account", "old-pw", "new-pw", "repeat"}
+		for i, def := range chgFieldDefs {
+			log.Logf(log.LevelInfo, "LoginScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", chgNames[i], def.x, def.y, def.w, def.h)
+		}
+		chgBtnNames := [2]string{"Ok", "Cancel"}
+		for i, off := range []loginArea{{wx + 81, wy + 141, 0, 0}, {wx + 160, wy + 141, 0, 0}} {
+			bw, bh := s.getPrguseSize(chgButtonImages[i])
+			log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", chgBtnNames[i], off.X, off.Y, bw, bh, chgButtonImages[i])
+		}
+
+	case modeServerSelect:
+		wx, wy := s.srvWindowOrigin()
+		ww, wh := s.getPrguseSize(srvDlgImg)
+		log.Logf(log.LevelInfo, "LoginScene", "  窗口      Prguse[%d]      pos=(%.0f,%.0f) size=(%d,%d)", srvDlgImg, wx, wy, ww, wh)
+		cw, ch := s.getPrguseSize(srvCloseImg)
+		log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "Close", wx+srvCloseDX, wy+srvCloseDY, cw, ch, srvCloseImg)
+		bw, bh := s.getPrguseSize(srvBtnImg)
+		count := len(s.servers)
+		for i := 0; i < count && i < 6; i++ {
+			bx := wx + 65
+			by := wy + srvButtonTop(i, count)
+			log.Logf(log.LevelInfo, "LoginScene", "  服务器按钮 %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", s.servers[i].Name, bx, by, bw, bh, srvBtnImg)
+		}
+	}
+}
+
 // NewLoginScene creates a new login scene.
 func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *LoginScene {
 	s := &LoginScene{
-		gl:            gl,
-		resources:     resources,
-		text:          text,
-		textSmall:     text,
-		textSrv:       text,
-		showLoginUI:   true,
-		focusedField:  0,
-		pressedButton: -1,
-		cursorBlink:   time.Now(),
+		gl:             gl,
+		resources:      resources,
+		text:           text,
+		textSmall:      text,
+		textSrv:        text,
+		showLoginUI:    true,
+		focusedField:   0,
+		pressedButton:  -1,
+		cursorBlink:    time.Now(),
+		compLoggedModes: 0,
 	}
 	// Delphi input fields use Font.Size=10 ≈ 13px @96DPI (IntroScn.pas:260).
 	if t, err := text.WithSize(13); err == nil {
@@ -342,6 +405,7 @@ func (s *LoginScene) Open() {
 	s.pressedButton = -1
 	s.servers = nil
 	s.cursorBlink = time.Now()
+	s.compLoggedModes = 0
 }
 
 // Close is called when the scene becomes inactive.
@@ -410,6 +474,10 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 		default:
 			s.renderButtons(gl, proj, ox, oy)
 			s.renderInputFields(gl, proj, ox, oy)
+		}
+		if s.compLoggedModes&(1<<s.mode) == 0 {
+			s.logComponentLayout()
+			s.compLoggedModes |= 1 << s.mode
 		}
 	}
 
@@ -877,6 +945,7 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
 			for i, b := range btns {
 				if hitTest(fx, fy, b) {
 					s.dlgPressedBtn = i
+					log.Logf(log.LevelInfo, "LoginScene", "点击 对话框按钮[%d] img=Prguse[%d] pos=(%.0f,%.0f)", i, s.dlgButtons[i], b.X, b.Y)
 					break
 				}
 			}
@@ -932,16 +1001,20 @@ func (s *LoginScene) regButtonArea(i int) loginArea {
 func (s *LoginScene) mouseLogin(fx, fy float32, action int) {
 	switch action {
 	case mousePress:
+		fieldNames := [2]string{"ID", "Password"}
 		for i, field := range inputFields {
 			if hitTest(fx, fy, field) {
 				s.focusedField = i
 				s.cursorBlink = time.Now()
+				log.Logf(log.LevelInfo, "LoginScene", "点击 输入框 %s pos=(%.0f,%.0f)", fieldNames[i], field.X, field.Y)
 				return
 			}
 		}
+		btnNames := [4]string{"OK", "ChangePW", "NewAccount", "Close"}
 		for i := range buttonAreas {
 			if hitTest(fx, fy, s.buttonArea(i)) {
 				s.pressedButton = i
+				log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 %s pos=(%.0f,%.0f)", btnNames[i], buttonAreas[i].X, buttonAreas[i].Y)
 				return
 			}
 		}
@@ -962,16 +1035,28 @@ func (s *LoginScene) mouseLogin(fx, fy float32, action int) {
 func (s *LoginScene) mouseGroup(fx, fy float32, action int, fields, buttons []loginArea, focus *int, onClick func(int)) {
 	switch action {
 	case mousePress:
+		regNames := [13]string{"account", "password", "confirm", "name", "SSNo", "birthday", "quiz1", "answer1", "quiz2", "answer2", "phone", "mobile", "email"}
 		for i, field := range fields {
 			if hitTest(fx, fy, field) {
 				*focus = i
 				s.cursorBlink = time.Now()
+				name := fmt.Sprintf("field[%d]", i)
+				if i < len(regNames) {
+					name = regNames[i]
+				}
+				log.Logf(log.LevelInfo, "LoginScene", "点击 输入框 %s pos=(%.0f,%.0f)", name, field.X, field.Y)
 				return
 			}
 		}
+		regBtnNames := [3]string{"Ok", "Cancel", "Close"}
 		for i, btn := range buttons {
 			if hitTest(fx, fy, btn) {
 				s.pressedButton = i
+				name := fmt.Sprintf("button[%d]", i)
+				if i < len(regBtnNames) {
+					name = regBtnNames[i]
+				}
+				log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 %s pos=(%.0f,%.0f)", name, btn.X, btn.Y)
 				return
 			}
 		}
@@ -997,16 +1082,20 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 	}
 	switch action {
 	case mousePress:
+		chgNames := [4]string{"account", "old-pw", "new-pw", "repeat"}
 		for i, def := range chgFieldDefs {
 			if hitTest(fx, fy, loginArea{def.x, def.y, def.w, def.h}) {
 				s.chgFocus = i
 				s.cursorBlink = time.Now()
+				log.Logf(log.LevelInfo, "LoginScene", "点击 输入框 %s pos=(%.0f,%.0f)", chgNames[i], def.x, def.y)
 				return
 			}
 		}
+		chgBtnNames := [2]string{"Ok", "Cancel"}
 		for i, btn := range buttons {
 			if hitTest(fx, fy, btn) {
 				s.pressedButton = i
+				log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 %s pos=(%.0f,%.0f)", chgBtnNames[i], btn.X, btn.Y)
 				return
 			}
 		}
@@ -1042,11 +1131,13 @@ func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 		for i := 0; i < count && i < 6; i++ {
 			if hitTest(fx, fy, btnArea(i)) {
 				s.pressedButton = i
+				log.Logf(log.LevelInfo, "LoginScene", "点击 服务器按钮 %s pos=(%.0f,%.0f)", s.servers[i].Name, wx+65, wy+srvButtonTop(i, count))
 				return
 			}
 		}
 		if hitTest(fx, fy, closeArea) {
 			s.pressedButton = 6
+			log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 Close pos=(%.0f,%.0f)", closeArea.X, closeArea.Y)
 		}
 	case mouseRelease:
 		if s.pressedButton < 0 {

@@ -228,8 +228,8 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 		def = &MonsterDef{Race: 51, RaceImg: 11, Appr: 160, HP: 5, Exp: 9, DC: 1, DCMax: 1, Speed: 10}
 	}
 
-	walkSpeed := int64(600)
-	attackSpeed := int64(1500)
+	walkSpeed := int64(1400)
+	attackSpeed := int64(2000)
 	if def.Speed > 0 {
 		walkSpeed = int64(2000 - def.Speed*100)
 		if walkSpeed < 200 {
@@ -248,6 +248,14 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	mon.HitPoint = mon.MaxHP
 	mon.BaseObject.WAbil.DC = uint32(def.DC) | uint32(def.DCMax)<<16
 	mon.BaseObject.WAbil.AC = uint32(def.AC) | uint32(def.MAC)<<16
+	mon.ViewRange = def.ViewRange
+	mon.CoolEye = def.CoolEye
+	if def.WalkStep > 0 {
+		mon.WalkStep = def.WalkStep
+	}
+	if def.WalkWait > 0 {
+		mon.WalkWait = int64(def.WalkWait)
+	}
 
 	env.AddObject(x, y, OS_MOVINGOBJECT, mon)
 	e.Monsters = append(e.Monsters, mon)

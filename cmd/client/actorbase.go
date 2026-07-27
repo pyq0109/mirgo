@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/protocol"
 	"github.com/pyq0109/mirgo/internal/wil"
@@ -93,6 +94,7 @@ type Actor struct {
 	Effect  int
 	OnHorse bool
 	State   int32
+	IsSelf  bool
 
 	SayingArr    [5]string
 	SayTime      int64
@@ -354,9 +356,9 @@ func (a *Actor) calcHumanFrame() {
 		a.WarModeTime = time.Now().UnixMilli()
 	case protocol.SMStruck:
 		action = HA.ActStruck
-		struckTime := 70 + (45-a.Level)*4
-		if struckTime < 70 {
-			struckTime = 70
+		struckTime := 200 - a.Level*5
+		if struckTime < 80 {
+			struckTime = 80
 		}
 		action.FTime = struckTime
 	case protocol.SMDeath:
@@ -428,7 +430,8 @@ func (a *Actor) calcMonsterFrame() {
 }
 
 func (a *Actor) calcNPCFrame() {
-	a.StartFrame = GetNpcOffset(a.Appearance) + a.Dir*8
+	npcDir := a.Dir % 3
+	a.StartFrame = GetNpcOffset(a.Appearance) + npcDir*8
 	a.EndFrame = a.StartFrame + 7
 	a.CurrentFrame = a.StartFrame
 	a.FrameTime = 200
@@ -486,7 +489,13 @@ func (a *Actor) Run(now int64) {
 	}
 
 	if a.CurrentAction != 0 {
-		if now-a.LastFrameTick >= int64(a.FrameTime) {
+		ft := a.FrameTime
+		if !a.IsSelf && a.UseMagic {
+			ft = ft * 10 / 18
+		} else if a.MsgMuch {
+			ft = ft * 2 / 3
+		}
+		if now-a.LastFrameTick >= int64(ft) {
 			a.LastFrameTick = now
 			if a.CurrentFrame < a.EndFrame {
 				a.CurrentFrame++
@@ -715,7 +724,25 @@ func (a *Actor) Draw(gl *engine.GLState, resources *engine.ResourceManager, scre
 	}
 }
 
-func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+func getStateTint(state int32) (float32, float32, float32, bool) {
+	switch {
+	case state < 0: // $80000000 ceGreen
+		return 0.3, 1.0, 0.3, true
+	case state&0x40000000 != 0: // ceRed
+		return 1.0, 0.3, 0.3, true
+	case state&0x20000000 != 0: // ceBlue
+		return 0.3, 0.3, 1.0, true
+	case state&0x10000000 != 0: // ceYellow
+		return 1.0, 1.0, 0.3, true
+	case state&0x08000000 != 0: // ceFuchsia
+		return 1.0, 0.3, 1.0, true
+	case state&0x04000000 != 0: // ceGrayScale
+		return 0.6, 0.6, 0.6, true
+	}
+	return 0, 0, 0, false
+}
+
+func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
 	img := a.GetBodyImage(resources)
 	if img == nil || img.RGBA == nil {
 		return
@@ -730,22 +757,41 @@ func (a *Actor) drawBody(gl *engine.GLState, resources *engine.ResourceManager, 
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+	drawX := screenX + float32(img.HotX)
+	drawY := screenY + float32(img.HotY)
+
+	blend := a.State&0x00800000 != 0
+	if blend {
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+	}
+	if tr, tg, tb, tinted := getStateTint(a.State); tinted {
+		glState.DrawQuadTint(tex, drawX, drawY, w, h, tr, tg, tb, 1.0, proj)
+	} else {
+		glState.DrawQuad(tex, drawX, drawY, w, h, proj)
+	}
+	if blend {
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	}
 }
 
 func (a *Actor) wingBehind() bool {
 	return a.Dir >= 3 && a.Dir <= 5
 }
 
-func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
 	wpord := getWordOrder(a.Sex, a.CurrentFrame)
 
+	blend := a.State&0x00800000 != 0
+	if blend {
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+	}
+
 	if a.Effect > 0 && a.wingBehind() {
-		a.drawWingLayer(gl, resources, screenX, screenY, proj)
+		a.drawWingLayer(glState, resources, screenX, screenY, proj)
 	}
 
 	if wpord == 0 && a.Weapon >= 2 {
-		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
+		a.drawWeaponLayer(glState, resources, screenX, screenY, proj)
 	}
 
 	bodyIdx := HumanFrame*a.Dress + a.CurrentFrame
@@ -756,28 +802,12 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 			if tex != 0 {
 				w := float32(img.Width)
 				h := float32(img.Height)
-				var tr, tg, tb float32
-				tinted := true
-				switch {
-				case a.State < 0: // $80000000 ceGreen
-					tr, tg, tb = 0.3, 1.0, 0.3
-				case a.State&0x40000000 != 0: // ceRed
-					tr, tg, tb = 1.0, 0.3, 0.3
-				case a.State&0x20000000 != 0: // ceBlue
-					tr, tg, tb = 0.3, 0.3, 1.0
-				case a.State&0x10000000 != 0: // ceYellow
-					tr, tg, tb = 1.0, 1.0, 0.3
-				case a.State&0x08000000 != 0: // ceFuchsia
-					tr, tg, tb = 1.0, 0.3, 1.0
-				case a.State&0x04000000 != 0: // ceGrayScale
-					tr, tg, tb = 0.6, 0.6, 0.6
-				default:
-					tinted = false
-				}
-				if tinted {
-					gl.DrawQuadTint(tex, screenX, screenY-h+engine.TileHeight, w, h, tr, tg, tb, 1.0, proj)
+				bx := screenX + float32(img.HotX)
+				by := screenY + float32(img.HotY)
+				if tr, tg, tb, tinted := getStateTint(a.State); tinted {
+					glState.DrawQuadTint(tex, bx, by, w, h, tr, tg, tb, 1.0, proj)
 				} else {
-					gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+					glState.DrawQuad(tex, bx, by, w, h, proj)
 				}
 			}
 		}
@@ -791,17 +821,21 @@ func (a *Actor) drawHuman(gl *engine.GLState, resources *engine.ResourceManager,
 			if tex != 0 {
 				w := float32(img.Width)
 				h := float32(img.Height)
-				gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+				glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, proj)
 			}
 		}
 	}
 
 	if wpord == 1 && a.Weapon >= 2 {
-		a.drawWeaponLayer(gl, resources, screenX, screenY, proj)
+		a.drawWeaponLayer(glState, resources, screenX, screenY, proj)
 	}
 
 	if a.Effect > 0 && !a.wingBehind() {
-		a.drawWingLayer(gl, resources, screenX, screenY, proj)
+		a.drawWingLayer(glState, resources, screenX, screenY, proj)
+	}
+
+	if blend {
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
 }
 
@@ -820,7 +854,7 @@ func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceMa
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+	gl.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, proj)
 }
 
 func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
@@ -841,7 +875,7 @@ func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceMana
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	gl.DrawQuad(tex, screenX, screenY-h+engine.TileHeight, w, h, proj)
+	gl.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, proj)
 }
 
 func getWilFile(resources *engine.ResourceManager, actorType ActorType, appr int) *wil.File {

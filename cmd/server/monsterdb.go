@@ -9,22 +9,26 @@ import (
 )
 
 type MonsterDef struct {
-	Name    string `json:"name"`
-	Race    int    `json:"race"`
-	RaceImg int    `json:"raceImg"`
-	Appr    int    `json:"appr"`
-	Lvl     int    `json:"lvl"`
-	Undead  int    `json:"undead"`
-	Exp     int    `json:"exp"`
-	HP      int    `json:"hp"`
-	AC      int    `json:"ac"`
-	MAC     int    `json:"mac"`
-	DC      int    `json:"dc"`
-	DCMax   int    `json:"dcMax"`
-	MC      int    `json:"mc"`
-	SC      int    `json:"sc"`
-	Speed   int    `json:"speed"`
-	Hit     int    `json:"hit"`
+	Name      string `json:"name"`
+	Race      int    `json:"race"`
+	RaceImg   int    `json:"raceImg"`
+	Appr      int    `json:"appr"`
+	Lvl       int    `json:"lvl"`
+	Undead    int    `json:"undead"`
+	Exp       int    `json:"exp"`
+	HP        int    `json:"hp"`
+	AC        int    `json:"ac"`
+	MAC       int    `json:"mac"`
+	DC        int    `json:"dc"`
+	DCMax     int    `json:"dcMax"`
+	MC        int    `json:"mc"`
+	SC        int    `json:"sc"`
+	Speed     int    `json:"speed"`
+	Hit       int    `json:"hit"`
+	ViewRange int    `json:"viewRange"`
+	CoolEye   int    `json:"coolEye"`
+	WalkStep  int    `json:"walkStep"`
+	WalkWait  int    `json:"walkWait"`
 }
 
 type MonsterDB struct {
