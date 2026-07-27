@@ -24,6 +24,24 @@ func atoiClamped(s string, lo, hi int) int {
 	return v
 }
 
+// goldStr formats a gold amount with thousands separators (Delphi GetGoldStr,
+// ClFunc.pas:98-115).
+func goldStr(n int) string {
+	s := strconv.Itoa(n)
+	if n < 0 {
+		return "-" + goldStr(-n)
+	}
+	first := len(s) % 3
+	if first == 0 {
+		first = 3
+	}
+	out := s[:first]
+	for i := first; i < len(s); i += 3 {
+		out += "," + s[i:i+3]
+	}
+	return out
+}
+
 // Item drag system — port of Delphi g_boItemMoving/g_MovingItem
 // (MShare.pas:365-368, FState.pas:613-621,1812-1886). The signed Index
 // encodes where the held item came from.
@@ -111,23 +129,45 @@ func (m *ItemMoveState) Cancel(gs *GameState) {
 	m.End()
 }
 
-// getTakeOnPosition maps an item StdMode to its equipment slot
-// (FState.pas:3269 GetTakeOnPosition; mirrors server getEquipSlot).
+// getTakeOnPosition maps an item StdMode to its primary equipment slot
+// (ClFunc.pas:618-634). Dual-slot items (rings/bracelets) return the left
+// slot; equipSlotClick picks left vs right via takeOnSlotMatches.
 func getTakeOnPosition(stdMode byte) int {
-	switch {
-	case stdMode >= 10 && stdMode <= 12:
-		return protocol.UDress
-	case stdMode >= 5 && stdMode <= 6:
+	switch stdMode {
+	case 5, 6:
 		return protocol.UWeapon
-	case stdMode >= 15 && stdMode <= 17:
-		return protocol.UNecklace
-	case stdMode >= 20 && stdMode <= 22:
+	case 10, 11:
+		return protocol.UDress
+	case 15, 16:
 		return protocol.UHelmet
-	case stdMode >= 24 && stdMode <= 26:
-		return protocol.UArmRingL
-	case stdMode >= 28 && stdMode <= 30:
+	case 19, 20, 21:
+		return protocol.UNecklace
+	case 22, 23:
 		return protocol.URingL
-	default:
-		return -1
+	case 24, 26:
+		return protocol.UArmRingL
+	case 28, 29, 30:
+		return protocol.URightHand
+	case 25, 51:
+		return protocol.UBujuk
+	case 52, 62:
+		return protocol.UBoots
+	case 53, 63:
+		return protocol.UCharm
+	case 54, 64:
+		return protocol.UBelt
 	}
+	return -1
+}
+
+// takeOnSlotMatches reports whether slot is a valid equip target for
+// stdMode, accepting either side for dual-slot items (FState:3300-3318).
+func takeOnSlotMatches(stdMode byte, slot int) bool {
+	switch stdMode {
+	case 22, 23:
+		return slot == protocol.URingL || slot == protocol.URingR
+	case 24, 26:
+		return slot == protocol.UArmRingL || slot == protocol.UArmRingR
+	}
+	return getTakeOnPosition(stdMode) == slot
 }

@@ -73,13 +73,11 @@ func main() {
 	playScene := NewPlayScene(glState, resources, *mapDir)
 	playScene.SetText(textRenderer)
 	loginScene := NewLoginScene(glState, resources, textRenderer)
-	selectServerScene := NewSelectServerScene(glState, resources, textRenderer)
 	selectChrScene := NewSelectChrScene(glState, resources, textRenderer)
 	noticeScene := NewNoticeScene(glState, resources, textRenderer)
 
 	sceneMgr.RegisterScene(engine.SceneIntro, &DebugScene{name: "Intro"})
 	sceneMgr.RegisterScene(engine.SceneLogin, loginScene)
-	sceneMgr.RegisterScene(engine.SceneSelectServer, selectServerScene)
 	sceneMgr.RegisterScene(engine.SceneSelectChr, selectChrScene)
 	sceneMgr.RegisterScene(engine.SceneLoginNotice, noticeScene)
 	sceneMgr.RegisterScene(engine.ScenePlayGame, playScene)
@@ -99,7 +97,7 @@ func main() {
 		}
 		var err error
 		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc: connecting to %s...", *serverAddr)
-		handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
+		handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
 		if err != nil {
 			log.Logf(log.LevelError, "Client", "[Callback] LoginFunc: connect failed: %v", err)
 			loginScene.SetError("连接服务器失败")
@@ -122,7 +120,7 @@ func main() {
 		log.Logf(log.LevelInfo, "Client", "[Callback] RegisterFunc: id=%s", ue.Account())
 		if handler == nil {
 			var err error
-			handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
+			handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
 			if err != nil {
 				log.Logf(log.LevelError, "Client", "[Callback] RegisterFunc: connect failed: %v", err)
 				loginScene.SetError("连接服务器失败")
@@ -142,7 +140,7 @@ func main() {
 		log.Logf(log.LevelInfo, "Client", "[Callback] ChgPwFunc: id=%s", id)
 		if handler == nil {
 			var err error
-			handler, err = connectToServer(*serverAddr, loginScene, selectServerScene, playScene, selectChrScene, noticeScene, sceneMgr)
+			handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
 			if err != nil {
 				log.Logf(log.LevelError, "Client", "[Callback] ChgPwFunc: connect failed: %v", err)
 				loginScene.SetError("连接服务器失败")
@@ -156,22 +154,15 @@ func main() {
 		handler.SendChgPw(id, oldpw, newpw)
 	})
 
-	// Wire server selection scene callbacks.
-	selectServerScene.SetSelectFunc(func(serverName string) {
+	// Wire server selection (DSelServerDlg overlay on the login scene). The
+	// close button reuses loginScene.closeFunc, which exits the app.
+	loginScene.SetSelectFunc(func(serverName string) {
 		log.Logf(log.LevelInfo, "Client", "[Callback] ServerSelectFunc: server=%s", serverName)
 		if handler == nil {
 			log.Logf(log.LevelWarn, "Client", "[Callback] ServerSelectFunc: handler is nil")
 			return
 		}
 		handler.SendSelectServer(serverName)
-	})
-	selectServerScene.SetCloseFunc(func() {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ServerSelectClose: returning to login")
-		if handler != nil {
-			handler.Close()
-			handler = nil
-		}
-		sceneMgr.ChangeScene(engine.SceneLogin)
 	})
 
 	// Wire select character scene callbacks.
@@ -221,9 +212,10 @@ func main() {
 	})
 
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
-		if action == glfw.Press && key == glfw.KeyEscape &&
-			!playScene.State.ShowNpcDialog && !playScene.State.InDeal &&
-			!playScene.State.ShowGuild && !playScene.State.ShowShop {
+		// Esc-quits only in pre-game scenes; the original has no global Esc
+		// in play — quitting goes through the DBotExit button there
+		// (ClMain:1575-1612).
+		if action == glfw.Press && key == glfw.KeyEscape && sceneMgr.CurrentType() != engine.ScenePlayGame {
 			if handler != nil {
 				handler.Close()
 				handler = nil
@@ -280,15 +272,14 @@ func main() {
 
 // NetHandler handles network communication.
 type NetHandler struct {
-	conn               net.Conn
-	loginScene         *LoginScene
-	selectServerScene  *SelectServerScene
-	playScene          *PlayScene
-	selectChrScene     *SelectChrScene
-	noticeScene        *NoticeScene
-	sceneMgr           *engine.SceneManager
-	code               byte
-	done               chan struct{}
+	conn           net.Conn
+	loginScene     *LoginScene
+	playScene      *PlayScene
+	selectChrScene *SelectChrScene
+	noticeScene    *NoticeScene
+	sceneMgr       *engine.SceneManager
+	code           byte
+	done           chan struct{}
 
 	// Auth state
 	loginID       string
@@ -581,13 +572,13 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				})
 			}
 		} else {
-			// First login — show server selection dialog
+			// First login — show the server select overlay on the login scene
+			// (Delphi DSelServerDlg, FState.pas:2453-2517).
 			log.Logf(log.LevelInfo, "Client", "Login successful, showing server selection")
 			servers := parseServerList(body)
-			if h.selectServerScene != nil {
-				h.selectServerScene.SetServers(servers)
+			if h.loginScene != nil {
+				h.loginScene.ShowServerSelect(servers)
 			}
-			h.sceneMgr.ChangeScene(engine.SceneSelectServer)
 		}
 
 	case protocol.SMSelectServerOK:
@@ -1019,13 +1010,16 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMGuildMessage:
 		log.Logf(log.LevelInfo, "Client", "Guild chat: %s", body)
+		h.playScene.addGuildChat(body)
 		h.playScene.AddChatMessage("[行会] " + body)
 
 	case protocol.SMStorageOK:
 		log.Logf(log.LevelInfo, "Client", "Item stored")
+		h.playScene.sellConfirmed()
 
 	case protocol.SMStorageFull:
 		log.Logf(log.LevelInfo, "Client", "Storage full")
+		h.playScene.sellFailed()
 
 	case protocol.SMTakeBackStorageItemOK:
 		log.Logf(log.LevelInfo, "Client", "Item retrieved from storage")
@@ -1202,16 +1196,21 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelInfo, "Client", "Eat item failed")
 
 	case protocol.SMTakeOnOK:
+		// Bag/equipment state arrives via the full SMBagItems/SMSendUseItems
+		// refresh the server sends alongside this message (the client applies
+		// an optimistic visual at request time).
 		log.Logf(log.LevelInfo, "Client", "Equip OK: slot=%d", msg.Recog)
 
 	case protocol.SMTakeOnFail:
-		log.Logf(log.LevelInfo, "Client", "Equip failed: code=%d", msg.Recog)
+		// The full refresh that accompanies this message rolls back the
+		// client's optimistic update.
+		log.Logf(log.LevelWarn, "Client", "Equip failed: code=%d", msg.Recog)
 
 	case protocol.SMTakeOffOK:
 		log.Logf(log.LevelInfo, "Client", "Unequip OK: slot=%d", msg.Recog)
 
 	case protocol.SMTakeOffFail:
-		log.Logf(log.LevelInfo, "Client", "Unequip failed")
+		log.Logf(log.LevelWarn, "Client", "Unequip failed")
 
 	case protocol.SMMerchantDlgClose:
 		h.playScene.State.ShowNpcDialog = false
@@ -1259,9 +1258,11 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMUserSellItemOK:
 		log.Logf(log.LevelInfo, "Client", "Sell success")
+		h.playScene.sellConfirmed()
 
 	case protocol.SMUserSellItemFail:
 		log.Logf(log.LevelInfo, "Client", "Sell failed")
+		h.playScene.sellFailed()
 
 	case protocol.SMSendBuyPrice:
 		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
@@ -1589,7 +1590,7 @@ func parseQueryChrBody(body string) (chars []parsedChar, selectedIdx int) {
 }
 
 // connectToServer creates a new NetHandler and connects to the login server.
-func connectToServer(addr string, loginScene *LoginScene, selectServerScene *SelectServerScene, playScene *PlayScene, selectChrScene *SelectChrScene, noticeScene *NoticeScene, sceneMgr *engine.SceneManager) (*NetHandler, error) {
+func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, selectChrScene *SelectChrScene, noticeScene *NoticeScene, sceneMgr *engine.SceneManager) (*NetHandler, error) {
 	log.Logf(log.LevelInfo, "Client", "Connecting to %s...", addr)
 
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
@@ -1599,14 +1600,13 @@ func connectToServer(addr string, loginScene *LoginScene, selectServerScene *Sel
 	log.Logf(log.LevelInfo, "Client", "Connected to server")
 
 	handler := &NetHandler{
-		conn:              conn,
-		loginScene:        loginScene,
-		selectServerScene: selectServerScene,
-		playScene:         playScene,
-		selectChrScene:    selectChrScene,
-		noticeScene:       noticeScene,
-		sceneMgr:          sceneMgr,
-		done:              make(chan struct{}),
+		conn:           conn,
+		loginScene:     loginScene,
+		playScene:      playScene,
+		selectChrScene: selectChrScene,
+		noticeScene:    noticeScene,
+		sceneMgr:       sceneMgr,
+		done:           make(chan struct{}),
 	}
 
 	// Send protocol version

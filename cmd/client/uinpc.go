@@ -58,7 +58,9 @@ func (s *PlayScene) parseNpcDialog(body string) {
 				continue // centering markers (unused in this Delphi revision too)
 			}
 			if tag == "" {
-				continue // empty tag: hides shop windows (no client equivalent yet)
+				// Empty tag hides the shop windows (FState:4847-4850).
+				s.State.ShowShop = false
+				continue
 			}
 			// <display text/link value>
 			display, link := tag, ""
@@ -77,7 +79,7 @@ func (s *PlayScene) buildNpcPanels() {
 
 	// --- NPC dialog (DMerchantDlg [384] @0,0) ---
 	npc := NewUIControl("DMerchantDlg", KindWindow)
-	npc.Floating = true
+	npc.Floating = false // DFM: not draggable
 	if prg != nil {
 		npc.SetImgIndex(prg, ImgNpcDlg)
 	} else {
@@ -87,20 +89,21 @@ func (s *PlayScene) buildNpcPanels() {
 	npc.Visible = false
 	npc.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintNpcDialog(c, proj) }
 	npc.OnMouseDown = func(c *UIControl, button, x, y int) { s.npcClick(x, y) }
+	npc.OnMouseUp = func(c *UIControl, button, x, y int) { s.npcSelectTag = "" } // FState:5158-5162
 	ui.Root.AddChild(npc)
 	s.hudNpc = npc
 
 	npcClose := NewUIControl("DMerchantDlgClose", KindButton)
-	npcClose.Left, npcClose.Top = 399, 1
+	npcClose.Left, npcClose.Top = 372, 20 // runtime override (FState:1303-1305)
 	if prg != nil {
-		npcClose.SetImgIndex(prg, ImgCloseMed)
+		npcClose.SetImgIndex(prg, ImgCloseSmall)
 	}
 	npcClose.OnClick = func(c *UIControl, x, y int) { s.State.ShowNpcDialog = false }
 	npc.AddChild(npcClose)
 
 	// --- Buy list (DMenuDlg [385], runtime pos 0,170 — FState:4751-4752) ---
 	menu := NewUIControl("DMenuDlg", KindWindow)
-	menu.Floating = true
+	menu.Floating = false // DFM: not draggable
 	if prg != nil {
 		menu.SetImgIndex(prg, ImgShopBg)
 	} else {
@@ -113,10 +116,13 @@ func (s *PlayScene) buildNpcPanels() {
 	ui.Root.AddChild(menu)
 	s.hudMenu = menu
 
+	// Runtime button layout (FState:1330-1341 — the DlgConf entries are
+	// dead values): Prev[387]@(328,42), Next[388]@(328,162),
+	// Buy[362]@(100,230), Close[366]@(175,230).
 	menuPrev := NewUIControl("DMenuPrev", KindButton)
-	menuPrev.Left, menuPrev.Top = 43, 175
+	menuPrev.Left, menuPrev.Top = 328, 42
 	if prg != nil {
-		menuPrev.SetImgIndex(prg, ImgPageDown)
+		menuPrev.SetImgIndex(prg, ImgPageUp)
 	}
 	menuPrev.OnClick = func(c *UIControl, x, y int) {
 		s.menuTop -= menuMaxRows - 1
@@ -127,9 +133,9 @@ func (s *PlayScene) buildNpcPanels() {
 	menu.AddChild(menuPrev)
 
 	menuNext := NewUIControl("DMenuNext", KindButton)
-	menuNext.Left, menuNext.Top = 90, 175
+	menuNext.Left, menuNext.Top = 328, 162
 	if prg != nil {
-		menuNext.SetImgIndex(prg, ImgPageUp)
+		menuNext.SetImgIndex(prg, ImgPageDown)
 	}
 	menuNext.OnClick = func(c *UIControl, x, y int) {
 		if s.menuTop+menuMaxRows < len(s.State.ShopGoods) {
@@ -139,24 +145,24 @@ func (s *PlayScene) buildNpcPanels() {
 	menu.AddChild(menuNext)
 
 	menuBuy := NewUIControl("DMenuBuy", KindButton)
-	menuBuy.Left, menuBuy.Top = 215, 171
+	menuBuy.Left, menuBuy.Top = 100, 230
 	if prg != nil {
-		menuBuy.SetImgIndex(prg, ImgShopBuy)
+		menuBuy.SetImgIndex(prg, ImgConfirm)
 	}
 	menuBuy.OnClick = func(c *UIControl, x, y int) { s.buySelected() }
 	menu.AddChild(menuBuy)
 
 	menuClose := NewUIControl("DMenuClose", KindButton)
-	menuClose.Left, menuClose.Top = 291, 0
+	menuClose.Left, menuClose.Top = 175, 230
 	if prg != nil {
-		menuClose.SetImgIndex(prg, ImgCloseMed)
+		menuClose.SetImgIndex(prg, ImgCancel)
 	}
 	menuClose.OnClick = func(c *UIControl, x, y int) { s.State.ShowShop = false }
 	menu.AddChild(menuClose)
 
 	// --- Sell/repair/storage spot (DSellDlg [392], runtime pos 260,170) ---
 	sell := NewUIControl("DSellDlg", KindWindow)
-	sell.Floating = true
+	sell.Floating = false // DFM: not draggable
 	if prg != nil {
 		sell.SetImgIndex(prg, ImgSellBg)
 	} else {
@@ -204,18 +210,19 @@ func (s *PlayScene) buildNpcPanels() {
 	}
 	sell.AddChild(spot)
 
+	// Runtime layout (FState:1352-1357): OK[362]@(28,135), Close[366]@(81,135).
 	sellOk := NewUIControl("DSellDlgOk", KindButton)
-	sellOk.Left, sellOk.Top = 85, 150
+	sellOk.Left, sellOk.Top = 28, 135
 	if prg != nil {
-		sellOk.SetImgIndex(prg, ImgSellOk)
+		sellOk.SetImgIndex(prg, ImgConfirm)
 	}
 	sellOk.OnClick = func(c *UIControl, x, y int) { s.sellOk() }
 	sell.AddChild(sellOk)
 
 	sellClose := NewUIControl("DSellDlgClose", KindButton)
-	sellClose.Left, sellClose.Top = 115, 0
+	sellClose.Left, sellClose.Top = 81, 135
 	if prg != nil {
-		sellClose.SetImgIndex(prg, ImgCloseMed)
+		sellClose.SetImgIndex(prg, ImgCancel)
 	}
 	sellClose.OnClick = func(c *UIControl, x, y int) { s.State.ShowShop = false }
 	sell.AddChild(sellClose)
@@ -262,7 +269,7 @@ func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 			if seg.tag != "" {
 				r, g, b := 1.0, 1.0, 0.0
 				if s.npcSelectTag == seg.tag {
-					r, g, b = 1.0, 0.3, 0.3 // pressed link (FState:4864-4865)
+					r, g, b = 1.0, 0.0, 0.0 // pressed link, clRed (FState:4864-4865)
 				}
 				s.text.DrawTextOutline(seg.text, float32(ax+x), float32(ay+y),
 					float32(r), float32(g), float32(b), 1, 0, 0, 0, 1, proj)
@@ -329,14 +336,14 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		return
 	}
 	ax, ay := c.AbsX(), c.AbsY()
-	s.text.DrawText("Items", float32(ax+27), float32(ay+31), 1, 1, 0.8, 1, proj)
-	s.text.DrawText("Price", float32(ax+164), float32(ay+31), 1, 1, 0.8, 1, proj)
-
-	storage := s.State.ShopMode == 3
-	if storage {
-		// Storage-mode headers (FState:4943-4961).
-		s.text.DrawText("Stored", float32(ax+27), float32(ay+31), 1, 1, 0.8, 1, proj)
-		s.text.DrawText("Dura", float32(ax+164), float32(ay+31), 1, 1, 0.8, 1, proj)
+	// Headers (FState:4913-4917 buy mode / 4943-4946 storage mode), white.
+	if s.State.ShopMode == 3 {
+		s.text.DrawText("保管物品", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
+		s.text.DrawText("持久度", float32(ax+164), float32(ay+31), 1, 1, 1, 1, proj)
+	} else {
+		s.text.DrawText("物品列表", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
+		s.text.DrawText("价格", float32(ax+164), float32(ay+31), 1, 1, 1, 1, proj)
+		s.text.DrawText("有库存", float32(ax+262), float32(ay+31), 1, 1, 1, 1, proj)
 	}
 	goods := s.State.ShopGoods
 	rows := len(goods) - s.menuTop
@@ -348,7 +355,9 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		g := goods[idx]
 		y := ay + 50 + m*menuRowH
 		if idx == s.menuIndex {
-			s.text.DrawText(">", float32(ax+25), float32(y), 1, 0.3, 0.3, 1, proj)
+			// Delphi draws char(7) in clRed (:4923-4925); the engine font
+			// has no glyph for the control char, so '>' stands in.
+			s.text.DrawText(">", float32(ax+25), float32(y), 1, 0, 0, 1, proj)
 		}
 		name := g.Name
 		if name == "" {
@@ -358,9 +367,11 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 				name = "Item#" + strconv.Itoa(int(g.ItemIdx))
 			}
 		}
-		s.text.DrawText(name, float32(ax+38), float32(y), 0.9, 0.9, 0.9, 1, proj)
-		if storage {
-			// Durability column (Dura/DuraMax of the stored instance).
+		s.text.DrawText(name, float32(ax+38), float32(y), 1, 1, 1, 1, proj)
+		if s.State.ShopMode == 3 {
+			// Durability column (Dura/DuraMax of the stored instance; the
+			// Delphi Stock/Grade layout needs the server-side goods format,
+			// tracked in batch B5).
 			dura := ""
 			for i := range s.State.StorageItems {
 				if s.State.StorageItems[i].MakeIndex == int32(g.Price) {
@@ -369,10 +380,10 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 					break
 				}
 			}
-			s.text.DrawText(dura, float32(ax+170), float32(y), 0.7, 0.7, 0.7, 1, proj)
+			s.text.DrawText(dura, float32(ax+170), float32(y), 1, 1, 1, 1, proj)
 		} else {
-			s.text.DrawText(strconv.Itoa(g.Price), float32(ax+170), float32(y), 1, 0.9, 0.3, 1, proj)
-			s.text.DrawText("-", float32(ax+265), float32(y), 0.7, 0.7, 0.7, 1, proj)
+			s.text.DrawText(strconv.Itoa(g.Price)+" 金币", float32(ax+170), float32(y), 1, 1, 1, 1, proj)
+			s.text.DrawText("-", float32(ax+265), float32(y), 1, 1, 1, 1, proj)
 		}
 	}
 }
@@ -420,27 +431,39 @@ func (s *PlayScene) paintSellDlg(c *UIControl, proj [16]float32) {
 	if s.text == nil {
 		return
 	}
-	label := "Price: "
+	label := "价格: "
 	switch s.State.ShopMode {
 	case 1:
-		label = "Sell: "
+		label = "价格: "
 	case 2:
-		label = "Repair: "
+		label = "修理: "
 	case 3:
-		label = "Storage: "
+		label = "保管物品: "
 	}
-	s.text.DrawText(label+s.sellPriceStr, float32(c.AbsX()+28), float32(c.AbsY()+31), 1, 1, 0.8, 1, proj)
+	s.text.DrawText(label+s.sellPriceStr, float32(c.AbsX()+28), float32(c.AbsY()+31), 1, 1, 1, 1, proj)
 }
 
 // sellSpotClick picks up / places the sell item (FState:5195-5227).
 func (s *PlayScene) sellSpotClick() {
 	s.sellPriceStr = ""
 	if s.itemMove.Moving {
-		// Place the held item on the spot, then query its price.
-		if s.itemMove.Index >= 0 {
-			it := s.itemMove.Item
-			s.sellItem = &it
-			s.itemMove.End()
+		mi := s.itemMove.Index
+		// Accept bag items and the spot's own item being re-placed
+		// (FState:5210).
+		if mi >= 0 || mi == moveIdxSellSpot {
+			if s.sellItem != nil {
+				// Occupied spot: swap held ↔ spot; the cursor keeps the old
+				// spot item (Index = -99, FState:5212-5216).
+				old := *s.sellItem
+				held := s.itemMove.Item
+				s.sellItem = &held
+				s.itemMove.Item = old
+				s.itemMove.Index = moveIdxSellSpot
+			} else {
+				it := s.itemMove.Item
+				s.sellItem = &it
+				s.itemMove.End()
+			}
 			s.queryPrice = true
 			s.queryPriceTick = time.Now().UnixMilli()
 		}
@@ -475,7 +498,9 @@ func (s *PlayScene) pumpSellQuery() {
 	}
 }
 
-// sellOk confirms sell/repair/storage (FState:5251-5264).
+// sellOk confirms sell/repair/storage (FState:5251-5264). The item leaves
+// the spot visually; sellWait keeps it so SMUserSellItemFail can restore it
+// (Delphi g_SellDlgItemSellWait, :5253,5260).
 func (s *PlayScene) sellOk() {
 	now := time.Now().UnixMilli()
 	if now < s.lastBuyTick || s.sellItem == nil {
@@ -483,6 +508,9 @@ func (s *PlayScene) sellOk() {
 	}
 	s.lastBuyTick = now + 5000
 	mi := s.sellItem.MakeIndex
+	s.sellWait = s.sellItem
+	s.sellItem = nil
+	s.sellPriceStr = ""
 	switch s.State.ShopMode {
 	case 1:
 		if s.sendSellItem != nil {
@@ -497,13 +525,31 @@ func (s *PlayScene) sellOk() {
 			s.sendStorageItem(mi)
 		}
 	}
+}
+
+// sellConfirmed drops the pending item after the server accepted the sale
+// or stored it; the full bag refresh removes it from the bag.
+func (s *PlayScene) sellConfirmed() {
 	s.sellItem = nil
+	s.sellWait = nil
 	s.sellPriceStr = ""
+}
+
+// sellFailed restores the pending item to the sell spot.
+func (s *PlayScene) sellFailed() {
+	if s.sellWait != nil {
+		s.sellItem = s.sellWait
+		s.sellWait = nil
+	}
 }
 
 // clearMerchantState resets transient shop/dialog state when windows close.
 func (s *PlayScene) clearMerchantState() {
+	// The spot item never left the bag (client-owned visual), so closing
+	// just drops the references — Delphi AddItemBag's effect is a no-op here
+	// (FState:4795-4801).
 	s.sellItem = nil
+	s.sellWait = nil
 	s.sellPriceStr = ""
 	s.queryPrice = false
 	s.menuTop = 0

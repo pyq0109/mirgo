@@ -83,6 +83,11 @@ func NewUIControl(name string, kind UIKind) *UIControl {
 	case KindButton, KindWindow:
 		c.EnableFocus = true // TDButton/TDWindow default (DWinCtl:650,806)
 	case KindGrid:
+		// Width/Height stay 0: bounds derive from the cell geometry unless
+		// the builder sets them explicitly (Delphi sizes TDGrid via the DFM
+		// Width/Height, which may clip the cell area — FState:1173-1174 sets
+		// 286×162 on the 8×6 bag grid).
+		c.Width, c.Height = 0, 0
 		c.ColCount, c.RowCount = 8, 5 // TDGrid defaults (DWinCtl:702-705)
 		c.ColWidth, c.RowHeight = 36, 32
 	}
@@ -156,10 +161,11 @@ func (c *UIControl) ParentSpaceY(absY int) int {
 // InRange hit-tests (x, y) given in parent space. Rectangle first, then
 // per-pixel alpha for image-backed controls or the OnInRealArea override
 // (TDControl.InRange, DWinCtl.pas:399-418).
-// effectiveSize is Width/Height, except for grids whose bounds derive from
-// the cell geometry (Delphi sizes TDGrid via ColCount×ColWidth in the DFM).
+// effectiveSize is Width/Height; grids derive their bounds from the cell
+// geometry unless Width/Height were set explicitly (Delphi DFM practice,
+// e.g. the bag grid's runtime-clipped 286×162, FState:1173-1174).
 func (c *UIControl) effectiveSize() (int, int) {
-	if c.Kind == KindGrid {
+	if c.Kind == KindGrid && (c.Width <= 0 || c.Height <= 0) {
 		return c.ColCount * c.ColWidth, c.RowCount * c.RowHeight
 	}
 	return c.Width, c.Height

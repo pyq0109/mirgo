@@ -1,12 +1,9 @@
 package main
 
-import (
-	"strconv"
-	"time"
-)
+import "time"
 
 // Trade windows — port of DDealDlg/DDealRemoteDlg (FState.pas:1459-1491
-// layout, 5613-5865 behavior): own 5×2 grid, partner 5×4 grid, gold input,
+// layout, 5613-5865 behavior): own 5×2 grid, partner 5×2 grid, gold input,
 // confirm/close with the 4s action throttle (g_dwDealActionTick).
 func (s *PlayScene) buildDealPanels() {
 	ui := s.ui
@@ -15,6 +12,7 @@ func (s *PlayScene) buildDealPanels() {
 	// Partner panel [390] top-right, own panel [389] below it
 	// (FState OpenDealDlg repositioning :5617-5620).
 	remote := NewUIControl("DDealRemoteDlg", KindWindow)
+	remote.Floating = true // DFM: trade windows are draggable
 	if prg != nil {
 		remote.SetImgIndex(prg, ImgDealRem)
 	} else {
@@ -28,6 +26,7 @@ func (s *PlayScene) buildDealPanels() {
 	s.hudDealRemote = remote
 
 	own := NewUIControl("DDealDlg", KindWindow)
+	own.Floating = true // DFM: trade windows are draggable
 	if prg != nil {
 		own.SetImgIndex(prg, ImgDealBg)
 	} else {
@@ -55,12 +54,13 @@ func (s *PlayScene) buildDealPanels() {
 	}
 	own.AddChild(grid)
 
-	// Partner grid: 5×4 read-only (paint walks 0..19, FState:5789-5807).
+	// Partner grid: 5×2 read-only (RowCount=2, FState:1485-1488; paint walks
+	// 0..9, DDRGridGridPaint :5789-5807).
 	rgrid := NewUIControl("DDRGrid", KindControl)
 	rgrid.Left, rgrid.Top = 21, 56
-	rgrid.Width, rgrid.Height = 5*36, 4*33
+	rgrid.Width, rgrid.Height = 5*36, 2*33
 	rgrid.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-		for idx := 0; idx < 20; idx++ {
+		for idx := 0; idx < 10; idx++ {
 			x := c.AbsX() + (idx%5)*36
 			y := c.AbsY() + (idx/5)*33
 			s.paintDealCell(s.State.DealRemoteItems[idx], x, y, 36, 33, proj)
@@ -72,7 +72,7 @@ func (s *PlayScene) buildDealPanels() {
 	goldBtn := NewUIControl("DDGold", KindButton)
 	goldBtn.Left, goldBtn.Top = 11, 137
 	if prg != nil {
-		goldBtn.SetImgIndex(prg, ImgGoldBtn)
+		goldBtn.SetImgIndex(prg, ImgDealGold)
 	}
 	goldBtn.OnClick = func(c *UIControl, x, y int) { s.dealGoldClick() }
 	own.AddChild(goldBtn)
@@ -91,7 +91,11 @@ func (s *PlayScene) buildDealPanels() {
 	if prg != nil {
 		closeBtn.SetImgIndex(prg, ImgCloseMed)
 	}
+	// Close shares the confirm gate (FState:5667-5673).
 	closeBtn.OnClick = func(c *UIControl, x, y int) {
+		if s.dealThrottled() {
+			return
+		}
 		if s.sendDealCancel != nil {
 			s.sendDealCancel()
 		}
@@ -110,7 +114,8 @@ func (s *PlayScene) syncDealWindows() {
 }
 
 func (s *PlayScene) paintDealCell(item *BagItem, x, y, w, h int, proj [16]float32) {
-	s.gl.DrawQuadColor(float32(x), float32(y), float32(w), float32(h), 0.1, 0.1, 0.15, 0.35, proj)
+	// No per-cell background: the slot art is baked into panels [389]/[390]
+	// (DDGridGridPaint/DDRGridGridPaint draw only the item, FState:5758-5807).
 	if item == nil || s.resources.Items == nil {
 		return
 	}
@@ -142,20 +147,23 @@ func (s *PlayScene) paintDealOwn(c *UIControl, proj [16]float32) {
 	}
 	nw := s.text.MeasureText(name)
 	s.text.DrawText(name, float32(c.AbsX()+59+(106-nw)/2), float32(c.AbsY()+6), 1, 1, 1, 1, proj)
-	s.text.DrawText(strconv.Itoa(s.State.DealGold), float32(c.AbsX()+64), float32(c.AbsY()+131), 1, 0.9, 0.3, 1, proj)
+	s.text.DrawText(goldStr(s.State.DealGold), float32(c.AbsX()+64), float32(c.AbsY()+131), 1, 0.9, 0.3, 1, proj)
 }
 
 func (s *PlayScene) paintDealRemote(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
 		s.ui.BlitImage(prg, ImgDealRem, c.AbsX(), c.AbsY(), proj)
+		// DDRGold: partner-side display-only gold button [28]@(11,137),
+		// no click behavior (FState:1489-1491).
+		s.ui.BlitImage(prg, ImgDealGold, c.AbsX()+11, c.AbsY()+137, proj)
 	}
 	if s.text == nil {
 		return
 	}
 	nw := s.text.MeasureText(s.State.DealPartner)
 	s.text.DrawText(s.State.DealPartner, float32(c.AbsX()+59+(106-nw)/2), float32(c.AbsY()+6), 1, 1, 1, 1, proj)
-	s.text.DrawText(strconv.Itoa(s.State.DealRemoteGold), float32(c.AbsX()+64), float32(c.AbsY()+131), 1, 0.9, 0.3, 1, proj)
+	s.text.DrawText(goldStr(s.State.DealRemoteGold), float32(c.AbsX()+64), float32(c.AbsY()+131), 1, 0.9, 0.3, 1, proj)
 }
 
 // dealThrottled mirrors g_dwDealActionTick (FState: deal actions set a 4s
@@ -256,6 +264,14 @@ func (s *PlayScene) dealConfirm() {
 		s.sendDealEnd()
 	}
 	s.State.DealEnd = true
+	// Confirming while holding one of own offers puts it back on the table
+	// (FState:5656-5663: Index -29..-20 → AddDealItem + drop the drag).
+	if s.itemMove.Moving && s.itemMove.Index >= -29 && s.itemMove.Index <= -20 {
+		if s.sendDealAdd != nil {
+			s.sendDealAdd(s.itemMove.Item.MakeIndex)
+		}
+		s.itemMove.End()
+	}
 }
 
 // resetDeal clears trade state when a deal opens or ends.

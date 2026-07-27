@@ -60,6 +60,12 @@ type GameState struct {
 	MapTitle   string
 	LightLevel int
 
+	// ServerName is the display name of the selected server, drawn centered at
+	// the top of the character-select scene (IntroScn:1539-1545, g_sServerName).
+	// Not currently populated: SMSelectServerOK carries only addr/port/cert and
+	// the network flow is intentionally left untouched.
+	ServerName string
+
 	ItemDefs map[int]*ClientItemDef
 
 	// Bag is a fixed 46-slot array (Delphi g_ItemArr model): client-owned

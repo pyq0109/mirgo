@@ -156,8 +156,7 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 		return
 	}
 
-	validSlot := getEquipSlot(def.StdMode)
-	if validSlot != slot {
+	if !validEquipSlot(def.StdMode, slot) {
 		p.sendTakeOnFail(server, 1)
 		return
 	}
@@ -468,33 +467,63 @@ func (p *PlayObject) updateAppearance() {
 	}
 }
 
+// getEquipSlot maps an item StdMode to its primary equipment slot
+// (ClFunc.pas:618-634). Dual-slot items (rings/bracelets) return the left
+// slot; validEquipSlot accepts either side.
 func getEquipSlot(stdMode byte) int {
-	switch {
-	case stdMode >= 10 && stdMode <= 12:
-		return protocol.UDress
-	case stdMode >= 5 && stdMode <= 6:
+	switch stdMode {
+	case 5, 6:
 		return protocol.UWeapon
-	case stdMode >= 15 && stdMode <= 17:
-		return protocol.UNecklace
-	case stdMode >= 20 && stdMode <= 22:
+	case 10, 11:
+		return protocol.UDress
+	case 15, 16:
 		return protocol.UHelmet
-	case stdMode >= 24 && stdMode <= 26:
-		return protocol.UArmRingL
-	case stdMode >= 28 && stdMode <= 30:
+	case 19, 20, 21:
+		return protocol.UNecklace
+	case 22, 23:
 		return protocol.URingL
-	default:
-		return -1
+	case 24, 26:
+		return protocol.UArmRingL
+	case 28, 29, 30:
+		return protocol.URightHand
+	case 25, 51:
+		return protocol.UBujuk
+	case 52, 62:
+		return protocol.UBoots
+	case 53, 63:
+		return protocol.UCharm
+	case 54, 64:
+		return protocol.UBelt
 	}
+	return -1
+}
+
+// validEquipSlot reports whether slot is an acceptable equip target for
+// stdMode, allowing either side for dual-slot items (FState:3300-3318).
+func validEquipSlot(stdMode byte, slot int) bool {
+	switch stdMode {
+	case 22, 23:
+		return slot == protocol.URingL || slot == protocol.URingR
+	case 24, 26:
+		return slot == protocol.UArmRingL || slot == protocol.UArmRingR
+	}
+	return getEquipSlot(stdMode) == slot
 }
 
 func (p *PlayObject) sendTakeOnFail(server *netserver.TCPServer, code int) {
 	resp := protocol.MakeDefaultMsg(protocol.SMTakeOnFail, int32(code), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+	// The client equips optimistically; the full refresh restores the
+	// authoritative bag/equipment state (SMBagItems/SMSendUseItems handlers).
+	p.SendBagItemsFull(server)
+	p.SendUseItemsFull(server)
 }
 
 func (p *PlayObject) sendTakeOffFail(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMTakeOffFail, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+	p.SendBagItemsFull(server)
+	p.SendUseItemsFull(server)
 }
 
 func (p *PlayObject) sendEatFail(server *netserver.TCPServer) {

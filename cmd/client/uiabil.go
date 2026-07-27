@@ -15,12 +15,36 @@ import (
 var abilStatNames = [9]string{"DC", "MC", "SC", "AC", "MAC", "HP", "MP", "Hit", "Speed"}
 var abilRowTops = [9]int{101, 121, 140, 160, 181, 201, 220, 240, 261}
 
+// Per-row hover hints (Delphi AdjustAbilHints, FState:18-28).
+var abilHints = [9]string{
+	"攻击力(DC)", "魔法力(MC)", "道术(SC)", "防御力(AC)", "魔法防御(MAC)",
+	"生命值(HP)", "魔法值(MP)", "准确(Hit)", "敏捷(Speed)",
+}
+
+// DUserState1 has its own slot layout, distinct from DStateWin
+// (FState:1095-1158).
+var inspectSlots = []stateSlotDef{
+	{protocol.UNecklace, "项链", 168, 87, 34, 31},
+	{protocol.UHelmet, "头盔", 115, 93, 18, 18},
+	{protocol.URightHand, "火炬", 168, 125, 34, 31},
+	{protocol.UArmRingR, "右手镯", 42, 176, 34, 31},
+	{protocol.UArmRingL, "左手镯", 168, 176, 34, 31},
+	{protocol.URingR, "右戒指", 42, 215, 34, 31},
+	{protocol.URingL, "左戒指", 168, 215, 34, 31},
+	{protocol.UWeapon, "武器", 47, 80, 47, 87},
+	{protocol.UDress, "衣服", 96, 122, 53, 112},
+	{protocol.UBujuk, "护身符", 42, 254, 34, 31},
+	{protocol.UBelt, "腰带", 84, 254, 34, 31},
+	{protocol.UBoots, "鞋", 126, 254, 34, 31},
+	{protocol.UCharm, "魅力石", 168, 254, 34, 31},
+}
+
 func (s *PlayScene) buildAbilPanel() {
 	ui := s.ui
 	prg := s.resources.Prguse
 
 	win := NewUIControl("DAdjustAbility", KindWindow)
-	win.Floating = true
+	win.Floating = false // DFM: not draggable
 	if prg != nil {
 		win.SetImgIndex(prg, ImgAdjustBg)
 	} else {
@@ -29,6 +53,19 @@ func (s *PlayScene) buildAbilPanel() {
 	win.Left, win.Top = 0, 0
 	win.Visible = false
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintAbilPanel(c, proj) }
+	// Row hover hints (DAdjustAbilityMouseMove, FState:6712-6737).
+	win.OnMouseMove = func(c *UIControl, x, y int) {
+		lx, ly := x, y
+		if lx < 50 || lx >= 150 {
+			return
+		}
+		for i, top := range abilRowTops {
+			if ly >= top-3 && ly < top-3+20 {
+				s.tooltip.Show(c.AbsX()+lx+10, c.AbsY()+ly+5, abilHints[i], [4]float32{1, 1, 1, 1}, false)
+				return
+			}
+		}
+	}
 	ui.Root.AddChild(win)
 	s.hudAbil = win
 
@@ -79,7 +116,7 @@ func (s *PlayScene) buildAbilPanel() {
 
 	// Inspect window (DUserState1 [370], read-only equipment view).
 	inspect := NewUIControl("DUserState1", KindWindow)
-	inspect.Floating = true
+	inspect.Floating = false // DFM: not draggable
 	if prg != nil {
 		inspect.SetImgIndex(prg, ImgStateBg)
 	} else {
@@ -89,6 +126,32 @@ func (s *PlayScene) buildAbilPanel() {
 	inspect.Top = 0
 	inspect.Visible = false
 	inspect.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintInspect(c, proj) }
+	// Slot hover tooltips (FState:5995-6036).
+	inspect.OnMouseMove = func(c *UIControl, x, y int) {
+		for _, def := range inspectSlots {
+			if x < def.x || x >= def.x+def.w || y < def.y || y >= def.y+def.h {
+				continue
+			}
+			item := s.inspectItems[def.slot]
+			if item == nil {
+				return
+			}
+			bag := &BagItem{
+				Idx:       item.WIndex,
+				Dura:      item.Dura,
+				DuraMax:   item.DuraMax,
+				MakeIndex: item.MakeIndex,
+				Def:       s.State.ItemDefs[int(item.WIndex)],
+			}
+			text, _ := GetMouseItemInfo(s.State, bag)
+			color := [4]float32{1, 1, 1, 1}
+			if item.DuraMax > 0 && item.Dura == 0 {
+				color = [4]float32{1, 0, 0, 1}
+			}
+			s.tooltip.Show(c.AbsX()+def.x-30, c.AbsY()+def.y+50, text, color, false)
+			return
+		}
+	}
 	ui.Root.AddChild(inspect)
 	s.hudInspect = inspect
 
@@ -116,22 +179,32 @@ func (s *PlayScene) syncAbilWindows() {
 	}
 }
 
-// abilAdjust moves points between the budget and one stat (FState:6633-6704,
-// without the Ctrl×10 accelerator).
+// abilAdjust moves points between the budget and one stat (FState:6633-6704):
+// holding Ctrl steps by 10 when enough points remain (:6638,6657).
 func (s *PlayScene) abilAdjust(stat, delta int) {
+	step := 1
+	if s.ctrlDown && s.abilPointsLeft >= 10 {
+		step = 10
+	}
 	if delta > 0 {
 		if s.abilPointsLeft <= 0 {
 			return
 		}
-		s.abilDeltas[stat]++
-		s.abilPointsLeft--
+		if step > s.abilPointsLeft {
+			step = s.abilPointsLeft
+		}
+		s.abilDeltas[stat] += step
+		s.abilPointsLeft -= step
 		return
 	}
 	if s.abilDeltas[stat] <= 0 {
 		return
 	}
-	s.abilDeltas[stat]--
-	s.abilPointsLeft++
+	if step > s.abilDeltas[stat] {
+		step = s.abilDeltas[stat]
+	}
+	s.abilDeltas[stat] -= step
+	s.abilPointsLeft += step
 }
 
 // abilCommit sends the allocation (Delphi SendAdjustBonus: Recog =
@@ -160,6 +233,17 @@ func (s *PlayScene) paintAbilPanel(c *UIControl, proj [16]float32) {
 	m := c.AbsY() + 101
 	rowY := [9]int{m - 4, m + 16, m + 36, m + 56, m + 76, m + 96, m + 116, m + 136, m + 156}
 
+	// Header hints (FState:6541-6547), silver, 14px apart.
+	hints := [4]string{
+		"恭喜! 你的等级提升了.",
+		"你可以将获得的点数分配到下面的属性中.",
+		"分配完成后按确定按钮生效.",
+		"按住 Ctrl 可以每次分配 10 点.",
+	}
+	for i, h := range hints {
+		s.text.DrawText(h, float32(c.AbsX()+36), float32(c.AbsY()+22+i*14), 0.75, 0.75, 0.75, 1, proj)
+	}
+
 	values := [9]string{
 		loHiStr(st.DC), loHiStr(st.MC), loHiStr(st.SC), loHiStr(st.AC), loHiStr(st.MAC),
 		fmt.Sprintf("%d/%d", st.HP, st.MaxHP),
@@ -168,7 +252,6 @@ func (s *PlayScene) paintAbilPanel(c *UIControl, proj [16]float32) {
 		fmt.Sprintf("%d", st.Speed),
 	}
 	for i := 0; i < 9; i++ {
-		s.text.DrawText(abilStatNames[i], float32(c.AbsX()+40), float32(rowY[i]), 0.9, 0.9, 0.9, 1, proj)
 		s.text.DrawText(values[i], float32(l), float32(rowY[i]), 1, 1, 1, 1, proj)
 		if s.abilDeltas[i] > 0 {
 			s.text.DrawText("+"+fmt.Sprintf("%d", s.abilDeltas[i]), float32(c.AbsX()+195), float32(rowY[i]), 1, 1, 0.4, 1, proj)
@@ -181,23 +264,64 @@ func loHiStr(v uint32) string {
 	return fmt.Sprintf("%d-%d", v&0xFFFF, v>>16)
 }
 
-// paintInspect renders the inspected player's 13 slots using the shared
-// slot layout (DUserState1, FState:1088-1163).
+// paintInspect renders the inspected player: paper doll + the 13 slots on
+// the DUserState1 layout (FState:5872-5964, 1095-1158).
 func (s *PlayScene) paintInspect(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
 		s.ui.BlitImage(prg, ImgStateBg, c.AbsX(), c.AbsY(), proj)
 	}
+	ax, ay := c.AbsX(), c.AbsY()
+
+	// Paper doll (FState:5887-5932): body @(38,52), layers share origin
+	// (31,96) with each image's own offset. Inspect female hair uses the
+	// 480 base (:5900), unlike the own-character doll (441).
+	if prg != nil {
+		body := ImgBodyMale
+		if s.inspectSex == 1 {
+			body = ImgBodyFemale
+		}
+		s.ui.BlitImage(prg, body, ax+38, ay+52, proj)
+		ox, oy := ax+31, ay+96
+		hair := 440 + s.inspectHair/2
+		if s.inspectSex == 1 {
+			hair = 480 + s.inspectHair/2
+		}
+		if img := prg.GetImage(hair); img != nil && img.RGBA != nil {
+			if t := s.resources.GetTexture(prg, hair); t != 0 {
+				s.gl.DrawQuad(t, float32(ox+int(img.HotX)), float32(oy+int(img.HotY)),
+					float32(img.Width), float32(img.Height), proj)
+			}
+		}
+		for _, slot := range []int{protocol.UDress, protocol.UWeapon, protocol.UHelmet} {
+			item := s.inspectItems[slot]
+			if item == nil {
+				continue
+			}
+			f, idx := s.stateItemFile(s.equippedLooks(item))
+			if f == nil {
+				continue
+			}
+			if img := f.GetImage(idx); img != nil && img.RGBA != nil {
+				if t := s.resources.GetTexture(f, idx); t != 0 {
+					s.gl.DrawQuad(t, float32(ox+int(img.HotX)), float32(oy+int(img.HotY)),
+						float32(img.Width), float32(img.Height), proj)
+				}
+			}
+		}
+	}
+
 	if s.text != nil {
 		nw := s.text.MeasureText(s.inspectName)
-		s.text.DrawText(s.inspectName, float32(c.AbsX()+122-nw/2), float32(c.AbsY()+23), 1, 1, 1, 1, proj)
+		s.text.DrawText(s.inspectName, float32(ax+122-nw/2), float32(ay+23), 1, 1, 1, 1, proj)
 	}
-	for _, def := range stateSlots {
+
+	for _, def := range inspectSlots {
 		item := s.inspectItems[def.slot]
 		if item == nil {
 			continue
 		}
-		f, idx := s.stateItemFile(int(item.WIndex))
+		f, idx := s.stateItemFile(s.equippedLooks(item))
 		if f == nil {
 			continue
 		}
@@ -206,13 +330,15 @@ func (s *PlayScene) paintInspect(c *UIControl, proj [16]float32) {
 		if img == nil || img.RGBA == nil || tex == 0 {
 			continue
 		}
-		x := c.AbsX() + def.x + (def.w-img.Width)/2
-		y := c.AbsY() + def.y + (def.h-img.Height)/2
+		x := ax + def.x + (def.w-img.Width)/2
+		y := ay + def.y + (def.h-img.Height)/2
 		s.gl.DrawQuad(tex, float32(x), float32(y), float32(img.Width), float32(img.Height), proj)
 	}
 }
 
-// parseInspect fills the inspect window from an SMSendUserState body.
+// parseInspect fills the inspect window from an SMSendUserState body;
+// sex/hair come from the world actor (the message carries only name +
+// equipment).
 func (s *PlayScene) parseInspect(name string, body string) {
 	raw := []byte(body)
 	if len(raw) < 130 {
@@ -233,6 +359,14 @@ func (s *PlayScene) parseInspect(name string, body string) {
 		}
 	}
 	s.inspectName = name
+	s.inspectSex, s.inspectHair = 0, 0
+	for _, a := range s.State.Actors.All() {
+		if a.UserName == name {
+			s.inspectSex = a.Sex
+			s.inspectHair = a.Hair
+			break
+		}
+	}
 	s.showInspect = true
 }
 

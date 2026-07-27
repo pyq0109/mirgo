@@ -28,6 +28,26 @@ const (
 
 var dialogImages = map[int]int{DlgSmall: ImgModalSmall, DlgNormal: ImgModalNormal, DlgTall: ImgModalTall}
 
+// dialogButtonLayout gives the button anchor (left edge of the right-most
+// button, top) per dialog size (FState:2002-2042).
+var dialogButtonLayout = map[int]struct{ lx, ly int }{
+	DlgSmall:  {90, 36},
+	DlgNormal: {324, 126},
+	DlgTall:   {105, 305},
+}
+
+// dialogMsgLayout gives the message text origin (top-left, window-relative)
+// per dialog size (FState.pas:2010-2037).
+var dialogMsgLayout = map[int]struct{ lx, ly int }{
+	DlgSmall:  {39, 38},
+	DlgNormal: {39, 38},
+	DlgTall:   {23, 20},
+}
+
+// dialogButtonOrder is the fixed right-to-left placement order, regardless
+// of the caller's button set (FState:2060-2083: Cancel, No, Yes, Ok).
+var dialogButtonOrder = []ModalResult{MrCancel, MrNo, MrYes, MrOk}
+
 var dialogButtonImages = map[ModalResult]int{
 	MrOk:     ImgModalOk,     // 361 (+1 = 362 pressed)
 	MrYes:    ImgModalYes,    // 363 (+1 = 364)
@@ -109,25 +129,43 @@ func showDialog(scene *PlayScene, size int, msg string, buttons []ModalResult, i
 		if scene.text == nil {
 			return
 		}
-		lh := scene.text.LineHeight()
-		y := c.AbsY() + 36
+		// Left-aligned message text at the size-specific origin, 14px line
+		// spacing, white with a black outline (FState.pas:2010-2037, 2314-2323).
+		ml, hasML := dialogMsgLayout[size]
+		if !hasML {
+			ml = dialogMsgLayout[DlgNormal]
+		}
+		y := c.AbsY() + ml.ly
 		for _, ln := range d.msgLines {
-			lw := scene.text.MeasureText(ln)
-			scene.text.DrawText(ln, float32(c.AbsX()+(c.Width-lw)/2), float32(y), 1, 1, 1, 1, proj)
-			y += lh + 2
+			scene.text.DrawTextOutline(ln, float32(c.AbsX()+ml.lx), float32(y),
+				1, 1, 1, 1, 0, 0, 0, 1, proj)
+			y += 14
 		}
 	}
 	d.win = win
 
-	// Buttons: right-to-left from lx=324, step 110, Top=126 (:2060-2083).
-	lx := 324
-	for _, mr := range buttons {
+	// Buttons: fixed Cancel→No→Yes→Ok placement order, right-to-left from
+	// the size-specific anchor, 110px step (FState:2060-2083).
+	layout, hasLayout := dialogButtonLayout[size]
+	if !hasLayout {
+		layout = dialogButtonLayout[DlgNormal]
+	}
+	ordered := make([]ModalResult, 0, len(buttons))
+	for _, mr := range dialogButtonOrder {
+		for _, b := range buttons {
+			if b == mr {
+				ordered = append(ordered, mr)
+				break
+			}
+		}
+	}
+	lx, ly := layout.lx, layout.ly
+	for _, mr := range ordered {
 		btnImg := dialogButtonImages[mr]
 		btn := NewUIControl("DMsgDlgBtn", KindButton)
 		btn.SetImgIndex(scene.resources.Prguse, btnImg)
-		lx -= btn.Width
 		btn.Left = lx
-		btn.Top = 126
+		btn.Top = ly
 		btn.FaceIndex = btnImg
 		result := mr
 		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
@@ -139,14 +177,16 @@ func showDialog(scene *PlayScene, size int, msg string, buttons []ModalResult, i
 		}
 		btn.OnClick = func(c *UIControl, x, y int) { d.complete(result) }
 		win.AddChild(btn)
-		lx -= 110 - btn.Width // net 110px step between buttons
+		lx -= 110
 	}
 
 	if inputMode {
-		edit := NewEditBox(scene, "EdDlgEdit", 200, 20)
+		// Width = window width - 170, centered horizontally (x=85) and
+		// vertically centered minus 10px, window-relative (FState.pas:2089-2094).
+		edit := NewEditBox(scene, "EdDlgEdit", win.Width-170, 20)
 		edit.MaxLen = 30 // EdDlgEdit.MaxLength := 30 (:662)
 		edit.Ctrl.Left = (win.Width - edit.Ctrl.Width) / 2
-		edit.Ctrl.Top = 92
+		edit.Ctrl.Top = win.Height/2 - edit.Ctrl.Height/2 - 10
 		edit.OnEnter = func(text string) { d.complete(MrOk) }
 		edit.OnEsc = func() {
 			for _, b := range d.buttons {

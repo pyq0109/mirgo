@@ -38,6 +38,7 @@ const (
 	modeLogin loginMode = iota
 	modeRegister
 	modeChgPw
+	modeServerSelect
 )
 
 // Screen offset: the window is the fixed 800×600 Delphi game area.
@@ -128,6 +129,118 @@ var chgFieldDefs = []fieldDef{
 // (FState.pas:887-892): Ok [361] at +81,+141; Cancel [365] at +160,+141.
 var chgButtonImages = []int{361, 365}
 
+// serverInfo holds a server entry from SM_PASSOKSELECTSERVER.
+type serverInfo struct {
+	Name   string
+	Status int
+}
+
+// Server-select dialog: Prguse[256] background, six [79] buttons at window+65,
+// close button [83] at window+(245,31) (FState.pas:810-847).
+const (
+	srvDlgImg   = 256
+	srvBtnImg   = 79
+	srvCloseImg = 83
+	srvCloseDX  = float32(245)
+	srvCloseDY  = float32(31)
+	srvCloseW   = float32(20)
+	srvCloseH   = float32(20)
+)
+
+// srvButtonTop returns the window-relative Top of server button i for the
+// given server count (FState.pas:2456-2474): 1 server -> 204; 2 -> 190/235;
+// 3+ -> 100 stepping by 45.
+func srvButtonTop(i, count int) float32 {
+	switch count {
+	case 1:
+		return 204
+	case 2:
+		if i == 0 {
+			return 190
+		}
+		return 235
+	default:
+		return float32(100 + i*45)
+	}
+}
+
+// serverDisplayName returns the button label and color for a server's status
+// (FState.pas:2250-2272): 0 maintenance/clDkGray, 1 normal/clLime,
+// 2 smooth/clGreen, 3 crowded/clMaroon, 4 full/clRed.
+func serverDisplayName(srv serverInfo) (string, float32, float32, float32) {
+	switch srv.Status {
+	case 0:
+		return srv.Name + "(维护)", 0.25, 0.25, 0.25
+	case 1:
+		return srv.Name + "(正常)", 0, 1, 0
+	case 2:
+		return srv.Name + "(流畅)", 0, 0.5, 0
+	case 3:
+		return srv.Name + "(繁忙)", 0.5, 0, 0
+	case 4:
+		return srv.Name + "(满员)", 1, 0, 0
+	default:
+		return srv.Name, 1, 1, 0
+	}
+}
+
+// parseServerList parses the server list from SM_PASSOKSELECTSERVER body.
+// Body format: "name1/status1/name2/status2/..."
+func parseServerList(body string) []serverInfo {
+	var servers []serverInfo
+	if body == "" {
+		// Default server
+		servers = append(servers, serverInfo{Name: "Server", Status: 1})
+		return servers
+	}
+	parts := splitSlash(body)
+	for i := 0; i+1 < len(parts); i += 2 {
+		name := parts[i]
+		status := 0
+		fmt.Sscanf(parts[i+1], "%d", &status)
+		if name != "" {
+			servers = append(servers, serverInfo{Name: name, Status: status})
+		}
+	}
+	if len(servers) == 0 {
+		servers = append(servers, serverInfo{Name: "Server", Status: 1})
+	}
+	return servers
+}
+
+// splitSlash splits a string by '/'.
+func splitSlash(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '/' {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+// regHelps is the per-field registration help text drawn in clSilver next to
+// the focused edit (IntroScn.pas:709-786; the Delphi literals are GBK
+// mojibake, replaced with concise Chinese).
+var regHelps = [13]string{
+	"请输入账号(必填)",
+	"请输入密码(至少4位)",
+	"请再次输入密码确认",
+	"请输入真实姓名",
+	"请输入身份证号",
+	"生日格式: 1977/10/15",
+	"请输入密码提示问题",
+	"请输入提示问题的答案",
+	"请输入第二个提示问题",
+	"请输入第二个问题的答案",
+	"请输入电话号码",
+	"请输入手机号码",
+	"请输入邮箱地址",
+}
+
 // LoginScene handles the login screen (Delphi TLoginScene, IntroScn.pas:62).
 type LoginScene struct {
 	gl        *engine.GLState
@@ -168,10 +281,14 @@ type LoginScene struct {
 
 	connecting bool
 
+	// Server select overlay (Delphi DSelServerDlg, FState.pas:778-857)
+	servers []serverInfo
+
 	// Callbacks
 	loginFunc        func(id, password string)
 	registerFunc     func(ue protocol.UserEntry, ua protocol.UserEntryAdd)
 	chgpwFunc        func(id, oldpw, newpw string)
+	selectFunc       func(serverName string)
 	closeFunc        func()
 	doorCompleteFunc func()
 }
@@ -206,6 +323,7 @@ func (s *LoginScene) Open() {
 	s.dlgLines = nil
 	s.connecting = false
 	s.pressedButton = -1
+	s.servers = nil
 	s.cursorBlink = time.Now()
 }
 
@@ -267,6 +385,8 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 			s.renderRegisterWindow(gl, proj, ox, oy)
 		case modeChgPw:
 			s.renderChgPwWindow(gl, proj, ox, oy)
+		case modeServerSelect:
+			s.renderServerSelect(gl, proj)
 		default:
 			s.renderButtons(gl, proj, ox, oy)
 			s.renderInputFields(gl, proj, ox, oy)
@@ -315,6 +435,11 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 	passX, passY := ox+495, oy+511
 	masked := strings.Repeat("*", len(s.password))
 
+	// TEdit Color=clBlack: opaque black box under the white text
+	// (IntroScn.pas:258,270).
+	gl.DrawQuadColor(idX, idY, 112, 19, 0, 0, 0, 1, proj)
+	gl.DrawQuadColor(passX, passY, 112, 19, 0, 0, 0, 1, proj)
+
 	s.text.DrawText(s.userID, idX, idY, 1.0, 1.0, 1.0, 1.0, proj)
 	s.text.DrawText(masked, passX, passY, 1.0, 1.0, 1.0, 1.0, proj)
 
@@ -358,6 +483,17 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 		}
 	}
 
+	if s.text != nil {
+		// Title NewAccountTitle at (362,121), white + black outline
+		// (FState.pas:2669).
+		s.text.DrawTextOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+		// Per-field help NAHelps in clSilver, switching with the focused edit
+		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14).
+		if s.regFocus >= 0 && s.regFocus < len(regHelps) {
+			s.text.DrawText(regHelps[s.regFocus], 507, 124, 0.75, 0.75, 0.75, 1, proj)
+		}
+	}
+
 	if s.text != nil && s.connecting {
 		s.text.DrawText("注册中...", ox+350, oy+420, 0.5, 0.8, 1.0, 1.0, proj)
 	}
@@ -379,6 +515,58 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 		if tex, err := s.getPrguseTexture(idx); err == nil {
 			w, h := s.getPrguseSize(idx)
 			gl.DrawQuad(tex, off.X, off.Y, float32(w), float32(h), proj)
+		}
+	}
+}
+
+// srvWindowOrigin returns the runtime-centered top-left of the [256] dialog
+// (FState.pas:813-814: (SCREENWIDTH-w)/2, (SCREENHEIGHT-h)/2).
+func (s *LoginScene) srvWindowOrigin() (float32, float32) {
+	w, h := s.getPrguseSize(srvDlgImg)
+	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2
+}
+
+// renderServerSelect renders DSelServerDlg as an overlay on the login
+// background: dialog [256], up to six [79] buttons (pressed -> [80]) with the
+// centered server name + status color, and close button [83] (FState.pas:
+// 810-847, 2220-2280).
+func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
+	wx, wy := s.srvWindowOrigin()
+	if tex, err := s.getPrguseTexture(srvDlgImg); err == nil {
+		w, h := s.getPrguseSize(srvDlgImg)
+		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
+	}
+
+	// Close button [83] window+(245,31) (FState.pas:816-818); in this asset it
+	// is 1×1 and invisible, but still drawn here.
+	if tex, err := s.getPrguseTexture(srvCloseImg); err == nil {
+		cw, ch := s.getPrguseSize(srvCloseImg)
+		gl.DrawQuad(tex, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch), proj)
+	}
+
+	bw, bh := s.getPrguseSize(srvBtnImg)
+	count := len(s.servers)
+	for i := 0; i < count && i < 6; i++ {
+		bx := wx + 65
+		by := wy + srvButtonTop(i, count)
+		idx := srvBtnImg
+		if s.pressedButton == i {
+			idx = srvBtnImg + 1 // pressed -> FaceIndex+1 (FState.pas:2220-2224)
+		}
+		if tex, err := s.getPrguseTexture(idx); err == nil {
+			gl.DrawQuad(tex, bx, by, float32(bw), float32(bh), proj)
+		}
+		if s.text != nil {
+			name, r, g, b := serverDisplayName(s.servers[i])
+			tw := float32(s.text.MeasureText(name))
+			th := float32(s.text.LineHeight())
+			tx := bx + (float32(bw)-tw)/2
+			ty := by + (float32(bh)-th)/2
+			if s.pressedButton == i {
+				tx += 2 // pressed text shifts +2px (FState.pas:2276-2277)
+				ty += 2
+			}
+			s.text.DrawTextOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
 		}
 	}
 }
@@ -416,13 +604,13 @@ func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs
 }
 
 // dlgGeometry returns the dialog window rect and its Ok button rect.
-// Buttons are laid out right-to-left from lx=324 (FState.pas:2060-2083).
+// The Ok button's left edge is anchored at lx=324 (FState.pas:2078-2081).
 func (s *LoginScene) dlgGeometry() (win, ok loginArea) {
 	w, h := s.getPrguseSize(360)
 	x := loginOX + float32(800-w)/2
 	y := loginOY + float32(600-h)/2
 	bw, bh := s.getPrguseSize(361)
-	return loginArea{x, y, float32(w), float32(h)}, loginArea{x + 324 - float32(bw), y + 126, float32(bw), float32(bh)}
+	return loginArea{x, y, float32(w), float32(h)}, loginArea{x + 324, y + 126, float32(bw), float32(bh)}
 }
 
 // renderDialog renders DMsgDlg: Prguse[360] centered, wrapped white text
@@ -442,12 +630,12 @@ func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 	if s.text == nil {
 		return
 	}
-	lh := s.text.LineHeight()
-	y := win.Y + 36
+	// Body left-aligned at window+(39,38), line spacing 14, white + black
+	// outline (FState.pas:2023-2024, 2314-2323).
+	y := win.Y + 38
 	for _, ln := range s.dlgLines {
-		lw := s.text.MeasureText(ln)
-		s.text.DrawText(ln, win.X+(win.W-float32(lw))/2, y, 1, 1, 1, 1, proj)
-		y += float32(lh) + 2
+		s.text.DrawTextOutline(ln, win.X+39, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+		y += 14
 	}
 }
 
@@ -476,6 +664,8 @@ func (s *LoginScene) OnChar(char rune) {
 		if len(s.chgFields[s.chgFocus]) < def.maxLen {
 			s.chgFields[s.chgFocus] += string(char)
 		}
+	case modeServerSelect:
+		return // no text input on the server-select overlay
 	default:
 		if s.waitingResponse || s.focusedField < 0 {
 			return
@@ -511,6 +701,10 @@ func (s *LoginScene) OnKey(key int, action int) {
 		s.keyRegister(key)
 	case modeChgPw:
 		s.keyChgPw(key)
+	case modeServerSelect:
+		if key == keyEscape && s.closeFunc != nil {
+			s.closeFunc() // DSelServerDlg close == FrmMain.Close
+		}
 	default:
 		s.keyLogin(key)
 	}
@@ -644,6 +838,8 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int) {
 		s.mouseGroup(fx, fy, action, fields, buttons, &s.regFocus, s.handleRegButton)
 	case modeChgPw:
 		s.mouseChgPw(fx, fy, action)
+	case modeServerSelect:
+		s.mouseServerSelect(fx, fy, action)
 	default:
 		s.mouseLogin(fx, fy, action)
 	}
@@ -759,6 +955,51 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 				} else {
 					s.mode = modeLogin // ChgpwCancel
 				}
+			}
+		}
+	}
+}
+
+// mouseServerSelect handles the DSelServerDlg overlay: press/release on a
+// server button selects that server; the close button exits the app
+// (FState.pas:2220-2224; DSelServerDlg close == FrmMain.Close).
+func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
+	wx, wy := s.srvWindowOrigin()
+	bw, bh := s.getPrguseSize(srvBtnImg)
+	count := len(s.servers)
+	closeArea := loginArea{wx + srvCloseDX, wy + srvCloseDY, srvCloseW, srvCloseH}
+	btnArea := func(i int) loginArea {
+		return loginArea{wx + 65, wy + srvButtonTop(i, count), float32(bw), float32(bh)}
+	}
+
+	switch action {
+	case mousePress:
+		for i := 0; i < count && i < 6; i++ {
+			if hitTest(fx, fy, btnArea(i)) {
+				s.pressedButton = i
+				return
+			}
+		}
+		if hitTest(fx, fy, closeArea) {
+			s.pressedButton = 6
+		}
+	case mouseRelease:
+		if s.pressedButton < 0 {
+			return
+		}
+		i := s.pressedButton
+		s.pressedButton = -1
+		if i == 6 {
+			if hitTest(fx, fy, closeArea) && s.closeFunc != nil {
+				s.closeFunc()
+			}
+			return
+		}
+		if i < count && hitTest(fx, fy, btnArea(i)) {
+			name := s.servers[i].Name
+			s.mode = modeLogin // close the overlay once a server is picked
+			if s.selectFunc != nil {
+				s.selectFunc(name)
 			}
 		}
 	}
@@ -994,6 +1235,21 @@ func (s *LoginScene) SetRegisterFunc(fn func(ue protocol.UserEntry, ua protocol.
 // SetChgPwFunc sets the callback for password change attempts.
 func (s *LoginScene) SetChgPwFunc(fn func(id, oldpw, newpw string)) {
 	s.chgpwFunc = fn
+}
+
+// SetSelectFunc sets the callback for server selection.
+func (s *LoginScene) SetSelectFunc(fn func(serverName string)) {
+	s.selectFunc = fn
+}
+
+// ShowServerSelect opens the DSelServerDlg overlay on top of the login
+// background instead of switching to a separate scene (FState.pas:2453-2517).
+func (s *LoginScene) ShowServerSelect(servers []serverInfo) {
+	log.Logf(log.LevelInfo, "LoginScene", "Showing server select: %d servers", len(servers))
+	s.servers = servers
+	s.mode = modeServerSelect
+	s.pressedButton = -1
+	s.showLoginUI = true
 }
 
 // SetCloseFunc sets the callback for closing the application.

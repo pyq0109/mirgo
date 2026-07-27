@@ -48,79 +48,53 @@ func (s *NoticeScene) Close() {
 func (s *NoticeScene) Update(dt float64) {
 }
 
-// Render renders the notice scene.
+// Render renders the notice scene. The login notice is a vertical DMessageDlg
+// (DialogSize=2, Prguse[380] 256×359) on an empty black-screen scene; Delphi
+// draws no overlay mask (ClMain.pas:5732-5748; FState.pas:2029-2040).
 func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.7, proj)
+	// stLoginNotice background is an empty black screen.
+	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 1, proj)
 
-	if s.resources != nil && s.resources.Prguse != nil {
-		bgImg := s.resources.Prguse.GetImage(360)
-		if bgImg != nil && bgImg.RGBA != nil {
-			bgTex := s.resources.GetTexture(s.resources.Prguse, 360)
-			if bgTex != 0 {
-				bgW := float32(bgImg.Width)
-				bgH := float32(bgImg.Height)
-				bgX := (ScreenWidth - bgW) / 2
-				bgY := (ScreenHeight - bgH) / 2
-				gl.DrawQuad(bgTex, bgX, bgY, bgW, bgH, proj)
-
-				if s.text != nil {
-					for i, line := range s.Lines {
-						if i > 12 {
-							break
-						}
-						s.text.DrawText(line, bgX+20, bgY+20+float32(i)*18, 0.9, 0.9, 0.9, 1.0, proj)
-					}
-				}
-
-				okImg := s.resources.Prguse.GetImage(361)
-				if okImg != nil && okImg.RGBA != nil {
-					okTex := s.resources.GetTexture(s.resources.Prguse, 361)
-					if okTex != 0 {
-						okW := float32(okImg.Width)
-						okH := float32(okImg.Height)
-						okX := bgX + (bgW-okW)/2
-						okY := bgY + bgH - okH - 15
-						gl.DrawQuad(okTex, okX, okY, okW, okH, proj)
-						s.okBtnArea = [4]float32{okX, okY, okW, okH}
-					}
-				}
-				return
-			}
-		}
-	}
-
-	panelX, panelY := float32(200), float32(130)
-	panelW, panelH := float32(624), float32(380)
-
-	gl.DrawQuadColor(panelX-2, panelY-2, panelW+4, panelH+4, 0.4, 0.35, 0.2, 1.0, proj)
-	gl.DrawQuadColor(panelX, panelY, panelW, panelH, 0.08, 0.08, 0.15, 0.95, proj)
-	gl.DrawQuadColor(panelX+2, panelY+2, panelW-4, 28, 0.15, 0.12, 0.08, 0.9, proj)
-
-	okX, okY, okW, okH := float32(412), float32(520), float32(200), float32(40)
-	gl.DrawQuadColor(okX-1, okY-1, okW+2, okH+2, 0.5, 0.45, 0.3, 1.0, proj)
-	gl.DrawQuadColor(okX, okY, okW, okH, 0.2, 0.18, 0.12, 1.0, proj)
-	s.okBtnArea = [4]float32{okX, okY, okW, okH}
-
-	if s.text == nil {
+	if s.resources == nil || s.resources.Prguse == nil {
 		return
 	}
 
-	titleText := "服务器公告"
-	tw := s.text.MeasureText(titleText)
-	s.text.DrawText(titleText, panelX+(panelW-float32(tw))/2, panelY+6, 1.0, 0.9, 0.4, 1.0, proj)
-
-	y := panelY + 40
-	for _, line := range s.Lines {
-		if y > panelY+panelH-20 {
-			break
-		}
-		s.text.DrawText(line, panelX+20, y, 0.9, 0.9, 0.9, 1.0, proj)
-		y += 22
+	// Prguse[380] centered: ((800-256)/2, (600-359)/2) = (272,120).
+	bgImg := s.resources.Prguse.GetImage(380)
+	if bgImg == nil {
+		return
+	}
+	bgW := float32(bgImg.Width)
+	bgH := float32(bgImg.Height)
+	bgX := (ScreenWidth - bgW) / 2
+	bgY := (ScreenHeight - bgH) / 2
+	if bgTex := s.resources.GetTexture(s.resources.Prguse, 380); bgTex != 0 {
+		gl.DrawQuad(bgTex, bgX, bgY, bgW, bgH, proj)
 	}
 
-	okText := "确 定"
-	ow := s.text.MeasureText(okText)
-	s.text.DrawText(okText, okX+(okW-float32(ow))/2, okY+10, 1.0, 1.0, 0.8, 1.0, proj)
+	// Body window+(23,20), line spacing 14, white + black outline
+	// (FState.pas:2036-2037, 2314-2323).
+	if s.text != nil {
+		y := bgY + 20
+		for _, line := range s.Lines {
+			s.text.DrawTextOutline(line, bgX+23, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+			y += 14
+		}
+	}
+
+	// Ok button [361] window+(105,305) (FState.pas:2038-2039, 2079-2080).
+	okImg := s.resources.Prguse.GetImage(361)
+	if okImg == nil {
+		return
+	}
+	okX := bgX + 105
+	okY := bgY + 305
+	okW := float32(okImg.Width)
+	okH := float32(okImg.Height)
+	if okTex := s.resources.GetTexture(s.resources.Prguse, 361); okTex != 0 {
+		gl.DrawQuad(okTex, okX, okY, okW, okH, proj)
+	}
+	s.okBtnArea = [4]float32{okX, okY, okW, okH}
 }
 
 // OnKey handles keyboard input.

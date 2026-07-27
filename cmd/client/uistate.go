@@ -46,12 +46,21 @@ func (s *PlayScene) stateItemFile(looks int) (*wil.File, int) {
 	return s.resources.GetExtraWil(fmt.Sprintf("St%d.wil", looks/10000)), looks % 10000
 }
 
+// equippedLooks resolves the StateItem sprite index for an equipped item —
+// its Looks value (FState:3051 etc.), falling back to the raw DB index.
+func (s *PlayScene) equippedLooks(item *protocol.UserItem) int {
+	if def := s.State.ItemDefs[int(item.WIndex)]; def != nil {
+		return int(def.Looks)
+	}
+	return int(item.WIndex)
+}
+
 func (s *PlayScene) buildState() {
 	ui := s.ui
 	prg := s.resources.Prguse
 
 	win := NewUIControl("DStateWin", KindWindow)
-	win.Floating = true
+	win.Floating = false // DFM: not draggable
 	if prg != nil {
 		win.SetImgIndex(prg, ImgStateBg)
 	} else {
@@ -61,6 +70,20 @@ func (s *PlayScene) buildState() {
 	win.Top = 0
 	win.Visible = false
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintStatePage(c, proj) }
+	// Page 3 magic-row hit area on the window body (FState:3187-3198):
+	// x∈[33,199], y∈[55,240], row height 37 — clicking a row opens the key
+	// binding dialog for that magic.
+	win.OnClick = func(c *UIControl, x, y int) {
+		if s.State.StatePage != 3 {
+			return
+		}
+		if x >= 33 && x <= 199 && y >= 55 && y <= 240 {
+			idx := s.magicPage*5 + (y-55)/37
+			if idx < len(s.State.Magics) {
+				s.openKeySelDlg(idx)
+			}
+		}
+	}
 	ui.Root.AddChild(win)
 	s.hudState = win
 
@@ -141,11 +164,13 @@ func (s *PlayScene) buildState() {
 		s.stateSlotBtns[def.slot] = btn
 	}
 
-	// 5 magic icon buttons (DStMag1..5, FState:1044-1067), page 3 only.
+	// 5 magic icon buttons (DStMag1..5, FState:1044-1067: Left=30, Top =
+	// 37/82/127/172/216 — the 5th is 211+5, not 37+4*45), page 3 only.
+	magTops := [5]int{37, 82, 127, 172, 216}
 	for i := 0; i < 5; i++ {
 		row := i
 		btn := NewUIControl("DStMag", KindButton)
-		btn.Left, btn.Top = 30, 37+row*45
+		btn.Left, btn.Top = 30, magTops[row]
 		btn.Width, btn.Height = 31, 33
 		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
 			idx := s.magicPage*5 + row
@@ -196,14 +221,14 @@ func (s *PlayScene) syncStateWindow() {
 }
 
 // paintEquipSlot draws the equipped item icon centered in its slot
-// (FState:3041-3185, no-offset centered overload).
+// (FState:3041-3185): no cell background (baked into [370]), icon centered
+// on both axes from the item's Looks sprite.
 func (s *PlayScene) paintEquipSlot(def stateSlotDef, ax, ay int, proj [16]float32) {
-	s.gl.DrawQuadColor(float32(ax), float32(ay), float32(def.w), float32(def.h), 0.1, 0.1, 0.15, 0.3, proj)
 	item := s.State.UseItems[def.slot]
 	if item == nil {
 		return
 	}
-	f, idx := s.stateItemFile(int(item.WIndex))
+	f, idx := s.stateItemFile(s.equippedLooks(item))
 	if f == nil {
 		return
 	}
@@ -278,7 +303,7 @@ func (s *PlayScene) paintPaperDoll(ax, ay int, proj [16]float32) {
 		if item == nil {
 			continue
 		}
-		f, idx := s.stateItemFile(int(item.WIndex))
+		f, idx := s.stateItemFile(s.equippedLooks(item))
 		if f == nil {
 			continue
 		}
@@ -297,28 +322,29 @@ func (s *PlayScene) paintPaperDoll(ax, ay int, proj [16]float32) {
 		s.text.DrawText(name, float32(ax+122-lw/2), float32(ay+23), 1, 1, 1, 1, proj)
 	}
 	if st.GuildName != "" {
-		s.text.DrawText(st.GuildName+" "+st.GuildRank, float32(ax+65), float32(ay+45), 1, 1, 0.8, 1, proj)
+		s.text.DrawText(st.GuildName+" "+st.GuildRank, float32(ax+65), float32(ay+45), 0.75, 0.75, 0.75, 1, proj)
 	}
 }
 
-// paintStateStats renders page 1 (FState:2855-2870).
+// paintStateStats renders page 1 (FState:2855-2870): pure values only — the
+// labels are baked into the [370] artwork.
 func (s *PlayScene) paintStateStats(ax, ay int, proj [16]float32) {
 	if s.text == nil {
 		return
 	}
 	st := s.State
 	l, m := float32(ax+137), float32(ay+99)
-	row := func(y float32, label string, v uint32) {
+	row := func(y float32, v uint32) {
 		lo, hi := unpackLoHi(v)
-		s.text.DrawText(fmt.Sprintf("%s %d-%d", label, lo, hi), l, y, 1, 1, 1, 1, proj)
+		s.text.DrawText(fmt.Sprintf("%d-%d", lo, hi), l, y, 1, 1, 1, 1, proj)
 	}
-	row(m-22, "AC", st.AC)
-	row(m+5, "MAC", st.MAC)
-	row(m+34, "DC", st.DC)
-	row(m+60, "MC", st.MC)
-	row(m+88, "SC", st.SC)
-	s.text.DrawText(fmt.Sprintf("HP %d/%d", st.HP, st.MaxHP), l, m+116, 1, 1, 1, 1, proj)
-	s.text.DrawText(fmt.Sprintf("MP %d/%d", st.MP, st.MaxMP), l, m+144, 1, 1, 1, 1, proj)
+	row(m-22, st.AC)
+	row(m+5, st.MAC)
+	row(m+34, st.DC)
+	row(m+60, st.MC)
+	row(m+88, st.SC)
+	s.text.DrawText(fmt.Sprintf("%d/%d", st.HP, st.MaxHP), l, m+116, 1, 1, 1, 1, proj)
+	s.text.DrawText(fmt.Sprintf("%d/%d", st.MP, st.MaxMP), l, m+144, 1, 1, 1, 1, proj)
 }
 
 // paintStateDetails renders page 2 (FState:2871-2930).
@@ -330,29 +356,32 @@ func (s *PlayScene) paintStateDetails(ax, ay int, proj [16]float32) {
 	bbx, bby := float32(ax+60), float32(ay+70)
 	mmx := bbx + 85
 	silver := [3]float32{0.75, 0.75, 0.75}
+	// Labels stay silver; only the value column turns red on overflow
+	// (FState:2884-2930).
 	line := func(k int, label, value string, warn bool) {
+		s.text.DrawText(label, bbx, bby+float32(k*14), silver[0], silver[1], silver[2], 1, proj)
 		r, g, b := silver[0], silver[1], silver[2]
 		if warn {
 			r, g, b = 1, 0.3, 0.3
 		}
-		s.text.DrawText(label, bbx, bby+float32(k*14), r, g, b, 1, proj)
 		s.text.DrawText(value, mmx, bby+float32(k*14), r, g, b, 1, proj)
 	}
 	expPct := 0.0
 	if st.MaxExp > 0 {
 		expPct = 100 * float64(st.Exp) / float64(st.MaxExp)
 	}
-	line(0, "Exp", fmt.Sprintf("%.2f%%", expPct), false)
-	line(1, "Weight", fmt.Sprintf("%d/%d", st.Weight, st.MaxWeight), st.Weight > st.MaxWeight)
-	line(2, "WearWeight", fmt.Sprintf("%d/%d", st.WearWeight, st.MaxWearWeight), false)
-	line(3, "HandWeight", fmt.Sprintf("%d/%d", st.HandWeight, st.MaxHandWeight), false)
-	line(4, "Hit", fmt.Sprintf("%d", st.Hit), false)
-	line(5, "Speed", fmt.Sprintf("%d", st.Speed), false)
-	line(6, "AntiMagic", "+0%", false)
-	line(7, "AntiPoison", "+0%", false)
-	line(8, "PoisonRecover", "+0%", false)
-	line(9, "HealthRecover", "+0%", false)
-	line(10, "SpellRecover", "+0%", false)
+	line(0, "经验值", fmt.Sprintf("%.2f%%", expPct), false)
+	line(1, "负重能力", fmt.Sprintf("%d/%d", st.Weight, st.MaxWeight), st.Weight > st.MaxWeight)
+	line(2, "装备重量", fmt.Sprintf("%d/%d", st.WearWeight, st.MaxWearWeight), st.WearWeight > st.MaxWearWeight)
+	line(3, "手上重量", fmt.Sprintf("%d/%d", st.HandWeight, st.MaxHandWeight), st.HandWeight > st.MaxHandWeight)
+	line(4, "准确度", fmt.Sprintf("%d", st.Hit), false)
+	line(5, "敏捷度", fmt.Sprintf("%d", st.Speed), false)
+	// Recovery/resistance values need a protocol extension (B5); placeholders.
+	line(6, "魔法躲避", "+0%", false)
+	line(7, "中毒躲避", "+0%", false)
+	line(8, "中毒恢复", "+0%", false)
+	line(9, "生命恢复", "+0%", false)
+	line(10, "魔法恢复", "+0%", false)
 }
 
 // paintMagicList renders page 3 text/icons (FState:2931-2998); the icon
@@ -393,7 +422,7 @@ func (s *PlayScene) equipSlotClick(slot int) {
 	st := s.State
 	if s.itemMove.Moving {
 		if s.itemMove.Index >= 0 && s.itemMove.Item.Def != nil {
-			if getTakeOnPosition(s.itemMove.Item.Def.StdMode) == slot && s.sendTakeOn != nil {
+			if takeOnSlotMatches(s.itemMove.Item.Def.StdMode, slot) && s.sendTakeOn != nil {
 				s.sendTakeOn(s.itemMove.Item.MakeIndex, slot)
 				// Optimistic visual: server re-sync confirms.
 				if s.itemMove.Index < len(st.BagItems) {
@@ -476,13 +505,13 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 		}
 	}
 
-	pick := func(key byte) {
-		s.applyMagicKey(magIdx, key)
-		s.ui.CloseModal(win)
-	}
+	// Pre-selected key: F1..F8/None only update it (with highlight); the
+	// binding is applied when Ok closes the dialog (FState:5277-5398 —
+	// DKsF1Click preselects, DKsOkClick just hides, the caller applies).
+	selKey := mag.Key
 
-	// F1..F8 buttons (FState:1375-1398).
-	xs := []int{25, 57, 89, 121, 160, 192, 224, 256}
+	// F1..F8 buttons, runtime positions (FState:1375-1398).
+	xs := []int{57, 89, 121, 153, 192, 224, 256, 288}
 	for i, x := range xs {
 		key := byte('1' + i)
 		img := ImgKeyF1 + i*2
@@ -492,13 +521,14 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 			btn.SetImgIndex(prg, img)
 		}
 		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-			idx := img
-			if c.Downed {
-				idx++
+			// Face is only blitted when selected or pressed; the idle face
+			// is baked into the dialog background (FState:5332-5371, where
+			// the +1 pressed variant is commented out).
+			if selKey == key || c.Downed {
+				s.ui.BlitImage(prg, img, c.AbsX(), c.AbsY(), proj)
 			}
-			s.ui.BlitImage(prg, idx, c.AbsX(), c.AbsY(), proj)
 		}
-		btn.OnClick = func(c *UIControl, x, y int) { pick(key) }
+		btn.OnClick = func(c *UIControl, x, y int) { selKey = key }
 		win.AddChild(btn)
 	}
 
@@ -514,7 +544,10 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 		}
 		s.ui.BlitImage(prg, idx, c.AbsX(), c.AbsY(), proj)
 	}
-	ok.OnClick = func(c *UIControl, x, y int) { s.ui.CloseModal(win) }
+	ok.OnClick = func(c *UIControl, x, y int) {
+		s.applyMagicKey(magIdx, selKey)
+		s.ui.CloseModal(win)
+	}
 	win.AddChild(ok)
 
 	none := NewUIControl("DKsNone", KindButton)
@@ -523,20 +556,19 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 		none.SetImgIndex(prg, ImgKeyNone)
 	}
 	none.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-		idx := ImgKeyNone
-		if c.Downed {
-			idx++
+		if selKey == 0 || c.Downed {
+			s.ui.BlitImage(prg, ImgKeyNone, c.AbsX(), c.AbsY(), proj)
 		}
-		s.ui.BlitImage(prg, idx, c.AbsX(), c.AbsY(), proj)
 	}
-	none.OnClick = func(c *UIControl, x, y int) { pick(0) }
+	none.OnClick = func(c *UIControl, x, y int) { selKey = 0 }
 	win.AddChild(none)
 
 	s.ui.ShowModal(win)
 }
 
-// applyMagicKey rebinds locally and tells the server (ClMain.pas:3520-3532
-// client-side unbind + CMMagicKeyChange).
+// applyMagicKey rebinds locally and tells the server: any other magic
+// holding the key is explicitly unbound first (ClMain.pas:3520-3532), then
+// the new binding is sent.
 func (s *PlayScene) applyMagicKey(magIdx int, key byte) {
 	if magIdx >= len(s.State.Magics) {
 		return
@@ -545,6 +577,9 @@ func (s *PlayScene) applyMagicKey(magIdx int, key byte) {
 		for i := range s.State.Magics {
 			if i != magIdx && s.State.Magics[i].Key == key {
 				s.State.Magics[i].Key = 0
+				if s.sendMagicKey != nil {
+					s.sendMagicKey(int(s.State.Magics[i].MagID), 0)
+				}
 			}
 		}
 	}

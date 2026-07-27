@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	selectedFrame = 16
-	freezeFrame   = 13
+	selectedFrame   = 16
+	freezeFrame     = 13
+	selectEffFrames = 14 // ChrSel[4..17] selection-effect loop (IntroScn:1442-1454)
 )
 
 // CharacterSlot represents a character in the selection screen.
@@ -49,10 +50,21 @@ type SelectChrScene struct {
 	createJob   int
 	createSex   int
 	createIndex int
+	createDown  int // create-dialog button held down (-1 none; 0-2 class, 3-4 gender)
 	cursorBlink time.Time
 
 	deleteConfirm bool
 	deleteName    string
+
+	downButton  int // select button held down (-1 none), for pressed-only blit
+	selEffIndex int
+	selEffTick  time.Time
+
+	// ServerName is drawn centered at the top of the screen (IntroScn:1539-1545).
+	// Mirrors GameState.ServerName; currently never assigned because the server
+	// name is not carried by SMSelectServerOK (body is addr/port/cert only) and
+	// the network flow is intentionally left untouched. Drawn only when non-empty.
+	ServerName string
 
 	startFunc  func(charName string)
 	exitFunc   func()
@@ -65,40 +77,42 @@ const (
 	selOY = float32(0)
 )
 
+// selButtonAreas are the select-screen button hit rectangles; sizes match the
+// image extents Delphi derives via SetImgIndex (FState:904-925). Order parallels
+// selButtons.
 var selButtonAreas = []loginArea{
-	{selOX + 134, selOY + 424, 70, 20},
-	{selOX + 602, selOY + 424, 70, 20},
-	{selOX + 374, selOY + 427, 70, 20},
-	{selOX + 349, selOY + 467, 70, 20},
-	{selOX + 349, selOY + 505, 70, 20},
-	{selOX + 349, selOY + 543, 70, 20},
+	{selOX + 134, selOY + 424, 76, 33},  // ImgSelSelect1 [66]
+	{selOX + 602, selOY + 424, 76, 33},  // ImgSelSelect2 [67]
+	{selOX + 374, selOY + 427, 44, 21},  // ImgSelStart [68]
+	{selOX + 349, selOY + 467, 120, 21}, // ImgSelNewChr [69]
+	{selOX + 349, selOY + 505, 120, 21}, // ImgSelErase [70]
+	{selOX + 349, selOY + 543, 56, 20},  // ImgSelExit [72]
 }
 
-var createJobAreas = []loginArea{
-	{440, 305, 60, 22},
-	{510, 305, 60, 22},
-	{580, 305, 60, 22},
+// selButtons maps each select button to its Prguse image and screen position
+// (FState:904-925). The faces are baked into the background [65] and are blit
+// only while pressed (DscSelect1DirectPaint, FState:2693-2705).
+var selButtons = []struct {
+	img  int
+	x, y float32
+}{
+	{ImgSelSelect1, selOX + 134, selOY + 424},
+	{ImgSelSelect2, selOX + 602, selOY + 424},
+	{ImgSelStart, selOX + 374, selOY + 427},
+	{ImgSelNewChr, selOX + 349, selOY + 467},
+	{ImgSelErase, selOX + 349, selOY + 505},
+	{ImgSelExit, selOX + 349, selOY + 543},
 }
-
-var createSexAreas = []loginArea{
-	{440, 345, 60, 22},
-	{510, 345, 60, 22},
-}
-
-var (
-	createConfirmArea = loginArea{420, 400, 80, 28}
-	createCancelArea  = loginArea{530, 400, 80, 28}
-	deleteYesArea     = loginArea{420, 370, 80, 28}
-	deleteNoArea      = loginArea{530, 370, 80, 28}
-)
 
 // NewSelectChrScene creates a new character selection scene.
 func NewSelectChrScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *SelectChrScene {
 	return &SelectChrScene{
-		gl:        gl,
-		resources: resources,
-		text:      text,
-		Selected:  -1,
+		gl:         gl,
+		resources:  resources,
+		text:       text,
+		Selected:   -1,
+		downButton: -1,
+		createDown: -1,
 	}
 }
 
@@ -147,15 +161,24 @@ func (s *SelectChrScene) Update(dt float64) {
 			}
 		}
 	}
+
+	// Selection effect advances at 50ms/frame while a valid slot is selected
+	// (IntroScn:1449-1454).
+	if s.Selected >= 0 && s.Selected < 2 && s.Characters[s.Selected].Valid {
+		if now.Sub(s.selEffTick) > 50*time.Millisecond {
+			s.selEffTick = now
+			s.selEffIndex = (s.selEffIndex + 1) % selectEffFrames
+		}
+	}
 }
 
 func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 	ox, oy := selOX, selOY
 
 	if s.resources.Prguse != nil {
-		tex := s.resources.GetTexture(s.resources.Prguse, 65)
+		tex := s.resources.GetTexture(s.resources.Prguse, ImgSelBg)
 		if tex != 0 {
-			w, h := s.getPrguseSize(65)
+			w, h := s.getPrguseSize(ImgSelBg)
 			gl.DrawQuad(tex, ox, oy, float32(w), float32(h), proj)
 		}
 	} else {
@@ -177,18 +200,34 @@ func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 	}
 }
 
+// slotPos returns the portrait top-left for a job/sex in slot idx. The table
+// matches IntroScn.pas:1390-1438 (bx,by); slot 1 is offset (+340,+2).
+func (s *SelectChrScene) slotPos(job, sex, idx int, ox, oy float32) (float32, float32) {
+	positions := [3][2][2]float32{
+		{{71, 52}, {65, 55}},
+		{{77, 46}, {171, 97}},
+		{{85, 63}, {164, 103}},
+	}
+	x := ox + positions[job][sex][0]
+	y := oy + positions[job][sex][1]
+	if idx == 1 {
+		x += 340
+		y += 2
+	}
+	return x, y
+}
+
 func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox, oy float32, idx int) {
+	if s.createMode && idx == s.createIndex {
+		s.renderCreatePreview(gl, proj, ox, oy, idx)
+		return
+	}
+
 	ch := s.Characters[idx]
 	if !ch.Valid {
 		return
 	}
 
-	type charPos struct{ x, y float32 }
-	positions := [3][2]charPos{
-		{{71, 52}, {65, 55}},
-		{{77, 46}, {171, 97}},
-		{{85, 63}, {164, 103}},
-	}
 	job := int(ch.Job)
 	sex := int(ch.Sex)
 	if job > 2 {
@@ -197,13 +236,7 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 	if sex > 1 {
 		sex = 0
 	}
-	pos := positions[job][sex]
-	slotX := ox + pos.x
-	slotY := oy + pos.y
-	if idx == 1 {
-		slotX += 340
-		slotY += 2
-	}
+	slotX, slotY := s.slotPos(job, sex, idx, ox, oy)
 
 	var imgIdx int
 	if ch.FreezeState || ch.Freezing {
@@ -226,9 +259,9 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 		if img != nil && img.Width > 0 && img.Height > 0 {
 			tex := s.resources.GetTexture(s.resources.ChrSel, imgIdx)
 			if tex != 0 {
-				drawX := slotX + (100-float32(img.Width))/2
-				drawY := slotY + 200 - float32(img.Height)
-				gl.DrawQuad(tex, drawX, drawY, float32(img.Width), float32(img.Height), proj)
+				// Delphi draws the portrait top-left at the slot origin
+				// (IntroScn:1443,1469,1494,1501).
+				gl.DrawQuad(tex, slotX, slotY, float32(img.Width), float32(img.Height), proj)
 				drawn = true
 			}
 		}
@@ -248,32 +281,76 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 	}
 
 	if idx == s.Selected {
-		gl.DrawQuadColor(slotX-2, slotY-2, 104, 204, 1.0, 1.0, 0.0, 0.3, proj)
+		s.renderSelectEffect(gl, proj, ox, oy, idx)
 	}
+}
+
+// renderCreatePreview draws the live creation portrait for the empty slot,
+// driven by createJob/createSex so the preview updates the instant a class or
+// gender is chosen (Delphi MakeNewChar → SelectChr(NewIndex), IntroScn:1286,1339-1353).
+func (s *SelectChrScene) renderCreatePreview(gl *engine.GLState, proj [16]float32, ox, oy float32, idx int) {
+	job, sex := s.createJob, s.createSex
+	if job > 2 {
+		job = 0
+	}
+	if sex > 1 {
+		sex = 0
+	}
+	slotX, slotY := s.slotPos(job, sex, idx, ox, oy)
+	imgIdx := 60 + job*40 + sex*120 // static standing pose
+	if s.resources.ChrSel == nil || imgIdx >= s.resources.ChrSel.Count {
+		return
+	}
+	img := s.resources.ChrSel.GetImage(imgIdx)
+	if img == nil || img.Width == 0 || img.Height == 0 {
+		return
+	}
+	tex := s.resources.GetTexture(s.resources.ChrSel, imgIdx)
+	if tex == 0 {
+		return
+	}
+	gl.DrawQuad(tex, slotX, slotY, float32(img.Width), float32(img.Height), proj)
+}
+
+// renderSelectEffect draws the 14-frame selection glow (ChrSel[4..17]) at the
+// fixed effect origin of the selected slot (IntroScn:1388-1389,1442-1454).
+func (s *SelectChrScene) renderSelectEffect(gl *engine.GLState, proj [16]float32, ox, oy float32, idx int) {
+	if s.resources.ChrSel == nil {
+		return
+	}
+	imgIdx := 4 + s.selEffIndex
+	if imgIdx >= s.resources.ChrSel.Count {
+		return
+	}
+	img := s.resources.ChrSel.GetImage(imgIdx)
+	if img == nil || img.Width == 0 || img.Height == 0 {
+		return
+	}
+	tex := s.resources.GetTexture(s.resources.ChrSel, imgIdx)
+	if tex == 0 {
+		return
+	}
+	ex, ey := float32(90), float32(58)
+	if idx == 1 {
+		ex, ey = 430, 60
+	}
+	// Delphi blends additively (DrawBlend) and fades via DarkLevel; both are
+	// approximated/omitted here (normal alpha, no fade — low priority).
+	gl.DrawQuad(tex, ox+ex, oy+ey, float32(img.Width), float32(img.Height), proj)
 }
 
 func (s *SelectChrScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	if s.resources.Prguse == nil {
 		return
 	}
-	buttons := []struct {
-		index int
-		x, y  float32
-	}{
-		{66, ox + 134, oy + 424},
-		{67, ox + 602, oy + 424},
-		{68, ox + 374, oy + 427},
-		{69, ox + 349, oy + 467},
-		{70, ox + 349, oy + 505},
-		{72, ox + 349, oy + 543},
+	// The six buttons are baked into the background [65]; only the pressed one
+	// is blit on top (DscSelect1DirectPaint draws FaceIndex only when Downed,
+	// FState:2693-2705).
+	if s.downButton < 0 || s.downButton >= len(selButtons) {
+		return
 	}
-	for _, btn := range buttons {
-		tex := s.resources.GetTexture(s.resources.Prguse, btn.index)
-		if tex != 0 {
-			w, h := s.getPrguseSize(btn.index)
-			gl.DrawQuad(tex, btn.x, btn.y, float32(w), float32(h), proj)
-		}
-	}
+	btn := selButtons[s.downButton]
+	s.drawPrguseImage(btn.img, btn.x, btn.y, proj)
 }
 
 func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy float32) {
@@ -294,16 +371,21 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 		}
 		tp := textPositions[i]
 
-		s.drawTextOutline(ch.Name, ox+tp.nameX, oy+tp.nameY, 1.0, 1.0, 0.8, 1.0, proj)
-
-		levelStr := fmt.Sprintf("Lv.%d", ch.Level)
-		s.drawTextOutline(levelStr, ox+tp.levelX, oy+tp.levelY, 0.8, 0.8, 0.8, 1.0, proj)
-
+		// Name/level/class are white with a black outline (BoldTextOut,
+		// IntroScn:1522-1534); the level is a bare number (IntToStr, :1523).
+		s.text.DrawTextOutline(ch.Name, ox+tp.nameX, oy+tp.nameY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+		s.text.DrawTextOutline(fmt.Sprintf("%d", ch.Level), ox+tp.levelX, oy+tp.levelY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		jobName := "未知"
 		if int(ch.Job) < len(jobNames) {
 			jobName = jobNames[ch.Job]
 		}
-		s.drawTextOutline(jobName, ox+tp.jobX, oy+tp.jobY, 0.8, 0.8, 0.8, 1.0, proj)
+		s.text.DrawTextOutline(jobName, ox+tp.jobX, oy+tp.jobY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+	}
+
+	// Server name centered at the top (IntroScn:1539-1545).
+	if s.ServerName != "" {
+		x := float32(ScreenWidth)/2 - float32(s.text.MeasureText(s.ServerName))/2
+		s.text.DrawTextOutline(s.ServerName, x, oy+8, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
 	if s.errorMsg != "" {
@@ -311,104 +393,138 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 	}
 }
 
-func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.5, proj)
+// createWinPos returns the creation-window origin for the current createIndex
+// (IntroScn:1272-1278): slot 0 → (469,63), slot 1 → (87,63).
+func (s *SelectChrScene) createWinPos() (float32, float32) {
+	if s.createIndex == 1 {
+		return 87, 63
+	}
+	return 469, 63
+}
 
-	if !s.drawPrguseImage(73, 352, 200, proj) {
-		gl.DrawQuadColor(352, 200, 320, 260, 0.12, 0.12, 0.2, 0.95, proj)
-		gl.DrawQuadColor(354, 202, 316, 256, 0.18, 0.18, 0.28, 0.95, proj)
+// imgArea builds a hit rectangle at (x,y) sized from the Prguse image, with a
+// fallback when the asset is unavailable (Delphi sizes controls from SetImgIndex).
+func (s *SelectChrScene) imgArea(img int, x, y float32) loginArea {
+	w, h := s.getPrguseSize(img)
+	if w == 0 || h == 0 {
+		w, h = 60, 22
+	}
+	return loginArea{x, y, float32(w), float32(h)}
+}
+
+func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32) {
+	winX, winY := s.createWinPos()
+
+	// Creation window background [73]; labels and button faces are baked into
+	// it, so there is no fullscreen dim and no separate label text (DCreateChr).
+	if !s.drawPrguseImage(ImgCreateBg, winX, winY, proj) {
+		gl.DrawQuadColor(winX, winY, 260, 320, 0.12, 0.12, 0.2, 0.95, proj)
 	}
 
-	if s.text == nil {
+	// Name edit field: black background, white text, window+(63,79) 129×21,
+	// MaxLength 14 (IntroScn:1109-1121,1282-1283).
+	gl.DrawQuadColor(winX+63, winY+79, 129, 21, 0, 0, 0, 1, proj)
+	if s.text != nil {
+		s.text.DrawText(s.createName, winX+65, winY+81, 1, 1, 1, 1, proj)
+		showCursor := time.Since(s.cursorBlink) < 250*time.Millisecond
+		if time.Since(s.cursorBlink) > 500*time.Millisecond {
+			s.cursorBlink = time.Now()
+			showCursor = true
+		}
+		if showCursor {
+			cx := winX + 65 + float32(s.text.MeasureText(s.createName))
+			s.text.DrawText("|", cx, winY+81, 1, 1, 1, 1, proj)
+		}
+	}
+
+	// Class buttons [74/75/76] (window-relative 36/103/168,139) and gender
+	// buttons [77/78] (70/137,211): highlight when selected, own face when
+	// pressed, otherwise nothing (DccCloseDirectPaint, FState:2725-2761).
+	jobXs := [3]float32{36, 103, 168}
+	for i := 0; i < 3; i++ {
+		s.renderCreateChoice(gl, proj, ImgCreateJob1+i, ImgClassHi1+i,
+			winX+jobXs[i], winY+139, s.createJob == i, s.createDown == i)
+	}
+	sexXs := [2]float32{70, 137}
+	sexHi := [2]int{ImgGenderHiM, ImgGenderHiF}
+	for i := 0; i < 2; i++ {
+		s.renderCreateChoice(gl, proj, ImgCreateMale+i, sexHi[i],
+			winX+sexXs[i], winY+211, s.createSex == i, s.createDown == 3+i)
+	}
+
+	// OK [51] / Cancel [52] are real buttons (not baked in), always drawn
+	// (window-relative 46/138,273 — FState:962-965).
+	s.drawButton(ImgCreateOk, winX+46, winY+273, proj)
+	s.drawButton(ImgCreateCancel, winX+138, winY+273, proj)
+}
+
+// renderCreateChoice mirrors DccCloseDirectPaint (FState:2725-2761): pressed →
+// draw the button's own face; not pressed but currently selected → draw the
+// highlight image; otherwise draw nothing (baked into the creation window).
+func (s *SelectChrScene) renderCreateChoice(gl *engine.GLState, proj [16]float32, faceIdx, hiIdx int, x, y float32, selected, downed bool) {
+	switch {
+	case downed:
+		s.drawPrguseImage(faceIdx, x, y, proj)
+	case selected:
+		s.drawPrguseImage(hiIdx, x, y, proj)
+	}
+}
+
+// drawButton blits a button image, falling back to a colored quad when the
+// asset is missing.
+func (s *SelectChrScene) drawButton(img int, x, y float32, proj [16]float32) {
+	if s.drawPrguseImage(img, x, y, proj) {
 		return
 	}
-
-	s.text.DrawText("创建角色", 460, 215, 1.0, 1.0, 0.5, 1.0, proj)
-
-	s.text.DrawText("角色名:", 372, 262, 0.9, 0.9, 0.9, 1.0, proj)
-	gl.DrawQuadColor(440, 258, 200, 22, 0.1, 0.1, 0.1, 1.0, proj)
-	s.text.DrawText(s.createName, 444, 262, 1.0, 1.0, 0.8, 1.0, proj)
-
-	showCursor := time.Since(s.cursorBlink) < 250*time.Millisecond
-	if time.Since(s.cursorBlink) > 500*time.Millisecond {
-		s.cursorBlink = time.Now()
-		showCursor = true
+	w, h := s.getPrguseSize(img)
+	if w == 0 || h == 0 {
+		w, h = 80, 28
 	}
-	if showCursor {
-		cx := float32(444) + float32(s.text.MeasureText(s.createName))
-		s.text.DrawText("|", cx, 262, 1.0, 1.0, 0.0, 1.0, proj)
-	}
+	s.gl.DrawQuadColor(x, y, float32(w), float32(h), 0.25, 0.3, 0.35, 0.9, proj)
+}
 
-	s.text.DrawText("职业:", 372, 308, 0.9, 0.9, 0.9, 1.0, proj)
-	jobImgIdx := []int{74, 75, 76}
-	for i, name := range jobNames {
-		var r, g, b float32
-		if i == s.createJob {
-			r, g, b = 1.0, 1.0, 0.3
-		} else {
-			r, g, b = 0.7, 0.7, 0.7
+// deleteWinPos centers the delete-confirm modal ([360]) on screen.
+func (s *SelectChrScene) deleteWinPos() (float32, float32) {
+	w, h := s.getPrguseSize(ImgModalNormal)
+	if w == 0 || h == 0 {
+		w, h = 380, 180
+	}
+	return float32(ScreenWidth-w) / 2, float32(ScreenHeight-h) / 2
+}
+
+// deleteButtonAreas returns the Yes/No/Cancel hit rectangles (screen coords),
+// laid out right-to-left from window-relative lx=324 with a 110px step
+// (FState:2060-2083; mirrors uidialog.go dialogButtonLayout/dialogButtonOrder).
+func (s *SelectChrScene) deleteButtonAreas() [3]loginArea {
+	winX, winY := s.deleteWinPos()
+	imgs := [3]int{ImgModalYes, ImgModalNo, ImgModalCancel}
+	lxs := [3]float32{104, 214, 324} // Yes, No, Cancel (right-to-left)
+	var areas [3]loginArea
+	for i, img := range imgs {
+		w, h := s.getPrguseSize(img)
+		if w == 0 || h == 0 {
+			w, h = 96, 34
 		}
-		if !s.drawPrguseImage(jobImgIdx[i], createJobAreas[i].X, createJobAreas[i].Y, proj) {
-			gl.DrawQuadColor(createJobAreas[i].X, createJobAreas[i].Y, createJobAreas[i].W, createJobAreas[i].H, 0.2, 0.2, 0.3, 0.8, proj)
-		}
-		s.text.DrawText(name, createJobAreas[i].X+12, createJobAreas[i].Y+3, r, g, b, 1.0, proj)
+		areas[i] = loginArea{winX + lxs[i], winY + 126, float32(w), float32(h)}
 	}
-
-	s.text.DrawText("性别:", 372, 348, 0.9, 0.9, 0.9, 1.0, proj)
-	sexNames := []string{"男", "女"}
-	sexImgIdx := []int{77, 78}
-	for i, name := range sexNames {
-		var r, g, b float32
-		if i == s.createSex {
-			r, g, b = 1.0, 1.0, 0.3
-		} else {
-			r, g, b = 0.7, 0.7, 0.7
-		}
-		if !s.drawPrguseImage(sexImgIdx[i], createSexAreas[i].X, createSexAreas[i].Y, proj) {
-			gl.DrawQuadColor(createSexAreas[i].X, createSexAreas[i].Y, createSexAreas[i].W, createSexAreas[i].H, 0.2, 0.2, 0.3, 0.8, proj)
-		}
-		s.text.DrawText(name, createSexAreas[i].X+20, createSexAreas[i].Y+3, r, g, b, 1.0, proj)
-	}
-
-	if !s.drawPrguseImage(51, createConfirmArea.X, createConfirmArea.Y, proj) {
-		gl.DrawQuadColor(createConfirmArea.X, createConfirmArea.Y, createConfirmArea.W, createConfirmArea.H, 0.25, 0.35, 0.25, 1.0, proj)
-	}
-	s.text.DrawText("确 定", createConfirmArea.X+18, createConfirmArea.Y+5, 1.0, 1.0, 1.0, 1.0, proj)
-
-	if !s.drawPrguseImage(52, createCancelArea.X, createCancelArea.Y, proj) {
-		gl.DrawQuadColor(createCancelArea.X, createCancelArea.Y, createCancelArea.W, createCancelArea.H, 0.35, 0.25, 0.25, 1.0, proj)
-	}
-	s.text.DrawText("取 消", createCancelArea.X+18, createCancelArea.Y+5, 1.0, 1.0, 1.0, 1.0, proj)
+	return areas
 }
 
 func (s *SelectChrScene) renderDeleteDialog(gl *engine.GLState, proj [16]float32) {
 	gl.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 0.5, proj)
-	gl.DrawQuadColor(352, 280, 320, 140, 0.12, 0.12, 0.2, 0.95, proj)
-	gl.DrawQuadColor(354, 282, 316, 136, 0.18, 0.18, 0.28, 0.95, proj)
-
-	if s.text == nil {
-		return
+	winX, winY := s.deleteWinPos()
+	if !s.drawPrguseImage(ImgModalNormal, winX, winY, proj) {
+		gl.DrawQuadColor(winX, winY, 380, 180, 0.12, 0.12, 0.2, 0.95, proj)
 	}
-
-	msg := fmt.Sprintf("确定删除角色 \"%s\"？", s.deleteName)
-	s.text.DrawText(msg, 380, 320, 1.0, 0.8, 0.3, 1.0, proj)
-
-	gl.DrawQuadColor(deleteYesArea.X, deleteYesArea.Y, deleteYesArea.W, deleteYesArea.H, 0.35, 0.25, 0.25, 1.0, proj)
-	s.text.DrawText("确 定", deleteYesArea.X+18, deleteYesArea.Y+5, 1.0, 1.0, 1.0, 1.0, proj)
-
-	gl.DrawQuadColor(deleteNoArea.X, deleteNoArea.Y, deleteNoArea.W, deleteNoArea.H, 0.25, 0.35, 0.25, 1.0, proj)
-	s.text.DrawText("取 消", deleteNoArea.X+18, deleteNoArea.Y+5, 1.0, 1.0, 1.0, 1.0, proj)
-}
-
-func (s *SelectChrScene) drawTextOutline(text string, x, y float32, r, g, b, a float32, proj [16]float32) {
-	if s.text == nil {
-		return
+	if s.text != nil {
+		msg := fmt.Sprintf("确定删除角色 \"%s\"？", s.deleteName)
+		s.text.DrawTextOutline(msg, winX+39, winY+38, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
-	s.text.DrawText(text, x-1, y, 0, 0, 0, a, proj)
-	s.text.DrawText(text, x+1, y, 0, 0, 0, a, proj)
-	s.text.DrawText(text, x, y-1, 0, 0, 0, a, proj)
-	s.text.DrawText(text, x, y+1, 0, 0, 0, a, proj)
-	s.text.DrawText(text, x, y, r, g, b, a, proj)
+	areas := s.deleteButtonAreas()
+	imgs := [3]int{ImgModalYes, ImgModalNo, ImgModalCancel}
+	for i, img := range imgs {
+		s.drawButton(img, areas[i].X, areas[i].Y, proj)
+	}
 }
 
 func (s *SelectChrScene) OnChar(char rune) {
@@ -464,48 +580,82 @@ func (s *SelectChrScene) OnKey(key int, action int) {
 
 func (s *SelectChrScene) OnMouse(x, y float64, button int, action int) {
 	fx, fy := float32(x), float32(y)
+	switch {
+	case s.createMode:
+		s.mouseCreate(fx, fy, action)
+	case s.deleteConfirm:
+		s.mouseDelete(fx, fy, action)
+	default:
+		s.mouseSelect(fx, fy, action)
+	}
+}
 
-	if s.createMode {
-		for i, area := range createJobAreas {
+// mouseSelect fires on release inside the same button (TDButton.MouseUp); the
+// pressed button is tracked so renderButtons can blit it while held.
+func (s *SelectChrScene) mouseSelect(fx, fy float32, action int) {
+	switch action {
+	case mousePress:
+		s.downButton = -1
+		for i, area := range selButtonAreas {
 			if hitTest(fx, fy, area) {
-				s.createJob = i
+				s.downButton = i
 				return
 			}
 		}
-		for i, area := range createSexAreas {
-			if hitTest(fx, fy, area) {
-				s.createSex = i
+	case mouseRelease:
+		down := s.downButton
+		s.downButton = -1
+		if down >= 0 && down < len(selButtonAreas) && hitTest(fx, fy, selButtonAreas[down]) {
+			s.handleButton(down)
+		}
+	}
+}
+
+func (s *SelectChrScene) mouseCreate(fx, fy float32, action int) {
+	winX, winY := s.createWinPos()
+	jobXs := [3]float32{36, 103, 168}
+	sexXs := [2]float32{70, 137}
+	switch action {
+	case mousePress:
+		s.createDown = -1
+		for i := 0; i < 3; i++ {
+			if hitTest(fx, fy, s.imgArea(ImgCreateJob1+i, winX+jobXs[i], winY+139)) {
+				s.createDown = i
 				return
 			}
 		}
-		if hitTest(fx, fy, createConfirmArea) {
+		for i := 0; i < 2; i++ {
+			if hitTest(fx, fy, s.imgArea(ImgCreateMale+i, winX+sexXs[i], winY+211)) {
+				s.createDown = 3 + i
+				return
+			}
+		}
+	case mouseRelease:
+		down := s.createDown
+		s.createDown = -1
+		switch {
+		case down >= 0 && down < 3 && hitTest(fx, fy, s.imgArea(ImgCreateJob1+down, winX+jobXs[down], winY+139)):
+			s.createJob = down // instant preview (renderCreatePreview reads this)
+		case down >= 3 && down < 5 && hitTest(fx, fy, s.imgArea(ImgCreateMale+down-3, winX+sexXs[down-3], winY+211)):
+			s.createSex = down - 3
+		case hitTest(fx, fy, s.imgArea(ImgCreateOk, winX+46, winY+273)):
 			s.confirmCreate()
-			return
-		}
-		if hitTest(fx, fy, createCancelArea) {
+		case hitTest(fx, fy, s.imgArea(ImgCreateCancel, winX+138, winY+273)):
 			s.createMode = false
-			return
 		}
+	}
+}
+
+func (s *SelectChrScene) mouseDelete(fx, fy float32, action int) {
+	if action != mouseRelease {
 		return
 	}
-
-	if s.deleteConfirm {
-		if hitTest(fx, fy, deleteYesArea) {
-			s.confirmDelete()
-			return
-		}
-		if hitTest(fx, fy, deleteNoArea) {
-			s.deleteConfirm = false
-			return
-		}
-		return
-	}
-
-	for i, btn := range selButtonAreas {
-		if hitTest(fx, fy, btn) {
-			s.handleButton(i)
-			return
-		}
+	areas := s.deleteButtonAreas()
+	switch {
+	case hitTest(fx, fy, areas[0]): // Yes
+		s.confirmDelete()
+	case hitTest(fx, fy, areas[1]), hitTest(fx, fy, areas[2]): // No / Cancel
+		s.deleteConfirm = false
 	}
 }
 
@@ -578,6 +728,7 @@ func (s *SelectChrScene) startCreate() {
 	s.createJob = 0
 	s.createSex = 0
 	s.createIndex = emptyIdx
+	s.createDown = -1
 	s.cursorBlink = time.Now()
 	s.errorMsg = ""
 	log.Logf(log.LevelInfo, "SelectChr", "Create character mode, slot=%d", emptyIdx)
@@ -646,6 +797,13 @@ func (s *SelectChrScene) SetDelChrFunc(fn func(name string)) {
 
 func (s *SelectChrScene) SetError(msg string) {
 	s.errorMsg = msg
+}
+
+// SetServerName sets the server name drawn centered at the top of the scene
+// (IntroScn:1539-1545). Intended to mirror GameState.ServerName once the
+// network flow exposes it.
+func (s *SelectChrScene) SetServerName(name string) {
+	s.ServerName = name
 }
 
 func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx int) {

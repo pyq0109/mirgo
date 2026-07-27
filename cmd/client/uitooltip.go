@@ -51,27 +51,50 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 	w += hintPadX * 2
 	h := len(t.lines)*lineH + hintPadY*2
 
+	// Background panel Prguse[394]. Delphi draws it 1:1 from the image top-left
+	// corner (DrawScrn.pas:426-436), clamping the box to the image size
+	// (:428-429) rather than stretching the texture.
+	var hintTex uint32
+	var imgW, imgH int
+	if s.resources.Prguse != nil {
+		img := s.resources.Prguse.GetImage(ImgHintBg)
+		tex := s.resources.GetTexture(s.resources.Prguse, ImgHintBg)
+		if img != nil && img.RGBA != nil && tex != 0 {
+			hintTex = tex
+			imgW, imgH = img.Width, img.Height
+			if w > imgW {
+				w = imgW
+			}
+			if h > imgH {
+				h = imgH
+			}
+		}
+	}
+
+	// Place the box, clamping to the screen edges and to non-negative coords
+	// (DrawScrn.pas:430-434; drawUp can push y negative).
 	x := t.x
 	if x+w > ScreenWidth {
 		x = ScreenWidth - w
+	}
+	if x < 0 {
+		x = 0
 	}
 	y := t.y
 	if t.drawUp {
 		y -= h
 	}
+	if y < 0 {
+		y = 0
+	}
 	fx, fy := float32(x), float32(y)
 
-	// Background panel Prguse[394] (DrawScrn.pas:426), stretched.
-	drawn := false
-	if s.resources.Prguse != nil {
-		img := s.resources.Prguse.GetImage(ImgHintBg)
-		tex := s.resources.GetTexture(s.resources.Prguse, ImgHintBg)
-		if img != nil && img.RGBA != nil && tex != 0 {
-			s.gl.DrawQuadTint(tex, fx, fy, float32(w), float32(h), 1, 1, 1, 0.9, proj)
-			drawn = true
-		}
-	}
-	if !drawn {
+	if hintTex != 0 {
+		// 1:1 source sub-rectangle from the image top-left, alpha=1 (:436).
+		s.gl.DrawQuadSub(hintTex, float32(imgW), float32(imgH),
+			0, 0, float32(w), float32(h), fx, fy, float32(w), float32(h),
+			1, 1, 1, 1, proj)
+	} else {
 		s.gl.DrawQuadColor(fx, fy, float32(w), float32(h), 0.05, 0.05, 0.1, 0.9, proj)
 	}
 
@@ -101,8 +124,11 @@ func GetMouseItemInfo(gs *GameState, item *BagItem) (text string, useable bool) 
 	if def != nil && def.Weight > 0 {
 		parts = append(parts, "Weight "+strconv.Itoa(int(def.Weight)))
 	}
+	// Delphi shows Round(dura/1000) (FState.pas:3936-3942); +500 rounds half-up.
 	if item.DuraMax > 0 {
-		parts = append(parts, "Dura "+strconv.Itoa(int(item.Dura))+"/"+strconv.Itoa(int(item.DuraMax)))
+		parts = append(parts, "Dura "+strconv.Itoa((int(item.Dura)+500)/1000)+"/"+strconv.Itoa((int(item.DuraMax)+500)/1000))
+	} else if item.Dura > 0 {
+		parts = append(parts, "Dura "+strconv.Itoa((int(item.Dura)+500)/1000))
 	}
 	if def != nil {
 		if def.AC > 0 || def.ACMax > 0 {

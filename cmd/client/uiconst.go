@@ -4,11 +4,14 @@ package main
 const (
 	ScreenWidth  = 800
 	ScreenHeight = 600
-	// Bottom bar image Prguse[1] is 155px tall; the map surface occupies the
-	// rest (Delphi MAPSURFACEHEIGHT = SCREENHEIGHT-155, Share.pas:31).
-	BottomBarHeight = 155
-	MapSurfaceH     = ScreenHeight - BottomBarHeight // 445
-	BottomBarTop    = ScreenHeight - BottomBarHeight // 445
+	// Map drawing surface height (Delphi MAPSURFACEHEIGHT, Share.pas:31).
+	MapSurfaceH = 445
+	// Bottom bar image Prguse[1] is 800×251; DBottom is bottom-anchored at
+	// Top = 600-251 = 349 (FState:1184-1189, btop := SCREENHEIGHT-d.Height
+	// at :3577). Its upper 120px overlap the map surface (color-key blend).
+	// buildHUD refines Top from the real image height at runtime.
+	BottomBarImageH = 251
+	BottomBarTop    = ScreenHeight - BottomBarImageH // 349
 
 	// Window drag clamps (Share.pas:33-36).
 	WinLeft   = 60
@@ -46,11 +49,14 @@ const (
 	ImgHunger1    = 16 // g_nMyHungryState 1..4 (FState:3683)
 
 	ImgBeltSlot  = 0  // invisible belt cell (MShare:495-500)
+	ImgDealGold  = 28 // trade dialog gold button, own + remote (FState:1475,1489)
 	ImgGoldBtn   = 29 // bag gold button (MShare:501)
 	ImgRepairBtn = 26 // (MShare:502)
 
 	ImgCloseSmall = 371 // small close, ubiquitous (FState:1076...)
 	ImgCloseMed   = 64  // medium close (MShare:505)
+	ImgConfirm    = 362 // confirm/OK (FState:1336,1352)
+	ImgCancel     = 366 // cancel/close (FState:1339,1355)
 
 	ImgStateBg      = 370 // state/equip panel bg (FState:983)
 	ImgBodyMale     = 376 // paper doll male (FState:2806)
@@ -117,6 +123,34 @@ const (
 
 	ImgHairMale   = 440 // hair base male: 440 + hair/2 (FState:2817)
 	ImgHairFemale = 441 // hair base female: 441 + hair/2 (FState:2818)
+)
+
+// Character select / creation scene (IntroScn.pas + FState.pas:904-965).
+const (
+	ImgSelBg      = 65 // select screen background (IntroScn:1375)
+	ImgSelSelect1 = 66 // DscSelect1 (FState:904)
+	ImgSelSelect2 = 67 // DscSelect2
+	ImgSelStart   = 68 // DscStart
+	ImgSelNewChr  = 69 // DscNewChr
+	ImgSelErase   = 70 // DscEraseChr
+	ImgSelExit    = 72 // DscExit
+
+	ImgCreateBg     = 73 // creation window background (FState:930)
+	ImgCreateJob1   = 74 // DccWarrior (FState:936)
+	ImgCreateJob2   = 75 // DccWizzard
+	ImgCreateJob3   = 76 // DccMonk
+	ImgCreateMale   = 77 // DccMale (FState:940)
+	ImgCreateFemale = 78 // DccFemale
+	ImgCreateOk     = 51 // DccOk (FState:944)
+	ImgCreateCancel = 52 // DccClose (FState:945)
+
+	// Class/gender selection highlights drawn over the baked window faces
+	// (DccCloseDirectPaint, FState:2737-2756).
+	ImgClassHi1  = 55 // warrior selected
+	ImgClassHi2  = 56 // mage selected
+	ImgClassHi3  = 57 // taoist selected
+	ImgGenderHiM = 58 // male selected
+	ImgGenderHiF = 59 // female selected
 )
 
 // Bottom-bar function buttons (DlgConf, MShare.pas:474-494; applied FState:1210-1239).

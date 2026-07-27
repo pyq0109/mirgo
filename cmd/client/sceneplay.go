@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/pyq0109/mirgo/internal/engine"
@@ -121,6 +122,7 @@ type PlayScene struct {
 	tooltip       Tooltip
 	hudPlusAbil   *UIControl
 	hudBag        *UIControl
+	bagHoverItem  *BagItem // hovered bag item for the in-window info area (FState:4465)
 	hudState      *UIControl
 	stateSlotBtns [13]*UIControl
 	stateMagBtns  [5]*UIControl
@@ -137,6 +139,9 @@ type PlayScene struct {
 	hudGuild, hudGroup *UIControl
 	guildAdminBtns     []*UIControl
 	guildChatMode      bool
+	guildChats         []string // guild chat buffer, 500 cap / trim 100 (FState:6465-6475)
+	guildActionTick    int64    // party ops 5s shared gate (FState:5514)
+	guildQueryTick     int64    // guild Home/List 3s gate (FState:6370)
 
 	// Adjust-ability + inspect windows (uiabil.go).
 	hudAbil, hudInspect *UIControl
@@ -145,6 +150,9 @@ type PlayScene struct {
 	showInspect         bool
 	inspectItems        [13]*protocol.UserItem
 	inspectName         string
+	inspectSex          int
+	inspectHair         int
+	ctrlDown            bool // Ctrl held (adjust panel ×10, FState:6638)
 
 	// NPC dialog + shop state (uinpc.go).
 	hudNpc, hudMenu, hudSell *UIControl
@@ -156,6 +164,7 @@ type PlayScene struct {
 	menuIndex                int
 	lastBuyTick              int64
 	sellItem                 *BagItem
+	sellWait                 *BagItem // item pending server sell confirmation
 	sellPriceStr             string
 	queryPrice               bool
 	queryPriceTick           int64
@@ -199,7 +208,9 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 	// (FState.pas:1865-1886 DBackgroundBackgroundClick). WantReturn stays
 	// false so the click still reaches the game world when nothing is held.
 	s.ui.Root.OnBackgroundClick = func(c *UIControl) {
-		s.backgroundClick()
+		if s.backgroundClick() {
+			c.WantReturn = true
+		}
 	}
 	s.buildHUD()
 	s.buildBag()
@@ -211,10 +222,12 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 	return s
 }
 
-// backgroundClick handles clicks that fell through every control.
-func (s *PlayScene) backgroundClick() {
+// backgroundClick handles clicks that fell through every control. It
+// reports whether the click was consumed (an item/gold drop), which sets
+// WantReturn so the world layer ignores the same click (FState:1865-1894).
+func (s *PlayScene) backgroundClick() bool {
 	if !s.itemMove.Moving {
-		return
+		return false
 	}
 	switch {
 	case s.itemMove.Index >= 0:
@@ -225,6 +238,7 @@ func (s *PlayScene) backgroundClick() {
 				s.State.BagItems[slot] = nil
 			}
 			s.itemMove.End()
+			return true
 		}
 	case s.itemMove.Index == moveIdxBagGold:
 		// Drop gold: ask the amount (FState.pas:1870-1882).
@@ -239,9 +253,11 @@ func (s *PlayScene) backgroundClick() {
 			}
 		})
 		s.itemMove.End()
+		return true
 	default:
 		s.itemMove.Cancel(s.State)
 	}
+	return false
 }
 
 func (s *PlayScene) SetSendMove(fn func(ident int, dir int)) {
@@ -969,8 +985,11 @@ func (s *PlayScene) OnChar(char rune) {
 	if s.ui.RouteChar(char) {
 		return
 	}
-	if s.chatMode && char >= 32 && char <= 126 {
-		if len(s.chatInput) < 80 {
+	// Chat input accepts any printable rune, including CJK (the game is a
+	// Chinese environment); 127 (DEL) is excluded. MaxLength 70
+	// (PlayScn.pas:273).
+	if s.chatMode && char >= 32 && char != 127 {
+		if utf8.RuneCountInString(s.chatInput) < 70 {
 			s.chatInput += string(char)
 		}
 	}
@@ -981,35 +1000,18 @@ func (s *PlayScene) OnKey(key int, action int) {
 	if s.ui.RouteKeyDown(key) {
 		return
 	}
-	if key == 256 && s.itemMove.Moving { // Esc releases the held item
-		s.itemMove.Cancel(s.State)
+	// Track Ctrl for the adjust-panel ×10 accelerator.
+	if key == 341 || key == 345 {
+		s.ctrlDown = action == 1
 		return
 	}
-	if s.State.ShowNpcDialog {
-		s.State.ShowNpcDialog = false
+	if key == 256 && s.itemMove.Moving { // Esc releases the held item
+		s.itemMove.Cancel(s.State)
 		return
 	}
 
 	if action == 1 {
 		switch key {
-		case 256: // Escape
-			if s.State.InDeal {
-				s.State.InDeal = false
-				s.State.DealPartner = ""
-				s.resetDeal()
-				if s.sendDealCancel != nil {
-					s.sendDealCancel()
-				}
-				return
-			}
-			if s.State.ShowShop {
-				s.State.ShowShop = false
-				return
-			}
-			if s.State.ShowGuild {
-				s.State.ShowGuild = false
-				return
-			}
 		case 257: // Enter
 			if s.chatMode {
 				if s.chatInput != "" && s.sendChat != nil {
@@ -1021,19 +1023,30 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.chatMode = true
 			}
 			return
-		case 66: // B
+		case keyBackspace:
+			if s.chatMode && s.chatInput != "" {
+				runes := []rune(s.chatInput)
+				s.chatInput = string(runes[:len(runes)-1])
+			}
+			return
+		case 32: // Space — open chat (ClMain:1741-1745)
+			s.chatMode = true
+			return
+		case 66: // B — bag (ClMain:1675-1678)
 			s.State.ShowBag = !s.State.ShowBag
 			return
-		case 71: // G
+		case 67: // C — status panel page 0 (ClMain:1668-1674)
+			s.State.StatePage = 0
+			s.State.ShowEquip = true
+			return
+		case 69: // E — status panel page 3 (ClMain:1676-1685)
+			s.State.StatePage = 3
+			s.State.ShowEquip = true
+			return
+		case 71: // G — guild (ClMain:1637-1661)
 			s.toggleGuild()
 			return
-		case 78: // N
-			s.State.ShowEquip = !s.State.ShowEquip
-			return
-		case 77: // M
-			s.showMinimap = !s.showMinimap
-			return
-		case 72: // H
+		case 72: // H — cycle attack mode (ClMain:1517-1525)
 			s.State.AttackMode = (s.State.AttackMode + 1) % 5
 			if s.sendAttackMode != nil {
 				s.sendAttackMode(s.State.AttackMode)
@@ -1041,25 +1054,68 @@ func (s *PlayScene) OnKey(key int, action int) {
 			modes := []string{"和平", "组队", "行会", "全体", "PK"}
 			s.addChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
 			return
-		case 80: // P — character stats (state panel page 1)
-			s.State.ShowEquip = !s.State.ShowEquip
-			if s.State.ShowEquip {
-				s.State.StatePage = 1
+		case 77: // M — minimap (ClMain:1613-1628; three-state cycle is B5)
+			s.showMinimap = !s.showMinimap
+			return
+		case 78: // N — adjust ability (ClMain:1692-1695)
+			s.State.ShowPlusAbil = !s.State.ShowPlusAbil
+			return
+		case 83: // S — group dialog (ClMain:1629-1636)
+			s.State.ShowGroupDlg = !s.State.ShowGroupDlg
+			return
+		case 86: // V — friend dialog (ClMain:1687-1690; server side missing)
+			s.addChatMessage("好友: 尚未实现")
+			return
+		case 87: // W — trade (ClMain:1663-1666)
+			s.tryDeal()
+			return
+		case 90: // Z — pick up item (ClMain:1564-1573)
+			if s.sendPickup != nil {
+				s.sendPickup()
 			}
+			return
+		case 265: // Up — scroll chat back one line (ClMain:1699-1706)
+			s.scrollChat(-1)
+			return
+		case 264: // Down — scroll chat forward one line (ClMain:1707-1714)
+			s.scrollChat(1)
+			return
+		case 266: // PageUp — page chat back (ClMain:1715-1718)
+			s.scrollChat(-ViewChatLine)
+			return
+		case 267: // PageDown — page chat forward (ClMain:1719-1722)
+			s.scrollChat(ViewChatLine)
+			return
+		case 298: // F9 — bag (ClMain:1488-1494)
+			s.State.ShowBag = !s.State.ShowBag
+			return
+		case 299: // F10 — status page 0 (ClMain:1495-1502)
+			s.State.StatePage = 0
+			s.State.ShowEquip = true
+			return
+		case 300: // F11 — status page 3 (ClMain:1503-1508)
+			s.State.StatePage = 3
+			s.State.ShowEquip = true
+			return
+		case 301: // F12 — options/sound (ClMain:1509+; audio not implemented)
+			s.addChatMessage("[声音] 切换(音频未实现)")
 			return
 		}
 
+		// F1..F8 cast the magic bound to that key (FState:3506-3545).
 		if !s.chatMode && key >= 290 && key <= 297 {
-			slotIdx := key - 290
-			if slotIdx < len(s.State.Magics) && s.sendSpell != nil {
-				mag := s.State.Magics[slotIdx]
-				my := s.State.MySelf
-				if my != nil {
-					dx, dy := dirOffset(my.Dir)
-					tx := my.CurrX + dx
-					ty := my.CurrY + dy
-					s.sendSpell(int(mag.MagID), tx, ty)
+			k := byte('1' + (key - 290))
+			for i := range s.State.Magics {
+				if s.State.Magics[i].Key != k {
+					continue
 				}
+				if s.sendSpell != nil {
+					if my := s.State.MySelf; my != nil {
+						dx, dy := dirOffset(my.Dir)
+						s.sendSpell(int(s.State.Magics[i].MagID), my.CurrX+dx, my.CurrY+dy)
+					}
+				}
+				break
 			}
 			return
 		}
@@ -1071,70 +1127,22 @@ func (s *PlayScene) OnKey(key int, action int) {
 			return
 		}
 	}
-	if action != 1 && action != 2 {
-		return
-	}
-	if s.chatMode {
-		return
-	}
-	if s.State.MySelf == nil || s.sendMove == nil {
-		return
-	}
-	if s.State.MySelf.Death {
-		return
-	}
-	if s.actionFailLock {
-		if time.Now().UnixMilli()-s.actionFailLockTime > 1000 {
-			s.actionFailLock = false
-		} else {
-			return
-		}
-	}
-	if !s.State.MySelf.IsIdle() || !s.ServerAcceptNextAction() {
-		return
-	}
+}
 
-	dir := -1
-	switch key {
-	case 87, 265: // W, Up
-		dir = 0
-	case 69: // E
-		dir = 1
-	case 68, 262: // D, Right
-		dir = 2
-	case 67: // C
-		dir = 3
-	case 83, 264: // S, Down
-		dir = 4
-	case 90: // Z
-		dir = 5
-	case 65, 263: // A, Left
-		dir = 6
-	case 81: // Q
-		dir = 7
+// scrollChat scrolls the chat board by delta lines, clamped to the buffer
+// (ClMain:1699-1722).
+func (s *PlayScene) scrollChat(delta int) {
+	s.chatScroll += delta
+	max := len(s.chatMessages) - ViewChatLine
+	if max < 0 {
+		max = 0
 	}
-
-	if dir < 0 {
-		return
+	if s.chatScroll < 0 {
+		s.chatScroll = 0
 	}
-
-	s.targetX = -1
-	s.targetY = -1
-
-	dx, dy := dirOffset(dir)
-	newX := s.State.MySelf.CurrX + dx
-	newY := s.State.MySelf.CurrY + dy
-
-	if !s.CanWalk(newX, newY) {
-		s.State.MySelf.UpdateMsg(protocol.CMTurn, s.State.MySelf.CurrX, s.State.MySelf.CurrY, dir, 0, 0)
-		s.sendMove(protocol.CMTurn, dir)
-		return
+	if s.chatScroll > max {
+		s.chatScroll = max
 	}
-
-	s.State.MySelf.UpdateMsg(protocol.CMWalk, newX, newY, dir, 0, 0)
-	s.sendMove(protocol.CMWalk, dir)
-	s.ActionLock = true
-	s.ActionLockTime = time.Now().UnixMilli()
 }
 
 func dirOffset(dir int) (dx, dy int) {
