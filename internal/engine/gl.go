@@ -201,6 +201,20 @@ func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
+// DrawQuadAdditive draws a textured quad with additive blending (src+dst),
+// matching Delphi DrawBlend(...,1) used for selection glow effects.
+func (s *GLState) DrawQuadAdditive(texID uint32, x, y, w, h float32, proj [16]float32) {
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+	s.setModel(x, y, w, h, proj)
+	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
+	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
+	gl.Uniform1i(s.TextureShader.UseTexLoc, 1)
+	gl.Uniform4f(s.TextureShader.ColorLoc, 1, 1, 1, 1)
+	s.bindTexture(texID)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+}
+
 // OrthoProj computes an orthographic projection matrix (Y-down) from width/height.
 func OrthoProj(width, height float32) [16]float32 {
 	return [16]float32{

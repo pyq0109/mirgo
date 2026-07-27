@@ -85,30 +85,30 @@ const (
 )
 
 // selButtonAreas are the select-screen button hit rectangles; sizes match the
-// image extents Delphi derives via SetImgIndex (FState:904-925). Order parallels
-// selButtons.
+// image extents Delphi derives via SetImgIndex (FState:904-925). Coordinates
+// use the old layout baked into bg[65] (FState commented values {…}).
 var selButtonAreas = []loginArea{
-	{selOX + 134, selOY + 424, 76, 33},  // ImgSelSelect1 [66]
-	{selOX + 602, selOY + 424, 76, 33},  // ImgSelSelect2 [67]
-	{selOX + 374, selOY + 427, 44, 21},  // ImgSelStart [68]
-	{selOX + 349, selOY + 467, 120, 21}, // ImgSelNewChr [69]
-	{selOX + 349, selOY + 505, 120, 21}, // ImgSelErase [70]
-	{selOX + 349, selOY + 543, 56, 20},  // ImgSelExit [72]
+	{selOX + 134, selOY + 454, 76, 33},  // ImgSelSelect1 [66]
+	{selOX + 685, selOY + 454, 76, 33},  // ImgSelSelect2 [67]
+	{selOX + 385, selOY + 456, 44, 21},  // ImgSelStart [68]
+	{selOX + 348, selOY + 486, 120, 21}, // ImgSelNewChr [69]
+	{selOX + 347, selOY + 506, 120, 21}, // ImgSelErase [70]
+	{selOX + 379, selOY + 547, 56, 20},  // ImgSelExit [72]
 }
 
-// selButtons maps each select button to its Prguse image and screen position
-// (FState:904-925). The faces are baked into the background [65] and are blit
-// only while pressed (DscSelect1DirectPaint, FState:2693-2705).
+// selButtons maps each select button to its Prguse image and screen position.
+// The faces are baked into the background [65] and are blit only while pressed
+// (DscSelect1DirectPaint, FState:2693-2705).
 var selButtons = []struct {
 	img  int
 	x, y float32
 }{
-	{ImgSelSelect1, selOX + 134, selOY + 424},
-	{ImgSelSelect2, selOX + 602, selOY + 424},
-	{ImgSelStart, selOX + 374, selOY + 427},
-	{ImgSelNewChr, selOX + 349, selOY + 467},
-	{ImgSelErase, selOX + 349, selOY + 505},
-	{ImgSelExit, selOX + 349, selOY + 543},
+	{ImgSelSelect1, selOX + 134, selOY + 454},
+	{ImgSelSelect2, selOX + 685, selOY + 454},
+	{ImgSelStart, selOX + 385, selOY + 456},
+	{ImgSelNewChr, selOX + 348, selOY + 486},
+	{ImgSelErase, selOX + 347, selOY + 506},
+	{ImgSelExit, selOX + 379, selOY + 547},
 }
 
 // NewSelectChrScene creates a new character selection scene.
@@ -216,8 +216,8 @@ func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 	}
 }
 
-// slotPos returns the portrait top-left for a job/sex in slot idx. The table
-// matches IntroScn.pas:1390-1438 (bx,by); slot 1 is offset (+340,+2).
+// slotPos returns the frozen-frame top-left (bx,by) for a job/sex in slot idx.
+// Matches IntroScn.pas:1390-1438; slot 1 is offset (+340,+2).
 func (s *SelectChrScene) slotPos(job, sex, idx int, ox, oy float32) (float32, float32) {
 	positions := [3][2][2]float32{
 		{{71, 52}, {65, 55}},
@@ -231,6 +231,20 @@ func (s *SelectChrScene) slotPos(job, sex, idx int, ox, oy float32) (float32, fl
 		y += 2
 	}
 	return x, y
+}
+
+// standingPos returns the standing-frame top-left (fx,fy). For female wizard
+// and female taoist the standing frame is offset from the frozen frame
+// (IntroScn:1413-1414 fx=bx-30,fy=by-14; IntroScn:1426-1427 fx=bx-23,fy=by-20).
+func (s *SelectChrScene) standingPos(job, sex, idx int, ox, oy float32) (float32, float32) {
+	bx, by := s.slotPos(job, sex, idx, ox, oy)
+	switch {
+	case job == 1 && sex == 1:
+		return bx - 30, by - 14
+	case job == 2 && sex == 1:
+		return bx - 23, by - 20
+	}
+	return bx, by
 }
 
 func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox, oy float32, idx int) {
@@ -252,21 +266,29 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 	if sex > 1 {
 		sex = 0
 	}
-	slotX, slotY := s.slotPos(job, sex, idx, ox, oy)
 
+	// Determine frame index and draw position. The standing state uses (fx,fy)
+	// which differs from the frozen (bx,by) for female wizard/taoist
+	// (IntroScn:1480-1494 vs 1497-1501).
 	var imgIdx int
+	var drawX, drawY float32
+	standing := !ch.FreezeState && !ch.Unfreezing && !ch.Freezing
 	if ch.FreezeState || ch.Freezing {
 		frame := 0
 		if ch.Freezing {
 			frame = freezeFrame - 1 - ch.AniIndex
 		}
 		imgIdx = 60 + int(ch.Job)*40 + int(ch.Sex)*120 + frame
+		drawX, drawY = s.slotPos(job, sex, idx, ox, oy)
 	} else if ch.Unfreezing {
 		imgIdx = 60 + int(ch.Job)*40 + int(ch.Sex)*120 + ch.AniIndex
+		drawX, drawY = s.slotPos(job, sex, idx, ox, oy)
 	} else if idx == s.Selected {
 		imgIdx = 40 + int(ch.Job)*40 + int(ch.Sex)*120 + ch.AniIndex%selectedFrame
+		drawX, drawY = s.standingPos(job, sex, idx, ox, oy)
 	} else {
 		imgIdx = 60 + int(ch.Job)*40 + int(ch.Sex)*120
+		drawX, drawY = s.slotPos(job, sex, idx, ox, oy)
 	}
 
 	drawn := false
@@ -276,11 +298,9 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 		if img != nil && img.Width > 0 && img.Height > 0 {
 			tex := s.resources.GetTexture(s.resources.ChrSel, imgIdx)
 			if tex != 0 {
-				// Delphi draws the portrait top-left at the slot origin
-				// (IntroScn:1443,1469,1494,1501).
 				sprW, sprH = float32(img.Width), float32(img.Height)
-				s.traceDraw("portrait", "ChrSel", imgIdx, slotX, slotY, sprW, sprH)
-				gl.DrawQuad(tex, slotX, slotY, sprW, sprH, proj)
+				s.traceDraw("portrait", "ChrSel", imgIdx, drawX, drawY, sprW, sprH)
+				gl.DrawQuad(tex, drawX, drawY, sprW, sprH, proj)
 				drawn = true
 			}
 		}
@@ -297,18 +317,20 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 			r, g, b = 0.3, 0.8, 0.3
 		}
 		sprW, sprH = 100, 200
-		gl.DrawQuadColor(slotX, slotY, sprW, sprH, r, g, b, 0.8, proj)
+		gl.DrawQuadColor(drawX, drawY, sprW, sprH, r, g, b, 0.8, proj)
 	}
 
-	// Brightness transition: a black overlay fades out over the selected
+	// Brightness transition: a black overlay fades out over the standing
 	// portrait while DarkLevel counts down (IntroScn:1485-1494).
-	if idx == s.Selected && ch.DarkLevel > 0 {
+	if standing && idx == s.Selected && ch.DarkLevel > 0 {
 		alpha := float32(ch.DarkLevel) / darkLevelMax
 		log.Logf(log.LevelTrace, "Render", "selchr dark overlay slot=%d alpha=%.3f", idx, alpha)
-		gl.DrawQuadColor(slotX, slotY, sprW, sprH, 0, 0, 0, alpha, proj)
+		gl.DrawQuadColor(drawX, drawY, sprW, sprH, 0, 0, 0, alpha, proj)
 	}
 
-	if idx == s.Selected {
+	// Selection glow plays only during the Unfreezing animation
+	// (IntroScn:1439-1459, DrawBlend at :1444 is inside the Unfreezing branch).
+	if ch.Unfreezing {
 		s.renderSelectEffect(gl, proj, ox, oy, idx)
 	}
 }
@@ -363,11 +385,8 @@ func (s *SelectChrScene) renderSelectEffect(gl *engine.GLState, proj [16]float32
 	if idx == 1 {
 		ex, ey = 430, 60
 	}
-	// Delphi blends additively (DrawBlend); approximated here with normal
-	// alpha. The DarkLevel fade applies to the portrait itself, drawn in
-	// renderCharSlot (IntroScn:1485-1494).
 	s.traceDraw("effect", "ChrSel", imgIdx, ox+ex, oy+ey, float32(img.Width), float32(img.Height))
-	gl.DrawQuad(tex, ox+ex, oy+ey, float32(img.Width), float32(img.Height), proj)
+	gl.DrawQuadAdditive(tex, ox+ex, oy+ey, float32(img.Width), float32(img.Height), proj)
 }
 
 func (s *SelectChrScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy float32) {
@@ -762,8 +781,9 @@ func (s *SelectChrScene) selectChar(idx int) {
 		ch.Freezing = false
 		ch.AniIndex = 0
 		ch.AniTick = time.Now()
-		ch.DarkLevel = darkLevelMax
-		ch.DarkTick = time.Now()
+		// Delphi SelChrSelect1Click/2Click sets DarkLevel=0 (IntroScn:1165,1182):
+		// manual click has no brightness transition.
+		ch.DarkLevel = 0
 	}
 }
 
@@ -887,16 +907,14 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 			i, c.Name, c.Level, c.Job, c.Sex)
 	}
 
+	// Delphi (ClMain:5100-5112) sets FreezeState=FALSE directly for the
+	// pre-selected character — no unfreeze animation, no dark transition.
 	if selectedIdx >= 0 && selectedIdx < 2 && s.Characters[selectedIdx].Valid {
 		s.Selected = selectedIdx
-		s.Characters[selectedIdx].Unfreezing = true
-		s.Characters[selectedIdx].DarkLevel = darkLevelMax
-		s.Characters[selectedIdx].DarkTick = time.Now()
+		s.Characters[selectedIdx].FreezeState = false
 	} else if s.Characters[0].Valid {
 		s.Selected = 0
-		s.Characters[0].Unfreezing = true
-		s.Characters[0].DarkLevel = darkLevelMax
-		s.Characters[0].DarkTick = time.Now()
+		s.Characters[0].FreezeState = false
 	}
 	log.Logf(log.LevelInfo, "SelectChrScene", "Final selected=%d", s.Selected)
 }
