@@ -87,9 +87,11 @@ func (m *UIManager) CloseModal(c *UIControl) {
 // must ignore it — mirrors ClMain.pas `if g_DWinMan.MouseDown then exit`).
 func (m *UIManager) RouteMouseDown(absX, absY int, button int) bool {
 	if m.Modal != nil && m.Modal.Visible {
+		log.Logf(log.LevelDebug, "UI", "route mousedown → modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
 		return m.dispatchMouseDown(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
 	}
 	if m.Capture != nil {
+		log.Logf(log.LevelDebug, "UI", "route mousedown → capture %s pos=(%d,%d)", m.Capture.Name, absX, absY)
 		return m.dispatchMouseDown(m.Capture, button, m.Capture.ParentSpaceX(absX), m.Capture.ParentSpaceY(absY))
 	}
 	return m.dispatchMouseDown(m.Root, button, absX-m.Root.Left, absY-m.Root.Top)
@@ -97,9 +99,11 @@ func (m *UIManager) RouteMouseDown(absX, absY int, button int) bool {
 
 func (m *UIManager) RouteMouseUp(absX, absY int, button int) bool {
 	if m.Modal != nil && m.Modal.Visible {
+		log.Logf(log.LevelDebug, "UI", "route mouseup → modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
 		return m.dispatchMouseUp(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
 	}
 	if m.Capture != nil {
+		log.Logf(log.LevelDebug, "UI", "route mouseup → capture %s pos=(%d,%d)", m.Capture.Name, absX, absY)
 		return m.dispatchMouseUp(m.Capture, button, m.Capture.ParentSpaceX(absX), m.Capture.ParentSpaceY(absY))
 	}
 	return m.dispatchMouseUp(m.Root, button, absX-m.Root.Left, absY-m.Root.Top)
@@ -172,6 +176,7 @@ func (m *UIManager) dispatchMouseDown(c *UIControl, button, x, y int) bool {
 		// TDGrid.MouseDown (:721-736): left button, cell hit → capture.
 		if button == 0 {
 			if col, row, ok := c.ColRowAt(x, y); ok {
+				log.Logf(log.LevelDebug, "UI", "grid mousedown %s cell=(%d,%d)", c.Name, col, row)
 				c.SelectCol, c.SelectRow = col, row
 				m.SetCapture(c)
 				return true
@@ -193,6 +198,7 @@ func (m *UIManager) dispatchMouseDown(c *UIControl, button, x, y int) bool {
 			return false
 		}
 		if m.canFocusMsg(c) && (c.InRange(x, y) || m.Capture == c) {
+			log.Logf(log.LevelDebug, "UI", "mousedown %s(%s) pos=(%d,%d) btn=%d", c.Name, c.Kind, x, y, button)
 			if c.OnMouseDown != nil {
 				c.OnMouseDown(c, button, x, y)
 			}
@@ -234,6 +240,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 		if button == 0 {
 			if col, row, ok := c.ColRowAt(x, y); ok {
 				if c.SelectCol == col && c.SelectRow == row {
+					log.Logf(log.LevelDebug, "UI", "grid select %s cell=(%d,%d)", c.Name, col, row)
 					c.Col, c.Row = col, row
 					if c.OnGridSelect != nil {
 						c.OnGridSelect(c, col, row)
@@ -254,6 +261,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 					// this — TDWindow.MouseUp just calls inherited).
 					m.ReleaseCapture()
 					if !c.Background && c.InRange(x, y) {
+						log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 						if c.OnMouseUp != nil {
 							c.OnMouseUp(c, button, x, y)
 						}
@@ -281,6 +289,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 			// In Delphi a WM_LBUTTONCLK follows the up; controls with
 			// OnClick (e.g. DStateWin magic-page hit test) get it here.
 			if c.OnClick != nil {
+				log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 				c.OnClick(c, x, y)
 			}
 			if c.Kind == KindButton || c.Kind == KindWindow {
@@ -337,6 +346,7 @@ func (m *UIManager) dispatchMouseMove(c *UIControl, x, y int) bool {
 						if at+c.Height > WinBottom {
 							at = WinBottom - c.Height
 						}
+						log.Logf(log.LevelDebug, "UI", "drag %s to=(%d,%d)", c.Name, al, at)
 						c.Left, c.Top = al, at
 						c.SpotX, c.SpotY = x, y
 					}
@@ -365,6 +375,7 @@ func (m *UIManager) dispatchDblClick(c *UIControl, x, y int) bool {
 	// Capture takes priority over children (DWinCtl.pas:558-565).
 	if m.Capture != nil {
 		if m.Capture == c && c.OnDblClick != nil {
+			log.Logf(log.LevelDebug, "UI", "dblclick %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 			c.OnDblClick(c, x, y)
 			return true
 		}
@@ -380,6 +391,7 @@ func (m *UIManager) dispatchDblClick(c *UIControl, x, y int) bool {
 		return false
 	}
 	if c.InRange(x, y) && c.OnDblClick != nil {
+		log.Logf(log.LevelDebug, "UI", "dblclick %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 		c.OnDblClick(c, x, y)
 		return true
 	}

@@ -19,6 +19,21 @@ const (
 	KindGrid                  // TDGrid: fixed cells, owner-painted
 )
 
+func (k UIKind) String() string {
+	switch k {
+	case KindControl:
+		return "control"
+	case KindButton:
+		return "button"
+	case KindWindow:
+		return "window"
+	case KindGrid:
+		return "grid"
+	default:
+		return "unknown"
+	}
+}
+
 type UIControl struct {
 	Name   string
 	Kind   UIKind

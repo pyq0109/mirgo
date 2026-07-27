@@ -1317,6 +1317,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		return
 	}
 	if s.ui.RouteMouseDown(ix, iy, button) {
+		log.Logf(log.LevelDebug, "PlayScene", "mouse consumed by UI pos=(%d,%d)", ix, iy)
 		return
 	}
 	if y >= MapSurfaceH {

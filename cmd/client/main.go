@@ -261,6 +261,8 @@ func main() {
 	})
 
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
+		log.Logf(log.LevelDebug, "Key", "key=%d action=%d mods=%d scene=%s",
+			int(key), int(action), int(mods), sceneMgr.CurrentType())
 		// Esc-quits only in pre-game scenes; the original has no global Esc
 		// in play — quitting goes through the DBotExit button there
 		// (ClMain:1575-1612).
@@ -275,6 +277,7 @@ func main() {
 	})
 
 	glfwWindow.SetCharCallback(func(w *glfw.Window, char rune) {
+		log.Logf(log.LevelDebug, "Key", "char=%q scene=%s", char, sceneMgr.CurrentType())
 		sceneMgr.OnChar(char)
 	})
 
@@ -287,6 +290,8 @@ func main() {
 			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
 			x, y := w.GetCursorPos()
+			log.Logf(log.LevelDebug, "Mouse", "release button=%d pos=(%.0f,%.0f) scene=%s",
+				int(button), x, y, sceneMgr.CurrentType())
 			sceneMgr.OnMouse(x, y, int(button), 0, int(mods))
 		}
 	})
