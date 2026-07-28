@@ -609,11 +609,16 @@ func (h *NetHandler) handleControlMsg(payload string) {
 	case strings.HasPrefix(payload, "+GOOD"):
 		log.Logf(log.LevelDebug, "Client", "<<< +GOOD")
 		h.playScene.ActionLock = false
+		h.playScene.moveFailCount = 0
 	case strings.HasPrefix(payload, "+FAIL"):
 		log.Logf(log.LevelDebug, "Client", "<<< +FAIL")
 		h.playScene.ActionLock = false
-		h.playScene.actionFailLock = true
-		h.playScene.actionFailLockTime = time.Now().UnixMilli()
+		h.playScene.moveFailCount++
+		if h.playScene.moveFailCount >= 3 {
+			h.playScene.targetX = -1
+			h.playScene.targetY = -1
+			h.playScene.moveFailCount = 0
+		}
 		if h.playScene.State.MySelf != nil {
 			h.playScene.State.MySelf.MoveFail()
 		}
@@ -874,6 +879,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMMoveFail:
 		log.Logf(log.LevelDebug, "Client", "MoveFail from server")
 		h.playScene.ActionLock = false
+		h.playScene.moveFailCount++
+		if h.playScene.moveFailCount >= 3 {
+			h.playScene.targetX = -1
+			h.playScene.targetY = -1
+			h.playScene.moveFailCount = 0
+		}
 		if h.playScene.State.MySelf != nil {
 			h.playScene.State.MySelf.MoveFail()
 			my := h.playScene.State.MySelf

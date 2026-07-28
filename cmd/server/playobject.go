@@ -277,6 +277,7 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -290,6 +291,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	if p.WalkTo(dir) {
@@ -303,6 +305,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -316,6 +319,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	dx, dy := dirToOffset(dir)
@@ -337,6 +341,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -349,6 +354,7 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	}
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	if !p.OnHorse {

@@ -233,7 +233,14 @@ func (e *Environment) AddObject(x, y int, objType byte, obj interface{}) bool {
 		return false
 	}
 	idx := y*e.Width + x
-	e.Cells[idx].ObjList = append(e.Cells[idx].ObjList, OSObject{
+	cell := &e.Cells[idx]
+	base := objectBase(obj)
+	for _, o := range cell.ObjList {
+		if o.Type == objType && objectBase(o.Obj) == base {
+			return true
+		}
+	}
+	cell.ObjList = append(cell.ObjList, OSObject{
 		Type: objType,
 		Obj:  obj,
 	})
@@ -247,8 +254,9 @@ func (e *Environment) RemoveObject(x, y int, objType byte, obj interface{}) bool
 	}
 	idx := y*e.Width + x
 	cell := &e.Cells[idx]
+	target := objectBase(obj)
 	for i, o := range cell.ObjList {
-		if o.Type == objType && o.Obj == obj {
+		if o.Type == objType && objectBase(o.Obj) == target {
 			cell.ObjList = append(cell.ObjList[:i], cell.ObjList[i+1:]...)
 			return true
 		}

@@ -112,8 +112,7 @@ type PlayScene struct {
 	ActionLock     bool
 	ActionLockTime int64
 
-	actionFailLock     bool
-	actionFailLockTime int64
+	moveFailCount int
 
 	lastHitTick int64
 
