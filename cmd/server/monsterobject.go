@@ -35,10 +35,11 @@ type MonsterObject struct {
 	LastHiterTick int64
 	FocusTick     int64
 
-	walkCount    int
-	walkWaitTick int64
-	WalkStep     int
-	WalkWait     int64
+	walkCount      int
+	walkWaitTick   int64
+	walkWaitLocked bool // Delphi m_boWalkWaitLocked：步频休息锁存
+	WalkStep       int
+	WalkWait       int64
 
 	lastRegenTick int64
 	Engine        *UserEngine
@@ -50,6 +51,7 @@ type MonsterObject struct {
 
 	FixedHide      bool  // 潜地状态（m_boFixedHideMode）
 	StoneMode      bool  // 石化伏击状态（m_boStoneMode）
+	StickMode      bool  // 固定模式（m_boStickMode，不可移动）
 	Animal         bool  // 动物标志（m_boAnimal）
 	spawnTick      int64 // 出生时间（自爆计时用）
 	searchInterval int64 // SearchViewRange 随机间隔
@@ -57,16 +59,20 @@ type MonsterObject struct {
 }
 
 func getAIBehavior(race byte) int {
-	// Race 到 AI 的映射，参考 Delphi 工厂方法（UsrEngn.pas:1831-1938）。
+	// Race 到 AI 的映射，参考 Delphi 工厂方法（UsrEngn.pas:1819-1938）。
 	switch race {
 	case 51: // 鸡 — 被动动物
 		return AIPassive
-	case 52: // TChickenDeer — 逃跑
-		return AIFlee
+	case 52: // 鹿 — 由 SpawnMonster 掷骰决定 AIFlee/AIPassive
+		return AIPassive
+	case 53: // 狼 — TATMonster + 动物（主动搜索）
+		return AIMelee
 	case 80: // TMonster — 基础游荡（不主动搜索）
 		return AIPassive
-	case 82: // TSpitSpider — 远程喷吐
-		return AIRanged
+	case 82: // TSpitSpider — 2格锥形喷吐
+		return AISpit
+	case 83: // TSlowATMonster — 慢速近战（AttackSpeed 在 SpawnMonster 中翻倍）
+		return AIMelee
 	case 85: // TStickMonster — 固定潜地伏击
 		return AIBurrow
 	case 87: // TDualAxeMonster — 远程飞斧
@@ -75,6 +81,10 @@ func getAIBehavior(race byte) int {
 		return AIPoison
 	case 91: // TMagCowMonster — 魔法近战
 		return AIMagicCast
+	case 92: // TCowKingMonster — 牛魔王（范围攻击 Boss）
+		return AIArea
+	case 93: // TThornDarkMonster — 远程飞斧变种
+		return AIRanged
 	case 94: // TLightingZombi — 远程闪电
 		return AIRanged
 	case 95: // TDigOutZombi — 潜地僵尸
@@ -85,24 +95,34 @@ func getAIBehavior(race byte) int {
 		return AIStone
 	case 102: // TScultureKingMonster — 召唤
 		return AISummoner
+	case 104: // TArcherMonster — 远程弓箭
+		return AIRanged
 	case 105: // TGasMothMonster — 毒气近战
 		return AIPoison
-	case 107: // TCentipedeKingMonster — 固定Boss（TODO: StickMode）
+	case 107: // TCentipedeKingMonster — 固定 Boss（StickMode 在 SpawnMonster 中设置）
 		return AIArea
+	case 114: // TElfWarriorMonster — 潜地战士
+		return AIBurrow
 	case 117: // TExplosionSpider — 自爆
 		return AIExplode
-	case 118: // THighRiskSpider — 远程
+	case 118: // THighRiskSpider — 远程（非毒喷吐）
 		return AIRanged
 	case 119: // TBigPoisionSpider — 远程+毒
 		return AIRanged
+	case 130: // TDoubleCriticalMonster — 远程双暴击
+		return AICritical
 	case 131: // TRonObject — 范围攻击
 		return AIArea
+	case 132: // TSandMobObject — 潜地沙怪
+		return AIBurrow
+	case 133: // TMagicMonObject — 魔法攻击
+		return AIMagicCast
 	case 200: // TElectronicScolpionMon — 闪电吸血
 		return AILeech
+	case 215: // TFireBallMonster — 远程火球
+		return AIFireball
 	default:
-		// 53(狼), 81(沃玛战士), 83(慢速), 84(蝎子),
-		// 92(牛魔王), 100(白野猪), 103(蜂王),
-		// 113(精灵), 130(双暴击)
+		// 81(沃玛战士), 84(蝎子), 100(骷髅战士), 103(蜂王), 113(精灵)
 		return AIMelee
 	}
 }
@@ -239,16 +259,16 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		}
 
 		switch o.AIBehavior {
-		case 0:
+		case AIMelee:
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
 				o.chaseTarget(target, now)
 			}
-		case 1:
+		case AIRanged:
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
-			} else if dist <= 5 {
+			} else if dist <= 5 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 				if now-o.HitTick > o.AttackSpeed {
 					o.HitTick = now
 					o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -266,21 +286,31 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			} else {
 				o.chaseTarget(target, now)
 			}
-		case 2:
-			if int(o.WAbil.HP) < o.MaxHP/5 {
+		case AIFlee:
+			// Delphi TChickenDeer (ObjMon.pas:542-598)：始终远离威胁，不反击
+			if o.StatusTimeArr[POISON_DONTMOVE] <= 0 && now-o.WalkTick >= o.WalkSpeed {
+				o.WalkTick = now
 				fleeDir := dirToward(target.CurrX, target.CurrY, o.CurrX, o.CurrY)
-				if now-o.WalkTick >= o.WalkSpeed {
-					o.WalkTick = now
-					if o.WalkTo(fleeDir) {
-						o.SendRefMsg(RM_WALK, fleeDir, o.CurrX, o.CurrY, "")
+				if o.WalkTo(fleeDir) {
+					o.SendRefMsg(RM_WALK, fleeDir, o.CurrX, o.CurrY, "")
+				} else {
+					// 被阻挡时尝试绕行
+					clockwise := rand.Intn(3) != 0
+					for i := 0; i < 7; i++ {
+						var altDir int
+						if clockwise {
+							altDir = (fleeDir + i + 1) % 8
+						} else {
+							altDir = (fleeDir - i - 1 + 8) % 8
+						}
+						if o.WalkTo(altDir) {
+							o.SendRefMsg(RM_WALK, altDir, o.CurrX, o.CurrY, "")
+							break
+						}
 					}
 				}
-			} else if dist <= 1 {
-				o.meleeAttack(server, target, now)
-			} else {
-				o.chaseTarget(target, now)
 			}
-		case 3:
+		case AIArea:
 			// Delphi TRonObject: 目标在6格内 → AroundAttack（1格半径AoE）
 			if dist <= 6 && now-o.HitTick > o.AttackSpeed {
 				o.HitTick = now
@@ -303,7 +333,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			} else if dist > 6 {
 				o.chaseTarget(target, now)
 			}
-		case 4:
+		case AISummoner:
 			// Delphi 召唤类：创建真实 minion 对象
 			if now-o.lastSummonTick > 30000 && o.minionCount < 3 && o.Engine != nil && o.envir != nil {
 				o.lastSummonTick = now
@@ -351,14 +381,27 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			o.runExtendedAI(server, target, dist, now)
 		}
 	} else {
-		// 潜地怪物无目标时不闲逛
-		if o.FixedHide {
+		// 潜地/固定/定身怪物无目标时不闲逛
+		if o.FixedHide || o.StickMode || o.StatusTimeArr[POISON_DONTMOVE] > 0 {
 			return
 		}
 		if now-o.WalkTick > o.WalkSpeed {
+			// Delphi m_boWalkWaitLocked：突发-休息循环
+			if o.walkWaitLocked {
+				if now-o.walkWaitTick >= o.WalkWait {
+					o.walkWaitLocked = false
+				} else {
+					return
+				}
+			}
 			if rand.Intn(20) == 0 {
 				o.WalkTick = now
-				if rand.Intn(4) == 0 {
+				o.walkCount++
+				if o.WalkStep > 0 && o.walkCount > o.WalkStep {
+					o.walkCount = 0
+					o.walkWaitLocked = true
+					o.walkWaitTick = now
+				} else if rand.Intn(4) == 0 {
 					o.TurnTo(rand.Intn(8))
 				} else {
 					if o.WalkTo(o.Dir) {
@@ -420,16 +463,26 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 }
 
 func (o *MonsterObject) chaseTarget(target *PlayObject, now int64) {
+	if o.StickMode || o.StatusTimeArr[POISON_DONTMOVE] > 0 {
+		return
+	}
 	if now-o.WalkTick < o.WalkSpeed {
 		return
 	}
-	o.walkCount++
-	if o.walkCount > o.WalkStep && o.WalkStep > 0 {
-		if now-o.walkWaitTick < o.WalkWait {
+	// Delphi m_boWalkWaitLocked：突发-休息循环
+	if o.walkWaitLocked {
+		if now-o.walkWaitTick >= o.WalkWait {
+			o.walkWaitLocked = false
+		} else {
 			return
 		}
+	}
+	o.walkCount++
+	if o.WalkStep > 0 && o.walkCount > o.WalkStep {
 		o.walkCount = 0
+		o.walkWaitLocked = true
 		o.walkWaitTick = now
+		return
 	}
 	o.WalkTick = now
 

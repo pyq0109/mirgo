@@ -5,6 +5,9 @@ temp.md
 serverconfig/
 serverdata/
 !cmd/serverconfig/
+server
+!cmd/server/
+!internal/server/
 
 # Mimo
 .mimocode/

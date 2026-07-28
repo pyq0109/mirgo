@@ -25,6 +25,9 @@ const (
 	AISplit     = 14 // 死亡分裂（Race 96）
 	AIStone     = 15 // 石化伏击（Race 101）
 	AILeech     = 16 // 闪电吸血（Race 200）
+	AICritical  = 17 // 远程双暴击（Race 130）
+	AIFireball  = 18 // 远程火球（Race 215）
+	AISpit      = 19 // 锥形喷吐（Race 82）
 )
 
 func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -51,6 +54,12 @@ func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, target *PlayO
 		o.runStoneAI(server, target, dist, now)
 	case AILeech:
 		o.runLeechAI(server, target, dist, now)
+	case AICritical:
+		o.runCriticalAI(server, target, dist, now)
+	case AIFireball:
+		o.runFireballAI(server, target, dist, now)
+	case AISpit:
+		o.runSpitAI(server, target, dist, now)
 	default:
 		o.runBaseAI(server, target, dist, now)
 	}
@@ -159,7 +168,12 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 		o.meleeAttack(server, target, now)
 		return
 	}
-	if dist <= 6 && now-o.HitTick > o.AttackSpeed {
+	// Delphi: 封魔状态下降级为追击
+	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
+		o.chaseTarget(target, now)
+		return
+	}
+	if dist <= 6 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) && now-o.HitTick > o.AttackSpeed {
 		o.HitTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 		damage := o.calcMonsterDamage(target.BaseObject)
@@ -169,7 +183,7 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 		o.FocusTick = now
 		return
 	}
-	if dist > 6 {
+	if dist > 6 || !o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		o.chaseTarget(target, now)
 	}
 }
@@ -225,7 +239,7 @@ func (o *MonsterObject) runPoisonAI(server *netserver.TCPServer, target *PlayObj
 		o.FocusTick = now
 		return
 	}
-	if dist <= 4 && now-o.HitTick > o.AttackSpeed*2 {
+	if dist <= 4 && o.StatusTimeArr[POISON_LOCKSPELL] <= 0 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) && now-o.HitTick > o.AttackSpeed*2 {
 		o.HitTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 		target.MakePoison(POISON_DECHEALTH, 60)
@@ -258,7 +272,7 @@ func (o *MonsterObject) runDualAxeAI(server *netserver.TCPServer, target *PlayOb
 		o.meleeAttack(server, target, now)
 		return
 	}
-	if dist <= 7 {
+	if dist <= 7 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick > o.AttackSpeed {
 			o.HitTick = now
 			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -309,7 +323,12 @@ func (o *MonsterObject) runStoneAI(server *netserver.TCPServer, target *PlayObje
 // runLeechAI — TElectronicScolpionMon (Race 200): 闪电吸血
 // Delphi ObjMon.pas:1842-1881: 2格内闪电攻击，吸血 damage/btGetBackHP
 func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
-	if dist <= 2 {
+	// Delphi: 封魔状态下降级为追击
+	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
+		o.chaseTarget(target, now)
+		return
+	}
+	if dist <= 2 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick < o.AttackSpeed {
 			return
 		}
@@ -332,6 +351,109 @@ func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObje
 		}
 		o.FocusTick = now
 		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
+		return
+	}
+	o.chaseTarget(target, now)
+}
+
+// runCriticalAI — TDoubleCriticalMonster (Race 130): 远程攻击，1/4 概率双倍伤害
+// Delphi ObjMon.pas:233
+func (o *MonsterObject) runCriticalAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+		return
+	}
+	if dist <= 7 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+		if now-o.HitTick > o.AttackSpeed {
+			o.HitTick = now
+			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+			spd := target.SpeedPoint
+			if spd < 1 {
+				spd = 1
+			}
+			if rand.Intn(spd) < o.HitPoint {
+				damage := o.calcMonsterDamage(target.BaseObject)
+				if rand.Intn(4) == 0 {
+					damage *= 2
+				}
+				o.applyMonsterDamageToPlayer(server, target, damage, now)
+				o.FocusTick = now
+			}
+			o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+		}
+		return
+	}
+	o.chaseTarget(target, now)
+}
+
+// runFireballAI — TFireBallMonster (Race 215): 8格火球，MC 伤害
+// Delphi ObjMon3.pas:984-1046
+func (o *MonsterObject) runFireballAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+		return
+	}
+	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
+		o.chaseTarget(target, now)
+		return
+	}
+	if dist <= 8 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+		if now-o.HitTick > o.AttackSpeed {
+			o.HitTick = now
+			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+			// MC 伤害
+			loMC := int(o.WAbil.MC & 0xFFFF)
+			hiMC := int(o.WAbil.MC >> 16)
+			damage := loMC
+			if hiMC > loMC {
+				damage = loMC + rand.Intn(hiMC-loMC+1)
+			}
+			if damage < 1 {
+				damage = 1
+			}
+			o.applyMonsterDamageToPlayer(server, target, damage, now)
+			o.FocusTick = now
+			o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
+		}
+		return
+	}
+	o.chaseTarget(target, now)
+}
+
+// runSpitAI — TSpitSpider (Race 82): 2格锥形喷吐，可附带绿毒
+// Delphi ObjMon.pas:719-745, TargetInSpitRange (ObjBase.pas:18504-18530)
+func (o *MonsterObject) runSpitAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+		return
+	}
+	if dist <= 2 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+		if now-o.HitTick > o.AttackSpeed {
+			o.HitTick = now
+			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+			// 锥形范围伤害：对目标及目标相邻格内所有玩家造成伤害
+			if o.envir != nil {
+				for dy := -1; dy <= 1; dy++ {
+					for dx := -1; dx <= 1; dx++ {
+						tx, ty := target.CurrX+dx, target.CurrY+dy
+						// 限制在 2 格范围内
+						if abs(tx-o.CurrX) > 2 || abs(ty-o.CurrY) > 2 {
+							continue
+						}
+						obj := o.envir.GetMovingObject(tx, ty)
+						if p, ok := obj.(*PlayObject); ok && !p.Death && !p.Ghost {
+							damage := o.calcMonsterDamage(p.BaseObject)
+							o.applyMonsterDamageToPlayer(server, p, damage, now)
+							if rand.Intn(3) == 0 {
+								p.MakePoison(POISON_DECHEALTH, 60)
+							}
+						}
+					}
+				}
+			}
+			o.FocusTick = now
+			o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+		}
 		return
 	}
 	o.chaseTarget(target, now)

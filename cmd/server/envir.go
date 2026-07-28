@@ -399,3 +399,39 @@ func (e *Environment) GetGroundItemAt(x, y int) *GroundItem {
 	}
 	return nil
 }
+
+// CanFlyLine 检查 (x1,y1) 到 (x2,y2) 之间是否有视线（Bresenham 逐格检查 CanFly）。
+// 对应 Delphi m_PEnvir.CanFly 视线检查。
+func (e *Environment) CanFlyLine(x1, y1, x2, y2 int) bool {
+	if e.rawMap == nil {
+		return true
+	}
+	dx := abs(x2 - x1)
+	dy := abs(y2 - y1)
+	sx, sy := 1, 1
+	if x1 >= x2 {
+		sx = -1
+	}
+	if y1 >= y2 {
+		sy = -1
+	}
+	err := dx - dy
+	cx, cy := x1, y1
+	for {
+		if cx == x2 && cy == y2 {
+			return true
+		}
+		if !e.rawMap.CanFly(cx, cy) {
+			return false
+		}
+		e2 := 2 * err
+		if e2 > -dy {
+			err -= dy
+			cx += sx
+		}
+		if e2 < dx {
+			err += dx
+			cy += sy
+		}
+	}
+}

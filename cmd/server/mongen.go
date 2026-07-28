@@ -268,12 +268,23 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	mon.spawnTick = now
 	mon.searchInterval = 3000 + rand.Int63n(2000) // 3-5秒随机
 	switch byte(def.Race) {
-	case 51, 52, 53, 84:
+	case 51, 53, 84:
 		mon.Animal = true
+	case 52: // Delphi: 1/30 概率为逃跑鹿（TChickenDeer），29/30 为被动鹿
+		mon.Animal = true
+		if rand.Intn(30) == 0 {
+			mon.AIBehavior = AIFlee
+		} else {
+			mon.AIBehavior = AIPassive
+		}
+	case 83: // TSlowATMonster — 慢速近战，攻击冷却翻倍
+		mon.AttackSpeed *= 2
 	case 85: // TStickMonster — 出生即潜地
 		mon.FixedHide = true
 	case 101: // TScultureMonster — 出生即石化
 		mon.StoneMode = true
+	case 107: // TCentipedeKingMonster — 固定Boss，不可移动
+		mon.StickMode = true
 	}
 
 	env.AddObject(x, y, OS_MOVINGOBJECT, mon)

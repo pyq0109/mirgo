@@ -33,8 +33,8 @@ go mod vendor
 
 ## serverconfig
 
-```PowerShell
-go run ".\cmd\serverconfig\" -v
+```bash
+go run ./cmd/serverconfig -v
 ```
 
 ## mapviewer
