@@ -132,19 +132,19 @@ func (s *SelectChrScene) traceDraw(tag, wil string, idx int, x, y, w, h float32)
 }
 
 func (s *SelectChrScene) logComponentLayout(ox, oy float32) {
-	log.Logf(log.LevelInfo, "SelectChrScene", "=== 组件布局 (主界面) ===")
+	log.Logf(log.LevelInfo, "SelectChrScene", "=== component layout (main) ===")
 	bw, bh := s.getPrguseSize(ImgSelBg)
-	log.Logf(log.LevelInfo, "SelectChrScene", "  背景      Prguse[%d]       pos=(%.0f,%.0f) size=(%d,%d)", ImgSelBg, ox, oy, bw, bh)
+	log.Logf(log.LevelInfo, "SelectChrScene", "  background Prguse[%d]       pos=(%.0f,%.0f) size=(%d,%d)", ImgSelBg, ox, oy, bw, bh)
 
 	btnNames := [6]string{"Select1", "Select2", "Start", "NewChr", "Erase", "Exit"}
 	for i, a := range selButtonAreas {
-		log.Logf(log.LevelInfo, "SelectChrScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", btnNames[i], a.X, a.Y, a.W, a.H, selButtons[i].img)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  button     %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", btnNames[i], a.X, a.Y, a.W, a.H, selButtons[i].img)
 	}
 
 	for i := 0; i < 2; i++ {
 		ch := s.Characters[i]
 		if !ch.Valid {
-			log.Logf(log.LevelInfo, "SelectChrScene", "  角色槽位%d  (空)", i)
+			log.Logf(log.LevelInfo, "SelectChrScene", "  character slot %d (empty)", i)
 			continue
 		}
 		px, py := s.slotPos(int(ch.Job), int(ch.Sex), i, ox, oy)
@@ -152,7 +152,7 @@ func (s *SelectChrScene) logComponentLayout(ox, oy float32) {
 		if int(ch.Job) < len(jobNames) {
 			jn = jobNames[ch.Job]
 		}
-		log.Logf(log.LevelInfo, "SelectChrScene", "  角色槽位%d  %-8s     pos=(%.0f,%.0f) job=%s sex=%d", i, ch.Name, px, py, jn, ch.Sex)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  character slot %d %-8s     pos=(%.0f,%.0f) job=%s sex=%d", i, ch.Name, px, py, jn, ch.Sex)
 	}
 
 	type textPos struct{ nameX, nameY, levelX, levelY, jobX, jobY float32 }
@@ -161,59 +161,59 @@ func (s *SelectChrScene) logComponentLayout(ox, oy float32) {
 		{586, 476, 666, 513, 638, 548},
 	}
 	for i, tp := range textPositions {
-		log.Logf(log.LevelInfo, "SelectChrScene", "  文本      槽位%d-Name     pos=(%.0f,%.0f)", i, ox+tp.nameX, oy+tp.nameY)
-		log.Logf(log.LevelInfo, "SelectChrScene", "  文本      槽位%d-Level   pos=(%.0f,%.0f)", i, ox+tp.levelX, oy+tp.levelY)
-		log.Logf(log.LevelInfo, "SelectChrScene", "  文本      槽位%d-Job     pos=(%.0f,%.0f)", i, ox+tp.jobX, oy+tp.jobY)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  text       slot%d-Name     pos=(%.0f,%.0f)", i, ox+tp.nameX, oy+tp.nameY)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  text       slot%d-Level   pos=(%.0f,%.0f)", i, ox+tp.levelX, oy+tp.levelY)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  text       slot%d-Job     pos=(%.0f,%.0f)", i, ox+tp.jobX, oy+tp.jobY)
 	}
 	if s.ServerName != "" && s.text != nil {
 		x := float32(ScreenWidth)/2 - float32(s.text.MeasureText(s.ServerName))/2
-		log.Logf(log.LevelInfo, "SelectChrScene", "  文本      ServerName     pos=(%.0f,%.0f)", x, oy+8)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  text       ServerName     pos=(%.0f,%.0f)", x, oy+8)
 	}
 }
 
 func (s *SelectChrScene) logCreateDialogLayout() {
 	winX, winY := s.createWinPos()
 	cw, ch := s.getPrguseSize(ImgCreateBg)
-	log.Logf(log.LevelInfo, "SelectChrScene", "=== 组件布局 (创建角色对话框) ===")
-	log.Logf(log.LevelInfo, "SelectChrScene", "  窗口      Prguse[%d]       pos=(%.0f,%.0f) size=(%d,%d)", ImgCreateBg, winX, winY, cw, ch)
-	log.Logf(log.LevelInfo, "SelectChrScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(129,21)", "Name", winX+63, winY+79)
+	log.Logf(log.LevelInfo, "SelectChrScene", "=== component layout (create character dialog) ===")
+	log.Logf(log.LevelInfo, "SelectChrScene", "  window     Prguse[%d]       pos=(%.0f,%.0f) size=(%d,%d)", ImgCreateBg, winX, winY, cw, ch)
+	log.Logf(log.LevelInfo, "SelectChrScene", "  input      %-12s pos=(%.0f,%.0f) size=(129,21)", "Name", winX+63, winY+79)
 
 	jobNames3 := [3]string{"Warrior", "Mage", "Taoist"}
 	jobXs := [3]float32{36, 103, 168}
 	for i := 0; i < 3; i++ {
 		jw, jh := s.getPrguseSize(ImgCreateJob1 + i)
-		log.Logf(log.LevelInfo, "SelectChrScene", "  职业按钮  %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", jobNames3[i], winX+jobXs[i], winY+139, jw, jh, ImgCreateJob1+i)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  job button %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", jobNames3[i], winX+jobXs[i], winY+139, jw, jh, ImgCreateJob1+i)
 	}
 	sexNames := [2]string{"Male", "Female"}
 	sexXs := [2]float32{70, 137}
 	sexImgs := [2]int{ImgCreateMale, ImgCreateFemale}
 	for i := 0; i < 2; i++ {
 		sw, sh := s.getPrguseSize(sexImgs[i])
-		log.Logf(log.LevelInfo, "SelectChrScene", "  性别按钮  %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", sexNames[i], winX+sexXs[i], winY+211, sw, sh, sexImgs[i])
+		log.Logf(log.LevelInfo, "SelectChrScene", "  sex button %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", sexNames[i], winX+sexXs[i], winY+211, sw, sh, sexImgs[i])
 	}
 	okW, okH := s.getPrguseSize(ImgCreateOk)
-	log.Logf(log.LevelInfo, "SelectChrScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "OK", winX+46, winY+273, okW, okH, ImgCreateOk)
+	log.Logf(log.LevelInfo, "SelectChrScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "OK", winX+46, winY+273, okW, okH, ImgCreateOk)
 	cancelW, cancelH := s.getPrguseSize(ImgCreateCancel)
-	log.Logf(log.LevelInfo, "SelectChrScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "Cancel", winX+138, winY+273, cancelW, cancelH, ImgCreateCancel)
+	log.Logf(log.LevelInfo, "SelectChrScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "Cancel", winX+138, winY+273, cancelW, cancelH, ImgCreateCancel)
 }
 
 func (s *SelectChrScene) logDeleteDialogLayout() {
 	winX, winY := s.deleteWinPos()
 	dw, dh := s.getPrguseSize(ImgModalNormal)
-	log.Logf(log.LevelInfo, "SelectChrScene", "=== 组件布局 (删除确认对话框) ===")
-	log.Logf(log.LevelInfo, "SelectChrScene", "  窗口      Prguse[%d]      pos=(%.0f,%.0f) size=(%d,%d)", ImgModalNormal, winX, winY, dw, dh)
-	log.Logf(log.LevelInfo, "SelectChrScene", "  文本      删除消息       pos=(%.0f,%.0f)", winX+39, winY+38)
+	log.Logf(log.LevelInfo, "SelectChrScene", "=== component layout (delete confirm dialog) ===")
+	log.Logf(log.LevelInfo, "SelectChrScene", "  window     Prguse[%d]      pos=(%.0f,%.0f) size=(%d,%d)", ImgModalNormal, winX, winY, dw, dh)
+	log.Logf(log.LevelInfo, "SelectChrScene", "  text       delete message pos=(%.0f,%.0f)", winX+39, winY+38)
 	imgs := [3]int{ImgModalYes, ImgModalNo, ImgModalCancel}
 	names := [3]string{"Yes", "No", "Cancel"}
 	lxs := [3]float32{104, 214, 324}
 	for i, img := range imgs {
 		bw, bh := s.getPrguseSize(img)
-		log.Logf(log.LevelInfo, "SelectChrScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", names[i], winX+lxs[i], winY+126, bw, bh, img)
+		log.Logf(log.LevelInfo, "SelectChrScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", names[i], winX+lxs[i], winY+126, bw, bh, img)
 	}
 }
 
 func (s *SelectChrScene) Open() {
-	log.Logf(log.LevelInfo, "SelectChrScene", "已打开")
+	log.Logf(log.LevelInfo, "SelectChrScene", "opened")
 	s.errorMsg = ""
 	s.createMode = false
 	s.deleteConfirm = false
@@ -223,7 +223,7 @@ func (s *SelectChrScene) Open() {
 }
 
 func (s *SelectChrScene) Close() {
-	log.Logf(log.LevelInfo, "SelectChrScene", "已关闭")
+	log.Logf(log.LevelInfo, "SelectChrScene", "closed")
 }
 
 func (s *SelectChrScene) Update(dt float64) {
@@ -429,7 +429,7 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 	// (IntroScn:1485-1494)。
 	if standing && idx == s.Selected && ch.DarkLevel > 0 {
 		alpha := float32(ch.DarkLevel) / darkLevelMax
-		log.Logf(log.LevelTrace, "Render", "selchr 暗色遮罩 slot=%d alpha=%.3f", idx, alpha)
+		log.Logf(log.LevelTrace, "Render", "selchr dark overlay slot=%d alpha=%.3f", idx, alpha)
 		gl.DrawQuadColor(drawX, drawY, sprW, sprH, 0, 0, 0, alpha, proj)
 	}
 
@@ -530,23 +530,23 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 
 		// 名字/等级/职业为白色带黑色描边 (BoldTextOut,
 		// IntroScn:1522-1534)；等级为纯数字 (IntToStr, :1523)。
-		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", ch.Name, ox+tp.nameX, oy+tp.nameY)
+		log.Logf(log.LevelTrace, "Render", "selchr info text '%s' pos=(%.0f,%.0f)", ch.Name, ox+tp.nameX, oy+tp.nameY)
 		s.text.DrawTextOutline(ch.Name, ox+tp.nameX, oy+tp.nameY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		levelStr := fmt.Sprintf("%d", ch.Level)
-		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", levelStr, ox+tp.levelX, oy+tp.levelY)
+		log.Logf(log.LevelTrace, "Render", "selchr info text '%s' pos=(%.0f,%.0f)", levelStr, ox+tp.levelX, oy+tp.levelY)
 		s.text.DrawTextOutline(levelStr, ox+tp.levelX, oy+tp.levelY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		jobName := "未知"
 		if int(ch.Job) < len(jobNames) {
 			jobName = jobNames[ch.Job]
 		}
-		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", jobName, ox+tp.jobX, oy+tp.jobY)
+		log.Logf(log.LevelTrace, "Render", "selchr info text '%s' pos=(%.0f,%.0f)", jobName, ox+tp.jobX, oy+tp.jobY)
 		s.text.DrawTextOutline(jobName, ox+tp.jobX, oy+tp.jobY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
 	// 服务器名居中显示在顶部 (IntroScn:1539-1545)。
 	if s.ServerName != "" {
 		x := float32(ScreenWidth)/2 - float32(s.text.MeasureText(s.ServerName))/2
-		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", s.ServerName, x, oy+8)
+		log.Logf(log.LevelTrace, "Render", "selchr info text '%s' pos=(%.0f,%.0f)", s.ServerName, x, oy+8)
 		s.text.DrawTextOutline(s.ServerName, x, oy+8, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
@@ -587,7 +587,7 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 
 	// 名字输入框：黑底白字，窗口+(63,79)，129×21，
 	// MaxLength 14 (IntroScn:1109-1121,1282-1283)。
-	log.Logf(log.LevelTrace, "Render", "selchr 名字输入框 pos=(%.0f,%.0f) size=(%.0f,%.0f)", winX+63, winY+79, float32(129), float32(21))
+	log.Logf(log.LevelTrace, "Render", "selchr name input pos=(%.0f,%.0f) size=(%.0f,%.0f)", winX+63, winY+79, float32(129), float32(21))
 	gl.DrawQuadColor(winX+63, winY+79, 129, 21, 0, 0, 0, 1, proj)
 	if s.text != nil {
 		s.text.DrawText(s.createName, winX+65, winY+81, 1, 1, 1, 1, proj)
@@ -759,7 +759,7 @@ func (s *SelectChrScene) OnKey(key int, action int) {
 }
 
 func (s *SelectChrScene) OnMouse(x, y float64, button int, action int, mods int) {
-	log.Logf(log.LevelDebug, "Mouse", "selchr pos=(%.0f,%.0f) 按键=%d 动作=%d", x, y, button, action)
+	log.Logf(log.LevelDebug, "Mouse", "selchr pos=(%.0f,%.0f) button=%d action=%d", x, y, button, action)
 	fx, fy := float32(x), float32(y)
 	switch {
 	case s.createMode:
@@ -781,7 +781,7 @@ func (s *SelectChrScene) mouseSelect(fx, fy float32, action int) {
 		for i, area := range selButtonAreas {
 			if hitTest(fx, fy, area) {
 				s.downButton = i
-				log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 %s pos=(%.0f,%.0f)", btnNames[i], area.X, area.Y)
+				log.Logf(log.LevelInfo, "SelectChrScene", "click button %s pos=(%.0f,%.0f)", btnNames[i], area.X, area.Y)
 				return
 			}
 		}
@@ -805,7 +805,7 @@ func (s *SelectChrScene) mouseCreate(fx, fy float32, action int) {
 		for i := 0; i < 3; i++ {
 			if hitTest(fx, fy, s.imgArea(ImgCreateJob1+i, winX+jobXs[i], winY+139)) {
 				s.createDown = i
-				log.Logf(log.LevelInfo, "SelectChrScene", "点击 职业按钮 %s pos=(%.0f,%.0f)", jobNames3[i], winX+jobXs[i], winY+139)
+				log.Logf(log.LevelInfo, "SelectChrScene", "click job button %s pos=(%.0f,%.0f)", jobNames3[i], winX+jobXs[i], winY+139)
 				return
 			}
 		}
@@ -813,7 +813,7 @@ func (s *SelectChrScene) mouseCreate(fx, fy float32, action int) {
 		for i := 0; i < 2; i++ {
 			if hitTest(fx, fy, s.imgArea(ImgCreateMale+i, winX+sexXs[i], winY+211)) {
 				s.createDown = 3 + i
-				log.Logf(log.LevelInfo, "SelectChrScene", "点击 性别按钮 %s pos=(%.0f,%.0f)", sexNames[i], winX+sexXs[i], winY+211)
+				log.Logf(log.LevelInfo, "SelectChrScene", "click sex button %s pos=(%.0f,%.0f)", sexNames[i], winX+sexXs[i], winY+211)
 				return
 			}
 		}
@@ -834,10 +834,10 @@ func (s *SelectChrScene) mouseCreate(fx, fy float32, action int) {
 		case down >= 3 && down < 5 && hitTest(fx, fy, s.imgArea(ImgCreateMale+down-3, winX+sexXs[down-3], winY+211)):
 			s.createSex = down - 3
 		case down == 5 && hitTest(fx, fy, s.imgArea(ImgCreateOk, winX+46, winY+273)):
-			log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 OK pos=(%.0f,%.0f)", winX+46, winY+273)
+			log.Logf(log.LevelInfo, "SelectChrScene", "click button OK pos=(%.0f,%.0f)", winX+46, winY+273)
 			s.confirmCreate()
 		case down == 6 && hitTest(fx, fy, s.imgArea(ImgCreateCancel, winX+142, winY+273)):
-			log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 Cancel pos=(%.0f,%.0f)", winX+142, winY+273)
+			log.Logf(log.LevelInfo, "SelectChrScene", "click button Cancel pos=(%.0f,%.0f)", winX+142, winY+273)
 			s.createMode = false
 		}
 	}
@@ -851,7 +851,7 @@ func (s *SelectChrScene) mouseDelete(fx, fy float32, action int) {
 	names := [3]string{"Yes", "No", "Cancel"}
 	for i, a := range areas {
 		if hitTest(fx, fy, a) {
-			log.Logf(log.LevelInfo, "SelectChrScene", "点击 按钮 %s pos=(%.0f,%.0f)", names[i], a.X, a.Y)
+			log.Logf(log.LevelInfo, "SelectChrScene", "click button %s pos=(%.0f,%.0f)", names[i], a.X, a.Y)
 			break
 		}
 	}
@@ -892,7 +892,7 @@ func (s *SelectChrScene) selectChar(idx int) {
 	if !s.Characters[idx].Valid {
 		return
 	}
-	log.Logf(log.LevelInfo, "SelectChr", "选中角色 %d: %s", idx, s.Characters[idx].Name)
+	log.Logf(log.LevelInfo, "SelectChr", "character selected %d: %s", idx, s.Characters[idx].Name)
 
 	if s.Selected >= 0 && s.Selected < 2 && s.Characters[s.Selected].Valid {
 		prev := &s.Characters[s.Selected]
@@ -938,7 +938,7 @@ func (s *SelectChrScene) startCreate() {
 	s.createDown = -1
 	s.cursorBlink = time.Now()
 	s.errorMsg = ""
-	log.Logf(log.LevelInfo, "SelectChr", "进入创建角色模式, slot=%d", emptyIdx)
+	log.Logf(log.LevelInfo, "SelectChr", "enter create character mode, slot=%d", emptyIdx)
 }
 
 func (s *SelectChrScene) confirmCreate() {
@@ -948,7 +948,7 @@ func (s *SelectChrScene) confirmCreate() {
 		return
 	}
 	hair := 1 + rand.Intn(5)
-	log.Logf(log.LevelInfo, "SelectChr", "创建角色: %s job=%d sex=%d hair=%d", name, s.createJob, s.createSex, hair)
+	log.Logf(log.LevelInfo, "SelectChr", "create character: %s job=%d sex=%d hair=%d", name, s.createJob, s.createSex, hair)
 	s.createMode = false
 	if s.newChrFunc != nil {
 		s.newChrFunc(name, hair, s.createJob, s.createSex)
@@ -963,11 +963,11 @@ func (s *SelectChrScene) startDelete() {
 	s.deleteConfirm = true
 	s.deleteName = s.Characters[s.Selected].Name
 	s.errorMsg = ""
-	log.Logf(log.LevelInfo, "SelectChr", "删除确认: %s", s.deleteName)
+	log.Logf(log.LevelInfo, "SelectChr", "delete confirm: %s", s.deleteName)
 }
 
 func (s *SelectChrScene) confirmDelete() {
-	log.Logf(log.LevelInfo, "SelectChr", "删除角色: %s", s.deleteName)
+	log.Logf(log.LevelInfo, "SelectChr", "delete character: %s", s.deleteName)
 	s.deleteConfirm = false
 	if s.delChrFunc != nil {
 		s.delChrFunc(s.deleteName)
@@ -980,7 +980,7 @@ func (s *SelectChrScene) startGame() {
 		return
 	}
 	charName := s.Characters[s.Selected].Name
-	log.Logf(log.LevelInfo, "SelectChrScene", "开始游戏, 角色: %s", charName)
+	log.Logf(log.LevelInfo, "SelectChrScene", "start game, character: %s", charName)
 	if s.startFunc != nil {
 		s.startFunc(charName)
 	}
@@ -1013,7 +1013,7 @@ func (s *SelectChrScene) SetServerName(name string) {
 }
 
 func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx int) {
-	log.Logf(log.LevelInfo, "SelectChrScene", "SetCharactersFromServer: %d 个角色, selectedIdx=%d", len(chars), selectedIdx)
+	log.Logf(log.LevelInfo, "SelectChrScene", "SetCharactersFromServer: %d characters, selectedIdx=%d", len(chars), selectedIdx)
 	s.Characters = [2]CharacterSlot{}
 	s.Selected = -1
 	s.createMode = false
@@ -1033,7 +1033,7 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 			FreezeState: true,
 			AniTick:     time.Now(),
 		}
-		log.Logf(log.LevelInfo, "SelectChrScene", "  角色 %d: %s Lv%d Job=%d Sex=%d",
+		log.Logf(log.LevelInfo, "SelectChrScene", "  character %d: %s Lv%d Job=%d Sex=%d",
 			i, c.Name, c.Level, c.Job, c.Sex)
 	}
 
@@ -1046,7 +1046,7 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 		s.Selected = 0
 		s.Characters[0].FreezeState = false
 	}
-	log.Logf(log.LevelInfo, "SelectChrScene", "最终选中=%d", s.Selected)
+	log.Logf(log.LevelInfo, "SelectChrScene", "final selected=%d", s.Selected)
 }
 
 func (s *SelectChrScene) getPrguseSize(index int) (int, int) {

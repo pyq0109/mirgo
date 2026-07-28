@@ -71,7 +71,7 @@ func LoadItemDB(path string) (*ItemDB, error) {
 		db.byName[item.Name] = item
 		db.byIdx[item.Idx] = item
 	}
-	log.Logf(log.LevelInfo, "ItemDB", "从 %s 加载了 %d 个物品", path, len(db.Items))
+	log.Logf(log.LevelInfo, "ItemDB", "loaded %d items from %s", len(db.Items), path)
 	return db, nil
 }
 

@@ -73,7 +73,7 @@ func (p *PlayObject) HandleDealTry(msg SendMessage, server *netserver.TCPServer)
 	menuMsg := protocol.MakeDefaultMsg(protocol.SMDealMenu, 0, 0, 0, 0)
 	server.Send(p.Session.ID, menuMsg, protocol.EncodeString(target.Name))
 	server.Send(target.Session.ID, menuMsg, protocol.EncodeString(p.Name))
-	log.Logf(log.LevelInfo, "Trade", "%s 向 %s 发起交易", p.Name, target.Name)
+	log.Logf(log.LevelInfo, "Trade", "%s initiated trade with %s", p.Name, target.Name)
 }
 
 func (p *PlayObject) HandleDealAddItem(msg SendMessage, server *netserver.TCPServer) {
@@ -184,7 +184,7 @@ func (p *PlayObject) HandleDealEnd(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, goldMsg, "")
 	partnerGold := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(partner.Gold), 0, 0, 0)
 	server.Send(partner.Session.ID, partnerGold, "")
-	log.Logf(log.LevelInfo, "Trade", "%s 和 %s 完成交易", p.Name, partner.Name)
+	log.Logf(log.LevelInfo, "Trade", "%s completed trade with %s", p.Name, partner.Name)
 	p.Deal = nil
 	partner.Deal = nil
 }

@@ -56,7 +56,7 @@ func (m *MapManager) LoadAllMaps() error {
 
 		mapData, err := mapformat.Parse(mapPath)
 		if err != nil {
-			log.Logf(log.LevelError, "MapManager", "加载地图 %s 失败: %v", name, err)
+			log.Logf(log.LevelError, "MapManager", "failed to load map %s: %v", name, err)
 			continue
 		}
 
@@ -65,7 +65,7 @@ func (m *MapManager) LoadAllMaps() error {
 		loaded++
 	}
 
-	log.Logf(log.LevelInfo, "MapManager", "已加载 %d 张地图", loaded)
+	log.Logf(log.LevelInfo, "MapManager", "loaded %d maps", loaded)
 	return nil
 }
 
@@ -122,5 +122,5 @@ func (m *MapManager) InitRoutes() {
 		m.AddRoute("0", 289, 618, "3", 330, 330)
 		m.AddRoute("3", 330, 331, "0", 289, 619)
 	}
-	log.Logf(log.LevelInfo, "MapManager", "已初始化 %d 条地图路线", len(m.routes))
+	log.Logf(log.LevelInfo, "MapManager", "initialized %d map routes", len(m.routes))
 }

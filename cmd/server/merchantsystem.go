@@ -32,7 +32,7 @@ func LoadMerchantConfigs(dir string) {
 	merchantConfigs = make(map[string]*MerchantConfig)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		log.Logf(log.LevelWarn, "Merchant", "商人配置目录不存在: %v", err)
+		log.Logf(log.LevelWarn, "Merchant", "merchant config directory not found: %v", err)
 		return
 	}
 	for _, e := range entries {
@@ -68,7 +68,7 @@ func LoadMerchantConfigs(dir string) {
 		key := strings.ToLower(cfg.NpcName)
 		merchantConfigs[key] = &cfg
 	}
-	log.Logf(log.LevelInfo, "Merchant", "已加载 %d 个商人配置", len(merchantConfigs))
+	log.Logf(log.LevelInfo, "Merchant", "loaded %d merchant configs", len(merchantConfigs))
 }
 
 func getMerchantConfig(npcName string) *MerchantConfig {
@@ -220,7 +220,7 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
-	log.Logf(log.LevelInfo, "Merchant", "%s 购买 %s 花费 %d 金币", p.Name, def.Name, price)
+	log.Logf(log.LevelInfo, "Merchant", "%s bought %s for %d gold", p.Name, def.Name, price)
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {
@@ -263,7 +263,7 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
-	log.Logf(log.LevelInfo, "Merchant", "%s 出售 %s 获得 %d 金币", p.Name, def.Name, price)
+	log.Logf(log.LevelInfo, "Merchant", "%s sold %s for %d gold", p.Name, def.Name, price)
 }
 
 func (p *PlayObject) HandleQuerySellPrice(msg SendMessage, server *netserver.TCPServer) {
@@ -330,7 +330,7 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
-	log.Logf(log.LevelInfo, "Merchant", "%s 修理 %s 花费 %d 金币", p.Name, def.Name, cost)
+	log.Logf(log.LevelInfo, "Merchant", "%s repaired %s for %d gold", p.Name, def.Name, cost)
 }
 
 func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TCPServer) {

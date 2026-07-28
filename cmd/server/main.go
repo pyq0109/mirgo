@@ -27,30 +27,30 @@ func main() {
 	// 从 serverconfig 目录加载配置
 	config, err := LoadConfig(*configDir)
 	if err != nil {
-		log.Logf(log.LevelError, "Server", "加载配置失败: %v", err)
+		log.Logf(log.LevelError, "Server", "failed to load config: %v", err)
 		os.Exit(1)
 	}
 
 	listenAddr := config.GetListenAddr()
 	dbPath := config.GetDatabasePath()
 
-	log.Logf(log.LevelInfo, "Server", "启动 MIR2 服务端...")
-	log.Logf(log.LevelInfo, "Server", "监听地址: %s", listenAddr)
-	log.Logf(log.LevelInfo, "Server", "数据库: %s", dbPath)
-	log.Logf(log.LevelInfo, "Server", "主城: %s(%d,%d)", config.GetHomeMap(), config.GetHomeX(), config.GetHomeY())
+	log.Logf(log.LevelInfo, "Server", "starting MIR2 server...")
+	log.Logf(log.LevelInfo, "Server", "listen address: %s", listenAddr)
+	log.Logf(log.LevelInfo, "Server", "database: %s", dbPath)
+	log.Logf(log.LevelInfo, "Server", "home map: %s(%d,%d)", config.GetHomeMap(), config.GetHomeX(), config.GetHomeY())
 
 	// 打开单个数据库文件
 	db, err := storage.Open(dbPath)
 	if err != nil {
-		log.Logf(log.LevelError, "Server", "打开数据库失败: %v", err)
+		log.Logf(log.LevelError, "Server", "failed to open database: %v", err)
 		os.Exit(1)
 	}
 	defer db.Close()
-	log.Logf(log.LevelInfo, "Server", "数据库已打开")
+	log.Logf(log.LevelInfo, "Server", "database opened")
 
 	mapMgr := NewMapManager(*mapDir)
 	if err := mapMgr.LoadAllMaps(); err != nil {
-		log.Logf(log.LevelError, "Server", "加载地图失败: %v", err)
+		log.Logf(log.LevelError, "Server", "failed to load maps: %v", err)
 		os.Exit(1)
 	}
 	mapMgr.InitRoutes()
@@ -59,7 +59,7 @@ func main() {
 	itemDBPath := filepath.Join(*configDir, "items", "std_items.jsonc")
 	itemDB, err = LoadItemDB(itemDBPath)
 	if err != nil {
-		log.Logf(log.LevelWarn, "Server", "加载 ItemDB 失败: %v（物品系统已禁用）", err)
+		log.Logf(log.LevelWarn, "Server", "failed to load ItemDB: %v (item system disabled)", err)
 		itemDB = nil
 	}
 
@@ -67,7 +67,7 @@ func main() {
 	magicDBPath := filepath.Join(*configDir, "magic", "magic_db.jsonc")
 	magicDB, err = LoadMagicDB(magicDBPath)
 	if err != nil {
-		log.Logf(log.LevelWarn, "Server", "加载 MagicDB 失败: %v（魔法系统已禁用）", err)
+		log.Logf(log.LevelWarn, "Server", "failed to load MagicDB: %v (magic system disabled)", err)
 		magicDB = nil
 	}
 
@@ -75,7 +75,7 @@ func main() {
 	monsterDBPath := filepath.Join(*configDir, "monsters", "monster_db.jsonc")
 	monsterDB, err = LoadMonsterDB(monsterDBPath)
 	if err != nil {
-		log.Logf(log.LevelWarn, "Server", "加载 MonsterDB 失败: %v（使用默认值）", err)
+		log.Logf(log.LevelWarn, "Server", "failed to load MonsterDB: %v (using defaults)", err)
 		monsterDB = &MonsterDB{byName: make(map[string]*MonsterDef)}
 	}
 
@@ -103,7 +103,7 @@ func main() {
 
 	server.SetConnectHandler(func(session *netserver.Session) {
 		sessionMgr.Add(session)
-		log.Logf(log.LevelInfo, "Server", "会话 %d 已连接（总数: %d）", session.ID, sessionMgr.Count())
+		log.Logf(log.LevelInfo, "Server", "session %d connected (total: %d)", session.ID, sessionMgr.Count())
 	})
 
 	server.SetDisconnectHandler(func(session *netserver.Session) {
@@ -117,11 +117,11 @@ func main() {
 					player.envir.RemoveObject(player.CurrX, player.CurrY, OS_MOVINGOBJECT, player)
 				}
 				userEngine.RemovePlayer(int32(session.CharacterID))
-				log.Logf(log.LevelInfo, "Server", "玩家 %s 已保存并从世界移除", player.Name)
+				log.Logf(log.LevelInfo, "Server", "player %s saved and removed from world", player.Name)
 			}
 		}
 		sessionMgr.Remove(session.ID)
-		log.Logf(log.LevelInfo, "Server", "会话 %d 已断开（总数: %d）", session.ID, sessionMgr.Count())
+		log.Logf(log.LevelInfo, "Server", "session %d disconnected (total: %d)", session.ID, sessionMgr.Count())
 	})
 
 	// Fix 5: 处理 **runlogin 原始消息
@@ -133,7 +133,7 @@ func main() {
 		loginInfo := raw[2:] // 去掉 **
 		parts := strings.Split(loginInfo, "/")
 		if len(parts) < 5 {
-			log.Logf(log.LevelWarn, "Server", "无效的 run login 格式: %s", raw)
+			log.Logf(log.LevelWarn, "Server", "invalid run login format: %s", raw)
 			return false
 		}
 		loginID := parts[0]
@@ -141,26 +141,26 @@ func main() {
 		var cert int32
 		fmt.Sscanf(parts[2], "%d", &cert)
 
-		log.Logf(log.LevelInfo, "Server", "[**RunLogin] 用户=%s 角色=%s 证书=%d 版本=%s 代码=%s",
+		log.Logf(log.LevelInfo, "Server", "[**RunLogin] user=%s character=%s cert=%d version=%s code=%s",
 			loginID, charName, cert, parts[3], parts[4])
-		log.Logf(log.LevelInfo, "Server", "[**RunLogin] 会话=%d 会话证书=%d 账号ID=%d",
+		log.Logf(log.LevelInfo, "Server", "[**RunLogin] session=%d session cert=%d account ID=%d",
 			session.ID, session.Certification, session.CharacterID)
 
 		// 验证证书与会话匹配
 		if session.Certification != 0 && session.Certification != cert {
-			log.Logf(log.LevelWarn, "Server", "[**RunLogin] 证书不匹配: 期望 %d, 实际 %d",
+			log.Logf(log.LevelWarn, "Server", "[**RunLogin] cert mismatch: expected %d, got %d",
 				session.Certification, cert)
 		}
 
 		// 加载角色并进入游戏
-		log.Logf(log.LevelInfo, "Server", "[**RunLoading 正在加载角色 %q，账号 %d...", charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[**RunLoading] loading character %q, account %d...", charName, session.CharacterID)
 		charData, err := db.GetCharacterByName(session.CharacterID, charName)
 		if err != nil {
-			log.Logf(log.LevelError, "Server", "[**RunLogin] 角色 %q 未找到，账号 %d: %v",
+			log.Logf(log.LevelError, "Server", "[**RunLogin] character %q not found, account %d: %v",
 				charName, session.CharacterID, err)
 			return true
 		}
-		log.Logf(log.LevelInfo, "Server", "[**RunLogin] 角色已加载: %s id=%d 地图=%s(%d,%d)",
+		log.Logf(log.LevelInfo, "Server", "[**RunLogin] character loaded: %s id=%d map=%s(%d,%d)",
 			charData.Name, charData.ID, charData.Map, charData.X, charData.Y)
 
 		// 创建 PlayObject
@@ -191,7 +191,7 @@ func main() {
 		// 查找并设置地图环境
 		envir := mapMgr.FindMap(charData.Map)
 		if envir == nil {
-			log.Logf(log.LevelError, "Server", "地图 %s 未找到，使用主城地图", charData.Map)
+			log.Logf(log.LevelError, "Server", "map %s not found, using home map", charData.Map)
 			envir = mapMgr.FindMap(config.GetHomeMap())
 			if envir != nil {
 				player.MapName = config.GetHomeMap()
@@ -209,7 +209,7 @@ func main() {
 		// 更新会话状态
 		session.State = netserver.StateInGame
 		session.CharacterID = charData.ID
-		log.Logf(log.LevelInfo, "Server", "会话 %d: 已认证 → 游戏中（角色=%s id=%d）",
+		log.Logf(log.LevelInfo, "Server", "session %d: authenticated -> in-game (character=%s id=%d)",
 			session.ID, charData.Name, charData.ID)
 
 		// 添加到 UserEngine
@@ -257,7 +257,7 @@ func main() {
 
 		// 发送地图信息
 		player.SendMapInfo(server)
-		log.Logf(log.LevelInfo, "Server", "已发送地图 %s(%d,%d) 给玩家 %s",
+		log.Logf(log.LevelInfo, "Server", "sent map %s(%d,%d) to player %s",
 			player.MapName, player.CurrX, player.CurrY, player.Name)
 
 		// 发送能力属性
@@ -275,7 +275,7 @@ func main() {
 		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
 		server.Send(session.ID, noticeResp, protocol.EncodeString("Welcome to MIR2 Go Server!"))
 
-		log.Logf(log.LevelInfo, "Server", "玩家 %s 进入游戏，位置 %s(%d,%d)",
+		log.Logf(log.LevelInfo, "Server", "player %s entered game at %s(%d,%d)",
 			player.Name, player.MapName, player.CurrX, player.CurrY)
 
 		return true
@@ -283,11 +283,11 @@ func main() {
 
 	server.SetMessageHandler(func(session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string) {
 		stateNames := map[netserver.SessionState]string{
-			netserver.StateConnected:     "已连接",
-			netserver.StateAuthenticated: "已认证",
-			netserver.StateInGame:        "游戏中",
+			netserver.StateConnected:     "connected",
+			netserver.StateAuthenticated: "authenticated",
+			netserver.StateInGame:        "in-game",
 		}
-		log.Logf(log.LevelInfo, "Server", "会话 %d 状态=%s: 分发 %s",
+		log.Logf(log.LevelInfo, "Server", "session %d state=%s: dispatching %s",
 			session.ID, stateNames[session.State], protocol.MsgName(msg.Ident))
 
 		switch session.State {
@@ -301,7 +301,7 @@ func main() {
 	})
 
 	if err := server.Start(); err != nil {
-		log.Logf(log.LevelError, "Server", "启动服务器失败: %v", err)
+		log.Logf(log.LevelError, "Server", "failed to start server: %v", err)
 		os.Exit(1)
 	}
 
@@ -311,7 +311,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Logf(log.LevelInfo, "Server", "服务器已启动。按 Ctrl+C 停止。")
+	log.Logf(log.LevelInfo, "Server", "server started. Press Ctrl+C to stop.")
 
 	tickCount := int64(0)
 	for {
@@ -328,10 +328,10 @@ func main() {
 			}
 		case sig := <-sigChan:
 			fmt.Println()
-			log.Logf(log.LevelInfo, "Server", "收到信号: %v", sig)
-			log.Logf(log.LevelInfo, "Server", "正在关闭...")
+			log.Logf(log.LevelInfo, "Server", "received signal: %v", sig)
+			log.Logf(log.LevelInfo, "Server", "shutting down...")
 			server.Stop()
-			log.Logf(log.LevelInfo, "Server", "服务器已停止")
+			log.Logf(log.LevelInfo, "Server", "server stopped")
 			return
 		}
 	}
@@ -341,14 +341,14 @@ func main() {
 func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string, config *ServerConfig, db *storage.Database) {
 	switch msg.Ident {
 	case protocol.CMProtocol:
-		log.Logf(log.LevelInfo, "Server", "协议版本: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Server", "protocol version: %d", msg.Recog)
 
 	case protocol.CMAddNewUser:
 		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd): 两个
 		// 独立的 6Bit 段（ClMain.pas:2844）。在解码前按固定编码长度
 		// 分割原始载荷；一次性解码整个字符串会导致第二段错位。
 		if len(rawBody) < protocol.UserEntryEncodedSize+protocol.UserEntryAddEncodedSize {
-			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] body 过短（%d 字符）", len(rawBody))
+			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] body too short (%d chars)", len(rawBody))
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -2, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -361,7 +361,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		_ = protocol.UserEntryAddFromBytes(uaBuf) // 附加信息，不持久化
 		username := strings.ToLower(ue.Account())
 		password := ue.Password()
-		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] 注册尝试: %s", username)
+		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] registration attempt: %s", username)
 		// Delphi SM_NEWID_FAIL Recog: 0=已存在, -2=系统繁忙, 其他=非法 (ClMain.pas:3694-3702)。
 		if len(username) < 3 || len(username) > 10 || len(password) < 3 || len(password) > 10 {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -1, 0, 0, 0)
@@ -370,7 +370,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		}
 		_, _, err := db.GetAccountByUsername(username)
 		if err == nil {
-			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] 账号已存在: %s", username)
+			log.Logf(log.LevelWarn, "Server", "[CMAddNewUser] account already exists: %s", username)
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -378,12 +378,12 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		hash := simpleHash(password)
 		_, err = db.CreateAccount(username, hash)
 		if err != nil {
-			log.Logf(log.LevelError, "Server", "[CMAddNewUser] 创建失败: %v", err)
+			log.Logf(log.LevelError, "Server", "[CMAddNewUser] creation failed: %v", err)
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -2, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
-		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] 账号已创建: %s", username)
+		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] account created: %s", username)
 		resp := protocol.MakeDefaultMsg(protocol.SMNewIDSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
@@ -396,7 +396,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 			return
 		}
 		id, oldpw, newpw := parts[0], parts[1], parts[2]
-		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] 修改尝试: %s", id)
+		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] change attempt: %s", id)
 		accountID, hash, err := db.GetAccountByUsername(id)
 		if err != nil || !verifyPassword(oldpw, hash) {
 			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -1, 0, 0, 0)
@@ -404,37 +404,37 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 			return
 		}
 		if err := db.UpdateAccountPassword(accountID, simpleHash(newpw)); err != nil {
-			log.Logf(log.LevelError, "Server", "[CMChangePassword] 更新失败: %v", err)
+			log.Logf(log.LevelError, "Server", "[CMChangePassword] update failed: %v", err)
 			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -3, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
-		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] 密码已修改: %s", id)
+		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] password changed: %s", id)
 		resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMIDPassword:
 		// 从 body 解析用户名/密码（格式: "username/password"）
 		username, password := parseCredentials(body)
-		log.Logf(log.LevelInfo, "Server", "登录尝试: %s", username)
+		log.Logf(log.LevelInfo, "Server", "login attempt: %s", username)
 
 		// 对照数据库验证
 		accountID, passwordHash, err := db.GetAccountByUsername(username)
 		if err != nil {
-			log.Logf(log.LevelWarn, "Server", "账号未找到: %s", username)
+			log.Logf(log.LevelWarn, "Server", "account not found: %s", username)
 			// 开发环境自动创建账号（生产环境移除）
 			hash := simpleHash(password)
 			accountID, err = db.CreateAccount(username, hash)
 			if err != nil {
-				log.Logf(log.LevelError, "Server", "创建账号失败: %v", err)
+				log.Logf(log.LevelError, "Server", "failed to create account: %v", err)
 				sendLoginFail(server, session)
 				return
 			}
-			log.Logf(log.LevelInfo, "Server", "自动创建账号: %s (id=%d)", username, accountID)
+			log.Logf(log.LevelInfo, "Server", "auto-created account: %s (id=%d)", username, accountID)
 		} else {
 			// 验证密码
 			if !verifyPassword(password, passwordHash) {
-				log.Logf(log.LevelWarn, "Server", "密码无效: %s", username)
+				log.Logf(log.LevelWarn, "Server", "invalid password: %s", username)
 				sendLoginFail(server, session)
 				return
 			}
@@ -444,7 +444,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		session.State = netserver.StateAuthenticated
 		session.AccountName = username
 		session.CharacterID = accountID
-		log.Logf(log.LevelInfo, "Server", "会话 %d: 已连接 → 已认证（账号=%s ID=%d）",
+		log.Logf(log.LevelInfo, "Server", "session %d: connected -> authenticated (account=%s ID=%d)",
 			session.ID, username, accountID)
 
 		// Fix 2: 发送服务器列表，body 为 "serverName/status"
@@ -454,10 +454,10 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 			serverName = "Server"
 		}
 		server.Send(session.ID, resp, protocol.EncodeString(serverName+"/1"))
-		log.Logf(log.LevelInfo, "Server", "登录成功: %s（账号=%d）", username, accountID)
+		log.Logf(log.LevelInfo, "Server", "login successful: %s (account=%d)", username, accountID)
 
 	default:
-		log.Logf(log.LevelWarn, "Server", "Connected 状态收到意外消息 %d", msg.Ident)
+		log.Logf(log.LevelWarn, "Server", "unexpected message %d in Connected state", msg.Ident)
 	}
 }
 
@@ -474,7 +474,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		addrBody := fmt.Sprintf("%s/%d/%d", host, port, cert)
 		resp := protocol.MakeDefaultMsg(protocol.SMSelectServerOK, 0, 0, 0, 0)
 		server.Send(session.ID, resp, protocol.EncodeString(addrBody))
-		log.Logf(log.LevelInfo, "Server", "[CMSelectServer] 已发送 SMSelectServerOK: %s (cert=%d)", addrBody, cert)
+		log.Logf(log.LevelInfo, "Server", "[CMSelectServer] sent SMSelectServerOK: %s (cert=%d)", addrBody, cert)
 
 	case protocol.CMQueryChr:
 		log.Logf(log.LevelInfo, "Server", "[CMQueryChr] accountID=%d", session.CharacterID)
@@ -484,7 +484,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		// body: "loginID/charName/hair/job/sex"
 		parts := strings.Split(body, "/")
 		if len(parts) < 5 {
-			log.Logf(log.LevelWarn, "Server", "[CMNewChr] 无效 body: %q", body)
+			log.Logf(log.LevelWarn, "Server", "[CMNewChr] invalid body: %q", body)
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -495,7 +495,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		fmt.Sscanf(parts[3], "%d", &job)
 		fmt.Sscanf(parts[4], "%d", &sex)
 
-		log.Logf(log.LevelInfo, "Server", "[CMNewChr] 名字=%q 职业=%d 性别=%d 发型=%d 账号=%d",
+		log.Logf(log.LevelInfo, "Server", "[CMNewChr] name=%q job=%d sex=%d hair=%d account=%d",
 			charName, job, sex, hair, session.CharacterID)
 
 		if charName == "" || len([]rune(charName)) > 14 {
@@ -520,36 +520,36 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 
 		_, err = db.CreateCharacter(session.CharacterID, charName, job, sex)
 		if err != nil {
-			log.Logf(log.LevelError, "Server", "[CMNewChr] 创建失败: %v", err)
+			log.Logf(log.LevelError, "Server", "[CMNewChr] creation failed: %v", err)
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 
-		log.Logf(log.LevelInfo, "Server", "[CMNewChr] 已创建角色 %q，账号 %d", charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMNewChr] created character %q, account %d", charName, session.CharacterID)
 		resp := protocol.MakeDefaultMsg(protocol.SMNewChrSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMDelChr:
 		charName := body
-		log.Logf(log.LevelInfo, "Server", "[CMDelChr] 名字=%q 账号=%d", charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMDelChr] name=%q account=%d", charName, session.CharacterID)
 
 		charData, err := db.GetCharacterByName(session.CharacterID, charName)
 		if err != nil {
-			log.Logf(log.LevelWarn, "Server", "[CMDelChr] 角色 %q 未找到: %v", charName, err)
+			log.Logf(log.LevelWarn, "Server", "[CMDelChr] character %q not found: %v", charName, err)
 			resp := protocol.MakeDefaultMsg(protocol.SMDelChrFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 
 		if err := db.DeleteCharacter(charData.ID); err != nil {
-			log.Logf(log.LevelError, "Server", "[CMDelChr] 删除失败: %v", err)
+			log.Logf(log.LevelError, "Server", "[CMDelChr] deletion failed: %v", err)
 			resp := protocol.MakeDefaultMsg(protocol.SMDelChrFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 
-		log.Logf(log.LevelInfo, "Server", "[CMDelChr] 已删除角色 %q (id=%d)", charName, charData.ID)
+		log.Logf(log.LevelInfo, "Server", "[CMDelChr] deleted character %q (id=%d)", charName, charData.ID)
 		resp := protocol.MakeDefaultMsg(protocol.SMDelChrSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
@@ -560,17 +560,17 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		if idx := strings.Index(body, "/"); idx >= 0 {
 			charName = body[idx+1:]
 		}
-		log.Logf(log.LevelInfo, "Server", "[CMSelChr] body=%q 角色名=%q 账号ID=%d", body, charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMSelChr] body=%q character=%q account ID=%d", body, charName, session.CharacterID)
 
 		// 验证该账号下角色存在（不要覆盖 session.CharacterID ——
 		// 它仍保存着 **runlogin 处理器所需的账号 ID）
 		_, err := db.GetCharacterByName(session.CharacterID, charName)
 		if err != nil {
-			log.Logf(log.LevelError, "Server", "[CMSelChr] 角色 %q 未找到，账号 %d: %v",
+			log.Logf(log.LevelError, "Server", "[CMSelChr] character %q not found, account %d: %v",
 				charName, session.CharacterID, err)
 			return
 		}
-		log.Logf(log.LevelInfo, "Server", "[CMSelChr] 角色 %q 验证通过", charName)
+		log.Logf(log.LevelInfo, "Server", "[CMSelChr] character %q validated", charName)
 
 		// Fix 6: 发送 SMStartPlay，内容为 "addr/port"（同一服务器）
 		// 这里不创建 PlayObject —— 等待 **runlogin
@@ -578,10 +578,10 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		startBody := fmt.Sprintf("%s/%d", host, port)
 		startResp := protocol.MakeDefaultMsg(protocol.SMStartPlay, 0, 0, 0, 0)
 		server.Send(session.ID, startResp, protocol.EncodeString(startBody))
-		log.Logf(log.LevelInfo, "Server", "[CMSelChr] 已发送 SMStartPlay: %s", startBody)
+		log.Logf(log.LevelInfo, "Server", "[CMSelChr] sent SMStartPlay: %s", startBody)
 
 	default:
-		log.Logf(log.LevelWarn, "Server", "Authenticated 状态收到意外消息 %d", msg.Ident)
+		log.Logf(log.LevelWarn, "Server", "unexpected message %d in Authenticated state", msg.Ident)
 	}
 }
 
@@ -589,7 +589,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, userEngine *UserEngine) {
 	player := userEngine.GetPlayer(int32(session.CharacterID))
 	if player == nil {
-		log.Logf(log.LevelError, "Server", "会话 %d 未找到玩家", session.ID)
+		log.Logf(log.LevelError, "Server", "player not found for session %d", session.ID)
 		return
 	}
 
@@ -693,7 +693,7 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMQueryUserState:
 		player.SendMsg(protocol.CMQueryUserState, int(msg.Recog), 0, 0, "")
 	case protocol.CMLoginNoticeOK:
-		log.Logf(log.LevelInfo, "Server", "%s 已确认公告", player.Name)
+		log.Logf(log.LevelInfo, "Server", "%s confirmed notice", player.Name)
 		player.SendLogon(server)
 		player.SendBagItemsFull(server)
 		player.SendUseItemsFull(server)
@@ -705,17 +705,17 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMQueryBagItems:
 		player.SendBagItemsFull(server)
 	default:
-		log.Logf(log.LevelDebug, "Server", "未处理的游戏消息: %d 来自 %s", msg.Ident, player.Name)
+		log.Logf(log.LevelDebug, "Server", "unhandled game message: %d from %s", msg.Ident, player.Name)
 	}
 }
 
 // sendCharacterList 向客户端发送角色列表。
 // Fix 3: 使用文本格式 "*name/job/hair/level/sex/..." 代替二进制。
 func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, db *storage.Database) {
-	log.Logf(log.LevelInfo, "Server", "[sendCharacterList] 正在加载账号 %d 的角色...", session.CharacterID)
+	log.Logf(log.LevelInfo, "Server", "[sendCharacterList] loading characters for account %d...", session.CharacterID)
 	chars, err := db.GetCharactersByAccount(session.CharacterID)
 	if err != nil {
-		log.Logf(log.LevelError, "Server", "[sendCharacterList] 失败: %v", err)
+		log.Logf(log.LevelError, "Server", "[sendCharacterList] failed: %v", err)
 		resp := protocol.MakeDefaultMsg(protocol.SMQueryChrFail, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 		return
@@ -746,7 +746,7 @@ func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, 
 	resp := protocol.MakeDefaultMsg(protocol.SMQueryChr, int32(len(chars)), 0, 0, 0)
 	server.Send(session.ID, resp, protocol.EncodeString(sb.String()))
 
-	log.Logf(log.LevelInfo, "Server", "已发送 %d 个角色到会话 %d", len(chars), session.ID)
+	log.Logf(log.LevelInfo, "Server", "sent %d characters to session %d", len(chars), session.ID)
 }
 
 
@@ -772,9 +772,9 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		Gold:  int64(player.Gold),
 	}
 	if err := db.UpdateCharacter(c); err != nil {
-		log.Logf(log.LevelError, "Server", "保存角色 %s 失败: %v", player.Name, err)
+		log.Logf(log.LevelError, "Server", "failed to save character %s: %v", player.Name, err)
 	} else {
-		log.Logf(log.LevelDebug, "Server", "已保存角色 %s，位置 %s(%d,%d)", player.Name, player.MapName, player.CurrX, player.CurrY)
+		log.Logf(log.LevelDebug, "Server", "saved character %s at %s(%d,%d)", player.Name, player.MapName, player.CurrX, player.CurrY)
 	}
 
 	savePlayerItems(db, player)
@@ -828,7 +828,7 @@ func savePlayerItems(db *storage.Database, player *PlayObject) {
 	}
 	bagJSON, err := json.Marshal(bag)
 	if err != nil {
-		log.Logf(log.LevelError, "Server", "序列化背包物品失败，%s: %v", player.Name, err)
+		log.Logf(log.LevelError, "Server", "failed to serialize bag items, %s: %v", player.Name, err)
 		return
 	}
 
@@ -845,26 +845,26 @@ func savePlayerItems(db *storage.Database, player *PlayObject) {
 	}
 	equipJSON, err := json.Marshal(equip)
 	if err != nil {
-		log.Logf(log.LevelError, "Server", "序列化装备物品失败，%s: %v", player.Name, err)
+		log.Logf(log.LevelError, "Server", "failed to serialize equipment items, %s: %v", player.Name, err)
 		return
 	}
 
 	if err := db.SaveCharacterItems(int64(player.ID), bagJSON, equipJSON); err != nil {
-		log.Logf(log.LevelError, "Server", "保存物品失败，%s: %v", player.Name, err)
+		log.Logf(log.LevelError, "Server", "failed to save items, %s: %v", player.Name, err)
 	}
 }
 
 func loadPlayerItems(db *storage.Database, player *PlayObject) {
 	bagJSON, equipJSON, err := db.LoadCharacterItems(int64(player.ID))
 	if err != nil {
-		log.Logf(log.LevelWarn, "Server", "加载物品失败，%s: %v", player.Name, err)
+		log.Logf(log.LevelWarn, "Server", "failed to load items, %s: %v", player.Name, err)
 	}
 
 	if bagJSON == nil && equipJSON == nil {
 		player.GiveItem(1)
 		player.GiveItem(1)
 		player.GiveItem(2)
-		log.Logf(log.LevelInfo, "Server", "已给予初始物品给 %s", player.Name)
+		log.Logf(log.LevelInfo, "Server", "gave initial items to %s", player.Name)
 		return
 	}
 

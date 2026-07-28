@@ -391,7 +391,7 @@ func (p *PlayObject) checkMoveSpeed(now, interval int64, server *netserver.TCPSe
 		p.OverSpeedCount++
 		cfg := p.Engine.Config
 		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
-			log.Logf(log.LevelWarn, "Server", "加速外挂踢出: %s（次数=%d）", p.Name, p.OverSpeedCount)
+			log.Logf(log.LevelWarn, "Server", "speed-hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
 			server.CloseSession(p.Session.ID)
 			return false
 		}
@@ -694,7 +694,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		}
 	}
 
-	log.Logf(log.LevelInfo, "Combat", "%s 攻击 %s 造成 %d 点伤害（HP: %d/%d）",
+	log.Logf(log.LevelInfo, "Combat", "%s attacked %s dealing %d damage (HP: %d/%d)",
 		p.Name, target.Name, damage, hp, target.WAbil.MaxHP)
 }
 
@@ -754,7 +754,7 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 		// 可分配的属性点（Delphi 中每级调用 GetBonusPoint）。
 		p.BonusPoint += 3
 
-		log.Logf(log.LevelInfo, "Combat", "%s 升级到 %d 级", p.Name, p.WAbil.Level)
+		log.Logf(log.LevelInfo, "Combat", "%s leveled up to %d", p.Name, p.WAbil.Level)
 		leveledUp = true
 	}
 	// 同步客户端的经验/负重/等级信息。
@@ -887,7 +887,7 @@ func (p *PlayObject) resurrect(server *netserver.TCPServer) {
 	p.SendRefMsg(RM_TURN, p.Dir, p.CurrX, p.CurrY, p.Name)
 	p.sendHealthSpell(server)
 
-	log.Logf(log.LevelInfo, "Combat", "%s 在 %s(%d,%d) 复活", p.Name, p.MapName, p.CurrX, p.CurrY)
+	log.Logf(log.LevelInfo, "Combat", "%s resurrected at %s(%d,%d)", p.Name, p.MapName, p.CurrX, p.CurrY)
 }
 
 func IsSafeZone(envir *Environment, x, y int) bool {
@@ -918,7 +918,7 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 		p.Gold += item.Gold
 		resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
-		log.Logf(log.LevelInfo, "PlayObject", "%s 拾取 %d 金币（总计: %d）", p.Name, item.Gold, p.Gold)
+		log.Logf(log.LevelInfo, "PlayObject", "%s picked up %d gold (total: %d)", p.Name, item.Gold, p.Gold)
 	} else {
 		added := false
 		if p.ItemDB != nil {
@@ -932,7 +932,7 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 			p.RecalcAbilitys()
 			p.SendBagItemsFull(server)
 			p.sendWeightChanged(server)
-			log.Logf(log.LevelInfo, "PlayObject", "%s 拾取了 %s", p.Name, item.Name)
+			log.Logf(log.LevelInfo, "PlayObject", "%s picked up %s", p.Name, item.Name)
 		}
 	}
 
@@ -1319,6 +1319,6 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 
 	p.VisibleActors = make(map[int32]*VisibleEntry)
 
-	log.Logf(log.LevelInfo, "PlayObject", "%s 进入地图 %s（坐标 %d,%d）", p.Name, p.MapName, p.CurrX, p.CurrY)
+	log.Logf(log.LevelInfo, "PlayObject", "%s entered map %s (position %d,%d)", p.Name, p.MapName, p.CurrX, p.CurrY)
 	return true
 }

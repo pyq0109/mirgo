@@ -69,7 +69,7 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 
 	p.trainSkill(magID)
 
-	log.Logf(log.LevelInfo, "Magic", "%s 施放 %s (id=%d, 威力=%d)", p.Name, def.MagName, magID, power)
+	log.Logf(log.LevelInfo, "Magic", "%s cast %s (id=%d, power=%d)", p.Name, def.MagName, magID, power)
 }
 
 func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power, tx, ty int) {
@@ -284,7 +284,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				if int(mon.WAbil.HP) < mon.MaxHP/3 && rand.Intn(100) < 30+int(p.WAbil.Level) {
 					mon.TargetID = 0
 					mon.LastHiterID = 0
-					log.Logf(log.LevelInfo, "Magic", "%s 驯服了 %s", p.Name, mon.Name)
+					log.Logf(log.LevelInfo, "Magic", "%s tamed %s", p.Name, mon.Name)
 				}
 			}
 		}
@@ -537,7 +537,7 @@ func (p *PlayObject) trainSkill(magID int) {
 			if pm.TrainPoint >= threshold {
 				pm.TrainPoint = 0
 				pm.Level++
-				log.Logf(log.LevelInfo, "Magic", "%s 技能 %d 升级到 %d", p.Name, magID, pm.Level)
+				log.Logf(log.LevelInfo, "Magic", "%s skill %d leveled up to %d", p.Name, magID, pm.Level)
 			}
 			return
 		}

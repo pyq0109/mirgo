@@ -8,6 +8,9 @@ serverdata/
 server
 !cmd/server/
 !internal/server/
+client
+!cmd/client/
+!internal/client/
 
 # Mimo
 .mimocode/

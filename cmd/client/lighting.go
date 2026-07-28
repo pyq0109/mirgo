@@ -35,7 +35,7 @@ func (ls *LightingSystem) load(dataDir string) {
 		path := filepath.Join(dataDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			log.Logf(log.LevelWarn, "Lighting", "加载 %s 失败: %v", name, err)
+			log.Logf(log.LevelWarn, "Lighting", "failed to load %s: %v", name, err)
 			continue
 		}
 		if len(data) < 8 {
@@ -68,7 +68,7 @@ func (ls *LightingSystem) load(dataDir string) {
 		gl.BindTexture(gl.TEXTURE_2D, 0)
 		ls.fogTexID[i] = tex
 
-		log.Logf(log.LevelInfo, "Lighting", "已加载 %s: %dx%d", name, w, h)
+		log.Logf(log.LevelInfo, "Lighting", "loaded %s: %dx%d", name, w, h)
 	}
 	ls.loaded = true
 }

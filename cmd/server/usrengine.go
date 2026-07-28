@@ -49,14 +49,14 @@ func (e *UserEngine) AddPlayer(player *PlayObject) {
 	e.mu.Lock()
 	e.PlayObjectList[player.ID] = player
 	e.mu.Unlock()
-	log.Logf(log.LevelInfo, "UserEngine", "玩家 %s 已加入（总数: %d）", player.Name, len(e.PlayObjectList))
+	log.Logf(log.LevelInfo, "UserEngine", "player %s joined (total: %d)", player.Name, len(e.PlayObjectList))
 }
 
 func (e *UserEngine) RemovePlayer(id int32) {
 	e.mu.Lock()
 	delete(e.PlayObjectList, id)
 	e.mu.Unlock()
-	log.Logf(log.LevelInfo, "UserEngine", "玩家 %d 已移除（总数: %d）", id, len(e.PlayObjectList))
+	log.Logf(log.LevelInfo, "UserEngine", "player %d removed (total: %d)", id, len(e.PlayObjectList))
 }
 
 

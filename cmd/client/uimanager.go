@@ -87,11 +87,11 @@ func (m *UIManager) CloseModal(c *UIControl) {
 // — 对应 ClMain.pas 的 `if g_DWinMan.MouseDown then exit`).
 func (m *UIManager) RouteMouseDown(absX, absY int, button int) bool {
 	if m.Modal != nil && m.Modal.Visible {
-		log.Logf(log.LevelDebug, "UI", "鼠标按下路由 → 模态 %s pos=(%d,%d)", m.Modal.Name, absX, absY)
+		log.Logf(log.LevelDebug, "UI", "mouse-down routed -> modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
 		return m.dispatchMouseDown(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
 	}
 	if m.Capture != nil {
-		log.Logf(log.LevelDebug, "UI", "鼠标按下路由 → 捕获 %s pos=(%d,%d)", m.Capture.Name, absX, absY)
+		log.Logf(log.LevelDebug, "UI", "mouse-down routed -> capture %s pos=(%d,%d)", m.Capture.Name, absX, absY)
 		return m.dispatchMouseDown(m.Capture, button, m.Capture.ParentSpaceX(absX), m.Capture.ParentSpaceY(absY))
 	}
 	return m.dispatchMouseDown(m.Root, button, absX-m.Root.Left, absY-m.Root.Top)
@@ -99,11 +99,11 @@ func (m *UIManager) RouteMouseDown(absX, absY int, button int) bool {
 
 func (m *UIManager) RouteMouseUp(absX, absY int, button int) bool {
 	if m.Modal != nil && m.Modal.Visible {
-		log.Logf(log.LevelDebug, "UI", "鼠标抬起路由 → 模态 %s pos=(%d,%d)", m.Modal.Name, absX, absY)
+		log.Logf(log.LevelDebug, "UI", "mouse-up routed -> modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
 		return m.dispatchMouseUp(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
 	}
 	if m.Capture != nil {
-		log.Logf(log.LevelDebug, "UI", "鼠标抬起路由 → 捕获 %s pos=(%d,%d)", m.Capture.Name, absX, absY)
+		log.Logf(log.LevelDebug, "UI", "mouse-up routed -> capture %s pos=(%d,%d)", m.Capture.Name, absX, absY)
 		return m.dispatchMouseUp(m.Capture, button, m.Capture.ParentSpaceX(absX), m.Capture.ParentSpaceY(absY))
 	}
 	return m.dispatchMouseUp(m.Root, button, absX-m.Root.Left, absY-m.Root.Top)
@@ -176,7 +176,7 @@ func (m *UIManager) dispatchMouseDown(c *UIControl, button, x, y int) bool {
 		// TDGrid.MouseDown (:721-736): 左键且命中单元格 → 捕获.
 		if button == 0 {
 			if col, row, ok := c.ColRowAt(x, y); ok {
-				log.Logf(log.LevelDebug, "UI", "网格鼠标按下 %s cell=(%d,%d)", c.Name, col, row)
+				log.Logf(log.LevelDebug, "UI", "grid mouse-down %s cell=(%d,%d)", c.Name, col, row)
 				c.SelectCol, c.SelectRow = col, row
 				m.SetCapture(c)
 				return true
@@ -198,7 +198,7 @@ func (m *UIManager) dispatchMouseDown(c *UIControl, button, x, y int) bool {
 			return false
 		}
 		if m.canFocusMsg(c) && (c.InRange(x, y) || m.Capture == c) {
-			log.Logf(log.LevelDebug, "UI", "鼠标按下 %s(%s) pos=(%d,%d) btn=%d", c.Name, c.Kind, x, y, button)
+			log.Logf(log.LevelDebug, "UI", "mouse-down %s(%s) pos=(%d,%d) btn=%d", c.Name, c.Kind, x, y, button)
 			if c.OnMouseDown != nil {
 				c.OnMouseDown(c, button, x, y)
 			}
@@ -240,7 +240,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 		if button == 0 {
 			if col, row, ok := c.ColRowAt(x, y); ok {
 				if c.SelectCol == col && c.SelectRow == row {
-					log.Logf(log.LevelDebug, "UI", "网格选中 %s cell=(%d,%d)", c.Name, col, row)
+					log.Logf(log.LevelDebug, "UI", "grid select %s cell=(%d,%d)", c.Name, col, row)
 					c.Col, c.Row = col, row
 					if c.OnGridSelect != nil {
 						c.OnGridSelect(c, col, row)
@@ -261,7 +261,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 					// TDWindow.MouseUp 只是调用 inherited).
 					m.ReleaseCapture()
 					if !c.Background && c.InRange(x, y) {
-						log.Logf(log.LevelDebug, "UI", "点击 %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+						log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 						if c.OnMouseUp != nil {
 							c.OnMouseUp(c, button, x, y)
 						}
@@ -289,7 +289,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 			// Delphi 中抬起之后会跟一个 WM_LBUTTONCLK; 带 OnClick 的
 			// 控件 (如 DStateWin 魔法页命中检测) 在此收到它.
 			if c.OnClick != nil {
-				log.Logf(log.LevelDebug, "UI", "点击 %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+				log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 				c.OnClick(c, x, y)
 			}
 			if c.Kind == KindButton || c.Kind == KindWindow {
@@ -346,7 +346,7 @@ func (m *UIManager) dispatchMouseMove(c *UIControl, x, y int) bool {
 						if at+c.Height > WinBottom {
 							at = WinBottom - c.Height
 						}
-						log.Logf(log.LevelDebug, "UI", "拖动 %s to=(%d,%d)", c.Name, al, at)
+						log.Logf(log.LevelDebug, "UI", "drag %s to=(%d,%d)", c.Name, al, at)
 						c.Left, c.Top = al, at
 						c.SpotX, c.SpotY = x, y
 					}
@@ -375,7 +375,7 @@ func (m *UIManager) dispatchDblClick(c *UIControl, x, y int) bool {
 	// 捕获优先于子控件 (DWinCtl.pas:558-565).
 	if m.Capture != nil {
 		if m.Capture == c && c.OnDblClick != nil {
-			log.Logf(log.LevelDebug, "UI", "双击 %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+			log.Logf(log.LevelDebug, "UI", "double-click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 			c.OnDblClick(c, x, y)
 			return true
 		}
@@ -391,7 +391,7 @@ func (m *UIManager) dispatchDblClick(c *UIControl, x, y int) bool {
 		return false
 	}
 	if c.InRange(x, y) && c.OnDblClick != nil {
-		log.Logf(log.LevelDebug, "UI", "双击 %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+		log.Logf(log.LevelDebug, "UI", "double-click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
 		c.OnDblClick(c, x, y)
 		return true
 	}

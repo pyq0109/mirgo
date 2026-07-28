@@ -16,11 +16,11 @@ func NewNoticeScene(gl *engine.GLState, resources *engine.ResourceManager, text 
 }
 
 func (s *NoticeScene) Open() {
-	log.Logf(log.LevelInfo, "NoticeScene", "已打开")
+	log.Logf(log.LevelInfo, "NoticeScene", "opened")
 }
 
 func (s *NoticeScene) Close() {
-	log.Logf(log.LevelInfo, "NoticeScene", "已关闭")
+	log.Logf(log.LevelInfo, "NoticeScene", "closed")
 }
 
 func (s *NoticeScene) Update(dt float64) {}

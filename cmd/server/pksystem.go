@@ -24,7 +24,7 @@ func (p *PlayObject) IncPkPoint(points int) {
 	oldLevel := p.PKLevel()
 	p.PkPoint += points
 	if p.PKLevel() != oldLevel {
-		log.Logf(log.LevelInfo, "PK", "%s PK 等级变化: %d -> %d", p.Name, oldLevel, p.PKLevel())
+		log.Logf(log.LevelInfo, "PK", "%s PK level changed: %d -> %d", p.Name, oldLevel, p.PKLevel())
 	}
 }
 
@@ -73,5 +73,5 @@ func (p *PlayObject) OnPlayerKilled(server *netserver.TCPServer, victim *PlayObj
 		}
 	}
 
-	log.Logf(log.LevelInfo, "PK", "%s 击杀 %s，PK 点数: %d（等级 %d）", p.Name, victim.Name, p.PkPoint, p.PKLevel())
+	log.Logf(log.LevelInfo, "PK", "%s killed %s, PK points: %d (level %d)", p.Name, victim.Name, p.PkPoint, p.PKLevel())
 }

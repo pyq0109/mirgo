@@ -81,7 +81,7 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 		if dist <= 3 {
 			o.FixedHide = false
 			o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
-			log.Logf(log.LevelInfo, "Monster", "%s 从地下钻出", o.Name)
+			log.Logf(log.LevelInfo, "Monster", "%s emerged from underground", o.Name)
 		}
 		return
 	}
@@ -139,7 +139,7 @@ func (o *MonsterObject) explode(server *netserver.TCPServer, target *PlayObject,
 	o.Death = true
 	o.DeathTick = now
 	o.WAbil.HP = 0
-	log.Logf(log.LevelInfo, "Monster", "%s 自爆造成 %d 点伤害", o.Name, damage)
+	log.Logf(log.LevelInfo, "Monster", "%s self-destructed dealing %d damage", o.Name, damage)
 }
 
 func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -156,7 +156,7 @@ func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayO
 			o.CurrX, o.CurrY = tx, ty
 			o.envir.AddObject(tx, ty, OS_MOVINGOBJECT, o)
 			o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
-			log.Logf(log.LevelInfo, "Monster", "%s 传送到 (%d,%d)", o.Name, tx, ty)
+			log.Logf(log.LevelInfo, "Monster", "%s teleported to (%d,%d)", o.Name, tx, ty)
 			return
 		}
 	}
@@ -217,7 +217,7 @@ func (o *MonsterObject) runCloneAI(server *netserver.TCPServer, target *PlayObje
 				o.Engine.Monsters = append(o.Engine.Monsters, clone)
 				o.Engine.mu.Unlock()
 				clone.SendRefMsg(RM_TURN, clone.Dir, cx, cy, clone.Name)
-				log.Logf(log.LevelInfo, "Monster", "%s 在 (%d,%d) 生成分身", o.Name, cx, cy)
+				log.Logf(log.LevelInfo, "Monster", "%s spawned clone at (%d,%d)", o.Name, cx, cy)
 			}
 		}
 	}

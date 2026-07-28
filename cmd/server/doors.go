@@ -17,7 +17,7 @@ func ProcessDoors(envir *Environment, currentTick int64) {
 		door := &envir.Doors[i]
 		if door.State == 1 && currentTick-door.OpenTick > doorCloseDelay {
 			door.State = 0
-			log.Logf(log.LevelDebug, "Doors", "门 %d 在 (%d,%d) 自动关闭", door.ID, door.X, door.Y)
+			log.Logf(log.LevelDebug, "Doors", "door %d auto-closed at (%d,%d)", door.ID, door.X, door.Y)
 			if envir.rawMap != nil {
 				info := envir.rawMap.InfoAt(door.X, door.Y)
 				if info != nil {
@@ -48,7 +48,7 @@ func (p *PlayObject) HandleOpenDoor(msg SendMessage, server *netserver.TCPServer
 					}
 					resp := protocol.MakeDefaultMsg(protocol.SMOpenDoorOK, int32(door.ID), uint16(door.X), uint16(door.Y), 0)
 					server.Send(p.Session.ID, resp, "")
-					log.Logf(log.LevelInfo, "Doors", "%s 打开了门 %d，位置 (%d,%d)", p.Name, door.ID, door.X, door.Y)
+					log.Logf(log.LevelInfo, "Doors", "%s opened door %d at (%d,%d)", p.Name, door.ID, door.X, door.Y)
 					return
 				}
 			}

@@ -306,58 +306,58 @@ var loginModeNames = [...]string{"login", "register", "chgpw", "serverselect"}
 
 func (s *LoginScene) logComponentLayout() {
 	name := loginModeNames[s.mode]
-	log.Logf(log.LevelInfo, "LoginScene", "=== 组件布局 (mode=%s) ===", name)
-	log.Logf(log.LevelInfo, "LoginScene", "  背景      ChrSel[22]       pos=(%.0f,%.0f) size=(800,600)", loginOX, loginOY)
+	log.Logf(log.LevelInfo, "LoginScene", "=== component layout (mode=%s) ===", name)
+	log.Logf(log.LevelInfo, "LoginScene", "  background ChrSel[22]       pos=(%.0f,%.0f) size=(800,600)", loginOX, loginOY)
 
 	switch s.mode {
 	case modeLogin:
 		fieldNames := [2]string{"ID", "Password"}
 		for i, a := range inputFields {
-			log.Logf(log.LevelInfo, "LoginScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", fieldNames[i], a.X, a.Y, a.W, a.H)
+			log.Logf(log.LevelInfo, "LoginScene", "  input      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", fieldNames[i], a.X, a.Y, a.W, a.H)
 		}
 		btnNames := [4]string{"OK", "ChangePW", "NewAccount", "Close"}
 		for i, a := range buttonAreas {
-			log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", btnNames[i], a.X, a.Y, a.W, a.H, buttonImages[i])
+			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", btnNames[i], a.X, a.Y, a.W, a.H, buttonImages[i])
 		}
 
 	case modeRegister:
 		wx, wy, ww, wh := s.windowOrigin(63)
-		log.Logf(log.LevelInfo, "LoginScene", "  窗口      Prguse[63]       pos=(%.0f,%.0f) size=(%d,%d)", wx, wy, ww, wh)
+		log.Logf(log.LevelInfo, "LoginScene", "  window     Prguse[63]       pos=(%.0f,%.0f) size=(%d,%d)", wx, wy, ww, wh)
 		regNames := [13]string{"account", "password", "confirm", "name", "SSNo", "birthday", "quiz1", "answer1", "quiz2", "answer2", "phone", "mobile", "email"}
 		for i, def := range regFieldDefs {
-			log.Logf(log.LevelInfo, "LoginScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", regNames[i], def.x, def.y, def.w, def.h)
+			log.Logf(log.LevelInfo, "LoginScene", "  input      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", regNames[i], def.x, def.y, def.w, def.h)
 		}
 		regBtnNames := [3]string{"Ok", "Cancel", "Close"}
 		for i, a := range regButtonAreas {
-			log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", regBtnNames[i], a.X, a.Y, a.W, a.H, regButtonImages[i])
+			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", regBtnNames[i], a.X, a.Y, a.W, a.H, regButtonImages[i])
 		}
-		log.Logf(log.LevelInfo, "LoginScene", "  标题文本  %-12s pos=(362,121)", "创建新账号")
+		log.Logf(log.LevelInfo, "LoginScene", "  title text %-12s pos=(362,121)", "Create New Account")
 
 	case modeChgPw:
 		wx, wy, ww, wh := s.windowOrigin(50)
-		log.Logf(log.LevelInfo, "LoginScene", "  窗口      Prguse[50]       pos=(%.0f,%.0f) size=(%d,%d)", wx, wy, ww, wh)
+		log.Logf(log.LevelInfo, "LoginScene", "  window     Prguse[50]       pos=(%.0f,%.0f) size=(%d,%d)", wx, wy, ww, wh)
 		chgNames := [4]string{"account", "old-pw", "new-pw", "repeat"}
 		for i, def := range chgFieldDefs {
-			log.Logf(log.LevelInfo, "LoginScene", "  输入框    %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", chgNames[i], def.x, def.y, def.w, def.h)
+			log.Logf(log.LevelInfo, "LoginScene", "  input      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", chgNames[i], def.x, def.y, def.w, def.h)
 		}
 		chgBtnNames := [2]string{"Ok", "Cancel"}
 		for i, off := range []loginArea{{wx + 81, wy + 141, 0, 0}, {wx + 160, wy + 141, 0, 0}} {
 			bw, bh := s.getPrguseSize(chgButtonImages[i])
-			log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", chgBtnNames[i], off.X, off.Y, bw, bh, chgButtonImages[i])
+			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", chgBtnNames[i], off.X, off.Y, bw, bh, chgButtonImages[i])
 		}
 
 	case modeServerSelect:
 		wx, wy := s.srvWindowOrigin()
 		ww, wh := s.getPrguseSize(srvDlgImg)
-		log.Logf(log.LevelInfo, "LoginScene", "  窗口      Prguse[%d]      pos=(%.0f,%.0f) size=(%d,%d)", srvDlgImg, wx, wy, ww, wh)
+		log.Logf(log.LevelInfo, "LoginScene", "  window     Prguse[%d]      pos=(%.0f,%.0f) size=(%d,%d)", srvDlgImg, wx, wy, ww, wh)
 		cw, ch := s.getPrguseSize(srvCloseImg)
-		log.Logf(log.LevelInfo, "LoginScene", "  按钮      %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "Close", wx+srvCloseDX, wy+srvCloseDY, cw, ch, srvCloseImg)
+		log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "Close", wx+srvCloseDX, wy+srvCloseDY, cw, ch, srvCloseImg)
 		bw, bh := s.getPrguseSize(srvBtnImg)
 		count := len(s.servers)
 		for i := 0; i < count && i < 6; i++ {
 			bx := wx + 65
 			by := wy + srvButtonTop(i, count)
-			log.Logf(log.LevelInfo, "LoginScene", "  服务器按钮 %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", s.servers[i].Name, bx, by, bw, bh, srvBtnImg)
+			log.Logf(log.LevelInfo, "LoginScene", "  server btn %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", s.servers[i].Name, bx, by, bw, bh, srvBtnImg)
 		}
 	}
 }
@@ -389,7 +389,7 @@ func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *
 
 // Open 在场景激活时调用。
 func (s *LoginScene) Open() {
-	log.Logf(log.LevelInfo, "LoginScene", "已打开")
+	log.Logf(log.LevelInfo, "LoginScene", "opened")
 	s.mode = modeLogin
 	s.showLoginUI = true
 	s.doorOpening = false
@@ -410,7 +410,7 @@ func (s *LoginScene) Open() {
 
 // Close 在场景失活时调用。
 func (s *LoginScene) Close() {
-	log.Logf(log.LevelInfo, "LoginScene", "已关闭")
+	log.Logf(log.LevelInfo, "LoginScene", "closed")
 }
 
 // Update 推进开门动画；黑屏淡出由全局 MakeDark 系统处理
@@ -426,7 +426,7 @@ func (s *LoginScene) Update(dt float64) {
 				s.doorFrame++
 			} else {
 				s.doorFading = true
-				log.Logf(log.LevelInfo, "LoginScene", "开门动画完成, 开始淡出")
+				log.Logf(log.LevelInfo, "LoginScene", "door animation done, starting fade-out")
 				globalFade.startOut(false, func() {
 					if s.doorCompleteFunc != nil {
 						s.doorCompleteFunc()
@@ -449,7 +449,7 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 		s.traceDraw("bg", "ChrSel", 22, ox, oy, float32(w), float32(h))
 		gl.DrawQuad(bgTex, ox, oy, float32(w), float32(h), proj)
 	} else {
-		log.Logf(log.LevelWarn, "LoginScene", "ChrSel[22] 背景不可用 (tex=%d err=%v)", bgTex, bgErr)
+		log.Logf(log.LevelWarn, "LoginScene", "ChrSel[22] background unavailable (tex=%d err=%v)", bgTex, bgErr)
 		gl.DrawQuadColor(0, 0, 800, 600, 0.05, 0.05, 0.1, 1, proj)
 	}
 
@@ -576,7 +576,7 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 	if s.text != nil {
 		// 标题 NewAccountTitle 位于 (362,121)，白色+黑色描边，粗体
 		// (FState.pas:2669)。
-		log.Logf(log.LevelTrace, "Render", "login 标题 pos=(%.0f,%.0f)", float32(362), float32(121))
+		log.Logf(log.LevelTrace, "Render", "login title pos=(%.0f,%.0f)", float32(362), float32(121))
 		s.text.DrawTextBoldOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		// 各输入框帮助文本 NAHelps，clSilver 色，随焦点切换
 		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14)。
@@ -658,7 +658,7 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 				tx += 2
 				ty += 2
 			}
-			log.Logf(log.LevelTrace, "Render", "login 服务器按钮文本 %q pos=(%.0f,%.0f)", name, tx, ty)
+			log.Logf(log.LevelTrace, "Render", "login server button text %q pos=(%.0f,%.0f)", name, tx, ty)
 			s.textSrv.DrawTextBoldOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
 		}
 	}
@@ -758,7 +758,7 @@ func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 	}
 	y := win.Y + g.msgLY
 	for _, ln := range s.dlgLines {
-		log.Logf(log.LevelTrace, "Render", "login 对话框文本 %q pos=(%.0f,%.0f)", ln, win.X+g.msgLX, y)
+		log.Logf(log.LevelTrace, "Render", "login dialog text %q pos=(%.0f,%.0f)", ln, win.X+g.msgLX, y)
 		s.text.DrawTextBoldOutline(ln, win.X+g.msgLX, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		y += 14
 	}
@@ -932,7 +932,7 @@ func (s *LoginScene) keyChgPw(key int) {
 // OnMouse 处理鼠标按键输入。在同一区域内松开时触发点击
 // (TDButton.MouseUp, DWinCtl.pas:677-695)。
 func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
-	log.Logf(log.LevelDebug, "Mouse", "login pos=(%.0f,%.0f) 按键=%d 动作=%d", x, y, button, action)
+	log.Logf(log.LevelDebug, "Mouse", "login pos=(%.0f,%.0f) button=%d action=%d", x, y, button, action)
 	if !s.showLoginUI || s.doorOpening {
 		return
 	}
@@ -945,7 +945,7 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
 			for i, b := range btns {
 				if hitTest(fx, fy, b) {
 					s.dlgPressedBtn = i
-					log.Logf(log.LevelInfo, "LoginScene", "点击 对话框按钮[%d] img=Prguse[%d] pos=(%.0f,%.0f)", i, s.dlgButtons[i], b.X, b.Y)
+					log.Logf(log.LevelInfo, "LoginScene", "click dialog button[%d] img=Prguse[%d] pos=(%.0f,%.0f)", i, s.dlgButtons[i], b.X, b.Y)
 					break
 				}
 			}
@@ -1006,7 +1006,7 @@ func (s *LoginScene) mouseLogin(fx, fy float32, action int) {
 			if hitTest(fx, fy, field) {
 				s.focusedField = i
 				s.cursorBlink = time.Now()
-				log.Logf(log.LevelInfo, "LoginScene", "点击 输入框 %s pos=(%.0f,%.0f)", fieldNames[i], field.X, field.Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click input %s pos=(%.0f,%.0f)", fieldNames[i], field.X, field.Y)
 				return
 			}
 		}
@@ -1014,7 +1014,7 @@ func (s *LoginScene) mouseLogin(fx, fy float32, action int) {
 		for i := range buttonAreas {
 			if hitTest(fx, fy, s.buttonArea(i)) {
 				s.pressedButton = i
-				log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 %s pos=(%.0f,%.0f)", btnNames[i], buttonAreas[i].X, buttonAreas[i].Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click button %s pos=(%.0f,%.0f)", btnNames[i], buttonAreas[i].X, buttonAreas[i].Y)
 				return
 			}
 		}
@@ -1043,7 +1043,7 @@ func (s *LoginScene) mouseGroup(fx, fy float32, action int, fields, buttons []lo
 				if i < len(regNames) {
 					name = regNames[i]
 				}
-				log.Logf(log.LevelInfo, "LoginScene", "点击 输入框 %s pos=(%.0f,%.0f)", name, field.X, field.Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click input %s pos=(%.0f,%.0f)", name, field.X, field.Y)
 				return
 			}
 		}
@@ -1055,7 +1055,7 @@ func (s *LoginScene) mouseGroup(fx, fy float32, action int, fields, buttons []lo
 				if i < len(regBtnNames) {
 					name = regBtnNames[i]
 				}
-				log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 %s pos=(%.0f,%.0f)", name, btn.X, btn.Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click button %s pos=(%.0f,%.0f)", name, btn.X, btn.Y)
 				return
 			}
 		}
@@ -1086,7 +1086,7 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 			if hitTest(fx, fy, loginArea{def.x, def.y, def.w, def.h}) {
 				s.chgFocus = i
 				s.cursorBlink = time.Now()
-				log.Logf(log.LevelInfo, "LoginScene", "点击 输入框 %s pos=(%.0f,%.0f)", chgNames[i], def.x, def.y)
+				log.Logf(log.LevelInfo, "LoginScene", "click input %s pos=(%.0f,%.0f)", chgNames[i], def.x, def.y)
 				return
 			}
 		}
@@ -1094,7 +1094,7 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 		for i, btn := range buttons {
 			if hitTest(fx, fy, btn) {
 				s.pressedButton = i
-				log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 %s pos=(%.0f,%.0f)", chgBtnNames[i], btn.X, btn.Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click button %s pos=(%.0f,%.0f)", chgBtnNames[i], btn.X, btn.Y)
 				return
 			}
 		}
@@ -1130,13 +1130,13 @@ func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 		for i := 0; i < count && i < 6; i++ {
 			if hitTest(fx, fy, btnArea(i)) {
 				s.pressedButton = i
-				log.Logf(log.LevelInfo, "LoginScene", "点击 服务器按钮 %s pos=(%.0f,%.0f)", s.servers[i].Name, wx+65, wy+srvButtonTop(i, count))
+				log.Logf(log.LevelInfo, "LoginScene", "click server button %s pos=(%.0f,%.0f)", s.servers[i].Name, wx+65, wy+srvButtonTop(i, count))
 				return
 			}
 		}
 		if hitTest(fx, fy, closeArea) {
 			s.pressedButton = 6
-			log.Logf(log.LevelInfo, "LoginScene", "点击 按钮 Close pos=(%.0f,%.0f)", closeArea.X, closeArea.Y)
+			log.Logf(log.LevelInfo, "LoginScene", "click button Close pos=(%.0f,%.0f)", closeArea.X, closeArea.Y)
 		}
 	case mouseRelease:
 		if s.pressedButton < 0 {
@@ -1208,7 +1208,7 @@ func (s *LoginScene) submitLogin() {
 	s.waitingResponse = true // 等待期间隐藏输入框 (IntroScn.pas:551-554)
 	pw := strings.ReplaceAll(strings.ReplaceAll(s.password, "~", "_"), "'", "_")
 	id := strings.ToLower(s.userID) // m_sLoginId := LowerCase (IntroScn.pas:534,548)
-	log.Logf(log.LevelInfo, "LoginScene", "提交登录: %s", id)
+	log.Logf(log.LevelInfo, "LoginScene", "submit login: %s", id)
 	s.loginFunc(id, pw)
 }
 
@@ -1283,7 +1283,7 @@ func (s *LoginScene) submitRegister() {
 	ua.SetBirthDay(s.regFields[5])
 	ua.SetMobilePhone(s.regFields[11])
 
-	log.Logf(log.LevelInfo, "LoginScene", "提交注册: %s", ue.Account())
+	log.Logf(log.LevelInfo, "LoginScene", "submit register: %s", ue.Account())
 	s.connecting = true
 	s.registerFunc(ue, ua)
 	s.mode = modeLogin // NewAccountClose (:1068,1072-1076)
@@ -1324,7 +1324,7 @@ func (s *LoginScene) submitChgPw() {
 		s.ShowMessage("未连接到服务器")
 		return
 	}
-	log.Logf(log.LevelInfo, "LoginScene", "提交修改密码: %s", s.chgFields[0])
+	log.Logf(log.LevelInfo, "LoginScene", "submit change password: %s", s.chgFields[0])
 	s.connecting = true
 	s.chgpwFunc(s.chgFields[0], s.chgFields[1], s.chgFields[2])
 	s.mode = modeLogin // ChgpwCancel (:1087,1094-1097)
@@ -1364,7 +1364,7 @@ func (s *LoginScene) closeDialog() {
 
 // SetError 保留给现有调用方；现在改为显示模态对话框。
 func (s *LoginScene) SetError(msg string) {
-	log.Logf(log.LevelWarn, "LoginScene", "错误: %s", msg)
+	log.Logf(log.LevelWarn, "LoginScene", "error: %s", msg)
 	s.ShowMessage(msg)
 }
 
@@ -1411,7 +1411,7 @@ func (s *LoginScene) SetSelectFunc(fn func(serverName string)) {
 // ShowServerSelect 在登录背景上方打开 DSelServerDlg 浮层，
 // 而非切换到独立场景 (FState.pas:2453-2517)。
 func (s *LoginScene) ShowServerSelect(servers []serverInfo) {
-	log.Logf(log.LevelInfo, "LoginScene", "显示选服界面: %d 个服务器", len(servers))
+	log.Logf(log.LevelInfo, "LoginScene", "show server select: %d servers", len(servers))
 	s.servers = servers
 	s.mode = modeServerSelect
 	s.pressedButton = -1
@@ -1435,7 +1435,7 @@ func (s *LoginScene) SetDoorCompleteFunc(fn func()) {
 
 // OpenLoginDoor 开始开门动画。
 func (s *LoginScene) OpenLoginDoor() {
-	log.Logf(log.LevelInfo, "LoginScene", "开始开门动画")
+	log.Logf(log.LevelInfo, "LoginScene", "starting door animation")
 	s.doorOpening = true
 	s.doorFading = false
 	s.doorFrame = 0

@@ -207,7 +207,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		if o.TargetID != 0 {
 			o.StoneMode = false
 			o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
-			log.Logf(log.LevelInfo, "Monster", "%s 解除石化", o.Name)
+			log.Logf(log.LevelInfo, "Monster", "%s released from petrification", o.Name)
 		}
 		return
 	}
@@ -362,7 +362,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 					o.Engine.mu.Unlock()
 					minion.SendRefMsg(RM_TURN, minion.Dir, cx, cy, minion.Name)
 					o.minionCount++
-					log.Logf(log.LevelInfo, "Monster", "%s 在 (%d,%d) 召唤了一个随从", o.Name, cx, cy)
+					log.Logf(log.LevelInfo, "Monster", "%s summoned a minion at (%d,%d)", o.Name, cx, cy)
 				}
 			}
 			if dist <= 1 {
@@ -456,7 +456,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 		if o.envir != nil {
 			o.envir.broadcastDeathMsg(target.BaseObject, target.ID, target.CurrX, target.CurrY, target.Dir, true)
 		}
-		log.Logf(log.LevelInfo, "Combat", "%s 击杀了 %s", o.Name, target.Name)
+		log.Logf(log.LevelInfo, "Combat", "%s killed %s", o.Name, target.Name)
 	} else {
 		target.sendHealthSpell(server)
 	}

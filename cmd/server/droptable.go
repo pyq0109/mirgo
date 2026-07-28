@@ -39,7 +39,7 @@ func LoadDropTables(dir string) *DropTable {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		log.Logf(log.LevelWarn, "DropTable", "目录不存在: %s，使用默认掉落表", dir)
+		log.Logf(log.LevelWarn, "DropTable", "directory not found: %s, using default drop tables", dir)
 		dt.loadDefaults()
 		return dt
 	}
@@ -51,19 +51,19 @@ func LoadDropTables(dir string) *DropTable {
 		}
 		path := filepath.Join(dir, entry.Name())
 		if err := dt.loadFile(path); err != nil {
-			log.Logf(log.LevelWarn, "DropTable", "加载 %s 失败: %v", path, err)
+			log.Logf(log.LevelWarn, "DropTable", "failed to load %s: %v", path, err)
 			continue
 		}
 		count++
 	}
 
 	if count == 0 {
-		log.Logf(log.LevelWarn, "DropTable", "在 %s 中未找到掉落文件，使用默认掉落表", dir)
+		log.Logf(log.LevelWarn, "DropTable", "no drop files found in %s, using default drop tables", dir)
 		dt.loadDefaults()
 		return dt
 	}
 
-	log.Logf(log.LevelInfo, "DropTable", "从 %s 加载了 %d 个掉落表", dir, count)
+	log.Logf(log.LevelInfo, "DropTable", "loaded %d drop tables from %s", count, dir)
 	return dt
 }
 

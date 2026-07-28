@@ -113,7 +113,7 @@ func (p *PlayObject) HandleCreateGroup(msg SendMessage, server *netserver.TCPSer
 	resp := protocol.MakeDefaultMsg(protocol.SMCreateGroupOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	p.broadcastPartyMembers(party, server)
-	log.Logf(log.LevelInfo, "Party", "%s 创建了队伍", p.Name)
+	log.Logf(log.LevelInfo, "Party", "%s created a party", p.Name)
 }
 
 // HandleGroupMode 切换允许组队标志（CMGroupMode，Param=1/0）。
@@ -142,7 +142,7 @@ func (p *PlayObject) HandleAddGroupMember(msg SendMessage, server *netserver.TCP
 	resp := protocol.MakeDefaultMsg(protocol.SMGroupAddMemOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(target.Name))
 	p.broadcastPartyMembers(party, server)
-	log.Logf(log.LevelInfo, "Party", "%s 邀请 %s 加入队伍", p.Name, target.Name)
+	log.Logf(log.LevelInfo, "Party", "%s invited %s to party", p.Name, target.Name)
 }
 
 // HandleDelGroupMember 将指定玩家从调用者的队伍中移除；
@@ -181,5 +181,5 @@ func (p *PlayObject) HandleDelGroupMember(msg SendMessage, server *netserver.TCP
 		return
 	}
 	p.broadcastPartyMembers(party, server)
-	log.Logf(log.LevelInfo, "Party", "%s 将 %s 移出队伍", p.Name, targetName)
+	log.Logf(log.LevelInfo, "Party", "%s removed %s from party", p.Name, targetName)
 }

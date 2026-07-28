@@ -66,7 +66,7 @@ func LoadMonsterDB(path string) (*MonsterDB, error) {
 		mon := &db.Monsters[i]
 		db.byName[mon.Name] = mon
 	}
-	log.Logf(log.LevelInfo, "MonsterDB", "从 %s 加载了 %d 个怪物", path, len(db.Monsters))
+	log.Logf(log.LevelInfo, "MonsterDB", "loaded %d monsters from %s", len(db.Monsters), path)
 	return db, nil
 }
 

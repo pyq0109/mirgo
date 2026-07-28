@@ -645,7 +645,7 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 		script, err := LoadNpcScript(npc.Script)
 		if err == nil {
 			script.Execute("main", p, npc, server)
-			log.Logf(log.LevelInfo, "NPC", "%s 执行了 %s 的脚本", p.Name, npc.Name)
+			log.Logf(log.LevelInfo, "NPC", "%s executed script of %s", p.Name, npc.Name)
 			return
 		}
 	}
@@ -654,5 +654,5 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(dialog))
 
-	log.Logf(log.LevelInfo, "NPC", "%s 点击了 NPC %s", p.Name, npc.Name)
+	log.Logf(log.LevelInfo, "NPC", "%s clicked NPC %s", p.Name, npc.Name)
 }

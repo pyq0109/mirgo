@@ -427,17 +427,17 @@ func (s *PlayScene) LoadMap(mapName string) error {
 		s.objectsCaches[0] = make(map[int]uint32)
 	}
 
-	log.Logf(log.LevelInfo, "PlayScene", "已加载地图: %s (%dx%d)", mapName, m.Width, m.Height)
+	log.Logf(log.LevelInfo, "PlayScene", "map loaded: %s (%dx%d)", mapName, m.Width, m.Height)
 	return nil
 }
 
 func (s *PlayScene) Open() {
-	log.Logf(log.LevelInfo, "PlayScene", "已打开")
+	log.Logf(log.LevelInfo, "PlayScene", "opened")
 }
 
 func (s *PlayScene) Close() {
 	s.State.Reset()
-	log.Logf(log.LevelInfo, "PlayScene", "已关闭")
+	log.Logf(log.LevelInfo, "PlayScene", "closed")
 }
 
 func (s *PlayScene) Update(dt float64) {
@@ -636,7 +636,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 
 	if s.deathGray {
-		log.Logf(log.LevelTrace, "Render", "play 死亡灰度 viewport=(%.0f,%.0f,%.0f,%.0f)",
+		log.Logf(log.LevelTrace, "Render", "play death grayscale viewport=(%.0f,%.0f,%.0f,%.0f)",
 			s.cam.X, s.cam.Y, float64(s.cam.ViewW)/s.cam.Zoom, float64(s.cam.ViewH)/s.cam.Zoom)
 		s.gl.DrawQuadColor(float32(s.cam.X), float32(s.cam.Y),
 			float32(float64(s.cam.ViewW)/s.cam.Zoom), float32(float64(s.cam.ViewH)/s.cam.Zoom),
@@ -662,7 +662,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 				mmTex := s.resources.GetTexture(s.resources.Mmap, 0)
 				if mmTex != 0 {
 					// Delphi: (SCREENWIDTH-120, 0), 120×120（PlayScn.pas:791-842）。
-					log.Logf(log.LevelTrace, "Render", "play 小地图 Mmap[0] pos=(%d,0) size=(120,120)", ScreenWidth-120)
+					log.Logf(log.LevelTrace, "Render", "play minimap Mmap[0] pos=(%d,0) size=(120,120)", ScreenWidth-120)
 					s.gl.DrawQuad(mmTex, ScreenWidth-120, 0, 120, 120, uiProj)
 					mmapDrawn = true
 				}
@@ -730,7 +730,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		my := s.State.MySelf
 		wx := float32(float64(my.Rx*engine.TileWidth) + my.ShiftX)
 		wy := float32(float64(my.Ry*engine.TileHeight) + my.ShiftY)
-		log.Logf(log.LevelTrace, "Render", "play 自身重绘 pos=(%.0f,%.0f) dir=%d", wx, wy, my.Dir)
+		log.Logf(log.LevelTrace, "Render", "play self redraw pos=(%.0f,%.0f) dir=%d", wx, wy, my.Dir)
 		my.Draw(s.gl, s.resources, wx, wy, proj)
 	}
 
@@ -757,7 +757,7 @@ func (s *PlayScene) drawGroundItemIcon(gi *GroundItemInfo, proj [16]float32) {
 		if img != nil && img.RGBA != nil {
 			tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
 			if tex != 0 {
-				log.Logf(log.LevelTrace, "Render", "play 地面物品 DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
+				log.Logf(log.LevelTrace, "Render", "play ground item DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
 				s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
 				return
 			}
@@ -777,7 +777,7 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 			flashIdx := 410 + step
 			if fimg := s.resources.Prguse.GetImage(flashIdx); fimg != nil && fimg.RGBA != nil {
 				if ftex := s.resources.GetTexture(s.resources.Prguse, flashIdx); ftex != 0 {
-					log.Logf(log.LevelTrace, "Render", "play 物品闪烁 Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
+					log.Logf(log.LevelTrace, "Render", "play item flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
 					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 					s.gl.DrawQuad(ftex, ix, iy, float32(fimg.Width), float32(fimg.Height), proj)
 					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -788,7 +788,7 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 	if s.text != nil && gi.Name != "" {
 		nameW := float32(s.text.MeasureText(gi.Name))
 		nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
-		log.Logf(log.LevelTrace, "Render", "play 物品名称 '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
+		log.Logf(log.LevelTrace, "Render", "play item name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
 		s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
 	}
 }
@@ -811,7 +811,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 	if showName && a.UserName != "" && s.text != nil {
 		nameW := float32(s.text.MeasureText(a.UserName))
 		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
-		log.Logf(log.LevelTrace, "Render", "play 角色名称 '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
+		log.Logf(log.LevelTrace, "Render", "play actor name '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
 		s.text.DrawText(a.UserName, nameX-1, sayY, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX+1, sayY, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX, sayY-1, 0, 0, 0, 1.0, proj)
@@ -831,7 +831,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 			hpBarX := worldX + float32(engine.TileWidth)/2 - hpBarW/2
 			hpBarY := sayY - 10
 			if bgTex != 0 {
-				log.Logf(log.LevelTrace, "Render", "play 血条背景 Prguse2[0] pos=(%.0f,%.0f) size=(%.0f,%.0f)", hpBarX, hpBarY, hpBarW, hpBarH)
+				log.Logf(log.LevelTrace, "Render", "play hp bar bg Prguse2[0] pos=(%.0f,%.0f) size=(%.0f,%.0f)", hpBarX, hpBarY, hpBarW, hpBarH)
 				s.gl.DrawQuad(bgTex, hpBarX, hpBarY, hpBarW, hpBarH, proj)
 			}
 			ratio := float32(1.0)
@@ -866,7 +866,7 @@ func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]fl
 		sayY = worldY - 12
 	}
 	bubbleY := sayY - float32(a.SayLineCount)*16
-	log.Logf(log.LevelTrace, "Render", "play 聊天气泡 lines=%d pos=(%.0f,%.0f)", a.SayLineCount, worldX-20, bubbleY)
+	log.Logf(log.LevelTrace, "Render", "play chat bubble lines=%d pos=(%.0f,%.0f)", a.SayLineCount, worldX-20, bubbleY)
 	for i := 0; i < a.SayLineCount && i < 5; i++ {
 		if a.SayingArr[i] != "" {
 			r, g, b := float32(1.0), float32(1.0), float32(1.0)
@@ -1378,7 +1378,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		}
 		wx, wy := s.cam.ScreenToWorld(x, y)
 		tx, ty := s.cam.WorldToTile(wx, wy)
-		log.Logf(log.LevelDebug, "Mouse", "play 右键 world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
+		log.Logf(log.LevelDebug, "Mouse", "play right-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
 		my := s.State.MySelf
 		if absInt(my.CurrX-tx) <= 2 && absInt(my.CurrY-ty) <= 2 {
 			dir := dirToward(my.CurrX, my.CurrY, tx, ty)
@@ -1408,7 +1408,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		return
 	}
 	if s.ui.RouteMouseDown(ix, iy, button) {
-		log.Logf(log.LevelDebug, "PlayScene", "鼠标事件被 UI 消费 pos=(%d,%d)", ix, iy)
+		log.Logf(log.LevelDebug, "PlayScene", "mouse event consumed by UI pos=(%d,%d)", ix, iy)
 		return
 	}
 	if y >= MapSurfaceH {
@@ -1427,7 +1427,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		}
 		wx, wy := s.cam.ScreenToWorld(x, y)
 		tx, ty := s.cam.WorldToTile(wx, wy)
-		log.Logf(log.LevelDebug, "Mouse", "play 左键 world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
+		log.Logf(log.LevelDebug, "Mouse", "play left-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
 
 		my := s.State.MySelf
 		for _, a := range s.State.Actors.All() {

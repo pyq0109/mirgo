@@ -76,7 +76,7 @@ func (p *PlayObject) HandleAdjustBonus(msg SendMessage, server *netserver.TCPSer
 	p.sendHealthSpell(server)
 	resp := protocol.MakeDefaultMsg(protocol.SMAdjustBonus, int32(p.BonusPoint), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
-	log.Logf(log.LevelInfo, "Items", "%s 分配了 %d 点加成点", p.Name, spent)
+	log.Logf(log.LevelInfo, "Items", "%s allocated %d bonus points", p.Name, spent)
 }
 
 // findBagItem 返回指定 MakeIndex 物品在背包中的位置，
@@ -202,7 +202,7 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 	p.SendAbility(server)
 	p.sendWeightChanged(server)
 
-	log.Logf(log.LevelInfo, "Items", "%s 装备 %s 到槽位 %d", p.Name, def.Name, slot)
+	log.Logf(log.LevelInfo, "Items", "%s equipped %s to slot %d", p.Name, def.Name, slot)
 }
 
 func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPServer) {
@@ -243,7 +243,7 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 			name = def.Name
 		}
 	}
-	log.Logf(log.LevelInfo, "Items", "%s 从槽位 %d 卸下 %s", p.Name, slot, name)
+	log.Logf(log.LevelInfo, "Items", "%s unequipped %s from slot %d", p.Name, name, slot)
 }
 
 func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer) {
@@ -303,7 +303,7 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 	p.SendAbility(server)
 	p.sendWeightChanged(server)
 
-	log.Logf(log.LevelInfo, "Items", "%s 使用了 %s", p.Name, def.Name)
+	log.Logf(log.LevelInfo, "Items", "%s used %s", p.Name, def.Name)
 }
 
 // makeLong 按 Delphi MakeLong 的方式打包 lo/hi 属性区间（lo word | hi word<<16）。

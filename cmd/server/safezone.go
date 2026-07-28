@@ -27,7 +27,7 @@ var globalSafeZones = &safeZoneManager{
 func LoadSafeZones(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Logf(log.LevelWarn, "SafeZone", "加载 %s 失败: %v，使用默认值", path, err)
+		log.Logf(log.LevelWarn, "SafeZone", "failed to load %s: %v, using defaults", path, err)
 		return
 	}
 
@@ -50,7 +50,7 @@ func LoadSafeZones(path string) {
 		} `json:"startPoints"`
 	}
 	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
-		log.Logf(log.LevelWarn, "SafeZone", "解析 %s 失败: %v", path, err)
+		log.Logf(log.LevelWarn, "SafeZone", "failed to parse %s: %v", path, err)
 		return
 	}
 
@@ -80,7 +80,7 @@ func LoadSafeZones(path string) {
 	}
 
 	globalSafeZones.zones = zones
-	log.Logf(log.LevelInfo, "SafeZone", "已加载 %d 个安全区，来源 %s", len(zones), path)
+	log.Logf(log.LevelInfo, "SafeZone", "loaded %d safe zones from %s", len(zones), path)
 }
 
 func CheckSafeZone(mapName string, x, y int) bool {
