@@ -36,10 +36,42 @@ type File struct {
 	path    string
 }
 
+// resolveInsensitive 在 target 所在目录中查找基名（不含扩展名）大小写不敏感匹配、
+// 且扩展名为 ext（不敏感）的文件，返回完整路径；未找到返回 ""。
+func resolveInsensitive(target, ext string) string {
+	dir := filepath.Dir(target)
+	base := strings.ToLower(strings.TrimSuffix(filepath.Base(target), filepath.Ext(target)))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.EqualFold(filepath.Ext(name), ext) {
+			nameBase := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+			if nameBase == base {
+				return filepath.Join(dir, name)
+			}
+		}
+	}
+	return ""
+}
+
 func Load(wilPath string) (*File, error) {
 	f, err := os.Open(wilPath)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", wilPath, err)
+		if resolved := resolveInsensitive(wilPath, ".wil"); resolved != "" {
+			f, err = os.Open(resolved)
+			if err != nil {
+				return nil, fmt.Errorf("open %s: %w", wilPath, err)
+			}
+			wilPath = resolved
+		} else {
+			return nil, fmt.Errorf("open %s: %w", wilPath, err)
+		}
 	}
 
 	magic := make([]byte, 5)
@@ -118,13 +150,17 @@ func Load(wilPath string) (*File, error) {
 	if _, err := os.Stat(wixPath); err != nil {
 		dir := filepath.Dir(wilPath)
 		wilBase := strings.ToLower(strings.TrimSuffix(filepath.Base(wilPath), filepath.Ext(wilPath)))
-		if matches, _ := filepath.Glob(filepath.Join(dir, "*.wix")); matches != nil {
-			for _, m := range matches {
-				mBase := strings.TrimRight(strings.ToLower(strings.TrimSuffix(filepath.Base(m), filepath.Ext(m))), ".")
-				if mBase == wilBase {
-					wixPath = m
-					break
-				}
+		var matches []string
+		for _, pat := range []string{"*.wix", "*.WIX"} {
+			if m, _ := filepath.Glob(filepath.Join(dir, pat)); m != nil {
+				matches = append(matches, m...)
+			}
+		}
+		for _, m := range matches {
+			mBase := strings.TrimRight(strings.ToLower(strings.TrimSuffix(filepath.Base(m), filepath.Ext(m))), ".")
+			if mBase == wilBase {
+				wixPath = m
+				break
 			}
 		}
 	}

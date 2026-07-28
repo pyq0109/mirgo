@@ -32,13 +32,25 @@ type TextRenderer struct {
 	fontData []byte // 保存以便 WithSize 复用
 }
 
-// fontSearchPaths 列出常见的 Windows 中文字体路径。
+// fontSearchPaths 列出常见系统的中文字体路径。
 var fontSearchPaths = []string{
+	// Windows
 	`C:\Windows\Fonts\msyh.ttc`,  // 微软雅黑
 	`C:\Windows\Fonts\msyhbd.ttc`, // 微软雅黑 Bold
 	`C:\Windows\Fonts\simsun.ttc`, // 宋体
 	`C:\Windows\Fonts\simhei.ttf`, // 黑体
 	`C:\Windows\Fonts\arial.ttf`,  // Arial（英文兜底）
+	// Linux
+	"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+	"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+	// macOS
+	"/System/Library/Fonts/PingFang.ttc",
+	"/System/Library/Fonts/STHeiti Light.ttc",
 }
 
 // NewTextRenderer 创建一个 TextRenderer。若 fontPath 为空，则尝试常见的 Windows 字体。
