@@ -66,6 +66,7 @@ func (s *PlayScene) buildBag() {
 		if s.itemMove.Moving || s.State.Gold <= 0 {
 			return
 		}
+		gSound.PlaySound(sMoney)
 		// 金币无物品实例; 放置目标会弹出数量输入。
 		s.itemMove.Moving = true
 		s.itemMove.Index = moveIdxBagGold
@@ -195,6 +196,7 @@ func (s *PlayScene) bagGridSelect(col, row int) {
 	if !s.itemMove.Moving {
 		// 拿起此格中的物品。
 		if item := st.BagItems[idx]; item != nil && !st.BeltHolds(item) {
+			s.playItemClickSound(item)
 			s.itemMove.Begin(idx, item)
 			st.BagItems[idx] = nil
 		}
@@ -273,6 +275,9 @@ func (s *PlayScene) useOrEquipHeld() {
 	stdMode := item.Def.StdMode
 	if stdMode <= 4 || stdMode == 31 {
 		if s.sendUseItem != nil {
+			if idx := itemUseSoundIdx(stdMode); idx >= 0 {
+				gSound.PlaySound(idx)
+			}
 			s.sendUseItem(item.MakeIndex)
 			s.itemMove.End()
 		}
@@ -317,4 +322,17 @@ func (s *PlayScene) bagGridHover(col, row int) {
 	ax := s.hudBag.AbsX() + 33 + col*36
 	ay := s.hudBag.AbsY() + 43 + (row+1)*32
 	s.tooltip.Show(ax, ay, text, color, false)
+}
+
+// playItemClickSound 按物品类型播放点击音效（Delphi SoundUtil:293-310）。
+func (s *PlayScene) playItemClickSound(item *BagItem) {
+	if item == nil || item.Def == nil {
+		gSound.PlaySound(sItmClick)
+		return
+	}
+	name := ""
+	if item.Def != nil {
+		name = item.Def.Name
+	}
+	gSound.PlaySound(itemClickSoundIdx(item.Def.StdMode, name))
 }

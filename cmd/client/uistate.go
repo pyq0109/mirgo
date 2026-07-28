@@ -445,14 +445,16 @@ func (s *PlayScene) equipSlotClick(slot int) {
 	if item == nil {
 		return
 	}
-	st.UseItems[slot] = nil
-	s.itemMove.Begin(-(slot + 1), &BagItem{
+	bi := &BagItem{
 		Idx:       item.WIndex,
 		Dura:      item.Dura,
 		DuraMax:   item.DuraMax,
 		MakeIndex: item.MakeIndex,
 		Def:       st.ItemDefs[int(item.WIndex)],
-	})
+	}
+	s.playItemClickSound(bi)
+	st.UseItems[slot] = nil
+	s.itemMove.Begin(-(slot + 1), bi)
 }
 
 // equipSlotHover 显示已装备物品的悬浮提示 (FState:3404-3467)。

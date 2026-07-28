@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/pyq0109/mirgo/internal/engine"
+	"github.com/pyq0109/mirgo/internal/mapformat"
 	"github.com/pyq0109/mirgo/internal/protocol"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
@@ -97,10 +98,30 @@ type Actor struct {
 	SayingArr    [5]string
 	SayTime      int64
 	SayLineCount int
+
+	// 声音字段（Delphi Actor.pas:662-679）
+	FootStepSound       int
+	StruckSound         int
+	StruckWeaponSound   int
+	AppearSound         int
+	NormalSound         int
+	AttackSound         int
+	WeaponSound         int
+	ScreamSound         int
+	DieSound            int
+	Die2Sound           int
+	MagicStartSound     int
+	MagicFireSound      int
+	MagicExplosionSound int
+	MagicStruckSound    int
+	MagicSerial         int
+	BoRunSound          bool
+	HiterCode           int32
+	MapRef              *mapformat.MapData
 }
 
 func NewActor(recogID int32, x, y, dir int) *Actor {
-	return &Actor{
+	a := &Actor{
 		RecogID: recogID,
 		CurrX:   x,
 		CurrY:   y,
@@ -108,6 +129,8 @@ func NewActor(recogID int32, x, y, dir int) *Actor {
 		Ry:      y,
 		Dir:     dir,
 	}
+	a.initSoundDefaults()
+	return a
 }
 
 func (a *Actor) SendMsg(ident, x, y, dir, feature, state int) {
@@ -175,7 +198,11 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 	a.Dir = msg.Dir
 
 	a.CurrentAction = msg.Ident
+	if msg.Ident == protocol.SMStruck {
+		a.HiterCode = int32(msg.State)
+	}
 	a.CalcActorFrame()
+	a.RunSound()
 
 	if msg.Ident == protocol.SMWalk || msg.Ident == protocol.SMRun || msg.Ident == protocol.SMHorseRun {
 		a.Shift(a.Dir, a.MoveStep, 0, a.EndFrame-a.StartFrame+1)
@@ -485,6 +512,7 @@ func (a *Actor) Move(now int64) bool {
 			cur := a.CurrentFrame - a.StartFrame + 1
 			max := a.EndFrame - a.StartFrame + 1
 			a.Shift(a.Dir, a.MoveStep, cur, max)
+			a.PlayFootstep(a.CurrentFrame - a.StartFrame)
 		}
 		if a.CurrentFrame >= a.EndFrame {
 			a.CurrentAction = 0
@@ -513,6 +541,7 @@ func (a *Actor) Run(now int64) {
 			a.LastFrameTick = now
 			if a.CurrentFrame < a.EndFrame {
 				a.CurrentFrame++
+				a.RunActSound(a.CurrentFrame - a.StartFrame)
 			} else {
 				a.CurrentAction = 0
 			}

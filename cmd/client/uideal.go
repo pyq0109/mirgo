@@ -188,6 +188,7 @@ func (s *PlayScene) dealGridSelect(idx int) {
 	st := s.State
 	if !s.itemMove.Moving {
 		if item := st.DealItems[idx]; item != nil {
+			s.playItemClickSound(item)
 			s.itemMove.Begin(moveIdxDeal(idx), item)
 			st.DealItems[idx] = nil
 		}
@@ -233,6 +234,7 @@ func (s *PlayScene) dealGoldClick() {
 	if s.State.DealEnd || s.dealThrottled() {
 		return
 	}
+	gSound.PlaySound(sMoney)
 	if s.itemMove.Moving && (s.itemMove.Index == moveIdxBagGold || s.itemMove.Index == moveIdxDealGold) {
 		s.itemMove.End()
 		max := s.State.DealGold + s.State.Gold

@@ -67,6 +67,10 @@ type UIControl struct {
 	SelectCol, SelectRow int // 按下的单元格 (驱动选择 + 高亮)
 	Col, Row             int // 上次确认的选择
 
+	// ClickSound 是按钮点击时播放的音效索引（-1=无声）。
+	// 对应 Delphi TClickSound: csNorm=103, csStone=104, csGlass=105。
+	ClickSound int
+
 	// 事件. nil 处理函数直接不触发.
 	OnDirectPaint     func(c *UIControl, proj [16]float32)
 	OnClick           func(c *UIControl, x, y int)
@@ -88,11 +92,12 @@ type UIControl struct {
 // (DWinCtl.pas:235-260): 隐藏、80×24、禁用焦点.
 func NewUIControl(name string, kind UIKind) *UIControl {
 	c := &UIControl{
-		Name:    name,
-		Kind:    kind,
-		Width:   80,
-		Height:  24,
-		Visible: false,
+		Name:       name,
+		Kind:       kind,
+		Width:      80,
+		Height:     24,
+		Visible:    false,
+		ClickSound: -1,
 	}
 	switch kind {
 	case KindButton, KindWindow:

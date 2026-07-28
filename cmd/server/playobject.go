@@ -729,7 +729,25 @@ func (p *PlayObject) sendHitToClient(server *netserver.TCPServer, smIdent uint16
 
 func (p *PlayObject) sendStruckToClient(server *netserver.TCPServer, msg SendMessage) {
 	resp := protocol.MakeDefaultMsg(protocol.SMStruck, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), uint16(msg.Param3))
-	server.Send(p.Session.ID, resp, "")
+	// body[0:4] = 攻击者 ID（客户端据此查找武器/种族以区分受击声）
+	var body string
+	if p.envir != nil {
+		if obj := p.envir.getObjectByID(msg.SourceID); obj != nil {
+			var hiterID int32
+			switch t := obj.(type) {
+			case *PlayObject:
+				hiterID = t.LastHiterID
+			case *MonsterObject:
+				hiterID = t.LastHiterID
+			}
+			if hiterID != 0 {
+				buf := make([]byte, 4)
+				binary.LittleEndian.PutUint32(buf, uint32(hiterID))
+				body = protocol.EncodeBuffer(buf)
+			}
+		}
+	}
+	server.Send(p.Session.ID, resp, body)
 }
 
 func (p *PlayObject) sendDeathToClient(server *netserver.TCPServer, msg SendMessage) {

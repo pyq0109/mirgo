@@ -390,6 +390,7 @@ func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *
 // Open 在场景激活时调用。
 func (s *LoginScene) Open() {
 	log.Logf(log.LevelInfo, "LoginScene", "opened")
+	gSound.PlayBGM(bmgIntro)
 	s.mode = modeLogin
 	s.showLoginUI = true
 	s.doorOpening = false
@@ -410,6 +411,7 @@ func (s *LoginScene) Open() {
 
 // Close 在场景失活时调用。
 func (s *LoginScene) Close() {
+	gSound.SilenceSound()
 	log.Logf(log.LevelInfo, "LoginScene", "closed")
 }
 
@@ -1162,6 +1164,7 @@ func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 
 // handleButton 分发底部四个登录按钮的点击。
 func (s *LoginScene) handleButton(index int) {
+	gSound.PlaySound(sRockButtonClick)
 	switch index {
 	case 0:
 		s.submitLogin()
@@ -1436,6 +1439,7 @@ func (s *LoginScene) SetDoorCompleteFunc(fn func()) {
 // OpenLoginDoor 开始开门动画。
 func (s *LoginScene) OpenLoginDoor() {
 	log.Logf(log.LevelInfo, "LoginScene", "starting door animation")
+	gSound.PlaySound(sRockDoorOpen)
 	s.doorOpening = true
 	s.doorFading = false
 	s.doorFrame = 0

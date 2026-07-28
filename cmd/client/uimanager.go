@@ -265,6 +265,9 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 						if c.OnMouseUp != nil {
 							c.OnMouseUp(c, button, x, y)
 						}
+						if c.ClickSound >= 0 {
+							gSound.PlaySound(c.ClickSound)
+						}
 						if c.OnClick != nil {
 							c.OnClick(c, x, y)
 						}
@@ -290,6 +293,9 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 			// 控件 (如 DStateWin 魔法页命中检测) 在此收到它.
 			if c.OnClick != nil {
 				log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+				if c.ClickSound >= 0 {
+					gSound.PlaySound(c.ClickSound)
+				}
 				c.OnClick(c, x, y)
 			}
 			if c.Kind == KindButton || c.Kind == KindWindow {

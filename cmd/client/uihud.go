@@ -50,6 +50,7 @@ func (s *PlayScene) buildHUD() {
 	for _, d := range stateDefs {
 		btn := NewUIControl("DMyState", KindButton)
 		btn.Left, btn.Top = d.x, d.y
+		btn.ClickSound = sGlassButtonClick
 		if prg != nil {
 			btn.SetImgIndex(prg, d.img)
 		}
@@ -65,7 +66,13 @@ func (s *PlayScene) buildHUD() {
 			case bag:
 				s.State.ShowBag = true // OpenItemBag = 显示 (FState:3805)
 			case page == -2:
-				s.AddChatMessage("[声音] 切换(音频未实现)")
+				if gSound != nil {
+					if gSound.ToggleSFX() {
+						s.AddChatMessage("[音乐打开]")
+					} else {
+						s.AddChatMessage("[音乐关闭]")
+					}
+				}
 			default:
 				s.State.StatePage = page
 				s.State.ShowEquip = true // OpenMyStatus = 显示 (FState:3801-3809)
@@ -383,6 +390,7 @@ func (s *PlayScene) beltClick(slot int) {
 	if item == nil {
 		return
 	}
+	s.playItemClickSound(item)
 	bagSlot := st.FindBagItemByMakeIndex(item.MakeIndex)
 	s.itemMove.Begin(bagSlot, item)
 	s.itemMove.FromBelt = slot
@@ -399,6 +407,9 @@ func (s *PlayScene) beltDblClick(slot int) {
 		if s.itemMove.FromBelt == slot && s.itemMove.Item.Def != nil {
 			stdMode := s.itemMove.Item.Def.StdMode
 			if (stdMode <= 4 || stdMode == 31) && s.sendUseItem != nil {
+				if idx := itemUseSoundIdx(stdMode); idx >= 0 {
+					gSound.PlaySound(idx)
+				}
 				s.sendUseItem(s.itemMove.Item.MakeIndex)
 				s.itemMove.End()
 			}
@@ -407,6 +418,9 @@ func (s *PlayScene) beltDblClick(slot int) {
 	}
 	if item := s.State.BeltItems[slot]; item != nil && item.Def != nil && s.sendUseItem != nil {
 		if stdMode := item.Def.StdMode; stdMode <= 4 || stdMode == 31 {
+			if idx := itemUseSoundIdx(stdMode); idx >= 0 {
+				gSound.PlaySound(idx)
+			}
 			s.sendUseItem(item.MakeIndex)
 		}
 	}

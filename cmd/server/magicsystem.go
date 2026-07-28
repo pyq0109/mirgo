@@ -51,7 +51,7 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 	p.WAbil.MP -= uint16(def.Spell)
 	p.sendHealthSpell(server)
 
-	p.SendRefMsg(RM_SPELL, p.Dir, p.CurrX, p.CurrY, "")
+	p.SendRefMsg(RM_SPELL, magID, p.CurrX, p.CurrY, "")
 
 	power := def.Power + pm.Level*(def.MaxPower-def.Power)/3
 	if power < 1 {
@@ -525,7 +525,10 @@ func (p *PlayObject) sendSpellToClient(server *netserver.TCPServer, msg SendMess
 		return
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMSpell, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
-	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
+	desc := p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj))
+	magIDBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(magIDBytes, uint32(msg.Param1))
+	body := protocol.EncodeBuffer(append(desc, magIDBytes...))
 	server.Send(p.Session.ID, resp, body)
 }
 

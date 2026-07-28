@@ -214,6 +214,7 @@ func (s *SelectChrScene) logDeleteDialogLayout() {
 
 func (s *SelectChrScene) Open() {
 	log.Logf(log.LevelInfo, "SelectChrScene", "opened")
+	gSound.PlayBGM(bmgSelect)
 	s.errorMsg = ""
 	s.createMode = false
 	s.deleteConfirm = false
@@ -223,6 +224,7 @@ func (s *SelectChrScene) Open() {
 }
 
 func (s *SelectChrScene) Close() {
+	gSound.SilenceSound()
 	log.Logf(log.LevelInfo, "SelectChrScene", "closed")
 }
 
@@ -867,6 +869,7 @@ func (s *SelectChrScene) OnScroll(x, y float64) {
 }
 
 func (s *SelectChrScene) handleButton(index int) {
+	gSound.PlaySound(sRockButtonClick)
 	switch index {
 	case 0:
 		s.selectChar(0)
@@ -892,6 +895,7 @@ func (s *SelectChrScene) selectChar(idx int) {
 	if !s.Characters[idx].Valid {
 		return
 	}
+	gSound.PlaySound(sMeltstone)
 	log.Logf(log.LevelInfo, "SelectChr", "character selected %d: %s", idx, s.Characters[idx].Name)
 
 	if s.Selected >= 0 && s.Selected < 2 && s.Characters[s.Selected].Valid {

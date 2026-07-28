@@ -300,6 +300,7 @@ func (s *PlayScene) npcClick(x, y int) {
 			return
 		}
 		s.npcLastClickTick = now + 5000
+		gSound.PlaySound(sGlassButtonClick)
 		s.npcSelectTag = cp.tag
 		s.selectNpcTag(cp.tag)
 		return
@@ -395,6 +396,7 @@ func (s *PlayScene) menuRowClick(x, y int) {
 	idx := (y-32)/menuRowH + s.menuTop
 	if idx >= 0 && idx < len(s.State.ShopGoods) {
 		s.menuIndex = idx
+		gSound.PlaySound(sGlassButtonClick)
 	}
 }
 
@@ -470,6 +472,7 @@ func (s *PlayScene) sellSpotClick() {
 	}
 	if s.sellItem != nil {
 		// 取回槽位物品。
+		s.playItemClickSound(s.sellItem)
 		s.itemMove.Begin(moveIdxSellSpot, s.sellItem)
 		s.sellItem = nil
 	}

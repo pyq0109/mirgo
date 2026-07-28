@@ -436,6 +436,7 @@ func (s *PlayScene) Open() {
 }
 
 func (s *PlayScene) Close() {
+	gSound.SilenceSound()
 	s.State.Reset()
 	log.Logf(log.LevelInfo, "PlayScene", "closed")
 }
@@ -1239,8 +1240,14 @@ func (s *PlayScene) OnKey(key int, action int) {
 			s.State.StatePage = 3
 			s.State.ShowEquip = true
 			return
-		case 301: // F12 — 选项/声音（ClMain:1509+；音频未实现）
-			s.AddChatMessage("[声音] 切换(音频未实现)")
+		case 301: // F12 — 选项/声音（ClMain:1509+）
+			if gSound != nil {
+				if gSound.ToggleSFX() {
+					s.AddChatMessage("[音乐打开]")
+				} else {
+					s.AddChatMessage("[音乐关闭]")
+				}
+			}
 			return
 		}
 
@@ -1264,6 +1271,11 @@ func (s *PlayScene) OnKey(key int, action int) {
 
 		if !s.chatMode && key >= 49 && key <= 54 {
 			if item := s.State.BeltItems[key-49]; item != nil && s.sendUseItem != nil {
+				if item.Def != nil {
+					if idx := itemUseSoundIdx(item.Def.StdMode); idx >= 0 {
+						gSound.PlaySound(idx)
+					}
+				}
 				s.sendUseItem(item.MakeIndex)
 			}
 			return

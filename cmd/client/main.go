@@ -119,6 +119,18 @@ func main() {
 	defer resources.Destroy()
 	log.Logf(log.LevelInfo, "Client", "WIL resources loaded")
 
+	var sndErr error
+	gSound, sndErr = NewSoundEngine(*dataDir)
+	if sndErr != nil {
+		log.Logf(log.LevelWarn, "Client", "sound init failed: %v (silent mode)", sndErr)
+		gSound = nil
+	}
+	defer func() {
+		if gSound != nil {
+			gSound.Close()
+		}
+	}()
+
 	textRenderer, err := engine.NewTextRenderer(glState, "", 16)
 	if err != nil {
 		log.Logf(log.LevelWarn, "Client", "failed to load font: %v", err)
@@ -821,6 +833,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 		h.playScene.State.MySelf = actor
 		actor.IsSelf = true
+		actor.MapRef = h.playScene.mapData
 		h.playScene.State.Sex = actor.Sex
 		h.playScene.State.Hair = actor.Hair
 		h.playScene.State.Actors.Add(actor)
@@ -996,6 +1009,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMMapDescription:
 		log.Logf(log.LevelInfo, "Client", "map description: %s", body)
 		h.playScene.State.MapTitle = body
+		h.playScene.State.MapMusic = int(msg.Recog)
+		gSound.PlayMapMusic(int(msg.Recog))
 
 	case protocol.SMSubAbility:
 		log.Logf(log.LevelInfo, "Client", "received sub ability")
@@ -1045,6 +1060,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor.Type = ActorHuman
 		h.playScene.State.MySelf = actor
 		actor.IsSelf = true
+		actor.MapRef = h.playScene.mapData
 		h.playScene.State.Actors.Add(actor)
 		actor.SendMsg(protocol.SMTurn, newX, newY, 0, 0, 0)
 
@@ -1061,7 +1077,24 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMStruck:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
-			actor.SendMsg(protocol.SMStruck, actor.CurrX, actor.CurrY, int(msg.Series)&0xFF, 0, 0)
+			hiterID := int32(0)
+			if raw := []byte(body); len(raw) >= 4 {
+				hiterID = int32(binary.LittleEndian.Uint32(raw[0:4]))
+			}
+			actor.HiterCode = hiterID
+			if hiterID != 0 && actor.MagicStruckSound < 1 {
+				if hiter := h.playScene.State.Actors.Get(hiterID); hiter != nil && hiter.Type == ActorHuman {
+					if actor.Type == ActorHuman && actor.Dress/2 == 3 {
+						actor.StruckSound = struckArmorSoundIdx(hiter.Weapon)
+					} else {
+						actor.StruckSound = struckBodySoundIdx(hiter.Weapon)
+					}
+					actor.StruckWeaponSound = struckWeaponSoundIdx(hiter.Weapon)
+				} else if hiter != nil {
+					actor.StruckSound = sStruckBodyFist
+				}
+			}
+			actor.SendMsg(protocol.SMStruck, actor.CurrX, actor.CurrY, int(msg.Series)&0xFF, 0, int(hiterID))
 		}
 
 	case protocol.SMDeath, protocol.SMNowDeath:
@@ -1127,6 +1160,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMDealRemoteChgGold:
 		h.playScene.State.DealRemoteGold = int(msg.Recog)
+		gSound.PlaySound(sMoney)
 
 	case protocol.SMBuildGuildOK:
 		h.playScene.AddChatMessage("Guild created")
@@ -1154,6 +1188,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMGoldChanged:
 		log.Logf(log.LevelInfo, "Client", "gold: %d", msg.Recog)
 		h.playScene.State.Gold = int(msg.Recog)
+		gSound.PlaySound(sMoney)
 
 	case protocol.SMBackStep:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
@@ -1195,6 +1230,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMSpell:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
+			if raw := []byte(body); len(raw) >= 12 {
+				actor.MagicSerial = int(binary.LittleEndian.Uint32(raw[8:12]))
+			}
 			actor.SendMsg(protocol.SMSpell, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 		}
 
@@ -1204,6 +1242,11 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		fy := float64(msg.Tag)*engine.TileHeight + engine.TileHeight/2
 		effType := int(msg.Series & 0xFF)
 		effNum := int(msg.Series >> 8)
+		// 魔法爆炸/飞行音效（Delphi magiceff.pas:797/1344 回取施法者
+		// m_nMagicExplosionSound；此处按 magID 直接计算）
+		if magID := int(msg.Recog); magID > 0 {
+			gSound.PlaySound(10000 + magID*10 + 2)
+		}
 		switch effType {
 		case 2:
 			h.playScene.effects.AddGround(fx, fy, effNum, 10, 50)
@@ -1592,9 +1635,11 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMSpaceMoveHide:
 		log.Logf(log.LevelDebug, "Client", "teleport hide: %d", msg.Recog)
+		gSound.PlaySound(sSpacemoveOut)
 
 	case protocol.SMSpaceMoveShow:
 		log.Logf(log.LevelDebug, "Client", "teleport show: %d", msg.Recog)
+		gSound.PlaySound(sSpacemoveIn)
 
 	case protocol.SMOpenHealth:
 		log.Logf(log.LevelDebug, "Client", "health bar open: %d", msg.Recog)

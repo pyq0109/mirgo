@@ -130,6 +130,10 @@ type GameState struct {
 	ShopGoods   []ShopItem
 	ShopNpcID   int32
 	ShopMode    int
+
+	SoundEnabled bool
+	BGMEnabled   bool
+	MapMusic     int
 }
 
 type ShopItem struct {
@@ -140,8 +144,11 @@ type ShopItem struct {
 
 func NewGameState() *GameState {
 	return &GameState{
-		Actors:   NewActorManager(),
-		ItemDefs: make(map[int]*ClientItemDef),
+		Actors:       NewActorManager(),
+		ItemDefs:     make(map[int]*ClientItemDef),
+		SoundEnabled: true,
+		BGMEnabled:   true,
+		MapMusic:     -1,
 	}
 }
 
