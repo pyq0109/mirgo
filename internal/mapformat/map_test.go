@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseHeader(t *testing.T) {
-	// Test with a known map file (relative to project root)
+	// 用一个已知地图文件测试（相对于项目根目录）
 	path := "../../asset/server/Map/0102.map"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Skip("map file not found:", path)
@@ -39,7 +39,7 @@ func TestParseColumnMajor(t *testing.T) {
 		t.Fatal("parse failed:", err)
 	}
 
-	// Verify At() works for all cells
+	// 验证 At() 对所有格子都有效
 	for y := 0; y < m.Height; y++ {
 		for x := 0; x < m.Width; x++ {
 			cell := m.At(x, y)
@@ -61,7 +61,7 @@ func TestIsCollision(t *testing.T) {
 		t.Fatal("parse failed:", err)
 	}
 
-	// Just verify it doesn't panic
+	// 仅验证不会 panic
 	collisionCount := 0
 	for y := 0; y < m.Height; y++ {
 		for x := 0; x < m.Width; x++ {
@@ -88,7 +88,7 @@ func TestCellInfos(t *testing.T) {
 		t.Fatalf("CellInfos length mismatch: got %d, want %d", len(m.CellInfos), len(m.Cells))
 	}
 
-	// Count layers
+	// 统计各层数量
 	backCount, midCount, frontCount := 0, 0, 0
 	for i := range m.CellInfos {
 		info := &m.CellInfos[i]

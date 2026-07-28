@@ -1,4 +1,4 @@
-// Package storage provides SQLite database access for the MIR2 game server.
+// Package storage 为 MIR2 游戏服务端提供 SQLite 数据库访问。
 package storage
 
 import (
@@ -10,14 +10,14 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Database wraps sql.DB with game-specific operations.
+// Database 在 sql.DB 之上封装了游戏相关的操作。
 type Database struct {
 	db *sql.DB
 }
 
-// Open opens or creates a SQLite database at the given path.
+// Open 在给定路径打开或创建一个 SQLite 数据库。
 func Open(path string) (*Database, error) {
-	// Ensure directory exists
+	// 确保目录存在
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
@@ -88,19 +88,19 @@ func (d *Database) initialize() error {
 	return nil
 }
 
-// Close closes the database.
+// Close 关闭数据库。
 func (d *Database) Close() error {
 	return d.db.Close()
 }
 
-// DB returns the underlying sql.DB for advanced operations.
+// DB 返回底层的 sql.DB 以便进行高级操作。
 func (d *Database) DB() *sql.DB {
 	return d.db
 }
 
-// Account operations
+// 账号操作
 
-// CreateAccount creates a new account.
+// CreateAccount 创建一个新账号。
 func (d *Database) CreateAccount(username, passwordHash string) (int64, error) {
 	result, err := d.db.Exec(
 		"INSERT INTO accounts (username, password_hash) VALUES (?, ?)",
@@ -112,7 +112,7 @@ func (d *Database) CreateAccount(username, passwordHash string) (int64, error) {
 	return result.LastInsertId()
 }
 
-// GetAccountByUsername returns an account by username.
+// GetAccountByUsername 按用户名返回一个账号。
 func (d *Database) GetAccountByUsername(username string) (id int64, passwordHash string, err error) {
 	err = d.db.QueryRow(
 		"SELECT id, password_hash FROM accounts WHERE username = ?",
@@ -121,9 +121,9 @@ func (d *Database) GetAccountByUsername(username string) (id int64, passwordHash
 	return
 }
 
-// Character operations
+// 角色操作
 
-// UpdateAccountPassword changes an account's password hash.
+// UpdateAccountPassword 修改账号的密码哈希。
 func (d *Database) UpdateAccountPassword(accountID int64, passwordHash string) error {
 	_, err := d.db.Exec(
 		"UPDATE accounts SET password_hash = ? WHERE id = ?",
@@ -132,7 +132,7 @@ func (d *Database) UpdateAccountPassword(accountID int64, passwordHash string) e
 	return err
 }
 
-// CreateCharacter creates a new character.
+// CreateCharacter 创建一个新角色。
 func (d *Database) CreateCharacter(accountID int64, name string, job, sex int) (int64, error) {
 	result, err := d.db.Exec(
 		"INSERT INTO characters (account_id, name, job, sex) VALUES (?, ?, ?, ?)",
@@ -144,7 +144,7 @@ func (d *Database) CreateCharacter(accountID int64, name string, job, sex int) (
 	return result.LastInsertId()
 }
 
-// GetCharactersByAccount returns all characters for an account.
+// GetCharactersByAccount 返回某个账号下的所有角色。
 func (d *Database) GetCharactersByAccount(accountID int64) ([]CharacterInfo, error) {
 	rows, err := d.db.Query(
 		"SELECT id, name, job, sex, level FROM characters WHERE account_id = ?",
@@ -166,7 +166,7 @@ func (d *Database) GetCharactersByAccount(accountID int64) ([]CharacterInfo, err
 	return chars, rows.Err()
 }
 
-// GetCharacterByID returns a character by ID.
+// GetCharacterByID 按 ID 返回一个角色。
 func (d *Database) GetCharacterByID(id int64) (*Character, error) {
 	var c Character
 	err := d.db.QueryRow(
@@ -179,7 +179,7 @@ func (d *Database) GetCharacterByID(id int64) (*Character, error) {
 	return &c, nil
 }
 
-// GetCharacterByName returns a character by name within an account.
+// GetCharacterByName 在某个账号下按名字返回一个角色。
 func (d *Database) GetCharacterByName(accountID int64, name string) (*Character, error) {
 	var c Character
 	err := d.db.QueryRow(
@@ -192,7 +192,7 @@ func (d *Database) GetCharacterByName(accountID int64, name string) (*Character,
 	return &c, nil
 }
 
-// UpdateCharacter updates character data.
+// UpdateCharacter 更新角色数据。
 func (d *Database) UpdateCharacter(c *Character) error {
 	_, err := d.db.Exec(
 		"UPDATE characters SET level=?, map=?, x=?, y=?, hp=?, mp=?, exp=?, gold=? WHERE id=?",
@@ -201,7 +201,7 @@ func (d *Database) UpdateCharacter(c *Character) error {
 	return err
 }
 
-// DeleteCharacter deletes a character by ID.
+// DeleteCharacter 按 ID 删除一个角色。
 func (d *Database) DeleteCharacter(id int64) error {
 	_, err := d.db.Exec("DELETE FROM characters WHERE id = ?", id)
 	return err
@@ -239,7 +239,7 @@ func (d *Database) LoadCharacterMeta(charID int64) ([]byte, error) {
 	return data, nil
 }
 
-// CharacterInfo is a summary of character data.
+// CharacterInfo 是角色数据的摘要。
 type CharacterInfo struct {
 	ID    int64
 	Name  string
@@ -248,7 +248,7 @@ type CharacterInfo struct {
 	Level int
 }
 
-// Character is the full character data.
+// Character 是完整的角色数据。
 type Character struct {
 	ID        int64
 	AccountID int64

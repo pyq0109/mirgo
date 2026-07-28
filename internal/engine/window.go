@@ -12,7 +12,7 @@ func init() {
 	runtime.LockOSThread()
 }
 
-// Window represents a GLFW window with OpenGL context.
+// Window 表示带 OpenGL 上下文的 GLFW 窗口。
 type Window struct {
 	window *glfw.Window
 	width  int
@@ -20,7 +20,7 @@ type Window struct {
 	title  string
 }
 
-// NewWindow creates a new GLFW window with OpenGL 3.3 Core Profile.
+// NewWindow 创建一个使用 OpenGL 3.3 Core Profile 的 GLFW 窗口。
 func NewWindow(width, height int, title string) (*Window, error) {
 	if err := glfw.Init(); err != nil {
 		return nil, fmt.Errorf("glfw init: %w", err)
@@ -58,7 +58,7 @@ func NewWindow(width, height int, title string) (*Window, error) {
 	}, nil
 }
 
-// Run starts the main loop with the given update and render functions.
+// Run 用给定的 update 和 render 函数启动主循环。
 func (w *Window) Run(updateFn func(dt float64), renderFn func()) {
 	lastTime := glfw.GetTime()
 
@@ -83,78 +83,78 @@ func (w *Window) Run(updateFn func(dt float64), renderFn func()) {
 	}
 }
 
-// ShouldClose returns true if the window should close.
+// ShouldClose 在窗口应关闭时返回 true。
 func (w *Window) ShouldClose() bool {
 	return w.window.ShouldClose()
 }
 
-// Destroy terminates GLFW.
+// Destroy 终止 GLFW。
 func (w *Window) Destroy() {
 	w.window.Destroy()
 	glfw.Terminate()
 }
 
-// GetSize returns the window size.
+// GetSize 返回窗口大小。
 func (w *Window) GetSize() (int, int) {
 	return w.window.GetSize()
 }
 
-// GetFramebufferSize returns the framebuffer size.
+// GetFramebufferSize 返回帧缓冲区大小。
 func (w *Window) GetFramebufferSize() (int, int) {
 	return w.window.GetFramebufferSize()
 }
 
-// GetCursorPos returns the cursor position.
+// GetCursorPos 返回光标位置。
 func (w *Window) GetCursorPos() (float64, float64) {
 	return w.window.GetCursorPos()
 }
 
-// GetKey returns the key state.
+// GetKey 返回按键状态。
 func (w *Window) GetKey(key glfw.Key) glfw.Action {
 	return w.window.GetKey(key)
 }
 
-// GetMouseButton returns the mouse button state.
+// GetMouseButton 返回鼠标按键状态。
 func (w *Window) GetMouseButton(button glfw.MouseButton) glfw.Action {
 	return w.window.GetMouseButton(button)
 }
 
-// SetKeyCallback sets the key callback.
+// SetKeyCallback 设置按键回调。
 func (w *Window) SetKeyCallback(cb func(window *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey)) {
 	w.window.SetKeyCallback(cb)
 }
 
-// SetMouseButtonCallback sets the mouse button callback.
+// SetMouseButtonCallback 设置鼠标按键回调。
 func (w *Window) SetMouseButtonCallback(cb func(window *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey)) {
 	w.window.SetMouseButtonCallback(cb)
 }
 
-// SetCursorPosCallback sets the cursor position callback.
+// SetCursorPosCallback 设置光标位置回调。
 func (w *Window) SetCursorPosCallback(cb func(window *glfw.Window, xpos float64, ypos float64)) {
 	w.window.SetCursorPosCallback(cb)
 }
 
-// SetScrollCallback sets the scroll callback.
+// SetScrollCallback 设置滚轮回调。
 func (w *Window) SetScrollCallback(cb func(window *glfw.Window, xoff float64, yoff float64)) {
 	w.window.SetScrollCallback(cb)
 }
 
-// SetFramebufferSizeCallback sets the framebuffer size callback.
+// SetFramebufferSizeCallback 设置帧缓冲区大小回调。
 func (w *Window) SetFramebufferSizeCallback(cb func(window *glfw.Window, width int, height int)) {
 	w.window.SetFramebufferSizeCallback(cb)
 }
 
-// SetCharCallback sets the character input callback.
+// SetCharCallback 设置字符输入回调。
 func (w *Window) SetCharCallback(cb func(window *glfw.Window, char rune)) {
 	w.window.SetCharCallback(cb)
 }
 
-// GetWindow returns the underlying GLFW window (for ImGui integration).
+// GetWindow 返回底层的 GLFW 窗口（用于 ImGui 集成）。
 func (w *Window) GetWindow() *glfw.Window {
 	return w.window
 }
 
-// SetResizable enables or disables window resizing.
+// SetResizable 启用或禁用窗口缩放。
 func (w *Window) SetResizable(v bool) {
 	if v {
 		w.window.SetAttrib(glfw.Resizable, glfw.True)

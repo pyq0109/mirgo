@@ -2,17 +2,17 @@ package main
 
 import "time"
 
-// Trade windows — port of DDealDlg/DDealRemoteDlg (FState.pas:1459-1491
-// layout, 5613-5865 behavior): own 5×2 grid, partner 5×2 grid, gold input,
-// confirm/close with the 4s action throttle (g_dwDealActionTick).
+// 交易窗口 — 移植自 DDealDlg/DDealRemoteDlg (FState.pas:1459-1491
+// 布局, 5613-5865 行为): 己方 5×2 网格, 对方 5×2 网格, 金币输入,
+// 确认/关闭带 4 秒操作节流 (g_dwDealActionTick)。
 func (s *PlayScene) buildDealPanels() {
 	ui := s.ui
 	prg := s.resources.Prguse
 
-	// Partner panel [390] top-right, own panel [389] below it
-	// (FState OpenDealDlg repositioning :5617-5620).
+	// 对方面板 [390] 在右上方, 己方面板 [389] 在其下方
+	// (FState OpenDealDlg 重定位 :5617-5620)。
 	remote := NewUIControl("DDealRemoteDlg", KindWindow)
-	remote.Floating = true // DFM: trade windows are draggable
+	remote.Floating = true // DFM: 交易窗口可拖动
 	if prg != nil {
 		remote.SetImgIndex(prg, ImgDealRem)
 	} else {
@@ -26,7 +26,7 @@ func (s *PlayScene) buildDealPanels() {
 	s.hudDealRemote = remote
 
 	own := NewUIControl("DDealDlg", KindWindow)
-	own.Floating = true // DFM: trade windows are draggable
+	own.Floating = true // DFM: 交易窗口可拖动
 	if prg != nil {
 		own.SetImgIndex(prg, ImgDealBg)
 	} else {
@@ -39,7 +39,7 @@ func (s *PlayScene) buildDealPanels() {
 	ui.Root.AddChild(own)
 	s.hudDealOwn = own
 
-	// Own offer grid: 5×2 @21,56, cells 36×33 (FState:1465-1468).
+	// 己方物品网格: 5×2 @21,56, 格子 36×33 (FState:1465-1468)。
 	grid := NewUIControl("DDGrid", KindGrid)
 	grid.Left, grid.Top = 21, 56
 	grid.ColCount, grid.RowCount = 5, 2
@@ -54,8 +54,8 @@ func (s *PlayScene) buildDealPanels() {
 	}
 	own.AddChild(grid)
 
-	// Partner grid: 5×2 read-only (RowCount=2, FState:1485-1488; paint walks
-	// 0..9, DDRGridGridPaint :5789-5807).
+	// 对方网格: 5×2 只读 (RowCount=2, FState:1485-1488; 绘制遍历
+	// 0..9, DDRGridGridPaint :5789-5807)。
 	rgrid := NewUIControl("DDRGrid", KindControl)
 	rgrid.Left, rgrid.Top = 21, 56
 	rgrid.Width, rgrid.Height = 5*36, 2*33
@@ -68,7 +68,7 @@ func (s *PlayScene) buildDealPanels() {
 	}
 	remote.AddChild(rgrid)
 
-	// Gold button [28] (FState:1475-1477).
+	// 金币按钮 [28] (FState:1475-1477)。
 	goldBtn := NewUIControl("DDGold", KindButton)
 	goldBtn.Left, goldBtn.Top = 11, 137
 	if prg != nil {
@@ -77,7 +77,7 @@ func (s *PlayScene) buildDealPanels() {
 	goldBtn.OnClick = func(c *UIControl, x, y int) { s.dealGoldClick() }
 	own.AddChild(goldBtn)
 
-	// Confirm [391] / close [64].
+	// 确认 [391] / 关闭 [64]。
 	ok := NewUIControl("DDealOk", KindButton)
 	ok.Left, ok.Top = 155, 128
 	if prg != nil {
@@ -91,7 +91,7 @@ func (s *PlayScene) buildDealPanels() {
 	if prg != nil {
 		closeBtn.SetImgIndex(prg, ImgCloseMed)
 	}
-	// Close shares the confirm gate (FState:5667-5673).
+	// 关闭与确认共用节流门控 (FState:5667-5673)。
 	closeBtn.OnClick = func(c *UIControl, x, y int) {
 		if s.dealThrottled() {
 			return
@@ -114,8 +114,8 @@ func (s *PlayScene) syncDealWindows() {
 }
 
 func (s *PlayScene) paintDealCell(item *BagItem, x, y, w, h int, proj [16]float32) {
-	// No per-cell background: the slot art is baked into panels [389]/[390]
-	// (DDGridGridPaint/DDRGridGridPaint draw only the item, FState:5758-5807).
+	// 无单格背景: 格子底图已烘焙在面板 [389]/[390] 中
+	// (DDGridGridPaint/DDRGridGridPaint 只绘制物品, FState:5758-5807)。
 	if item == nil || s.resources.Items == nil {
 		return
 	}
@@ -128,7 +128,7 @@ func (s *PlayScene) paintDealCell(item *BagItem, x, y, w, h int, proj [16]float3
 	if img == nil || img.RGBA == nil || tex == 0 {
 		return
 	}
-	// Centered with Delphi's -1/+1 nudge (FState:5767-5773).
+	// 居中并带 Delphi 的 -1/+1 偏移修正 (FState:5767-5773)。
 	iw, ih := float32(img.Width), float32(img.Height)
 	s.gl.DrawQuad(tex, float32(x)+(float32(w)-iw)/2-1, float32(y)+(float32(h)-ih)/2+1, iw, ih, proj)
 }
@@ -154,8 +154,8 @@ func (s *PlayScene) paintDealRemote(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
 		s.ui.BlitImage(prg, ImgDealRem, c.AbsX(), c.AbsY(), proj)
-		// DDRGold: partner-side display-only gold button [28]@(11,137),
-		// no click behavior (FState:1489-1491).
+		// DDRGold: 对方侧仅展示的金币按钮 [28]@(11,137),
+		// 无点击行为 (FState:1489-1491)。
 		s.ui.BlitImage(prg, ImgDealGold, c.AbsX()+11, c.AbsY()+137, proj)
 	}
 	if s.text == nil {
@@ -166,8 +166,8 @@ func (s *PlayScene) paintDealRemote(c *UIControl, proj [16]float32) {
 	s.text.DrawText(goldStr(s.State.DealRemoteGold), float32(c.AbsX()+64), float32(c.AbsY()+131), 1, 0.9, 0.3, 1, proj)
 }
 
-// dealThrottled mirrors g_dwDealActionTick (FState: deal actions set a 4s
-// cooldown; handlers gate on it).
+// dealThrottled 对应 g_dwDealActionTick (FState: 交易操作设置 4 秒
+// 冷却; 各处理函数以此为门控)。
 func (s *PlayScene) dealThrottled() bool {
 	now := time.Now().UnixMilli()
 	if now < s.dealActionTick {
@@ -177,7 +177,7 @@ func (s *PlayScene) dealThrottled() bool {
 	return false
 }
 
-// dealGridSelect: pick up / place offered items (FState:5722-5756).
+// dealGridSelect: 拿起/放置交易物品 (FState:5722-5756)。
 func (s *PlayScene) dealGridSelect(idx int) {
 	if idx < 0 || idx >= 10 || s.State.DealEnd {
 		return
@@ -196,14 +196,14 @@ func (s *PlayScene) dealGridSelect(idx int) {
 	mi := s.itemMove.Index
 	switch {
 	case mi >= 0:
-		// From bag → offer it (server moves the instance out of the bag).
+		// 从背包 → 放入交易栏 (服务端将物品从背包移出)。
 		if st.DealItems[idx] == nil && s.sendDealAdd != nil {
 			s.sendDealAdd(s.itemMove.Item.MakeIndex)
 			s.itemMove.End()
 		}
 	case mi >= -29 && mi <= -20:
-		// Rearrange own offers (server list order is irrelevant; deletion
-		// addresses items by MakeIndex).
+		// 重新排列己方交易物品 (服务端列表顺序无关; 删除
+		// 通过 MakeIndex 定位物品)。
 		if st.DealItems[idx] == nil {
 			it := s.itemMove.Item
 			st.DealItems[idx] = &it
@@ -227,8 +227,8 @@ func (s *PlayScene) dealCellHover(item *BagItem, x, y int) {
 	s.tooltip.Show(x, y, text, color, false)
 }
 
-// dealGoldClick: pick up deal gold or prompt for the amount to stake
-// (FState:5828-5865).
+// dealGoldClick: 拿起交易金币或弹出输入框输入金额
+// (FState:5828-5865)。
 func (s *PlayScene) dealGoldClick() {
 	if s.State.DealEnd || s.dealThrottled() {
 		return
@@ -248,14 +248,14 @@ func (s *PlayScene) dealGoldClick() {
 		return
 	}
 	if !s.itemMove.Moving && s.State.DealGold > 0 {
-		// Pick the staked gold back up.
+		// 取回已放入的金币。
 		s.itemMove.Moving = true
 		s.itemMove.Index = moveIdxDealGold
 		s.itemMove.FromBelt = -1
 	}
 }
 
-// dealConfirm locks the offer (FState:5646-5665).
+// dealConfirm 锁定交易 (FState:5646-5665)。
 func (s *PlayScene) dealConfirm() {
 	if s.dealThrottled() {
 		return
@@ -264,8 +264,8 @@ func (s *PlayScene) dealConfirm() {
 		s.sendDealEnd()
 	}
 	s.State.DealEnd = true
-	// Confirming while holding one of own offers puts it back on the table
-	// (FState:5656-5663: Index -29..-20 → AddDealItem + drop the drag).
+	// 确认时若手持己方交易物品则自动放回交易栏
+	// (FState:5656-5663: Index -29..-20 → AddDealItem + 结束拖拽)。
 	if s.itemMove.Moving && s.itemMove.Index >= -29 && s.itemMove.Index <= -20 {
 		if s.sendDealAdd != nil {
 			s.sendDealAdd(s.itemMove.Item.MakeIndex)
@@ -274,7 +274,7 @@ func (s *PlayScene) dealConfirm() {
 	}
 }
 
-// resetDeal clears trade state when a deal opens or ends.
+// resetDeal 在交易开始或结束时清空交易状态。
 func (s *PlayScene) resetDeal() {
 	st := s.State
 	for i := range st.DealItems {

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// MonGen represents a monster spawn point.
+// MonGen 表示怪物刷怪点。
 type MonGen struct {
 	MapName  string `json:"mapName"`
 	X        int    `json:"x"`
@@ -19,14 +19,14 @@ type MonGen struct {
 	Interval int    `json:"interval"`
 }
 
-// MonItem represents a monster drop item.
+// MonItem 表示怪物掉落物品。
 type MonItem struct {
 	Prob string `json:"prob"`
 	Name string `json:"name"`
 	Count int   `json:"count,omitempty"`
 }
 
-// ConvertMonsters converts monster configuration files.
+// ConvertMonsters 转换怪物配置文件。
 func ConvertMonsters(inputDir, outputDir string) error {
 	envirDir := filepath.Join(inputDir, "Envir")
 
@@ -35,7 +35,7 @@ func ConvertMonsters(inputDir, outputDir string) error {
 		return fmt.Errorf("converting mongen.txt: %w", err)
 	}
 
-	// Convert MonItems/*.txt
+	// 转换 MonItems/*.txt
 	if err := convertMonItems(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting MonItems: %w", err)
 	}

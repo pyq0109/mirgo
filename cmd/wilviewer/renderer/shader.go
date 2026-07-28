@@ -79,7 +79,7 @@ func linkProgram(shaders ...uint32) (uint32, error) {
 	return program, nil
 }
 
-// ShaderProgram holds compiled shader program and uniform locations.
+// ShaderProgram 持有编译后的着色器程序和 uniform 位置。
 type ShaderProgram struct {
 	ID        uint32
 	ProjLoc   int32
@@ -90,7 +90,7 @@ type ShaderProgram struct {
 	FlipVLoc  int32
 }
 
-// NewShaderProgram compiles and links the main tile shader.
+// NewShaderProgram 编译并链接主着色器。
 func NewShaderProgram() (*ShaderProgram, error) {
 	vs, err := compileShader(vertexShader, gl.VERTEX_SHADER)
 	if err != nil {

@@ -52,9 +52,9 @@ type PlayObject struct {
 	GuildRank    string
 	StorageItems []*protocol.UserItem
 	AttackMode   byte
-	AllowGroup   bool // accepts party invites (CMGroupMode)
+	AllowGroup   bool // 是否接受组队邀请（CMGroupMode）
 
-	// Computed combat stats (Delphi m_btHitPoint/m_btSpeedPoint, ObjBase.pas:1241-1242).
+	// 计算后的战斗属性（Delphi m_btHitPoint/m_btSpeedPoint，ObjBase.pas:1241-1242）。
 	HitPoint   int
 	SpeedPoint int
 	BonusPoint int
@@ -112,7 +112,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	if p.Death {
 		if p.deathTick > 0 && now-p.deathTick > 10000 && !p.skeletonSent {
 			p.skeletonSent = true
-			// Not a fresh death: SM_DEATH shows the corpse/skeleton directly.
+			// 非新鲜死亡：SM_DEATH 直接显示尸体/骨架。
 			p.envir.broadcastDeathMsg(p.BaseObject, p.ID, p.CurrX, p.CurrY, p.Dir, false)
 		}
 		if now-p.deathTick > 180000 {
@@ -384,14 +384,14 @@ func (p *PlayObject) runIgnoreEntities() bool {
 	return cfg.Game.DisableRun || (p.Permission > 9 && cfg.Game.GMRunAll)
 }
 
-// checkMoveSpeed validates movement interval and tracks overspeed violations.
-// Returns true if the move is allowed, false if rejected (too fast).
+// checkMoveSpeed 校验移动间隔并记录超速违规。
+// 返回 true 表示允许移动，false 表示拒绝（速度过快）。
 func (p *PlayObject) checkMoveSpeed(now, interval int64, server *netserver.TCPServer) bool {
 	if now-p.WalkTick < interval {
 		p.OverSpeedCount++
 		cfg := p.Engine.Config
 		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
-			log.Logf(log.LevelWarn, "Server", "Speed hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
+			log.Logf(log.LevelWarn, "Server", "加速外挂踢出: %s（次数=%d）", p.Name, p.OverSpeedCount)
 			server.CloseSession(p.Session.ID)
 			return false
 		}
@@ -694,7 +694,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		}
 	}
 
-	log.Logf(log.LevelInfo, "Combat", "%s hit %s for %d damage (HP: %d/%d)",
+	log.Logf(log.LevelInfo, "Combat", "%s 攻击 %s 造成 %d 点伤害（HP: %d/%d）",
 		p.Name, target.Name, damage, hp, target.WAbil.MaxHP)
 }
 
@@ -718,8 +718,8 @@ func (p *PlayObject) sendStruckToClient(server *netserver.TCPServer, msg SendMes
 }
 
 func (p *PlayObject) sendDeathToClient(server *netserver.TCPServer, msg SendMessage) {
-	// Param3==1 marks a fresh kill → SM_NOWDEATH (client plays the death
-	// animation); otherwise SM_DEATH (corpse/skeleton shown directly).
+	// Param3==1 表示新鲜击杀 → SM_NOWDEATH（客户端播放死亡
+	// 动画）；否则 SM_DEATH（直接显示尸体/骨架）。
 	ident := uint16(protocol.SMDeath)
 	if msg.Param3 == 1 {
 		ident = protocol.SMNowDeath
@@ -743,7 +743,7 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	if p.WAbil.Exp >= maxExp {
 		p.WAbil.Exp -= maxExp
 		p.WAbil.Level++
-		// Stat growth now comes from the job formulas in RecalcAbilitys.
+		// 属性增长现在由 RecalcAbilitys 中的职业公式计算。
 		p.RecalcAbilitys()
 		p.WAbil.HP = p.WAbil.MaxHP
 		p.WAbil.MP = p.WAbil.MaxMP
@@ -751,13 +751,13 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 		levelMsg := protocol.MakeDefaultMsg(protocol.SMLevelUp, int32(p.WAbil.Level), 0, 0, 0)
 		server.Send(p.Session.ID, levelMsg, "")
 
-		// Bonus points to spend (Delphi GetBonusPoint per level).
+		// 可分配的属性点（Delphi 中每级调用 GetBonusPoint）。
 		p.BonusPoint += 3
 
-		log.Logf(log.LevelInfo, "Combat", "%s leveled up to %d", p.Name, p.WAbil.Level)
+		log.Logf(log.LevelInfo, "Combat", "%s 升级到 %d 级", p.Name, p.WAbil.Level)
 		leveledUp = true
 	}
-	// Keep the client's exp/weight/level bars in sync.
+	// 同步客户端的经验/负重/等级信息。
 	p.SendAbility(server)
 	p.sendHealthSpell(server)
 	if leveledUp {
@@ -774,8 +774,8 @@ func (p *PlayObject) GetMaxExp() uint32 {
 }
 
 func (p *PlayObject) sendHealthSpell(server *netserver.TCPServer) {
-	// Recog=HP, Param=MaxHP, Tag=MP, Series=MaxMP (both ends changed together;
-	// the old HP<<16|MP packing made the client read MP as HP).
+	// Recog=HP, Param=MaxHP, Tag=MP, Series=MaxMP（双端同步修改；
+	// 旧的 HP<<16|MP 打包方式导致客户端把 MP 读成 HP）。
 	resp := protocol.MakeDefaultMsg(protocol.SMHealthSpellChanged,
 		int32(p.WAbil.HP), uint16(p.WAbil.MaxHP), uint16(p.WAbil.MP), uint16(p.WAbil.MaxMP))
 	server.Send(p.Session.ID, resp, "")
@@ -887,7 +887,7 @@ func (p *PlayObject) resurrect(server *netserver.TCPServer) {
 	p.SendRefMsg(RM_TURN, p.Dir, p.CurrX, p.CurrY, p.Name)
 	p.sendHealthSpell(server)
 
-	log.Logf(log.LevelInfo, "Combat", "%s resurrected at %s(%d,%d)", p.Name, p.MapName, p.CurrX, p.CurrY)
+	log.Logf(log.LevelInfo, "Combat", "%s 在 %s(%d,%d) 复活", p.Name, p.MapName, p.CurrX, p.CurrY)
 }
 
 func IsSafeZone(envir *Environment, x, y int) bool {
@@ -918,7 +918,7 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 		p.Gold += item.Gold
 		resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
-		log.Logf(log.LevelInfo, "PlayObject", "%s picked up %d gold (total: %d)", p.Name, item.Gold, p.Gold)
+		log.Logf(log.LevelInfo, "PlayObject", "%s 拾取 %d 金币（总计: %d）", p.Name, item.Gold, p.Gold)
 	} else {
 		added := false
 		if p.ItemDB != nil {
@@ -932,7 +932,7 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 			p.RecalcAbilitys()
 			p.SendBagItemsFull(server)
 			p.sendWeightChanged(server)
-			log.Logf(log.LevelInfo, "PlayObject", "%s picked up %s", p.Name, item.Name)
+			log.Logf(log.LevelInfo, "PlayObject", "%s 拾取了 %s", p.Name, item.Name)
 		}
 	}
 
@@ -1011,7 +1011,7 @@ func (p *PlayObject) encodeCharDesc(feature, featureEx int32) []byte {
 	return buf
 }
 
-// FeatureEx encodes extended appearance: low byte = horse type, high byte = dress effect.
+// FeatureEx 编码扩展外观：低字节=马类型，高字节=衣服特效。
 func (p *PlayObject) FeatureEx() int32 {
 	if p.OnHorse {
 		return 1
@@ -1019,7 +1019,7 @@ func (p *PlayObject) FeatureEx() int32 {
 	return 0
 }
 
-// broadcastFeatureChanged notifies visible players and the player's own client of an appearance change.
+// broadcastFeatureChanged 通知视野内玩家和自身客户端外观发生变化。
 func (p *PlayObject) broadcastFeatureChanged(server *netserver.TCPServer) {
 	p.SendRefMsg(RM_FEATURECHANGED, 0, 0, 0, "")
 	resp := protocol.MakeDefaultMsg(protocol.SMFeatureChanged, p.ID, 0, 0, 0)
@@ -1107,9 +1107,9 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 	}
 }
 
-// HandleQueryUserState answers an inspect request (CMQueryUserState:
-// Recog = target player id): 130 bytes of equipment (13 × WIndex u16,
-// Dura u16, DuraMax u16, MakeIndex u32) followed by the player name.
+// HandleQueryUserState 回应查看请求（CMQueryUserState：
+// Recog = 目标玩家 ID）：130 字节装备数据（13 × WIndex u16,
+// Dura u16, DuraMax u16, MakeIndex u32），后跟玩家名。
 func (p *PlayObject) HandleQueryUserState(msg SendMessage, server *netserver.TCPServer) {
 	if p.Engine == nil {
 		return
@@ -1154,16 +1154,15 @@ func (p *PlayObject) encodeLogonBody() string {
 	buf := make([]byte, 16)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(p.Feature()))
 	binary.LittleEndian.PutUint32(buf[4:8], uint32(p.FeatureEx()))
-	// Third slot carries the job (0 warrior / 1 mage / 2 taoist); feature
-	// does not encode it and the client needs it for the HUD/class UI.
+	// 第三个槽位存放职业（0 战士 / 1 法师 / 2 道士）；feature
+	// 不包含职业信息，客户端 HUD/职业界面需要它。
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(p.Job))
 	binary.LittleEndian.PutUint32(buf[12:16], 0)
 	return protocol.EncodeBuffer(buf)
 }
 
-// encodeAbilityBody builds the SMAbility body: fixed 60-byte layout, both
-// ends defined together (Go closed loop). See GameState.ParseAbility for the
-// client-side mirror.
+// encodeAbilityBody 构建 SMAbility 消息体：固定 60 字节布局，
+// 双端统一定义（Go 闭环）。客户端镜像见 GameState.ParseAbility。
 func (p *PlayObject) encodeAbilityBody() string {
 	buf := make([]byte, 0, 60)
 	var tmp [4]byte
@@ -1200,8 +1199,8 @@ func (p *PlayObject) encodeAbilityBody() string {
 	return protocol.EncodeBuffer(buf)
 }
 
-// SendAbility sends the full ability block. Header Recog keeps the level for
-// legacy consumers; the body carries everything.
+// SendAbility 发送完整的属性数据块。消息头 Recog 保留等级供
+// 旧客户端使用；完整数据在消息体中。
 func (p *PlayObject) SendAbility(server *netserver.TCPServer) {
 	abilResp := protocol.MakeDefaultMsg(protocol.SMAbility, int32(p.WAbil.Level), 0, 0, 0)
 	server.Send(p.Session.ID, abilResp, p.encodeAbilityBody())
@@ -1213,10 +1212,10 @@ func (p *PlayObject) sendWeightChanged(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, resp, "")
 }
 
-// encodeStdItemsBody serializes the item definition DB. Layout: count u16,
-// then per item: Idx u16, Looks u16, StdMode/Shape/Weight/NeedLevel u8×4,
+// encodeStdItemsBody 序列化物品定义数据库。布局：count u16，
+// 每个物品：Idx u16, Looks u16, StdMode/Shape/Weight/NeedLevel u8×4,
 // AC/ACMax/MAC/MACMax/DC/DCMax/MC/MCMax/SC/SCMax u16×10, Price u32,
-// NameLen u8 + Name (UTF-8). Client mirror: GameState.ParseItemDefs.
+// NameLen u8 + Name (UTF-8)。客户端镜像见 GameState.ParseItemDefs。
 func encodeStdItemsBody(items []ItemDef) string {
 	buf := make([]byte, 2, 2+len(items)*40)
 	binary.LittleEndian.PutUint16(buf, uint16(len(items)))
@@ -1248,7 +1247,7 @@ func encodeStdItemsBody(items []ItemDef) string {
 	return protocol.EncodeBuffer(buf)
 }
 
-// SendStdItems delivers the whole item definition DB once at login.
+// SendStdItems 在登录时一次性下发完整的物品定义数据库。
 func (p *PlayObject) SendStdItems(server *netserver.TCPServer) {
 	if p.ItemDB == nil {
 		return
@@ -1320,6 +1319,6 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 
 	p.VisibleActors = make(map[int32]*VisibleEntry)
 
-	log.Logf(log.LevelInfo, "PlayObject", "%s entered map %s at (%d,%d)", p.Name, p.MapName, p.CurrX, p.CurrY)
+	log.Logf(log.LevelInfo, "PlayObject", "%s 进入地图 %s（坐标 %d,%d）", p.Name, p.MapName, p.CurrX, p.CurrY)
 	return true
 }

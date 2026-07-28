@@ -8,20 +8,20 @@ import (
 	"strings"
 )
 
-// FilterItem represents an item in the filter list.
+// FilterItem 表示过滤列表中的物品。
 type FilterItem struct {
 	Type  int    `json:"type"`
 	Name  string `json:"name"`
 	Props []int  `json:"props"`
 }
 
-// ItemRule represents an item rule.
+// ItemRule 表示物品规则。
 type ItemRule struct {
 	Name  string `json:"name"`
 	Rules string `json:"rules"`
 }
 
-// GroupItem represents an item set/group.
+// GroupItem 表示物品套装/分组。
 type GroupItem struct {
 	ID       int      `json:"id"`
 	Count    int      `json:"count"`
@@ -31,43 +31,43 @@ type GroupItem struct {
 	Desc     string   `json:"desc"`
 }
 
-// MakeItem represents a crafting recipe.
+// MakeItem 表示合成配方。
 type MakeItem struct {
 	Name  string         `json:"name"`
 	Items []MakeItemPart `json:"items"`
 }
 
-// MakeItemPart represents an ingredient in a crafting recipe.
+// MakeItemPart 表示合成配方中的材料。
 type MakeItemPart struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
 
-// ConvertItems converts item configuration files.
+// ConvertItems 转换物品配置文件。
 func ConvertItems(inputDir, outputDir string) error {
 	envirDir := filepath.Join(inputDir, "Envir")
 
-	// Convert FilterItemList.txt
+	// 转换 FilterItemList.txt
 	if err := convertFilterItems(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting FilterItemList.txt: %w", err)
 	}
 
-	// Convert ItemRuleList.txt
+	// 转换 ItemRuleList.txt
 	if err := convertItemRules(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting ItemRuleList.txt: %w", err)
 	}
 
-	// Convert GroupItemList.txt
+	// 转换 GroupItemList.txt
 	if err := convertGroupItems(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting GroupItemList.txt: %w", err)
 	}
 
-	// Convert UnbindList.txt
+	// 转换 UnbindList.txt
 	if err := convertUnbindList(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting UnbindList.txt: %w", err)
 	}
 
-	// Convert MakeItem.txt
+	// 转换 MakeItem.txt
 	if err := convertMakeItems(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting MakeItem.txt: %w", err)
 	}

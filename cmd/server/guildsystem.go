@@ -95,8 +95,8 @@ func (g *Guild) GetRank(name string) string {
 	return "成员"
 }
 
-// HandleOpenGuildDlg answers CMOpenGuildDlg with the guild overview
-// (Delphi SMOpenGuildDlg; the old mis-route created a guild here).
+// HandleOpenGuildDlg 响应 CMOpenGuildDlg，返回行会概览
+//（Delphi SMOpenGuildDlg；旧版曾在此处误创建行会）。
 func (p *PlayObject) HandleOpenGuildDlg(msg SendMessage, server *netserver.TCPServer) {
 	guild := p.Engine.PlayerGuild(p.Name)
 	if guild == nil {
@@ -116,8 +116,8 @@ func (p *PlayObject) HandleOpenGuildDlg(msg SendMessage, server *netserver.TCPSe
 	server.Send(p.Session.ID, resp, protocol.EncodeString(body))
 }
 
-// HandleGuildMemberListRequest answers CMGuildMemberList with
-// "name/rank/online" lines (Delphi member list content).
+// HandleGuildMemberListRequest 响应 CMGuildMemberList，
+// 返回 "名字/职位/在线" 格式的行（Delphi 成员列表内容）。
 func (p *PlayObject) HandleGuildMemberListRequest(msg SendMessage, server *netserver.TCPServer) {
 	guild := p.Engine.PlayerGuild(p.Name)
 	if guild == nil {
@@ -142,7 +142,7 @@ func (p *PlayObject) HandleGuildMemberListRequest(msg SendMessage, server *netse
 	server.Send(p.Session.ID, resp, protocol.EncodeString(sb.String()))
 }
 
-// HandleGuildUpdateRankInfo stores "name/rank" lines from the rank editor.
+// HandleGuildUpdateRankInfo 存储来自职位编辑器的 "名字/职位" 行。
 func (p *PlayObject) HandleGuildUpdateRankInfo(msg SendMessage, server *netserver.TCPServer) {
 	guild := p.Engine.PlayerGuild(p.Name)
 	if guild == nil || guild.Leader != p.Name {
@@ -163,7 +163,7 @@ func (p *PlayObject) HandleGuildUpdateRankInfo(msg SendMessage, server *netserve
 	server.Send(p.Session.ID, confirm, protocol.EncodeString("Rank info updated"))
 }
 
-// HandleGuildHome is a stub until guild maps exist.
+// HandleGuildHome 是占位实现，等待行会地图功能就绪。
 func (p *PlayObject) HandleGuildHome(msg SendMessage, server *netserver.TCPServer) {
 	confirm := protocol.MakeDefaultMsg(protocol.SMDlgMsg, 0, 0, 0, 0)
 	server.Send(p.Session.ID, confirm, protocol.EncodeString("Guild home is not configured"))
@@ -201,7 +201,7 @@ func (p *PlayObject) HandleBuildGuild(msg SendMessage, server *netserver.TCPServ
 	p.GuildRank = "掌门人"
 	resp := protocol.MakeDefaultMsg(protocol.SMBuildGuildOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
-	log.Logf(log.LevelInfo, "Guild", "%s created guild %s", p.Name, guildName)
+	log.Logf(log.LevelInfo, "Guild", "%s 创建行会 %s", p.Name, guildName)
 }
 
 func (p *PlayObject) HandleGuildMessage(msg SendMessage, server *netserver.TCPServer) {
@@ -260,7 +260,7 @@ func (p *PlayObject) HandleGuildAddMember(msg SendMessage, server *netserver.TCP
 	server.Send(target.Session.ID, notifyResp, protocol.EncodeString(guild.Name))
 
 	p.sendGuildMemberList(server, guild)
-	log.Logf(log.LevelInfo, "Guild", "%s added %s to guild %s", p.Name, targetName, guild.Name)
+	log.Logf(log.LevelInfo, "Guild", "%s 将 %s 加入行会 %s", p.Name, targetName, guild.Name)
 }
 
 func (p *PlayObject) HandleGuildDelMember(msg SendMessage, server *netserver.TCPServer) {
@@ -307,7 +307,7 @@ func (p *PlayObject) HandleGuildDelMember(msg SendMessage, server *netserver.TCP
 	resp := protocol.MakeDefaultMsg(protocol.SMGuildDelMemberOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(targetName))
 	p.sendGuildMemberList(server, guild)
-	log.Logf(log.LevelInfo, "Guild", "%s removed %s from guild %s", p.Name, targetName, guild.Name)
+	log.Logf(log.LevelInfo, "Guild", "%s 将 %s 移出行会 %s", p.Name, targetName, guild.Name)
 }
 
 func (p *PlayObject) HandleGuildAlly(msg SendMessage, server *netserver.TCPServer) {
@@ -334,7 +334,7 @@ func (p *PlayObject) HandleGuildAlly(msg SendMessage, server *netserver.TCPServe
 
 	resp := protocol.MakeDefaultMsg(protocol.SMGuildMakeAllyOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(targetGuildName))
-	log.Logf(log.LevelInfo, "Guild", "%s allied %s with %s", p.Name, guild.Name, targetGuildName)
+	log.Logf(log.LevelInfo, "Guild", "%s 与 %s 结盟 %s", p.Name, guild.Name, targetGuildName)
 }
 
 func (p *PlayObject) HandleGuildBreakAlly(msg SendMessage, server *netserver.TCPServer) {
@@ -371,7 +371,7 @@ func (p *PlayObject) HandleGuildBreakAlly(msg SendMessage, server *netserver.TCP
 
 	resp := protocol.MakeDefaultMsg(protocol.SMGuildBreakAllyOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(targetGuildName))
-	log.Logf(log.LevelInfo, "Guild", "%s broke alliance %s - %s", p.Name, guild.Name, targetGuildName)
+	log.Logf(log.LevelInfo, "Guild", "%s 解除联盟 %s - %s", p.Name, guild.Name, targetGuildName)
 }
 
 func (p *PlayObject) HandleGuildUpdateNotice(msg SendMessage, server *netserver.TCPServer) {
@@ -383,7 +383,7 @@ func (p *PlayObject) HandleGuildUpdateNotice(msg SendMessage, server *netserver.
 		return
 	}
 	guild.Notice = msg.Msg
-	log.Logf(log.LevelInfo, "Guild", "%s updated guild notice for %s", p.Name, guild.Name)
+	log.Logf(log.LevelInfo, "Guild", "%s 更新了行会 %s 的公告", p.Name, guild.Name)
 }
 
 func (p *PlayObject) sendGuildMemberList(server *netserver.TCPServer, guild *Guild) {
@@ -431,6 +431,6 @@ func (p *PlayObject) HandleGuildWar(msg SendMessage, server *netserver.TCPServer
 			server.Send(member.Session.ID, sysMsg, protocol.EncodeString(text))
 		}
 	}
-	log.Logf(log.LevelInfo, "Guild", "War declared: %s vs %s", guild.Name, targetGuildName)
+	log.Logf(log.LevelInfo, "Guild", "行会战争宣战: %s 对 %s", guild.Name, targetGuildName)
 }
 

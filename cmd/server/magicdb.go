@@ -56,7 +56,7 @@ func LoadMagicDB(path string) (*MagicDB, error) {
 		magic := &db.Magics[i]
 		db.byID[magic.MagID] = magic
 	}
-	log.Logf(log.LevelInfo, "MagicDB", "Loaded %d magics from %s", len(db.Magics), path)
+	log.Logf(log.LevelInfo, "MagicDB", "从 %s 加载了 %d 个魔法", path, len(db.Magics))
 	return db, nil
 }
 

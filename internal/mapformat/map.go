@@ -12,13 +12,13 @@ const (
 	headerSize = 52
 	cellSize   = 12
 
-	// Lib index constants matching C++ kLibTiles/kLibSmTiles/kLibObjects.
-	LibTiles    = 0 // Tiles.wil - background
-	LibSmTiles  = 1 // SmTiles.wil - middle layer
-	LibObjects  = 2 // Objects.wil - foreground
+	// 对应 C++ kLibTiles/kLibSmTiles/kLibObjects 的 Lib 索引常量。
+	LibTiles    = 0 // Tiles.wil - 背景层
+	LibSmTiles  = 1 // SmTiles.wil - 中间层
+	LibObjects  = 2 // Objects.wil - 前景层
 )
 
-// Header is the 52-byte map file header.
+// Header 是 52 字节的地图文件头。
 type Header struct {
 	Width     uint16
 	Height    uint16
@@ -28,39 +28,39 @@ type Header struct {
 	Reserved  [23]byte
 }
 
-// Cell is a 12-byte map cell (TMapUnitInfo).
+// Cell 是 12 字节的地图格子（TMapUnitInfo）。
 type Cell struct {
-	BkImg      uint16 // bit15 = collision, bits 0-14 = image index (1-based)
+	BkImg      uint16 // bit15 = 碰撞，bits 0-14 = 图像索引（从 1 开始）
 	MidImg     uint16
 	FrImg      uint16
-	DoorIndex  uint8  // bit7 = has door
-	DoorOffset uint8  // bit7 = door open
-	AniFrame   uint8  // bit7 = alpha blend, bits 6-0 = frame count
+	DoorIndex  uint8  // bit7 = 有门
+	DoorOffset uint8  // bit7 = 门已打开
+	AniFrame   uint8  // bit7 = alpha 混合，bits 6-0 = 帧数
 	AniTick    uint8
-	Area       uint8  // selects Objects{N+1}.wil
+	Area       uint8  // 选择 Objects{N+1}.wil
 	Light      uint8  // 0-4
 }
 
-// CellInfo is the parsed cell with separated lib/image indices.
-// Matches C++ CellInfo from common/map_types.h.
+// CellInfo 是解析后的格子，lib/图像索引已分离。
+// 对应 C++ common/map_types.h 中的 CellInfo。
 type CellInfo struct {
-	BackLib         int  // LibTiles or -1 if empty
-	BackImage       int  // 0-based index into Tiles.wil
+	BackLib         int  // LibTiles，空则为 -1
+	BackImage       int  // Tiles.wil 中从 0 开始的索引
 	Collision       bool // (wBkImg & 0x8000) != 0
-	MiddleLib       int  // LibSmTiles or -1 if empty
-	MiddleImage     int  // 0-based index into SmTiles.wil
-	FrontLib        int  // LibObjects or -1 if empty
-	FrontImage      int  // 0-based index into Objects{area+1}.wil
+	MiddleLib       int  // LibSmTiles，空则为 -1
+	MiddleImage     int  // SmTiles.wil 中从 0 开始的索引
+	FrontLib        int  // LibObjects，空则为 -1
+	FrontImage      int  // Objects{area+1}.wil 中从 0 开始的索引
 	FrontArea       uint8
-	FrontAniFrame   uint8 // bit7=alpha blend, bits6-0=frame count
+	FrontAniFrame   uint8 // bit7=alpha 混合，bits6-0=帧数
 	FrontAniTick    uint8
-	FrontDoorOffset uint8 // bit7=door open, bits6-0=offset
-	FrontDoorIndex  uint8 // bit7=has door, bits6-0=door group id
+	FrontDoorOffset uint8 // bit7=门已打开，bits6-0=偏移
+	FrontDoorIndex  uint8 // bit7=有门，bits6-0=门组 id
 	Door            uint8
 	Light           uint8
 }
 
-// MapData holds the parsed map.
+// MapData 保存解析后的地图。
 type MapData struct {
 	Header    Header
 	Cells     []Cell
@@ -69,23 +69,23 @@ type MapData struct {
 	Height    int
 }
 
-// At returns the raw cell at (x, y) in row-major order.
+// At 按行优先返回 (x, y) 处的原始格子。
 func (m *MapData) At(x, y int) *Cell {
 	return &m.Cells[y*m.Width+x]
 }
 
-// InfoAt returns the parsed cell info at (x, y) in row-major order.
+// InfoAt 按行优先返回 (x, y) 处解析后的格子信息。
 func (m *MapData) InfoAt(x, y int) *CellInfo {
 	return &m.CellInfos[y*m.Width+x]
 }
 
-// IsCollision returns true if the cell at (x, y) is blocked (terrain only, ignores doors).
+// IsCollision 在 (x, y) 处的格子被阻挡时返回 true（仅地形，忽略门）。
 func (m *MapData) IsCollision(x, y int) bool {
 	return m.CellInfos[y*m.Width+x].Collision
 }
 
-// CanMove returns true if the cell at (x, y) is walkable, considering doors.
-// Matches Delphi TMap.CanMove (MapUnit.pas:311-327).
+// CanMove 在 (x, y) 处的格子可通行（考虑门）时返回 true。
+// 对应 Delphi TMap.CanMove（MapUnit.pas:311-327）。
 func (m *MapData) CanMove(x, y int) bool {
 	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
 		return false
@@ -103,8 +103,8 @@ func (m *MapData) CanMove(x, y int) bool {
 	return true
 }
 
-// CanFly returns true if the cell at (x, y) allows flight (only checks FrImg bit15).
-// Matches Delphi TMap.CanFly (MapUnit.pas:329-343).
+// CanFly 在 (x, y) 处的格子允许飞行时返回 true（仅检查 FrImg bit15）。
+// 对应 Delphi TMap.CanFly（MapUnit.pas:329-343）。
 func (m *MapData) CanFly(x, y int) bool {
 	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
 		return false
@@ -122,8 +122,8 @@ func (m *MapData) CanFly(x, y int) bool {
 	return true
 }
 
-// GetDoor returns the door group ID at (x, y), or 0 if no door.
-// Matches Delphi TMap.GetDoor (MapUnit.pas:346-356).
+// GetDoor 返回 (x, y) 处的门组 ID，无门则返回 0。
+// 对应 Delphi TMap.GetDoor（MapUnit.pas:346-356）。
 func (m *MapData) GetDoor(x, y int) int {
 	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
 		return 0
@@ -135,8 +135,8 @@ func (m *MapData) GetDoor(x, y int) int {
 	return 0
 }
 
-// IsDoorOpen returns true if the door at (x, y) is open.
-// Matches Delphi TMap.IsDoorOpen (MapUnit.pas:358-368).
+// IsDoorOpen 在 (x, y) 处的门已打开时返回 true。
+// 对应 Delphi TMap.IsDoorOpen（MapUnit.pas:358-368）。
 func (m *MapData) IsDoorOpen(x, y int) bool {
 	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
 		return false
@@ -148,8 +148,8 @@ func (m *MapData) IsDoorOpen(x, y int) bool {
 	return false
 }
 
-// OpenDoor opens all cells belonging to the same door group as (x, y).
-// Matches Delphi TMap.OpenDoor (MapUnit.pas:370-387).
+// OpenDoor 打开与 (x, y) 同属一个门组的所有格子。
+// 对应 Delphi TMap.OpenDoor（MapUnit.pas:370-387）。
 func (m *MapData) OpenDoor(x, y int) {
 	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
 		return
@@ -173,8 +173,8 @@ func (m *MapData) OpenDoor(x, y int) {
 	}
 }
 
-// CloseDoor closes all cells belonging to the same door group as (x, y).
-// Matches Delphi TMap.CloseDoor (MapUnit.pas:389-405).
+// CloseDoor 关闭与 (x, y) 同属一个门组的所有格子。
+// 对应 Delphi TMap.CloseDoor（MapUnit.pas:389-405）。
 func (m *MapData) CloseDoor(x, y int) {
 	if x < 0 || x >= m.Width || y < 0 || y >= m.Height {
 		return
@@ -198,7 +198,7 @@ func (m *MapData) CloseDoor(x, y int) {
 	}
 }
 
-// Parse reads a .map file and returns MapData.
+// Parse 读取一个 .map 文件并返回 MapData。
 func Parse(path string) (*MapData, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -225,7 +225,7 @@ func Parse(path string) (*MapData, error) {
 	height := int(hdr.Height)
 	totalCells := width * height
 
-	// Detect cell size
+	// 检测格子大小
 	remaining := len(data) - headerSize
 	if totalCells == 0 {
 		return nil, fmt.Errorf("zero cells (%dx%d)", width, height)
@@ -245,7 +245,7 @@ func Parse(path string) (*MapData, error) {
 		return nil, fmt.Errorf("unknown format: %d bytes for %d cells", remaining, totalCells)
 	}
 
-	// Read cells: file stores column-major, convert to row-major
+	// 读取格子：文件按列优先存储，转换为行优先
 	cells := make([]Cell, totalCells)
 	for col := 0; col < width; col++ {
 		for row := 0; row < height; row++ {
@@ -276,8 +276,8 @@ func Parse(path string) (*MapData, error) {
 	return md, nil
 }
 
-// parseCells converts raw Cell data into CellInfo with separated lib/image indices.
-// Matches C++ ParseCells from common/map_parser.cpp.
+// parseCells 将原始 Cell 数据转换为 lib/图像索引已分离的 CellInfo。
+// 对应 C++ common/map_parser.cpp 中的 ParseCells。
 func (m *MapData) parseCells() {
 	total := len(m.Cells)
 	m.CellInfos = make([]CellInfo, total)
@@ -285,7 +285,7 @@ func (m *MapData) parseCells() {
 		raw := &m.Cells[i]
 		info := &m.CellInfos[i]
 
-		// Collision: Delphi CanMove checks both wBkImg and wFrImg bit15 (MapUnit.pas:320)
+		// 碰撞：Delphi CanMove 同时检查 wBkImg 和 wFrImg 的 bit15（MapUnit.pas:320）
 		info.Collision = (raw.BkImg&0x8000) != 0 || (raw.FrImg&0x8000) != 0
 		backImg := int(raw.BkImg&0x7FFF) - 1
 		if backImg >= 0 {
@@ -296,7 +296,7 @@ func (m *MapData) parseCells() {
 			info.BackImage = -1
 		}
 
-		// Middle layer: bits 0-14 = 1-based image index
+		// 中间层：bits 0-14 = 从 1 开始的图像索引
 		midImg := int(raw.MidImg&0x7FFF) - 1
 		if midImg >= 0 {
 			info.MiddleLib = LibSmTiles
@@ -306,7 +306,7 @@ func (m *MapData) parseCells() {
 			info.MiddleImage = -1
 		}
 
-		// Front layer: bits 0-14 = 1-based image index
+		// 前景层：bits 0-14 = 从 1 开始的图像索引
 		frontImg := int(raw.FrImg&0x7FFF) - 1
 		if frontImg >= 0 {
 			info.FrontLib = LibObjects
@@ -319,7 +319,7 @@ func (m *MapData) parseCells() {
 		info.Door = raw.DoorIndex
 		info.Light = raw.Light
 
-		// Front layer metadata for animation/alpha/door
+		// 前景层动画/alpha/门的元数据
 		if frontImg >= 0 {
 			info.FrontArea = raw.Area
 			info.FrontAniFrame = raw.AniFrame

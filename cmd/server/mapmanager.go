@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/mapformat"
 )
 
-// MapRoute represents a teleport route between maps.
+// MapRoute 表示地图之间的传送路线。
 type MapRoute struct {
 	SrcMap     string
 	SrcX, SrcY int
@@ -18,7 +18,7 @@ type MapRoute struct {
 	DstX, DstY int
 }
 
-// MapManager manages all maps.
+// MapManager 管理所有地图。
 type MapManager struct {
 	mapDir string
 	maps   map[string]*Environment
@@ -26,7 +26,7 @@ type MapManager struct {
 	mu     sync.RWMutex
 }
 
-// NewMapManager creates a new map manager.
+// NewMapManager 创建一个新的地图管理器。
 func NewMapManager(mapDir string) *MapManager {
 	return &MapManager{
 		mapDir: mapDir,
@@ -34,7 +34,7 @@ func NewMapManager(mapDir string) *MapManager {
 	}
 }
 
-// LoadAllMaps loads all .map files from the map directory.
+// LoadAllMaps 从地图目录加载所有 .map 文件。
 func (m *MapManager) LoadAllMaps() error {
 	entries, err := os.ReadDir(m.mapDir)
 	if err != nil {
@@ -56,7 +56,7 @@ func (m *MapManager) LoadAllMaps() error {
 
 		mapData, err := mapformat.Parse(mapPath)
 		if err != nil {
-			log.Logf(log.LevelError, "MapManager", "Failed to load map %s: %v", name, err)
+			log.Logf(log.LevelError, "MapManager", "加载地图 %s 失败: %v", name, err)
 			continue
 		}
 
@@ -65,18 +65,18 @@ func (m *MapManager) LoadAllMaps() error {
 		loaded++
 	}
 
-	log.Logf(log.LevelInfo, "MapManager", "Loaded %d maps", loaded)
+	log.Logf(log.LevelInfo, "MapManager", "已加载 %d 张地图", loaded)
 	return nil
 }
 
-// FindMap finds a map by name.
+// FindMap 按名称查找地图。
 func (m *MapManager) FindMap(name string) *Environment {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.maps[name]
 }
 
-// GetMapList returns all loaded map names.
+// GetMapList 返回所有已加载的地图名称。
 func (m *MapManager) GetMapList() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -87,7 +87,7 @@ func (m *MapManager) GetMapList() []string {
 	return names
 }
 
-// AddRoute adds a teleport route between maps.
+// AddRoute 添加地图之间的传送路线。
 func (m *MapManager) AddRoute(srcMap string, srcX, srcY int, dstMap string, dstX, dstY int) {
 	m.routes = append(m.routes, MapRoute{
 		SrcMap: srcMap,
@@ -99,7 +99,7 @@ func (m *MapManager) AddRoute(srcMap string, srcX, srcY int, dstMap string, dstX
 	})
 }
 
-// FindRoute finds a route at the given position.
+// FindRoute 查找指定位置的传送路线。
 func (m *MapManager) FindRoute(mapName string, x, y int) *MapRoute {
 	for _, r := range m.routes {
 		if r.SrcMap == mapName && r.SrcX == x && r.SrcY == y {
@@ -109,18 +109,18 @@ func (m *MapManager) FindRoute(mapName string, x, y int) *MapRoute {
 	return nil
 }
 
-// GetLoadedCount returns the number of loaded maps.
+// GetLoadedCount 返回已加载的地图数量。
 func (m *MapManager) GetLoadedCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.maps)
 }
 
-// InitRoutes sets up teleport routes between loaded maps.
+// InitRoutes 初始化已加载地图之间的传送路线。
 func (m *MapManager) InitRoutes() {
 	if m.FindMap("0") != nil && m.FindMap("3") != nil {
 		m.AddRoute("0", 289, 618, "3", 330, 330)
 		m.AddRoute("3", 330, 331, "0", 289, 619)
 	}
-	log.Logf(log.LevelInfo, "MapManager", "Initialized %d map routes", len(m.routes))
+	log.Logf(log.LevelInfo, "MapManager", "已初始化 %d 条地图路线", len(m.routes))
 }

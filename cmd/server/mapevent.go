@@ -46,8 +46,8 @@ func (e *Environment) ProcessMapEvents(server *netserver.TCPServer, now int64) {
 					}
 				}
 			case *PlayObject:
-				// Fire damages players but never kills: clamping at 1 HP avoids
-				// the death/PK/drop flow, which a map event cannot drive cleanly.
+				// 火墙对玩家造成伤害但不会致死：将 HP 钳制在 1 可以避免
+				// 死亡/PK/掉落流程，地图事件无法干净地驱动这些流程。
 				if !o.Ghost && !o.Death {
 					hp := int(o.WAbil.HP) - ev.Damage
 					if hp < 1 {

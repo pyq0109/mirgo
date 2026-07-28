@@ -7,7 +7,7 @@ import (
 	"github.com/go-gl/gl/v3.3-core/gl"
 )
 
-// GLState holds OpenGL resources for rendering.
+// GLState 保存用于渲染的 OpenGL 资源。
 type GLState struct {
 	TextureShader *TextureShader
 	ColorShader   *ColorShader
@@ -15,13 +15,13 @@ type GLState struct {
 	VBO           uint32
 	WhiteTex      uint32
 
-	// Current viewport in framebuffer pixels (updated by SetViewport).
+	// 当前视口（帧缓冲像素，由 SetViewport 更新）。
 	ViewX, ViewY, ViewW, ViewH int32
 
 	scissorStack [][4]int32
 }
 
-// NewGLState initializes OpenGL resources.
+// NewGLState 初始化 OpenGL 资源。
 func NewGLState() (*GLState, error) {
 	texShader, err := NewTextureShader()
 	if err != nil {
@@ -32,7 +32,7 @@ func NewGLState() (*GLState, error) {
 		return nil, err
 	}
 
-	// Unit quad VBO: pos(2) + uv(2) per vertex, 6 vertices
+	// 单位四边形 VBO：每个顶点 pos(2) + uv(2)，共 6 个顶点
 	vertices := []float32{
 		0, 0, 0, 0,
 		1, 0, 1, 0,
@@ -59,7 +59,7 @@ func NewGLState() (*GLState, error) {
 
 	gl.BindVertexArray(0)
 
-	// White 1x1 texture
+	// 白色 1x1 纹理
 	var whiteTex uint32
 	gl.GenTextures(1, &whiteTex)
 	gl.BindTexture(gl.TEXTURE_2D, whiteTex)
@@ -77,7 +77,7 @@ func NewGLState() (*GLState, error) {
 	}, nil
 }
 
-// UploadTexture uploads an *image.RGBA to an OpenGL texture.
+// UploadTexture 将 *image.RGBA 上传为 OpenGL 纹理。
 func (s *GLState) UploadTexture(img *image.RGBA) uint32 {
 	var tex uint32
 	gl.GenTextures(1, &tex)
@@ -92,30 +92,29 @@ func (s *GLState) UploadTexture(img *image.RGBA) uint32 {
 	return tex
 }
 
-// DeleteTexture deletes an OpenGL texture.
+// DeleteTexture 删除一个 OpenGL 纹理。
 func (s *GLState) DeleteTexture(id uint32) {
 	if id != 0 {
 		gl.DeleteTextures(1, &id)
 	}
 }
 
-// SetViewport sets the GL viewport and remembers it (used for scissor math).
+// SetViewport 设置 GL 视口并记录下来（用于裁剪计算）。
 func (s *GLState) SetViewport(x, y, w, h int32) {
 	s.ViewX, s.ViewY, s.ViewW, s.ViewH = x, y, w, h
 	gl.Viewport(x, y, w, h)
 }
 
-// PushScissor enables a scissor rect. Coordinates are top-down within the
-// current viewport. Callers drawing UI at logical 800x600 while the
-// framebuffer is scaled (HiDPI) must convert logical to viewport pixels
-// themselves: pix = logical * ViewW / 800.
+// PushScissor 启用一个裁剪矩形。坐标相对于当前视口自上而下。
+// 在帧缓冲被缩放（HiDPI）时仍按逻辑 800x600 绘制 UI 的调用方，
+// 必须自行把逻辑像素换算为视口像素：pix = logical * ViewW / 800。
 func (s *GLState) PushScissor(x, y, w, h int32) {
 	s.scissorStack = append(s.scissorStack, [4]int32{x, y, w, h})
 	gl.Enable(gl.SCISSOR_TEST)
 	gl.Scissor(s.ViewX+x, s.ViewY+s.ViewH-y-h, w, h)
 }
 
-// PopScissor restores the previous scissor rect, or disables scissoring.
+// PopScissor 恢复上一个裁剪矩形，或禁用裁剪。
 func (s *GLState) PopScissor() {
 	if len(s.scissorStack) == 0 {
 		gl.Disable(gl.SCISSOR_TEST)
@@ -152,7 +151,7 @@ func (s *GLState) setModel(x, y, w, h float32, proj [16]float32) {
 	gl.UniformMatrix4fv(s.TextureShader.ModelLoc, 1, false, &model[0])
 }
 
-// DrawQuad draws a textured quad at (x, y) with size (w, h).
+// DrawQuad 在 (x, y) 处绘制尺寸为 (w, h) 的带纹理四边形。
 func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
@@ -163,7 +162,7 @@ func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// DrawQuadTint draws a textured quad with color tinting (frag_color = texture * color).
+// DrawQuadTint 绘制带颜色着色的带纹理四边形（frag_color = texture * color）。
 func (s *GLState) DrawQuadTint(texID uint32, x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
@@ -174,9 +173,9 @@ func (s *GLState) DrawQuadTint(texID uint32, x, y, w, h float32, r, g, b, a floa
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// DrawQuadSub draws a sub-rectangle (sx, sy, sw, sh in texture pixels of a
-// texW×texH texture) into the destination quad (x, y, w, h), with tint.
-// Used for cropped bars (HP/MP orbs, exp/weight) and partial sprites.
+// DrawQuadSub 将一张 texW×texH 纹理中的子矩形（sx, sy, sw, sh，单位为纹理像素）
+// 绘制到目标四边形 (x, y, w, h)，并带着色。
+// 用于裁剪的进度条（HP/MP 球、经验/负重）和部分精灵。
 func (s *GLState) DrawQuadSub(texID uint32, texW, texH float32, sx, sy, sw, sh, x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
 	if texW <= 0 || texH <= 0 {
 		return
@@ -190,7 +189,7 @@ func (s *GLState) DrawQuadSub(texID uint32, texW, texH float32, sx, sy, sw, sh, 
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// DrawQuadColor draws a colored quad (no texture).
+// DrawQuadColor 绘制一个纯色四边形（无纹理）。
 func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
@@ -201,8 +200,8 @@ func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// DrawQuadAdditive draws a textured quad with additive blending (src+dst),
-// matching Delphi DrawBlend(...,1) used for selection glow effects.
+// DrawQuadAdditive 以叠加混合（src+dst）绘制带纹理四边形，
+// 对应 Delphi 用于选中发光效果的 DrawBlend(...,1)。
 func (s *GLState) DrawQuadAdditive(texID uint32, x, y, w, h float32, proj [16]float32) {
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 	s.setModel(x, y, w, h, proj)
@@ -215,7 +214,7 @@ func (s *GLState) DrawQuadAdditive(texID uint32, x, y, w, h float32, proj [16]fl
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 }
 
-// OrthoProj computes an orthographic projection matrix (Y-down) from width/height.
+// OrthoProj 根据宽高计算正交投影矩阵（Y 轴向下）。
 func OrthoProj(width, height float32) [16]float32 {
 	return [16]float32{
 		2 / width, 0, 0, 0,
@@ -225,8 +224,8 @@ func OrthoProj(width, height float32) [16]float32 {
 	}
 }
 
-// OrthoProj4 computes an orthographic projection matrix from left/right/bottom/top.
-// This matches the mapviewer's OrthoProj function.
+// OrthoProj4 根据 left/right/bottom/top 计算正交投影矩阵。
+// 与 mapviewer 的 OrthoProj 函数一致。
 func OrthoProj4(left, right, bottom, top float32) [16]float32 {
 	return [16]float32{
 		2 / (right - left), 0, 0, 0,
@@ -236,7 +235,7 @@ func OrthoProj4(left, right, bottom, top float32) [16]float32 {
 	}
 }
 
-// Destroy frees all GL resources held by the GLState.
+// Destroy 释放 GLState 持有的所有 GL 资源。
 func (s *GLState) Destroy() {
 	gl.DeleteTextures(1, &s.WhiteTex)
 	gl.DeleteBuffers(1, &s.VBO)

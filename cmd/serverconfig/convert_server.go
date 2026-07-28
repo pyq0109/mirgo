@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// ServerConfig represents the main server configuration.
+// ServerConfig 表示服务器主配置。
 type ServerConfig struct {
 	Server   ServerSection   `json:"server"`
 	Database DatabaseSection `json:"database"`
@@ -15,7 +15,7 @@ type ServerConfig struct {
 	Plugins  PluginsSection  `json:"plugins"`
 }
 
-// ServerSection contains server identity and network settings.
+// ServerSection 包含服务器标识和网络设置。
 type ServerSection struct {
 	Name      string        `json:"name"`
 	Index     int           `json:"index"`
@@ -23,24 +23,24 @@ type ServerSection struct {
 	Limits    LimitsConfig  `json:"limits"`
 }
 
-// ListenConfig contains network listen settings.
+// ListenConfig 包含网络监听设置。
 type ListenConfig struct {
 	Addr string `json:"addr"`
 }
 
-// LimitsConfig contains server capacity limits.
+// LimitsConfig 包含服务器容量限制。
 type LimitsConfig struct {
 	MaxPlayers int `json:"maxPlayers"`
 	HumLimit   int `json:"humLimit"`
 	MonLimit   int `json:"monLimit"`
 }
 
-// DatabaseSection contains database file path.
+// DatabaseSection 包含数据库文件路径。
 type DatabaseSection struct {
 	Path string `json:"path"`
 }
 
-// GameSection contains game world settings.
+// GameSection 包含游戏世界设置。
 type GameSection struct {
 	HomeMap         string         `json:"homeMap"`
 	HomeX           int            `json:"homeX"`
@@ -57,27 +57,27 @@ type GameSection struct {
 	SpeedHackMax    int            `json:"speedHackMax"`
 }
 
-// CommandsSection contains GM command definitions.
+// CommandsSection 包含 GM 命令定义。
 type CommandsSection struct {
 	Names       map[string]string `json:"names"`
 	Permissions map[string]int    `json:"permissions"`
 }
 
-// PluginsSection contains plugin toggles.
+// PluginsSection 包含插件开关。
 type PluginsSection struct {
 	Enabled map[string]bool `json:"enabled"`
 }
 
-// ConvertServer converts the main server configuration files.
+// ConvertServer 转换服务器主配置文件。
 func ConvertServer(inputDir, outputDir string) error {
-	// Parse !setup.txt
+	// 解析 !setup.txt
 	setupFile := filepath.Join(inputDir, "!setup.txt")
 	setup, err := ParseINI(setupFile)
 	if err != nil {
 		return fmt.Errorf("parsing !setup.txt: %w", err)
 	}
 
-	// Parse Command.ini
+	// 解析 Command.ini
 	cmdFile := filepath.Join(inputDir, "Command.ini")
 	commands, err := ParseINI(cmdFile)
 	if err != nil {
@@ -88,11 +88,11 @@ func ConvertServer(inputDir, outputDir string) error {
 	pluginFile := filepath.Join(inputDir, "系统插件.ini")
 	plugins, err := ParseINI(pluginFile)
 	if err != nil {
-		// Plugin file is optional
+		// 插件文件为可选项
 		plugins = make(map[string]map[string]string)
 	}
 
-	// Build server config
+	// 构建服务器配置
 	config := ServerConfig{
 		Server: ServerSection{
 			Name:  getINIValue(setup, "Server", "ServerName", "Mir2 Server"),
@@ -133,20 +133,20 @@ func ConvertServer(inputDir, outputDir string) error {
 		},
 	}
 
-	// Marshal to JSON
+	// 序列化为 JSON
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling server config: %w", err)
 	}
 
-	// Write output
+	// 写入输出文件
 	outputFile := filepath.Join(outputDir, "server.jsonc")
 	comment := "服务器主配置\n来源: asset/server/!setup.txt + Command.ini + 系统插件.ini\n说明: 合并后的服务端配置，移除了多进程地址配置"
 
 	return WriteJSONC(outputFile, string(data), comment)
 }
 
-// Helper functions
+// 辅助函数
 
 func getINIValue(ini map[string]map[string]string, section, key, defaultVal string) string {
 	if sec, ok := ini[section]; ok {

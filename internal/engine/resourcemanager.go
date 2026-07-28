@@ -9,12 +9,12 @@ import (
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
-// ResourceManager manages WIL file loading and texture caching.
+// ResourceManager 管理 WIL 文件加载与纹理缓存。
 type ResourceManager struct {
 	dataDir string
 	gl      *GLState
 
-	// WIL files
+	// WIL 文件
 	Tiles    *wil.File
 	SmTiles  *wil.File
 	Objects  [15]*wil.File
@@ -39,17 +39,17 @@ type ResourceManager struct {
 	HumEffect *wil.File
 	MagIcon  *wil.File
 
-	// Texture cache
+	// 纹理缓存
 	mu       sync.RWMutex
-	texCache map[string]uint32 // "wilName:index" -> texture ID
+	texCache map[string]uint32 // "wilName:index" -> 纹理 ID
 
-	// Lazily loaded auxiliary WILs (St<N>.wil equipment looks files); nil
-	// values cache failed loads.
+	// 懒加载的辅助 WIL（St<N>.wil 装备外观文件）；nil 值用于缓存
+	// 加载失败的结果。
 	extraMu sync.Mutex
 	extras  map[string]*wil.File
 }
 
-// NewResourceManager creates a new resource manager and loads all WIL files.
+// NewResourceManager 创建一个新的资源管理器并加载所有 WIL 文件。
 func NewResourceManager(dataDir string, gl *GLState) (*ResourceManager, error) {
 	rm := &ResourceManager{
 		dataDir:  dataDir,
@@ -64,7 +64,7 @@ func NewResourceManager(dataDir string, gl *GLState) (*ResourceManager, error) {
 	return rm, nil
 }
 
-// DataDir returns the data directory path.
+// DataDir 返回数据目录路径。
 func (rm *ResourceManager) DataDir() string {
 	return rm.dataDir
 }
@@ -81,7 +81,7 @@ func (rm *ResourceManager) loadAll() error {
 
 	var err error
 
-	// Map tiles
+	// 地图地砖
 	rm.Tiles, err = load("Tiles.wil")
 	if err != nil {
 		return err
@@ -91,16 +91,16 @@ func (rm *ResourceManager) loadAll() error {
 		return err
 	}
 
-	// Objects (1-15)
+	// Objects（1-15）
 	for i := 0; i < 15; i++ {
 		name := fmt.Sprintf("Objects%d.wil", i+1)
 		if i == 0 {
 			name = "Objects.wil"
 		}
-		rm.Objects[i], _ = load(name) // Optional, ignore errors
+		rm.Objects[i], _ = load(name) // 可选，忽略错误
 	}
 
-	// Character assets
+	// 角色资源
 	rm.Hum, err = load("Hum.wil")
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func (rm *ResourceManager) loadAll() error {
 		return err
 	}
 
-	// Monster files (Mon1-Mon28, optional)
+	// 怪物文件（Mon1-Mon28，可选）
 	for i := 0; i < 28; i++ {
 		name := fmt.Sprintf("Mon%d.wil", i+1)
 		rm.Mon[i], _ = load(name)
@@ -126,11 +126,11 @@ func (rm *ResourceManager) loadAll() error {
 		return err
 	}
 
-	// Magic effects
+	// 魔法特效
 	rm.Magic, _ = load("Magic.wil")
 	rm.Magic2, _ = load("Magic2.wil")
 
-	// Items
+	// 物品
 	rm.Items, err = load("Items.wil")
 	if err != nil {
 		return err
@@ -152,16 +152,16 @@ func (rm *ResourceManager) loadAll() error {
 	rm.Prguse2, _ = load("Prguse2.wil")
 	rm.Prguse3, _ = load("Prguse3.wil")
 
-	// Character selection
+	// 角色选择
 	rm.ChrSel, err = load("ChrSel.wil")
 	if err != nil {
 		return err
 	}
 
-	// Minimap
+	// 小地图
 	rm.Mmap, _ = load("mmap.wil")
 
-	// Effects
+	// 特效
 	rm.Effect, _ = load("Effect.wil")
 	rm.Dragon, _ = load("Dragon.wil")
 	rm.Event, _ = load("Event.wil")
@@ -171,7 +171,7 @@ func (rm *ResourceManager) loadAll() error {
 	return nil
 }
 
-// GetTexture returns a cached texture for the given WIL file and image index.
+// GetTexture 返回给定 WIL 文件和图像索引对应的缓存纹理。
 func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 	if f == nil || index < 0 || index >= f.Count {
 		return 0
@@ -200,7 +200,7 @@ func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 	return tex
 }
 
-// GetImage returns the raw image for the given WIL file and index.
+// GetImage 返回给定 WIL 文件和索引对应的原始图像。
 func (rm *ResourceManager) GetImage(f *wil.File, index int) *image.RGBA {
 	if f == nil || index < 0 || index >= f.Count {
 		return nil
@@ -212,9 +212,8 @@ func (rm *ResourceManager) GetImage(f *wil.File, index int) *image.RGBA {
 	return img.RGBA
 }
 
-// GetExtraWil lazily loads an auxiliary WIL by file name (e.g. "St1.wil",
-// used for equipment Looks >= 10000; ClMain.pas:6179-6210). Returns nil when
-// the file is absent.
+// GetExtraWil 按文件名懒加载一个辅助 WIL（如 "St1.wil"，用于装备
+// Looks >= 10000 的情况；ClMain.pas:6179-6210）。文件不存在时返回 nil。
 func (rm *ResourceManager) GetExtraWil(name string) *wil.File {
 	rm.extraMu.Lock()
 	defer rm.extraMu.Unlock()
@@ -233,7 +232,7 @@ func (rm *ResourceManager) GetExtraWil(name string) *wil.File {
 	return f
 }
 
-// ClearCache clears the texture cache.
+// ClearCache 清空纹理缓存。
 func (rm *ResourceManager) ClearCache() {
 	rm.mu.Lock()
 	for _, tex := range rm.texCache {
@@ -243,7 +242,7 @@ func (rm *ResourceManager) ClearCache() {
 	rm.mu.Unlock()
 }
 
-// Destroy frees all resources.
+// Destroy 释放所有资源。
 func (rm *ResourceManager) Destroy() {
 	rm.ClearCache()
 	rm.closeAllWils()

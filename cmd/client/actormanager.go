@@ -57,7 +57,7 @@ func (m *ActorManager) Update(now int64, moveTick bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, actor := range m.actors {
-		// Delphi only sets the backlog speed-up flag for non-self actors (Actor.pas:2667)
+		// Delphi 只对非自身角色设置消息积压加速标志（Actor.pas:2667）
 		actor.MsgMuch = !actor.IsSelf && len(actor.MsgList) >= 2
 		if moveTick {
 			actor.LockEndFrame = false
@@ -81,14 +81,14 @@ func (m *ActorManager) SortedByY() []*Actor {
 		if actors[i].Ry != actors[j].Ry {
 			return actors[i].Ry < actors[j].Ry
 		}
-		// Dead actors sit on the bottom layer (drawn first) so the living
-		// trample them — ActorDied moves the dead to the list head
-		// (PlayScn.pas:2151-2169); the render loop draws head-first (:1229-1240).
+		// 死亡角色在底层（先绘制），活人踩在上面——
+		// ActorDied 把死者移到列表头部（PlayScn.pas:2151-2169）；
+		// 渲染循环从头部开始绘制（:1229-1240）。
 		if actors[i].Death != actors[j].Death {
 			return actors[i].Death
 		}
-		// Deterministic tie-break: map iteration order is random, so without a
-		// stable key same-row actors would swap draw order across frames (flicker).
+		// 确定性排序：map 迭代顺序是随机的，没有稳定键的话
+		// 同行角色会跨帧交换绘制顺序（闪烁）。
 		return actors[i].RecogID < actors[j].RecogID
 	})
 	return actors

@@ -2,22 +2,22 @@ package engine
 
 import "github.com/pyq0109/mirgo/internal/log"
 
-// SceneType represents the type of game scene.
-// Matches Delphi TSceneType enum from IntroScn.pas
+// SceneType 表示游戏场景的类型。
+// 对应 Delphi IntroScn.pas 中的 TSceneType 枚举
 type SceneType int
 
 const (
-	SceneIntro         SceneType = iota // 0: Startup screen (empty)
-	SceneLogin                          // 1: Login screen with ID/Password
-	SceneSelectServer                   // 2: Server selection dialog
-	SceneSelectChr                      // 3: Character selection
-	SceneNewChr                         // 4: Character creation (unused)
-	SceneLoading                        // 5: Loading screen (unused)
-	SceneLoginNotice                    // 6: Login notice/announcement
-	ScenePlayGame                       // 7: Main game play
+	SceneIntro         SceneType = iota // 0：启动画面（空）
+	SceneLogin                          // 1：账号/密码登录界面
+	SceneSelectServer                   // 2：选服对话框
+	SceneSelectChr                      // 3：角色选择
+	SceneNewChr                         // 4：创建角色（未使用）
+	SceneLoading                        // 5：加载界面（未使用）
+	SceneLoginNotice                    // 6：登录公告
+	ScenePlayGame                       // 7：主游戏场景
 )
 
-// String returns the scene type name.
+// String 返回场景类型名称。
 func (t SceneType) String() string {
 	switch t {
 	case SceneIntro:
@@ -41,46 +41,46 @@ func (t SceneType) String() string {
 	}
 }
 
-// Scene is the interface for all game scenes.
+// Scene 是所有游戏场景的接口。
 type Scene interface {
-	// Open called when the scene becomes active.
+	// Open 在场景变为活动时调用。
 	Open()
-	// Close is called when the scene becomes inactive.
+	// Close 在场景变为非活动时调用。
 	Close()
-	// Update updates the scene state.
+	// Update 更新场景状态。
 	Update(dt float64)
-	// Render renders the scene.
+	// Render 渲染场景。
 	Render(gl *GLState, proj [16]float32)
-	// OnKey handles keyboard input.
+	// OnKey 处理键盘输入。
 	OnKey(key int, action int)
-	// OnMouse handles mouse button input. mods is a bitmask of GLFW modifier keys.
+	// OnMouse 处理鼠标按键输入。mods 是 GLFW 修饰键的位掩码。
 	OnMouse(x, y float64, button int, action int, mods int)
-	// OnScroll handles mouse scroll input.
+	// OnScroll 处理鼠标滚轮输入。
 	OnScroll(x, y float64)
 }
 
-// SceneManager manages scene transitions.
+// SceneManager 管理场景切换。
 type SceneManager struct {
 	currentType SceneType
 	current     Scene
 	scenes      map[SceneType]Scene
 }
 
-// NewSceneManager creates a new scene manager.
+// NewSceneManager 创建一个新的场景管理器。
 func NewSceneManager() *SceneManager {
 	return &SceneManager{
 		scenes: make(map[SceneType]Scene),
 	}
 }
 
-// RegisterScene registers a scene for the given type.
+// RegisterScene 为指定类型注册一个场景。
 func (m *SceneManager) RegisterScene(t SceneType, scene Scene) {
 	m.scenes[t] = scene
 }
 
-// ChangeScene transitions to a new scene.
+// ChangeScene 切换到一个新场景。
 func (m *SceneManager) ChangeScene(t SceneType) {
-	log.Logf(log.LevelInfo, "Scene", "ChangeScene: %s → %s", m.currentType, t)
+	log.Logf(log.LevelInfo, "Scene", "切换场景：%s → %s", m.currentType, t)
 	if m.current != nil {
 		m.current.Close()
 	}
@@ -91,59 +91,59 @@ func (m *SceneManager) ChangeScene(t SceneType) {
 	}
 }
 
-// CurrentType returns the current scene type.
+// CurrentType 返回当前场景类型。
 func (m *SceneManager) CurrentType() SceneType {
 	return m.currentType
 }
 
-// Current returns the current scene.
+// Current 返回当前场景。
 func (m *SceneManager) Current() Scene {
 	return m.current
 }
 
-// Update updates the current scene.
+// Update 更新当前场景。
 func (m *SceneManager) Update(dt float64) {
 	if m.current != nil {
 		m.current.Update(dt)
 	}
 }
 
-// Render renders the current scene.
+// Render 渲染当前场景。
 func (m *SceneManager) Render(gl *GLState, proj [16]float32) {
 	if m.current != nil {
 		m.current.Render(gl, proj)
 	}
 }
 
-// OnKey forwards keyboard input to the current scene.
+// OnKey 将键盘输入转发给当前场景。
 func (m *SceneManager) OnKey(key int, action int) {
 	if m.current != nil {
 		m.current.OnKey(key, action)
 	}
 }
 
-// OnMouse forwards mouse button input to the current scene.
+// OnMouse 将鼠标按键输入转发给当前场景。
 func (m *SceneManager) OnMouse(x, y float64, button int, action int, mods int) {
 	if m.current != nil {
 		m.current.OnMouse(x, y, button, action, mods)
 	}
 }
 
-// OnScroll forwards mouse scroll input to the current scene.
+// OnScroll 将鼠标滚轮输入转发给当前场景。
 func (m *SceneManager) OnScroll(x, y float64) {
 	if m.current != nil {
 		m.current.OnScroll(x, y)
 	}
 }
 
-// OnChar forwards character input to the current scene if it supports it.
+// OnChar 在场景支持时将字符输入转发给当前场景。
 func (m *SceneManager) OnChar(char rune) {
 	if s, ok := m.current.(interface{ OnChar(rune) }); ok {
 		s.OnChar(char)
 	}
 }
 
-// OnMouseMove forwards cursor movement to the current scene if it supports it.
+// OnMouseMove 在场景支持时将光标移动转发给当前场景。
 func (m *SceneManager) OnMouseMove(x, y float64) {
 	if s, ok := m.current.(interface{ OnMouseMove(x, y float64) }); ok {
 		s.OnMouseMove(x, y)

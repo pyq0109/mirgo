@@ -1,14 +1,14 @@
-// Server Config Converter converts Delphi server configuration files to JSONC format.
+// 服务端配置转换工具，将 Delphi 服务端配置文件转换为 JSONC 格式。
 //
-// Usage:
+// 用法:
 //
 //	go run ./cmd/serverconfig [flags]
 //
-// Flags:
+// 参数:
 //
-//	-input string   Input directory (default "asset/server")
-//	-output string  Output directory (default "serverconfig")
-//	-v              Verbose output
+//	-input string   输入目录（默认 "asset/server"）
+//	-output string  输出目录（默认 "serverconfig"）
+//	-v              详细输出
 package main
 
 import (
@@ -20,31 +20,31 @@ import (
 )
 
 func main() {
-	inputDir := flag.String("input", "asset/server", "Input directory containing Delphi server config")
-	outputDir := flag.String("output", "serverconfig", "Output directory for JSONC files")
-	verbose := flag.Bool("v", false, "Verbose output")
+	inputDir := flag.String("input", "asset/server", "Delphi 服务端配置输入目录")
+	outputDir := flag.String("output", "serverconfig", "JSONC 文件输出目录")
+	verbose := flag.Bool("v", false, "详细输出")
 	flag.Parse()
 
 	start := time.Now()
 
-	fmt.Println("=== Server Config Converter ===")
+	fmt.Println("=== 服务端配置转换工具 ===")
 	fmt.Printf("输入目录: %s\n", *inputDir)
 	fmt.Printf("输出目录: %s\n", *outputDir)
 	fmt.Println()
 
-	// Verify input directory exists
+	// 验证输入目录是否存在
 	if !DirExists(*inputDir) {
 		fmt.Fprintf(os.Stderr, "错误: 输入目录不存在: %s\n", *inputDir)
 		os.Exit(1)
 	}
 
-	// Create output directory
+	// 创建输出目录
 	if err := os.MkdirAll(*outputDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "错误: 创建输出目录失败: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create subdirectories
+	// 创建子目录
 	subdirs := []string{
 		"maps", "items", "monsters", "magic", "npcs",
 		"guards", "castle", "guild", "notice", "misc",
@@ -62,7 +62,7 @@ func main() {
 
 	stats := &ConversionStats{}
 
-	// T2: Convert server config
+	// T2: 转换主配置
 	fmt.Println("[T2] 转换主配置...")
 	if err := ConvertServer(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换主配置失败: %v\n", err)
@@ -74,7 +74,7 @@ func main() {
 		}
 	}
 
-	// T3: Convert exp table and strings
+	// T3: 转换经验表和字符串
 	fmt.Println("[T3] 转换经验表和字符串...")
 	if err := ConvertExpTable(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换经验表失败: %v\n", err)
@@ -106,7 +106,7 @@ func main() {
 		}
 	}
 
-	// T4: Convert database
+	// T4: 转换数据库
 	fmt.Println("[T4] 转换数据库...")
 	if err := ConvertDatabase(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换数据库失败: %v\n", err)
@@ -120,7 +120,7 @@ func main() {
 		}
 	}
 
-	// T5: Convert maps
+	// T5: 转换地图配置
 	fmt.Println("[T5] 转换地图配置...")
 	if err := ConvertMaps(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换地图配置失败: %v\n", err)
@@ -134,7 +134,7 @@ func main() {
 		}
 	}
 
-	// T6: Convert items
+	// T6: 转换物品配置
 	fmt.Println("[T6] 转换物品配置...")
 	if err := ConvertItems(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换物品配置失败: %v\n", err)
@@ -150,7 +150,7 @@ func main() {
 		}
 	}
 
-	// T7: Convert monsters
+	// T7: 转换怪物配置
 	fmt.Println("[T7] 转换怪物配置...")
 	if err := ConvertMonsters(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换怪物配置失败: %v\n", err)
@@ -164,7 +164,7 @@ func main() {
 		}
 	}
 
-	// T8: Convert NPCs
+	// T8: 转换 NPC 配置
 	fmt.Println("[T8] 转换NPC配置...")
 	if err := ConvertNPCs(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换NPC配置失败: %v\n", err)
@@ -180,7 +180,7 @@ func main() {
 		}
 	}
 
-	// T9: Convert misc
+	// T9: 转换其他配置
 	fmt.Println("[T9] 转换其他配置...")
 	if err := ConvertMisc(*inputDir, *outputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 转换其他配置失败: %v\n", err)
@@ -196,7 +196,7 @@ func main() {
 		}
 	}
 
-	// Print summary
+	// 输出汇总
 	elapsed := time.Since(start)
 	fmt.Println()
 	fmt.Println("=== 转换完成 ===")
@@ -207,7 +207,7 @@ func main() {
 	fmt.Printf("耗时: %v\n", elapsed.Round(time.Millisecond))
 }
 
-// ConversionStats tracks conversion statistics.
+// ConversionStats 跟踪转换统计信息。
 type ConversionStats struct {
 	Success int
 	Errors  int

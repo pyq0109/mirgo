@@ -11,18 +11,18 @@ import (
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
-// WILRenderer renders WIL images using OpenGL.
+// WILRenderer 使用 OpenGL 渲染 WIL 图像。
 type WILRenderer struct {
 	WILFile  *wil.File
 	glState  *GLState
-	texCache map[int]uint32 // image index -> GL texture
+	texCache map[int]uint32 // 图片索引 -> GL 纹理
 
-	// Camera state for zoom/pan.
+	// 相机状态，用于缩放/平移
 	Zoom             float64
 	OffsetX, OffsetY float64
 }
 
-// NewWILRenderer creates a renderer for WIL images.
+// NewWILRenderer 创建 WIL 图像渲染器。
 func NewWILRenderer(wilFile *wil.File, glState *GLState) *WILRenderer {
 	return &WILRenderer{
 		WILFile:  wilFile,
@@ -32,7 +32,7 @@ func NewWILRenderer(wilFile *wil.File, glState *GLState) *WILRenderer {
 	}
 }
 
-// SetWILFile replaces the current WIL file and clears the texture cache.
+// SetWILFile 替换当前 WIL 文件并清除纹理缓存。
 func (r *WILRenderer) SetWILFile(f *wil.File) {
 	oldCount := len(r.texCache)
 	for _, tex := range r.texCache {
@@ -50,12 +50,12 @@ func (r *WILRenderer) SetWILFile(f *wil.File) {
 	}
 }
 
-// GetOrCreateTexture returns a GL texture for the given image index, creating and caching as needed.
+// GetOrCreateTexture 返回指定图片索引的 GL 纹理，需要时创建并缓存。
 func (r *WILRenderer) GetOrCreateTexture(idx int) uint32 {
 	return r.getTexture(idx)
 }
 
-// GetImage returns the image data for the given index, or nil if not available.
+// GetImage 返回指定索引的图像数据，不可用时返回 nil。
 func (r *WILRenderer) GetImage(idx int) *wil.Image {
 	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
 		return nil
@@ -63,7 +63,7 @@ func (r *WILRenderer) GetImage(idx int) *wil.Image {
 	return r.WILFile.GetImage(idx)
 }
 
-// getTexture returns a GL texture for the given image index, caching as needed.
+// getTexture 返回指定图片索引的 GL 纹理，需要时缓存。
 func (r *WILRenderer) getTexture(idx int) uint32 {
 	if idx < 0 || idx >= r.WILFile.Count {
 		return 0
@@ -83,8 +83,8 @@ func (r *WILRenderer) getTexture(idx int) uint32 {
 	return tex
 }
 
-// Render draws the specified WIL image in the given viewport.
-// vpX, vpY, vpW, vpH define the GL viewport in screen pixels.
+// Render 在指定视口中绘制 WIL 图像。
+// vpX, vpY, vpW, vpH 定义屏幕像素坐标的 GL 视口。
 func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
 	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
 		return
@@ -100,29 +100,29 @@ func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
 		return
 	}
 
-	// Set viewport to the center area.
+	// 设置视口到中心区域
 	gl.Viewport(vpX, vpY, vpW, vpH)
 
-	// Enable blending for transparent images.
+	// 启用透明图像混合
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-	// Use the shader program.
+	// 使用着色器程序
 	gl.UseProgram(r.glState.Shader.ID)
 	gl.Uniform1i(r.glState.Shader.TexLoc, 0)
 
-	// Orthographic projection: pixel coordinates, Y-down.
+	// 正交投影：像素坐标，Y 轴向下
 	imgW := float32(img.Width)
 	imgH := float32(img.Height)
 	vpw := float32(vpW)
 	vph := float32(vpH)
 	zoom := float32(r.Zoom)
 
-	// Center of viewport in world coords.
+	// 视口中心的世界坐标
 	cx := vpw/2/zoom + float32(r.OffsetX)
 	cy := vph/2/zoom + float32(r.OffsetY)
 
-	// Image position: centered at (cx, cy).
+	// 图像位置：居中于 (cx, cy)
 	x := cx - imgW/2
 	y := cy - imgH/2
 
@@ -130,7 +130,7 @@ func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
 	r.glState.DrawQuad(x, y, imgW, imgH, tex, true, proj)
 }
 
-// ExportPNG exports the specified image to a PNG file.
+// ExportPNG 将指定图像导出为 PNG 文件。
 func (r *WILRenderer) ExportPNG(idx int, path string) error {
 	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
 		mlog.Logf(mlog.LevelError, "Export", "导出失败: 无效索引 idx=%d", idx)
@@ -156,7 +156,7 @@ func (r *WILRenderer) ExportPNG(idx int, path string) error {
 	return err
 }
 
-// ExportAllPNG exports all images in the current WIL file to a directory.
+// ExportAllPNG 将当前 WIL 文件的所有图像导出到目录。
 func (r *WILRenderer) ExportAllPNG(dir string) (int, error) {
 	if r.WILFile == nil {
 		mlog.Logf(mlog.LevelError, "Export", "批量导出失败: 无WIL文件")
@@ -211,7 +211,7 @@ func itoa(i int) string {
 	return s
 }
 
-// Destroy frees all GL resources held by the renderer.
+// Destroy 释放渲染器持有的所有 GL 资源。
 func (r *WILRenderer) Destroy() {
 	count := len(r.texCache)
 	for _, tex := range r.texCache {
@@ -220,7 +220,7 @@ func (r *WILRenderer) Destroy() {
 	mlog.Logf(mlog.LevelDebug, "Renderer", "Destroy: 清除纹理=%d", count)
 }
 
-// UploadTexture uploads an *image.RGBA to an OpenGL texture.
+// UploadTexture 将 *image.RGBA 上传为 OpenGL 纹理。
 func UploadTexture(img *image.RGBA) uint32 {
 	var tex uint32
 	gl.GenTextures(1, &tex)

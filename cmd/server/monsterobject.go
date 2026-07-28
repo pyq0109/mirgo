@@ -19,7 +19,7 @@ type MonsterObject struct {
 	AttackSpeed int64
 	Exp         int
 
-	AIBehavior int // 0=melee, 1=ranged, 2=flee, 3=area, 4=summoner, 5+=extended
+	AIBehavior int // 0=近战, 1=远程, 2=逃跑, 3=范围, 4=召唤, 5+=扩展
 
 	TargetID       int32
 	HomeX, HomeY   int
@@ -57,7 +57,7 @@ type MonsterObject struct {
 }
 
 func getAIBehavior(race byte) int {
-	// Race→AI mapping based on Delphi factory (UsrEngn.pas:1831-1938).
+	// Race 到 AI 的映射，参考 Delphi 工厂方法（UsrEngn.pas:1831-1938）。
 	switch race {
 	case 51: // 鸡 — 被动动物
 		return AIPassive
@@ -100,9 +100,9 @@ func getAIBehavior(race byte) int {
 	case 200: // TElectronicScolpionMon — 闪电吸血
 		return AILeech
 	default:
-		// 53(wolf), 81(oma knight), 83(slow), 84(scorpion),
-		// 92(cow king), 100(white skeleton), 103(bee queen),
-		// 113(elf), 130(double critical)
+		// 53(狼), 81(沃玛战士), 83(慢速), 84(蝎子),
+		// 92(牛魔王), 100(白野猪), 103(蜂王),
+		// 113(精灵), 130(双暴击)
 		return AIMelee
 	}
 }
@@ -187,7 +187,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		if o.TargetID != 0 {
 			o.StoneMode = false
 			o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
-			log.Logf(log.LevelInfo, "Monster", "%s broke out of stone", o.Name)
+			log.Logf(log.LevelInfo, "Monster", "%s 解除石化", o.Name)
 		}
 		return
 	}
@@ -332,7 +332,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 					o.Engine.mu.Unlock()
 					minion.SendRefMsg(RM_TURN, minion.Dir, cx, cy, minion.Name)
 					o.minionCount++
-					log.Logf(log.LevelInfo, "Monster", "%s summoned a minion at (%d,%d)", o.Name, cx, cy)
+					log.Logf(log.LevelInfo, "Monster", "%s 在 (%d,%d) 召唤了一个随从", o.Name, cx, cy)
 				}
 			}
 			if dist <= 1 {
@@ -413,7 +413,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 		if o.envir != nil {
 			o.envir.broadcastDeathMsg(target.BaseObject, target.ID, target.CurrX, target.CurrY, target.Dir, true)
 		}
-		log.Logf(log.LevelInfo, "Combat", "%s killed %s", o.Name, target.Name)
+		log.Logf(log.LevelInfo, "Combat", "%s 击杀了 %s", o.Name, target.Name)
 	} else {
 		target.sendHealthSpell(server)
 	}

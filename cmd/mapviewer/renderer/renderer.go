@@ -16,7 +16,7 @@ const (
 	frontCullMargin = 20
 )
 
-// GLRenderer renders the map using OpenGL.
+// GLRenderer 使用 OpenGL 渲染地图。
 type GLRenderer struct {
 	Tiles   *wil.File
 	SmTiles *wil.File
@@ -24,21 +24,21 @@ type GLRenderer struct {
 
 	glState    *GLState
 	dataDir    string
-	texCache   map[int]uint32 // Tiles.wil image index -> GL texture
-	smTexCache map[int]uint32 // SmTiles.wil image index -> GL texture
+	texCache   map[int]uint32 // Tiles.wil 图片索引 -> GL 纹理
+	smTexCache map[int]uint32 // SmTiles.wil 图片索引 -> GL 纹理
 
-	// Area system: lazy-loaded Objects{N+1}.wil files and their texture caches.
+	// Area 系统：懒加载 Objects{N+1}.wil 及其纹理缓存
 	objectsLoaders map[int]*wil.File
 	objectsCaches  map[int]map[int]uint32
 
 	animCounter int
 
-	// Tile highlight state (set from main loop).
-	HighlightX, HighlightY int // hover tile (-1 = none)
-	LockedX, LockedY       int // locked tile (-1 = none)
+	// 格子高亮状态（由主循环设置）
+	HighlightX, HighlightY int // 悬停格子（-1 = 无）
+	LockedX, LockedY       int // 锁定格子（-1 = 无）
 }
 
-// NewGLRenderer creates a renderer with OpenGL state.
+// NewGLRenderer 创建带 OpenGL 状态的渲染器。
 func NewGLRenderer(tiles, smTiles, objects *wil.File, dataDir string, glState *GLState) *GLRenderer {
 	r := &GLRenderer{
 		Tiles:          tiles,
@@ -62,9 +62,9 @@ func NewGLRenderer(tiles, smTiles, objects *wil.File, dataDir string, glState *G
 	return r
 }
 
-// getObjectsLoader returns the WIL loader for the given area, lazy-loading if needed.
-// Area 0 = Objects.wil, Area N = Objects{N+1}.wil.
-// Matches C++ MapRenderer::GetObjectsLoader.
+// getObjectsLoader 返回指定 area 的 WIL 加载器，需要时懒加载。
+// Area 0 = Objects.wil, Area N = Objects{N+1}.wil。
+// 对应 C++ MapRenderer::GetObjectsLoader。
 func (r *GLRenderer) getObjectsLoader(area int) *wil.File {
 	if f, ok := r.objectsLoaders[area]; ok {
 		return f
@@ -97,19 +97,19 @@ func (r *GLRenderer) getTex(cache map[int]uint32, file *wil.File, idx int) uint3
 	}
 	tex := UploadTexture(img.RGBA)
 	cache[idx] = tex
-	img.RGBA = nil // Free Go-side pixels; GPU has its own copy.
+	img.RGBA = nil // 释放 Go 侧像素；GPU 已有自己的副本
 	return tex
 }
 
-// Render draws the visible portion of the map using OpenGL.
-// Render order matches C++ MapRenderer::Render:
-// Back -> Middle -> Front(normal) -> Front(blend) -> MapBorder -> TileHighlight -> LockedHighlight -> Grid
+// Render 绘制地图可见部分。
+// 渲染顺序对应 C++ MapRenderer::Render:
+// 背景 -> 中间 -> 前景(普通) -> 前景(混合) -> 地图边界 -> 格子高亮 -> 锁定高亮 -> 网格
 func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showMid, showFront, showCollision, showGrid bool) {
-	// Re-establish GL state that ImGui may have modified.
+	// 重新设置 ImGui 可能修改过的 GL 状态
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-	// Projection: orthographic Y-down
+	// 投影：Y 轴向下的正交投影
 	left := float32(cam.X)
 	top := float32(cam.Y)
 	right := float32(cam.X + float64(cam.ViewW)/cam.Zoom)
@@ -119,21 +119,21 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 	gl.UseProgram(r.glState.Shader.ID)
 	gl.Uniform1i(r.glState.Shader.TexLoc, 0)
 
-	// Back/middle cull range
+	// 背景/中间层裁剪范围
 	startX, startY, endX, endY := cam.ViewportTiles(cullMargin, cullMargin)
 	startX = clamp(startX, 0, m.Width-1)
 	startY = clamp(startY, 0, m.Height-1)
 	endX = clamp(endX, 0, m.Width-1)
 	endY = clamp(endY, 0, m.Height-1)
 
-	// Front cull range (wider margin for tall objects)
+	// 前景层裁剪范围（更大边距以容纳高物体）
 	fStartX, fStartY, fEndX, fEndY := cam.ViewportTiles(frontCullMargin, frontCullMargin)
 	fStartX = clamp(fStartX, 0, m.Width-1)
 	fStartY = clamp(fStartY, 0, m.Height-1)
 	fEndX = clamp(fEndX, 0, m.Width-1)
 	fEndY = clamp(fEndY, 0, m.Height-1)
 
-	// Align to even for back layer stride-2 rendering.
+	// 对齐到偶数，用于背景层步长 2 渲染
 	bStartX, bStartY, bEndX, bEndY := startX, startY, endX, endY
 	if bStartX%2 == 1 {
 		bStartX--
@@ -152,7 +152,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 	bEndX = clamp(bEndX, 0, m.Width-1)
 	bEndY = clamp(bEndY, 0, m.Height-1)
 
-	// 1. Back layer: even x, y (2x2 tile blocks)
+	// 1. 背景层：偶数 x, y（2x2 格子块）
 	if showBack {
 		for y := bStartY; y <= bEndY; y += 2 {
 			for x := bStartX; x <= bEndX; x += 2 {
@@ -172,7 +172,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		}
 	}
 
-	// 2. Middle layer: all cells
+	// 2. 中间层：所有格子
 	if showMid {
 		for y := startY; y <= endY; y++ {
 			for x := startX; x <= endX; x++ {
@@ -192,7 +192,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		}
 	}
 
-	// 3. Front layer — single pass with per-tile blend toggling (matches C++).
+	// 3. 前景层 — 单遍渲染，逐格子切换混合模式（对应 C++）
 	if showFront {
 		for y := fStartY; y <= fEndY; y++ {
 			for x := fStartX; x <= fEndX; x++ {
@@ -203,7 +203,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		r.animCounter++
 	}
 
-	// 4. Collision overlay
+	// 4. 碰撞叠加层
 	if showCollision {
 		for y := startY; y <= endY; y++ {
 			for x := startX; x <= endX; x++ {
@@ -216,7 +216,7 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 		}
 	}
 
-	// 5. Overlays (must render after all tile layers)
+	// 5. 叠加层（必须在所有格子层之后渲染）
 	r.drawMapBorder(cam, m, proj)
 	r.drawTileHighlight(m, proj)
 	r.drawLockedTileHighlight(m, proj)
@@ -225,8 +225,8 @@ func (r *GLRenderer) Render(m *mapformat.MapData, cam *Camera2D, showBack, showM
 	}
 }
 
-// drawFront renders a single front-layer cell.
-// Matches C++ MapRenderer::RenderFrontLayer + DrawTile for layer 2.
+// drawFront 渲染单个前景层格子。
+// 对应 C++ MapRenderer::RenderFrontLayer + DrawTile（layer 2）。
 func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float32) {
 	if info.FrontLib < 0 {
 		return
@@ -242,7 +242,7 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]floa
 	idx := info.FrontImage
 	isBlend := info.FrontAniFrame&0x80 != 0
 
-	// Animation
+	// 动画
 	ani := int(info.FrontAniFrame & 0x7F)
 	if ani > 0 {
 		tick := int(info.FrontAniTick)
@@ -256,7 +256,7 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]floa
 		}
 	}
 
-	// Door offset (C++ RenderFrontLayer lines 456-460)
+	// 门偏移（C++ RenderFrontLayer 456-460 行）
 	if info.FrontDoorOffset&0x80 != 0 {
 		if info.FrontDoorIndex&0x7F != 0 {
 			idx += int(info.FrontDoorOffset & 0x7F)
@@ -277,40 +277,40 @@ func (r *GLRenderer) drawFront(info *mapformat.CellInfo, x, y int, proj [16]floa
 	cellWorldY := float32(y * TileHeight)
 
 	if isBlend {
-		// Blend objects (fire, light): hotspot-based positioning + additive blending.
-		// Delphi formula: (n + ax - 2, m + ay - 68)
+		// 混合物体（火焰、光效）：基于热点定位 + 加法混合
+		// Delphi 公式: (n + ax - 2, m + ay - 68)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 		wx := cellWorldX + float32(img.HotX) - 2
 		wy := cellWorldY + float32(img.HotY) - 68
 		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	} else {
-		// Non-blend objects: bottom-aligned positioning.
+		// 非混合物体：底部对齐定位
 		wx := cellWorldX
 		wy := cellWorldY - float32(img.Height) + TileHeight
 		r.glState.DrawQuad(wx, wy, float32(img.Width), float32(img.Height), tex, false, proj)
 	}
 }
 
-// drawGrid renders the tile grid overlay using batched line drawing.
-// Matches C++ MapRenderer::RenderGrid.
+// drawGrid 用批量线段绘制渲染格子网格叠加层。
+// 对应 C++ MapRenderer::RenderGrid。
 func (r *GLRenderer) drawGrid(cam *Camera2D, startX, startY, endX, endY int, proj [16]float32) {
 	gl.UseProgram(r.glState.GridShader.ID)
 	gl.UniformMatrix4fv(r.glState.GridShader.ProjLoc, 1, false, &proj[0])
 	gl.Uniform4f(r.glState.GridShader.ColorLoc, 0.5, 0.5, 0.5, 0.3)
 	gl.BindVertexArray(r.glState.GridVAO)
 
-	// Build all line vertices into one batch.
+	// 将所有线段顶点构建为一个批次
 	lines := make([]float32, 0, ((endX-startX+2)+(endY-startY+2))*4)
 
-	// Vertical lines
+	// 竖线
 	for x := startX; x <= endX+1; x++ {
 		wx := float32(x * TileWidth)
 		wy0 := float32(startY * TileHeight)
 		wy1 := float32((endY + 1) * TileHeight)
 		lines = append(lines, wx, wy0, wx, wy1)
 	}
-	// Horizontal lines
+	// 横线
 	for y := startY; y <= endY+1; y++ {
 		wy := float32(y * TileHeight)
 		wx0 := float32(startX * TileWidth)
@@ -330,8 +330,8 @@ func (r *GLRenderer) drawGrid(cam *Camera2D, startX, startY, endX, endY int, pro
 	gl.BindVertexArray(0)
 }
 
-// drawMapBorder draws a blue rectangle around the map boundary.
-// Matches C++ MapRenderer::RenderMapBorder.
+// drawMapBorder 在地图边界绘制蓝色矩形。
+// 对应 C++ MapRenderer::RenderMapBorder。
 func (r *GLRenderer) drawMapBorder(cam *Camera2D, m *mapformat.MapData, proj [16]float32) {
 	mapW := float32(m.Width * TileWidth)
 	mapH := float32(m.Height * TileHeight)
@@ -354,8 +354,8 @@ func (r *GLRenderer) drawMapBorder(cam *Camera2D, m *mapformat.MapData, proj [16
 	gl.BindVertexArray(0)
 }
 
-// drawTileHighlight draws a white rectangle around the tile under the cursor.
-// Matches C++ MapRenderer::RenderTileHighlight.
+// drawTileHighlight 在鼠标悬停的格子周围绘制白色矩形。
+// 对应 C++ MapRenderer::RenderTileHighlight。
 func (r *GLRenderer) drawTileHighlight(m *mapformat.MapData, proj [16]float32) {
 	if r.HighlightX < 0 || r.HighlightY < 0 {
 		return
@@ -367,8 +367,8 @@ func (r *GLRenderer) drawTileHighlight(m *mapformat.MapData, proj [16]float32) {
 		TileWidth, TileHeight, 1, 1, 1, 0.8, proj)
 }
 
-// drawLockedTileHighlight draws a red rectangle around the locked tile.
-// Matches C++ MapRenderer::RenderLockedTileHighlight.
+// drawLockedTileHighlight 在锁定格子周围绘制红色矩形。
+// 对应 C++ MapRenderer::RenderLockedTileHighlight。
 func (r *GLRenderer) drawLockedTileHighlight(m *mapformat.MapData, proj [16]float32) {
 	if r.LockedX < 0 || r.LockedY < 0 {
 		return
@@ -380,7 +380,7 @@ func (r *GLRenderer) drawLockedTileHighlight(m *mapformat.MapData, proj [16]floa
 		TileWidth, TileHeight, 1, 0.3, 0.3, 1.0, proj)
 }
 
-// drawRect draws a rectangle outline using the grid shader.
+// drawRect 用网格着色器绘制矩形边框。
 func (r *GLRenderer) drawRect(x, y, w, h float32, red, green, blue, alpha float32, proj [16]float32) {
 	lines := []float32{
 		x, y, x + w, y,
@@ -410,7 +410,7 @@ func clamp(v, min, max int) int {
 	return v
 }
 
-// Destroy frees all GL resources held by the renderer.
+// Destroy 释放渲染器持有的所有 GL 资源。
 func (r *GLRenderer) Destroy() {
 	for _, tex := range r.texCache {
 		gl.DeleteTextures(1, &tex)

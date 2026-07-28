@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Guard represents a guard definition.
+// Guard 表示守卫定义。
 type Guard struct {
 	Name    string `json:"name"`
 	MapName string `json:"mapName"`
@@ -17,7 +17,7 @@ type Guard struct {
 	Dir     int    `json:"dir"`
 }
 
-// CastleConfig represents the Sabuk castle configuration.
+// CastleConfig 表示沙巴克城堡配置。
 type CastleConfig struct {
 	CastleName   string `json:"castleName"`
 	OwnGuild     string `json:"ownGuild"`
@@ -32,31 +32,31 @@ type CastleConfig struct {
 	RightWallHP  int    `json:"rightWallHP"`
 }
 
-// ConvertMisc converts miscellaneous configuration files.
+// ConvertMisc 转换其他配置文件。
 func ConvertMisc(inputDir, outputDir string) error {
 	envirDir := filepath.Join(inputDir, "Envir")
 
-	// Convert GuardList.txt
+	// 转换 GuardList.txt
 	if err := convertGuardList(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting GuardList.txt: %w", err)
 	}
 
-	// Convert AdminList.txt
+	// 转换 AdminList.txt
 	if err := convertAdminList(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting AdminList.txt: %w", err)
 	}
 
-	// Convert Castle/0/SabukW.txt
+	// 转换 Castle/0/SabukW.txt
 	if err := convertCastle(inputDir, outputDir); err != nil {
 		return fmt.Errorf("converting castle: %w", err)
 	}
 
-	// Convert Notice/Notice.txt
+	// 转换 Notice/Notice.txt
 	if err := convertNotice(inputDir, outputDir); err != nil {
 		return fmt.Errorf("converting notice: %w", err)
 	}
 
-	// Convert CustomMagic/*.ini
+	// 转换 CustomMagic/*.ini
 	if err := convertCustomMagic(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting custom magic: %w", err)
 	}

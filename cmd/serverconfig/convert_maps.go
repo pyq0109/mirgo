@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// MapInfo represents a map definition.
+// MapInfo 表示地图定义。
 type MapInfo struct {
 	Index  int      `json:"index"`
 	Name   string   `json:"name"`
@@ -16,7 +16,7 @@ type MapInfo struct {
 	Props  []string `json:"props,omitempty"`
 }
 
-// MapRoute represents a teleport route between maps.
+// MapRoute 表示地图间的传送路线。
 type MapRoute struct {
 	SrcMap string `json:"srcMap"`
 	SrcX   int    `json:"srcX"`
@@ -26,20 +26,20 @@ type MapRoute struct {
 	DstY   int    `json:"dstY"`
 }
 
-// MapsConfig represents the maps configuration.
+// MapsConfig 表示地图配置。
 type MapsConfig struct {
 	Source  string     `json:"source"`
 	Maps    []MapInfo  `json:"maps"`
 	Routes  []MapRoute `json:"routes"`
 }
 
-// MiniMap represents a minimap mapping.
+// MiniMap 表示小地图映射。
 type MiniMap struct {
 	MapName  string `json:"mapName"`
 	MiniMapID int   `json:"miniMapId"`
 }
 
-// StartPoint represents a safe zone / respawn point.
+// StartPoint 表示安全区/重生点。
 type StartPoint struct {
 	MapName string `json:"mapName"`
 	X       int    `json:"x"`
@@ -47,7 +47,7 @@ type StartPoint struct {
 	Range   int    `json:"range"`
 }
 
-// ConvertMaps converts map configuration files.
+// ConvertMaps 转换地图配置文件。
 func ConvertMaps(inputDir, outputDir string) error {
 	envirDir := filepath.Join(inputDir, "Envir")
 
@@ -61,12 +61,12 @@ func ConvertMaps(inputDir, outputDir string) error {
 		return fmt.Errorf("copying map files: %w", err)
 	}
 
-	// Convert MiniMap.txt
+	// 转换 MiniMap.txt
 	if err := convertMiniMap(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting MiniMap.txt: %w", err)
 	}
 
-	// Convert StartPoint.txt
+	// 转换 StartPoint.txt
 	if err := convertStartPoint(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting StartPoint.txt: %w", err)
 	}

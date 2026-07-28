@@ -16,7 +16,7 @@ import (
 
 const (
 	cullMargin      = 3
-	frontCullMargin = 35 // Delphi LONGHEIGHT_IMAGE (PlayScn.pas:17)
+	frontCullMargin = 35 // Delphi LONGHEIGHT_IMAGE 常量（PlayScn.pas:17）
 )
 
 type GroundItemInfo struct {
@@ -64,11 +64,11 @@ type PlayScene struct {
 	sendSpell    func(magID int, x, y int)
 	sendNpcClick   func(npcID int)
 	sendDealCancel func()
-	sendUseItem    func(makeIndex int32) // CMEat, item addressed by MakeIndex
+	sendUseItem    func(makeIndex int32) // CMEat，通过 MakeIndex 定位物品
 	sendBuyItem    func(itemIdx int)
-	sendSellItem   func(makeIndex int32) // CMUserSellItem, addressed by MakeIndex
-	sendDropItem   func(makeIndex int32) // CMDropItem, addressed by MakeIndex
-	sendDropGold   func(amount int)      // CMDropGold, amount in Recog
+	sendSellItem   func(makeIndex int32) // CMUserSellItem，通过 MakeIndex 定位
+	sendDropItem   func(makeIndex int32) // CMDropItem，通过 MakeIndex 定位
+	sendDropGold   func(amount int)      // CMDropGold，数量放 Recog 字段
 	sendDealTry    func()                // CMDealTry
 	sendTakeOn     func(makeIndex int32, slot int) // CMTakeOnItem
 	sendTakeOff       func(slot int)               // CMTakeOffItem
@@ -116,34 +116,34 @@ type PlayScene struct {
 
 	lastHitTick int64
 
-	// UI framework (DWinCtl port): panels, buttons, grids, modals.
+	// UI 框架（DWinCtl 移植）：面板、按钮、网格、模态框。
 	ui            *UIManager
 	itemMove      ItemMoveState
 	tooltip       Tooltip
 	hudPlusAbil   *UIControl
 	hudBag        *UIControl
-	bagHoverItem  *BagItem // hovered bag item for the in-window info area (FState:4465)
+	bagHoverItem  *BagItem // 背包窗口内信息区当前悬停的物品（FState:4465）
 	hudState      *UIControl
 	stateSlotBtns [13]*UIControl
 	stateMagBtns  [5]*UIControl
 	statePageUp   *UIControl
 	statePageDown *UIControl
 	magicPage     int
-	chatScroll    int // lines the chat board is scrolled back from newest
+	chatScroll    int // 聊天板从最新消息向上回滚的行数
 
-	// Trade windows (uideal.go).
+	// 交易窗口（uideal.go）。
 	hudDealOwn, hudDealRemote *UIControl
 	dealActionTick            int64
 
-	// Guild + group panels (uiguild.go).
+	// 行会 + 组队面板（uiguild.go）。
 	hudGuild, hudGroup *UIControl
 	guildAdminBtns     []*UIControl
 	guildChatMode      bool
-	guildChats         []string // guild chat buffer, 500 cap / trim 100 (FState:6465-6475)
-	guildActionTick    int64    // party ops 5s shared gate (FState:5514)
-	guildQueryTick     int64    // guild Home/List 3s gate (FState:6370)
+	guildChats         []string // 行会聊天缓冲，上限 500 / 裁剪至 100（FState:6465-6475）
+	guildActionTick    int64    // 组队操作 5 秒共享间隔（FState:5514）
+	guildQueryTick     int64    // 行会首页/成员列表 3 秒间隔（FState:6370）
 
-	// Adjust-ability + inspect windows (uiabil.go).
+	// 属性加点 + 查看窗口（uiabil.go）。
 	hudAbil, hudInspect *UIControl
 	abilDeltas          [9]int
 	abilPointsLeft      int
@@ -152,9 +152,9 @@ type PlayScene struct {
 	inspectName         string
 	inspectSex          int
 	inspectHair         int
-	ctrlDown            bool // Ctrl held (adjust panel ×10, FState:6638)
+	ctrlDown            bool // Ctrl 按住状态（加点面板 ×10，FState:6638）
 
-	// NPC dialog + shop state (uinpc.go).
+	// NPC 对话 + 商店状态（uinpc.go）。
 	hudNpc, hudMenu, hudSell *UIControl
 	npcLines                 [][]npcSegment
 	npcClicks                []npcClickPoint
@@ -164,16 +164,16 @@ type PlayScene struct {
 	menuIndex                int
 	lastBuyTick              int64
 	sellItem                 *BagItem
-	sellWait                 *BagItem // item pending server sell confirmation
+	sellWait                 *BagItem // 等待服务器确认出售的物品
 	sellPriceStr             string
 	queryPrice               bool
 	queryPriceTick           int64
 	merchantWasOpen          bool
 
-	// Cursor position in logical 800×600 space (updated on every move).
+	// 逻辑 800×600 空间下的鼠标坐标（每次移动时更新）。
 	mouseX, mouseY float64
-	// Double-click synthesis (GLFW has no native event): Delphi gets
-	// WM_LBUTTONDBLCLK; we detect two left presses <400ms and <4px apart.
+	// 双击合成（GLFW 无原生双击事件）：Delphi 收 WM_LBUTTONDBLCLK；
+	// 这里检测两次左键按下间隔 <400ms 且距离 <4px。
 	lastPressTick        int64
 	lastPressX, lastPressY float64
 
@@ -205,9 +205,9 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		events:         NewEventManager(),
 		ui:             NewUIManager(gl, resources, nil),
 	}
-	// Clicking empty space while holding an item drops it on the ground
-	// (FState.pas:1865-1886 DBackgroundBackgroundClick). WantReturn stays
-	// false so the click still reaches the game world when nothing is held.
+	// 手持物品时点击空白处将物品丢到地面
+	// （FState.pas:1865-1886 DBackgroundBackgroundClick）。
+	// 未持物时 WantReturn 保持 false，点击仍传递给游戏世界。
 	s.ui.Root.OnBackgroundClick = func(c *UIControl) {
 		if s.backgroundClick() {
 			c.WantReturn = true
@@ -223,16 +223,16 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 	return s
 }
 
-// backgroundClick handles clicks that fell through every control. It
-// reports whether the click was consumed (an item/gold drop), which sets
-// WantReturn so the world layer ignores the same click (FState:1865-1894).
+// backgroundClick 处理穿透所有控件的点击。返回是否消费了该点击
+// （丢弃物品/金币），消费时设置 WantReturn 使世界层忽略同一次点击
+// （FState:1865-1894）。
 func (s *PlayScene) backgroundClick() bool {
 	if !s.itemMove.Moving {
 		return false
 	}
 	switch {
 	case s.itemMove.Index >= 0:
-		// Drop the item on the ground (FState.pas:1842-1854).
+		// 将物品丢到地面（FState.pas:1842-1854）。
 		if s.sendDropItem != nil {
 			s.sendDropItem(s.itemMove.Item.MakeIndex)
 			if slot := s.State.FindBagItemByMakeIndex(s.itemMove.Item.MakeIndex); slot >= 0 {
@@ -242,7 +242,7 @@ func (s *PlayScene) backgroundClick() bool {
 			return true
 		}
 	case s.itemMove.Index == moveIdxBagGold:
-		// Drop gold: ask the amount (FState.pas:1870-1882).
+		// 丢金币：询问数量（FState.pas:1870-1882）。
 		gold := s.State.Gold
 		ShowInput(s, "Drop how much gold?", func(ok bool, text string) {
 			if !ok {
@@ -408,8 +408,8 @@ func (s *PlayScene) LoadMap(mapName string) error {
 	}
 	s.mapData = m
 	if s.cam == nil {
-		// Map surface is 800×445 (Delphi MAPSURFACEHEIGHT, Share.pas:31);
-		// the bottom 155px belong to the HUD bar.
+		// 地图渲染区域为 800×445（Delphi MAPSURFACEHEIGHT, Share.pas:31）；
+		// 底部 155px 属于 HUD 栏。
 		s.cam = engine.NewCamera(ScreenWidth, MapSurfaceH)
 	}
 	s.cam.CenterOn(float64(m.Width)*engine.TileWidth/2, float64(m.Height)*engine.TileHeight/2)
@@ -427,17 +427,17 @@ func (s *PlayScene) LoadMap(mapName string) error {
 		s.objectsCaches[0] = make(map[int]uint32)
 	}
 
-	log.Logf(log.LevelInfo, "PlayScene", "Loaded map: %s (%dx%d)", mapName, m.Width, m.Height)
+	log.Logf(log.LevelInfo, "PlayScene", "已加载地图: %s (%dx%d)", mapName, m.Width, m.Height)
 	return nil
 }
 
 func (s *PlayScene) Open() {
-	log.Logf(log.LevelInfo, "PlayScene", "Opened")
+	log.Logf(log.LevelInfo, "PlayScene", "已打开")
 }
 
 func (s *PlayScene) Close() {
 	s.State.Reset()
-	log.Logf(log.LevelInfo, "PlayScene", "Closed")
+	log.Logf(log.LevelInfo, "PlayScene", "已关闭")
 }
 
 func (s *PlayScene) Update(dt float64) {
@@ -474,8 +474,8 @@ func (s *PlayScene) Update(dt float64) {
 		moveTick = true
 	}
 
-	// Map animation counter ticks every 50ms (Delphi m_nAniCount,
-	// PlayScn.pas:892-896), decoupled from the render frame rate.
+	// 地图动画计数器每 50ms 递增一次（Delphi m_nAniCount,
+	// PlayScn.pas:892-896），与渲染帧率解耦。
 	if now-s.lastAniTick >= 50 {
 		s.lastAniTick = now
 		s.animCounter++
@@ -490,14 +490,14 @@ func (s *PlayScene) Update(dt float64) {
 		my := s.State.MySelf
 		wx := float64(my.Rx)*engine.TileWidth + my.ShiftX + engine.TileWidth/2
 		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
-		// Delphi places the player at screen (388, 208) in the 800×445
-		// viewport, not the geometric center (400, 222.5). The constants
-		// come from PlayScn.pas:1741-1748 reverse formula:
-		//   sx = (cx-Rx)*48 + 364 + 24 - ShiftX  →  388 when cx==Rx
-		//   sy = (cy-Ry)*32 + 192 + 16 - ShiftY  →  208 when cy==Ry
-		// The (388,208) anchor is in screen pixels; ScreenToWorld divides by
-		// Zoom (camera.go:28-30), so the world offset must be scaled too —
-		// otherwise the player drifts off-anchor whenever Zoom != 1.
+		// Delphi 将玩家固定在屏幕 (388, 208)（800×445 视口内），
+		// 而非几何中心 (400, 222.5)。常量来自 PlayScn.pas:1741-1748
+		// 反推公式：
+		//   sx = (cx-Rx)*48 + 364 + 24 - ShiftX  →  cx==Rx 时为 388
+		//   sy = (cy-Ry)*32 + 192 + 16 - ShiftY  →  cy==Ry 时为 208
+		// (388,208) 锚点是屏幕像素；ScreenToWorld 会除以 Zoom
+		// （camera.go:28-30），所以世界偏移也要缩放——
+		// 否则 Zoom != 1 时玩家会偏离锚点。
 		s.cam.X = wx - 388/s.cam.Zoom
 		s.cam.Y = wy - 208/s.cam.Zoom
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
@@ -514,9 +514,8 @@ func (s *PlayScene) Update(dt float64) {
 			nx, ny := my.CurrX+dx, my.CurrY+dy
 			if s.CanWalk(nx, ny) {
 				dist := absInt(my.CurrX-s.targetX) + absInt(my.CurrY-s.targetY)
-				// Mounted run advances 3 tiles; the server requires all three
-				// tiles ahead to be walkable (HandleHorseRun x1/x2/x3). The
-				// first tile is already validated by CanWalk(nx, ny) above.
+				// 骑马奔跑前进 3 格；服务端要求前方三格全部可通行
+				// （HandleHorseRun x1/x2/x3）。第一格已由上方 CanWalk(nx, ny) 验证。
 				if my.OnHorse && dist >= 4 && s.CanWalk(my.CurrX+dx*2, my.CurrY+dy*2) && s.CanWalk(my.CurrX+dx*3, my.CurrY+dy*3) {
 					my.UpdateMsg(protocol.CMHorseRun, my.CurrX+dx*3, my.CurrY+dy*3, dir, 0, 0)
 					s.sendMove(protocol.CMHorseRun, dir)
@@ -548,7 +547,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-	// World renders into the top 445 logical rows; the bottom 155px is HUD.
+	// 世界渲染到上方 445 逻辑行；底部 155px 是 HUD。
 	fbW, fbH := s.gl.ViewW, s.gl.ViewH
 	worldH := int32(float64(MapSurfaceH) * float64(fbH) / float64(ScreenHeight))
 	s.gl.SetViewport(0, fbH-worldH, fbW, worldH)
@@ -637,7 +636,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 
 	if s.deathGray {
-		log.Logf(log.LevelTrace, "Render", "play death-gray viewport=(%.0f,%.0f,%.0f,%.0f)",
+		log.Logf(log.LevelTrace, "Render", "play 死亡灰度 viewport=(%.0f,%.0f,%.0f,%.0f)",
 			s.cam.X, s.cam.Y, float64(s.cam.ViewW)/s.cam.Zoom, float64(s.cam.ViewH)/s.cam.Zoom)
 		s.gl.DrawQuadColor(float32(s.cam.X), float32(s.cam.Y),
 			float32(float64(s.cam.ViewW)/s.cam.Zoom), float32(float64(s.cam.ViewH)/s.cam.Zoom),
@@ -652,7 +651,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	// UI layers use the full viewport in 800×600 logical space.
+	// UI 层使用完整的 800×600 逻辑视口。
 	s.gl.SetViewport(0, 0, fbW, fbH)
 	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 	if s.showMinimap {
@@ -662,8 +661,8 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 			if mmImg != nil && mmImg.RGBA != nil {
 				mmTex := s.resources.GetTexture(s.resources.Mmap, 0)
 				if mmTex != 0 {
-					// Delphi: (SCREENWIDTH-120, 0), 120×120 (PlayScn.pas:791-842).
-					log.Logf(log.LevelTrace, "Render", "play minimap Mmap[0] pos=(%d,0) size=(120,120)", ScreenWidth-120)
+					// Delphi: (SCREENWIDTH-120, 0), 120×120（PlayScn.pas:791-842）。
+					log.Logf(log.LevelTrace, "Render", "play 小地图 Mmap[0] pos=(%d,0) size=(120,120)", ScreenWidth-120)
 					s.gl.DrawQuad(mmTex, ScreenWidth-120, 0, 120, 120, uiProj)
 					mmapDrawn = true
 				}
@@ -677,8 +676,8 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 }
 
 func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, proj [16]float32) {
-	// Phase A: draw 48×32 ground-level front objects first — they are
-	// always behind every actor (PlayScn.pas:1064-1108).
+	// 阶段 A：先绘制 48×32 地面层前景物件——它们始终在所有角色后面
+	// （PlayScn.pas:1064-1108）。
 	for y := fStartY; y <= fEndY; y++ {
 		for x := fStartX; x <= fEndX; x++ {
 			info := s.mapData.InfoAt(x, y)
@@ -686,9 +685,8 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		}
 	}
 
-	// Phase B: per-row Y-sort pass — large/blend front objects, map
-	// events, drop items, and actors are interleaved by row
-	// (PlayScn.pas:1124-1249).
+	// 阶段 B：逐行 Y 排序——大型/混合前景物件、地图事件、
+	// 地面物品和角色按行交错绘制（PlayScn.pas:1124-1249）。
 	actors := s.State.Actors.SortedByY()
 	actorIdx := 0
 
@@ -726,13 +724,13 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		s.drawChatBubble(a, worldX, worldY, proj)
 	}
 
-	// Phase C: overlay re-draws and drop-item flash/names
-	// (PlayScn.pas:1290-1396).
+	// 阶段 C：覆盖层重绘和地面物品闪烁/名称
+	// （PlayScn.pas:1290-1396）。
 	if s.State.MySelf != nil && !s.State.MySelf.Death {
 		my := s.State.MySelf
 		wx := float32(float64(my.Rx*engine.TileWidth) + my.ShiftX)
 		wy := float32(float64(my.Ry*engine.TileHeight) + my.ShiftY)
-		log.Logf(log.LevelTrace, "Render", "play self-redraw pos=(%.0f,%.0f) dir=%d", wx, wy, my.Dir)
+		log.Logf(log.LevelTrace, "Render", "play 自身重绘 pos=(%.0f,%.0f) dir=%d", wx, wy, my.Dir)
 		my.Draw(s.gl, s.resources, wx, wy, proj)
 	}
 
@@ -759,7 +757,7 @@ func (s *PlayScene) drawGroundItemIcon(gi *GroundItemInfo, proj [16]float32) {
 		if img != nil && img.RGBA != nil {
 			tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
 			if tex != 0 {
-				log.Logf(log.LevelTrace, "Render", "play item DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
+				log.Logf(log.LevelTrace, "Render", "play 地面物品 DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
 				s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
 				return
 			}
@@ -779,7 +777,7 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 			flashIdx := 410 + step
 			if fimg := s.resources.Prguse.GetImage(flashIdx); fimg != nil && fimg.RGBA != nil {
 				if ftex := s.resources.GetTexture(s.resources.Prguse, flashIdx); ftex != 0 {
-					log.Logf(log.LevelTrace, "Render", "play item-flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
+					log.Logf(log.LevelTrace, "Render", "play 物品闪烁 Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
 					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 					s.gl.DrawQuad(ftex, ix, iy, float32(fimg.Width), float32(fimg.Height), proj)
 					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -790,7 +788,7 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 	if s.text != nil && gi.Name != "" {
 		nameW := float32(s.text.MeasureText(gi.Name))
 		nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
-		log.Logf(log.LevelTrace, "Render", "play item-name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
+		log.Logf(log.LevelTrace, "Render", "play 物品名称 '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
 		s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
 	}
 }
@@ -804,8 +802,8 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 			showName = true
 		}
 	}
-	// Delphi SayY: alive = tileRow + ShiftY - 47, dead = tileRow + ShiftY - 12
-	// (PlayScn.pas:1232-1235). In world coords tileRow ≈ worldY.
+	// Delphi SayY：存活 = tileRow + ShiftY - 47，死亡 = tileRow + ShiftY - 12
+	// （PlayScn.pas:1232-1235）。世界坐标下 tileRow ≈ worldY。
 	sayY := worldY - 47
 	if a.Death {
 		sayY = worldY - 12
@@ -813,7 +811,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 	if showName && a.UserName != "" && s.text != nil {
 		nameW := float32(s.text.MeasureText(a.UserName))
 		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
-		log.Logf(log.LevelTrace, "Render", "play actor-name '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
+		log.Logf(log.LevelTrace, "Render", "play 角色名称 '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
 		s.text.DrawText(a.UserName, nameX-1, sayY, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX+1, sayY, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX, sayY-1, 0, 0, 0, 1.0, proj)
@@ -821,7 +819,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 		s.text.DrawText(a.UserName, nameX, sayY, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 
-	// HP bar for all visible actors (DrawScrn.pas:280-301), at SayY - 10.
+	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
 	if !a.Death && s.resources.Prguse2 != nil {
 		bgImg := s.resources.Prguse2.GetImage(0)
 		fillImg := s.resources.Prguse2.GetImage(1)
@@ -833,7 +831,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 			hpBarX := worldX + float32(engine.TileWidth)/2 - hpBarW/2
 			hpBarY := sayY - 10
 			if bgTex != 0 {
-				log.Logf(log.LevelTrace, "Render", "play hpbar-bg Prguse2[0] pos=(%.0f,%.0f) size=(%.0f,%.0f)", hpBarX, hpBarY, hpBarW, hpBarH)
+				log.Logf(log.LevelTrace, "Render", "play 血条背景 Prguse2[0] pos=(%.0f,%.0f) size=(%.0f,%.0f)", hpBarX, hpBarY, hpBarW, hpBarH)
 				s.gl.DrawQuad(bgTex, hpBarX, hpBarY, hpBarW, hpBarH, proj)
 			}
 			ratio := float32(1.0)
@@ -868,7 +866,7 @@ func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]fl
 		sayY = worldY - 12
 	}
 	bubbleY := sayY - float32(a.SayLineCount)*16
-	log.Logf(log.LevelTrace, "Render", "play chat-bubble lines=%d pos=(%.0f,%.0f)", a.SayLineCount, worldX-20, bubbleY)
+	log.Logf(log.LevelTrace, "Render", "play 聊天气泡 lines=%d pos=(%.0f,%.0f)", a.SayLineCount, worldX-20, bubbleY)
 	for i := 0; i < a.SayLineCount && i < 5; i++ {
 		if a.SayingArr[i] != "" {
 			r, g, b := float32(1.0), float32(1.0), float32(1.0)
@@ -880,8 +878,8 @@ func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]fl
 	}
 }
 
-// frontImageData resolves the WIL image for a front-layer cell. Returns
-// nil img when the cell has no drawable front object.
+// frontImageData 解析前景层格子的 WIL 图像。格子无可绘制前景物件时
+// 返回 nil img。
 func (s *PlayScene) frontImageData(info *mapformat.CellInfo, x, y int) (loader *wil.File, cache map[int]uint32, idx int, isBlend bool, img *wil.Image, tex uint32) {
 	if info.FrontLib < 0 {
 		return
@@ -926,9 +924,8 @@ func (s *PlayScene) frontImageData(info *mapformat.CellInfo, x, y int) (loader *
 	return
 }
 
-// drawFrontSmall draws only 48×32 (single-tile) front objects. These are
-// ground-level decorations that must always render behind every actor
-// (PlayScn.pas:1064-1108).
+// drawFrontSmall 只绘制 48×32（单格）前景物件。这些是地面装饰，
+// 必须始终渲染在所有角色后面（PlayScn.pas:1064-1108）。
 func (s *PlayScene) drawFrontSmall(info *mapformat.CellInfo, x, y int, proj [16]float32) {
 	_, _, _, isBlend, img, tex := s.frontImageData(info, x, y)
 	if img == nil || isBlend {
@@ -942,9 +939,9 @@ func (s *PlayScene) drawFrontSmall(info *mapformat.CellInfo, x, y int, proj [16]
 	s.gl.DrawQuad(tex, wx, wy, float32(img.Width), float32(img.Height), proj)
 }
 
-// drawFrontLarge draws front objects that are NOT 48×32 (tall buildings,
-// trees, etc.) plus alpha-blend objects. These participate in the per-row
-// Y-sort together with actors (PlayScn.pas:1124-1178).
+// drawFrontLarge 绘制非 48×32 的前景物件（高楼、树木等）以及
+// alpha 混合物件。它们与角色一起参与逐行 Y 排序
+// （PlayScn.pas:1124-1178）。
 func (s *PlayScene) drawFrontLarge(info *mapformat.CellInfo, x, y int, proj [16]float32) {
 	_, _, _, isBlend, img, tex := s.frontImageData(info, x, y)
 	if img == nil {
@@ -1063,8 +1060,8 @@ func (s *PlayScene) calcDarkness() float32 {
 	return max(dayVal, mapVal)
 }
 
-// dayBrightToDarkness maps SM_DAYCHANGING Param (0=darkest … 3+=brightest)
-// to a 0..1 overlay alpha.
+// dayBrightToDarkness 将 SM_DAYCHANGING Param（0=最暗 … 3+=最亮）
+// 映射为 0..1 的遮罩透明度。
 func dayBrightToDarkness(bright int) float32 {
 	switch {
 	case bright <= 0:
@@ -1078,9 +1075,9 @@ func dayBrightToDarkness(bright int) float32 {
 	}
 }
 
-// darkLevelToDarkness maps a Delphi DarkLevel (0=day, 1=deep night,
-// 2=medium, 3=dusk) to a 0..1 overlay alpha (PlayScn.pas:2275,
-// cliUtil.pas:594-599).
+// darkLevelToDarkness 将 Delphi DarkLevel 映射为暗度值
+// （0=白天, 1=深夜, 2=中等, 3=黄昏）→ 0..1 遮罩透明度
+// （PlayScn.pas:2275, cliUtil.pas:594-599）。
 func darkLevelToDarkness(level int) float32 {
 	switch {
 	case level <= 0:
@@ -1131,9 +1128,8 @@ func (s *PlayScene) OnChar(char rune) {
 	if s.ui.RouteChar(char) {
 		return
 	}
-	// Chat input accepts any printable rune, including CJK (the game is a
-	// Chinese environment); 127 (DEL) is excluded. MaxLength 70
-	// (PlayScn.pas:273).
+	// 聊天输入接受任何可打印字符，包括中文（游戏为中文环境）；
+	// 排除 127（DEL）。最大长度 70（PlayScn.pas:273）。
 	if s.chatMode && char >= 32 && char != 127 {
 		if utf8.RuneCountInString(s.chatInput) < 70 {
 			s.chatInput += string(char)
@@ -1142,16 +1138,16 @@ func (s *PlayScene) OnChar(char rune) {
 }
 
 func (s *PlayScene) OnKey(key int, action int) {
-	// UI (modals / focused edit controls) gets keys first.
+	// UI（模态框 / 聚焦的编辑控件）优先接收按键。
 	if s.ui.RouteKeyDown(key) {
 		return
 	}
-	// Track Ctrl for the adjust-panel ×10 accelerator.
+	// 跟踪 Ctrl 键用于加点面板 ×10 加速。
 	if key == 341 || key == 345 {
 		s.ctrlDown = action == 1
 		return
 	}
-	if key == 256 && s.itemMove.Moving { // Esc releases the held item
+	if key == 256 && s.itemMove.Moving { // Esc 取消手持物品
 		s.itemMove.Cancel(s.State)
 		return
 	}
@@ -1175,24 +1171,24 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.chatInput = string(runes[:len(runes)-1])
 			}
 			return
-		case 32: // Space — open chat (ClMain:1741-1745)
+		case 32: // 空格 — 打开聊天（ClMain:1741-1745）
 			s.chatMode = true
 			return
-		case 66: // B — bag (ClMain:1675-1678)
+		case 66: // B — 背包（ClMain:1675-1678）
 			s.State.ShowBag = !s.State.ShowBag
 			return
-		case 67: // C — status panel page 0 (ClMain:1668-1674)
+		case 67: // C — 状态面板第 0 页（ClMain:1668-1674）
 			s.State.StatePage = 0
 			s.State.ShowEquip = true
 			return
-		case 69: // E — status panel page 3 (ClMain:1676-1685)
+		case 69: // E — 状态面板第 3 页（ClMain:1676-1685）
 			s.State.StatePage = 3
 			s.State.ShowEquip = true
 			return
-		case 71: // G — guild (ClMain:1637-1661)
+		case 71: // G — 行会（ClMain:1637-1661）
 			s.toggleGuild()
 			return
-		case 72: // H — cycle attack mode (ClMain:1517-1525)
+		case 72: // H — 切换攻击模式（ClMain:1517-1525）
 			s.State.AttackMode = (s.State.AttackMode + 1) % 5
 			if s.sendAttackMode != nil {
 				s.sendAttackMode(s.State.AttackMode)
@@ -1200,55 +1196,55 @@ func (s *PlayScene) OnKey(key int, action int) {
 			modes := []string{"和平", "组队", "行会", "全体", "PK"}
 			s.AddChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
 			return
-		case 77: // M — minimap (ClMain:1613-1628; three-state cycle is B5)
+		case 77: // M — 小地图（ClMain:1613-1628；三态循环见 B5）
 			s.showMinimap = !s.showMinimap
 			return
-		case 78: // N — adjust ability (ClMain:1692-1695)
+		case 78: // N — 属性加点（ClMain:1692-1695）
 			s.State.ShowPlusAbil = !s.State.ShowPlusAbil
 			return
-		case 83: // S — group dialog (ClMain:1629-1636)
+		case 83: // S — 组队对话框（ClMain:1629-1636）
 			s.State.ShowGroupDlg = !s.State.ShowGroupDlg
 			return
-		case 86: // V — friend dialog (ClMain:1687-1690; server side missing)
+		case 86: // V — 好友对话框（ClMain:1687-1690；服务端未实现）
 			s.AddChatMessage("好友: 尚未实现")
 			return
-		case 87: // W — trade (ClMain:1663-1666)
+		case 87: // W — 交易（ClMain:1663-1666）
 			s.tryDeal()
 			return
-		case 90: // Z — pick up item (ClMain:1564-1573)
+		case 90: // Z — 拾取物品（ClMain:1564-1573）
 			if s.sendPickup != nil {
 				s.sendPickup()
 			}
 			return
-		case 265: // Up — scroll chat back one line (ClMain:1699-1706)
+		case 265: // 上箭头 — 聊天向上翻一行（ClMain:1699-1706）
 			s.scrollChat(-1)
 			return
-		case 264: // Down — scroll chat forward one line (ClMain:1707-1714)
+		case 264: // 下箭头 — 聊天向下翻一行（ClMain:1707-1714）
 			s.scrollChat(1)
 			return
-		case 266: // PageUp — page chat back (ClMain:1715-1718)
+		case 266: // PageUp — 聊天向上翻页（ClMain:1715-1718）
 			s.scrollChat(-ViewChatLine)
 			return
-		case 267: // PageDown — page chat forward (ClMain:1719-1722)
+		case 267: // PageDown — 聊天向下翻页（ClMain:1719-1722）
 			s.scrollChat(ViewChatLine)
 			return
-		case 298: // F9 — bag (ClMain:1488-1494)
+		case 298: // F9 — 背包（ClMain:1488-1494）
 			s.State.ShowBag = !s.State.ShowBag
 			return
-		case 299: // F10 — status page 0 (ClMain:1495-1502)
+		case 299: // F10 — 状态面板第 0 页（ClMain:1495-1502）
 			s.State.StatePage = 0
 			s.State.ShowEquip = true
 			return
-		case 300: // F11 — status page 3 (ClMain:1503-1508)
+		case 300: // F11 — 状态面板第 3 页（ClMain:1503-1508）
 			s.State.StatePage = 3
 			s.State.ShowEquip = true
 			return
-		case 301: // F12 — options/sound (ClMain:1509+; audio not implemented)
+		case 301: // F12 — 选项/声音（ClMain:1509+；音频未实现）
 			s.AddChatMessage("[声音] 切换(音频未实现)")
 			return
 		}
 
-		// F1..F8 cast the magic bound to that key (FState:3506-3545).
+		// F1..F8 释放绑定在该键上的魔法（FState:3506-3545）。
 		if !s.chatMode && key >= 290 && key <= 297 {
 			k := byte('1' + (key - 290))
 			for i := range s.State.Magics {
@@ -1275,8 +1271,8 @@ func (s *PlayScene) OnKey(key int, action int) {
 	}
 }
 
-// scrollChat scrolls the chat board by delta lines, clamped to the buffer
-// (ClMain:1699-1722).
+// scrollChat 按 delta 行滚动聊天板，限制在缓冲区内
+// （ClMain:1699-1722）。
 func (s *PlayScene) scrollChat(delta int) {
 	s.chatScroll += delta
 	max := len(s.chatMessages) - ViewChatLine
@@ -1317,7 +1313,7 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 	s.mouseX, s.mouseY = x, y
 	s.ui.RouteMouseMove(int(x), int(y))
 
-	// Tile-based focus detection (Delphi g_FocusCret, ClMain.pas:2085-2096).
+	// 基于格子的焦点检测（Delphi g_FocusCret, ClMain.pas:2085-2096）。
 	s.focusActor = nil
 	if y >= MapSurfaceH || s.cam == nil || s.State.MySelf == nil {
 		return
@@ -1346,7 +1342,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	s.mouseX, s.mouseY = x, y
 	ix, iy := int(x), int(y)
 
-	if action == 0 { // release
+	if action == 0 { // 松开
 		s.ui.RouteMouseUp(ix, iy, button)
 		return
 	}
@@ -1359,9 +1355,9 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		modCtrl  = 0x0002
 		modAlt   = 0x0004
 	)
-	_ = modAlt // butcher placeholder
+	_ = modAlt // 占位，暂未使用
 
-	// Right-click (ClMain.pas:2200-2229): Ctrl+right = inspect, otherwise move.
+	// 右键（ClMain.pas:2200-2229）：Ctrl+右键 = 查看，否则移动。
 	if button == 1 {
 		if s.itemMove.Moving {
 			s.itemMove.Cancel(s.State)
@@ -1382,7 +1378,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		}
 		wx, wy := s.cam.ScreenToWorld(x, y)
 		tx, ty := s.cam.WorldToTile(wx, wy)
-		log.Logf(log.LevelDebug, "Mouse", "play right-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
+		log.Logf(log.LevelDebug, "Mouse", "play 右键 world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
 		my := s.State.MySelf
 		if absInt(my.CurrX-tx) <= 2 && absInt(my.CurrY-ty) <= 2 {
 			dir := dirToward(my.CurrX, my.CurrY, tx, ty)
@@ -1395,7 +1391,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		return
 	}
 
-	// Left press: double-click synthesis (Delphi WM_LBUTTONDBLCLK).
+	// 左键按下：双击合成（Delphi WM_LBUTTONDBLCLK）。
 	dbl := false
 	if button == 0 {
 		now := time.Now().UnixMilli()
@@ -1412,7 +1408,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		return
 	}
 	if s.ui.RouteMouseDown(ix, iy, button) {
-		log.Logf(log.LevelDebug, "PlayScene", "mouse consumed by UI pos=(%d,%d)", ix, iy)
+		log.Logf(log.LevelDebug, "PlayScene", "鼠标事件被 UI 消费 pos=(%d,%d)", ix, iy)
 		return
 	}
 	if y >= MapSurfaceH {
@@ -1424,14 +1420,14 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	if s.State.MySelf.Death {
 		return
 	}
-	// Left-click (ClMain.pas:2246-2275): attack / NPC dialog / pickup.
+	// 左键（ClMain.pas:2246-2275）：攻击 / NPC 对话 / 拾取。
 	if button == 0 {
 		if s.cam == nil || s.mapData == nil {
 			return
 		}
 		wx, wy := s.cam.ScreenToWorld(x, y)
 		tx, ty := s.cam.WorldToTile(wx, wy)
-		log.Logf(log.LevelDebug, "Mouse", "play left-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
+		log.Logf(log.LevelDebug, "Mouse", "play 左键 world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
 
 		my := s.State.MySelf
 		for _, a := range s.State.Actors.All() {
@@ -1507,15 +1503,15 @@ func dirToward(fromX, fromY, toX, toY int) int {
 }
 
 func (s *PlayScene) OnScroll(offX, offY float64) {
-	// Wheel over the chat board scrolls chat history; elsewhere zooms
-	// (Delphi scrolls ChatBoardTop from PlayScn).
+	// 滚轮在聊天板上滚动聊天记录；其他区域缩放视角
+	// （Delphi 从 PlayScn 滚动 ChatBoardTop）。
 	if s.mouseX >= chatBoardX && s.mouseX <= chatBoardX+474 &&
 		s.mouseY >= float64(chatBoardTop) && s.mouseY < float64(chatBoardTop+chatLineH*ViewChatLine) {
 		maxScroll := len(s.chatMessages) - ViewChatLine
 		if maxScroll < 0 {
 			maxScroll = 0
 		}
-		s.chatScroll -= int(offY) // wheel up (offY>0) goes back in history
+		s.chatScroll -= int(offY) // 向上滚（offY>0）回看历史
 		if s.chatScroll < 0 {
 			s.chatScroll = 0
 		}
@@ -1561,9 +1557,8 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 		return
 	}
 
-	// Bottom bar, HP/MP orbs, buttons, belt, chat, bag, state panel — all
-	// drawn by the control tree (uihud.go / uibag.go / uistate.go) via
-	// s.ui.Paint below.
+	// 底栏、HP/MP 球、按钮、腰带、聊天、背包、状态面板——全部由
+	// 控件树（uihud.go / uibag.go / uistate.go）通过下方 s.ui.Paint 绘制。
 	s.syncBagWindow()
 	s.syncStateWindow()
 	s.syncMerchantWindows()
@@ -1571,18 +1566,18 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 	s.syncGuildWindows()
 	s.syncAbilWindows()
 
-	// UI control tree (DWinCtl port) paints on top of the legacy hand-drawn
-	// panels; legacy panels are migrated into the tree phase by phase.
+	// UI 控件树（DWinCtl 移植）绘制在旧版手绘面板之上；
+	// 旧版面板正逐步迁移到控件树中。
 	s.ui.Paint(proj)
 
-	// Hint panel, then the item held on the cursor — Delphi paint order
-	// (ClMain.pas: DrawHint :1079, held item :1093).
+	// 先画提示面板，再画光标上的手持物品——Delphi 绘制顺序
+	// （ClMain.pas: DrawHint :1079, 手持物品 :1093）。
 	s.tooltip.Render(s, proj)
 	s.renderHeldItem(proj)
 }
 
-// renderHeldItem draws the dragged item centered on the cursor with a name
-// label (ClMain.pas:1093-1113).
+// renderHeldItem 在光标中心绘制拖拽的物品并显示名称标签
+// （ClMain.pas:1093-1113）。
 func (s *PlayScene) renderHeldItem(proj [16]float32) {
 	if !s.itemMove.Moving {
 		return

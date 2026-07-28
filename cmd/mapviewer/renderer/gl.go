@@ -7,18 +7,18 @@ import (
 	"github.com/go-gl/gl/v3.3-core/gl"
 )
 
-// GLState holds OpenGL resources for rendering.
+// GLState 持有渲染所需的 OpenGL 资源。
 type GLState struct {
 	Shader     *ShaderProgram
 	GridShader *GridShaderProgram
 	VAO        uint32
 	VBO        uint32
 	WhiteTex   uint32
-	GridVAO    uint32 // VAO for grid/line rendering
-	GridVBO    uint32 // VBO for grid/line rendering
+	GridVAO    uint32 // 网格/线段渲染用 VAO
+	GridVBO    uint32 // 网格/线段渲染用 VBO
 }
 
-// NewGLState initializes OpenGL resources.
+// NewGLState 初始化 OpenGL 资源。
 func NewGLState() (*GLState, error) {
 	shader, err := NewShaderProgram()
 	if err != nil {
@@ -29,7 +29,7 @@ func NewGLState() (*GLState, error) {
 		return nil, err
 	}
 
-	// Unit quad VBO: pos(2) + uv(2) per vertex, 6 vertices
+	// 单位四边形 VBO: 每顶点 pos(2) + uv(2)，共 6 个顶点
 	vertices := []float32{
 		0, 0, 0, 0,
 		1, 0, 1, 0,
@@ -56,19 +56,19 @@ func NewGLState() (*GLState, error) {
 
 	gl.BindVertexArray(0)
 
-	// Grid VAO/VBO for line rendering (position only, no UVs).
+	// 网格 VAO/VBO 用于线段渲染（仅位置，无 UV）
 	var gridVAO, gridVBO uint32
 	gl.GenVertexArrays(1, &gridVAO)
 	gl.GenBuffers(1, &gridVBO)
 	gl.BindVertexArray(gridVAO)
 	gl.BindBuffer(gl.ARRAY_BUFFER, gridVBO)
-	// Dynamic buffer, will be updated per frame.
+	// 动态缓冲区，每帧更新
 	gl.BufferData(gl.ARRAY_BUFFER, 2*2*2000*4, nil, gl.DYNAMIC_DRAW)
 	gl.EnableVertexAttribArray(0)
 	gl.VertexAttribPointerWithOffset(0, 2, gl.FLOAT, false, 2*4, 0)
 	gl.BindVertexArray(0)
 
-	// White 1x1 texture
+	// 白色 1x1 纹理
 	var whiteTex uint32
 	gl.GenTextures(1, &whiteTex)
 	gl.BindTexture(gl.TEXTURE_2D, whiteTex)
@@ -88,7 +88,7 @@ func NewGLState() (*GLState, error) {
 	}, nil
 }
 
-// UploadTexture uploads an *image.RGBA to an OpenGL texture.
+// UploadTexture 将 *image.RGBA 上传为 OpenGL 纹理。
 func UploadTexture(img *image.RGBA) uint32 {
 	var tex uint32
 	gl.GenTextures(1, &tex)
@@ -103,14 +103,14 @@ func UploadTexture(img *image.RGBA) uint32 {
 	return tex
 }
 
-// DrawQuad draws a textured quad at (x, y) with size (w, h).
+// DrawQuad 在 (x, y) 处绘制大小为 (w, h) 的纹理四边形。
 func (s *GLState) DrawQuad(x, y, w, h float32, texture uint32, flipV bool, proj [16]float32) {
 	gl.UseProgram(s.Shader.ID)
 	gl.BindVertexArray(s.VAO)
 
 	gl.UniformMatrix4fv(s.Shader.ProjLoc, 1, false, &proj[0])
 
-	// Model matrix: translate(x,y) scale(w,h)
+	// 模型矩阵: translate(x,y) scale(w,h)
 	model := [16]float32{
 		w, 0, 0, 0,
 		0, h, 0, 0,
@@ -138,7 +138,7 @@ func (s *GLState) DrawQuad(x, y, w, h float32, texture uint32, flipV bool, proj 
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// DrawQuadColor draws a colored quad (no texture).
+// DrawQuadColor 绘制纯色四边形（无纹理）。
 func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
 	gl.UseProgram(s.Shader.ID)
 	gl.BindVertexArray(s.VAO)
@@ -162,7 +162,7 @@ func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// OrthoProj computes an orthographic projection matrix (Y-down).
+// OrthoProj 计算正交投影矩阵（Y 轴向下）。
 func OrthoProj(left, right, bottom, top float32) [16]float32 {
 	return [16]float32{
 		2 / (right - left), 0, 0, 0,
@@ -172,7 +172,7 @@ func OrthoProj(left, right, bottom, top float32) [16]float32 {
 	}
 }
 
-// Destroy frees all GL resources held by the GLState.
+// Destroy 释放 GLState 持有的所有 GL 资源。
 func (s *GLState) Destroy() {
 	gl.DeleteTextures(1, &s.WhiteTex)
 	gl.DeleteBuffers(1, &s.VBO)

@@ -6,7 +6,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// ClFunc.pas:618-634 is the authoritative StdMode→slot table.
+// ClFunc.pas:618-634 是 StdMode→装备槽 的权威映射表。
 func TestGetEquipSlotMapping(t *testing.T) {
 	cases := []struct {
 		stdMode byte
@@ -33,7 +33,7 @@ func TestGetEquipSlotMapping(t *testing.T) {
 }
 
 func TestValidEquipSlot(t *testing.T) {
-	// Dual-slot items accept either side (FState:3300-3318).
+	// 双槽物品可装备任一侧 (FState:3300-3318)。
 	if !validEquipSlot(22, protocol.URingL) || !validEquipSlot(23, protocol.URingR) {
 		t.Error("rings should fit either ring slot")
 	}
@@ -43,7 +43,7 @@ func TestValidEquipSlot(t *testing.T) {
 	if validEquipSlot(22, protocol.UArmRingL) {
 		t.Error("ring must not fit bracelet slot")
 	}
-	// Single-slot items accept only their primary slot.
+	// 单槽物品只能装备主槽位。
 	if !validEquipSlot(15, protocol.UHelmet) || validEquipSlot(15, protocol.UNecklace) {
 		t.Error("helmet fits only UHelmet")
 	}

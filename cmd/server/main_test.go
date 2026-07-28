@@ -16,7 +16,7 @@ import (
 )
 
 // ============================================================================
-// Unit Tests — Helper Functions
+// 单元测试 — 辅助函数
 // ============================================================================
 
 func TestParseCredentials(t *testing.T) {
@@ -102,7 +102,7 @@ func TestGetServerHostPort(t *testing.T) {
 }
 
 // ============================================================================
-// Unit Tests — Character List Text Format (Fix 3)
+// 单元测试 — 角色列表文本格式 (Fix 3)
 // ============================================================================
 
 func TestSendCharacterListFormat(t *testing.T) {
@@ -134,7 +134,7 @@ func TestSendCharacterListFormat(t *testing.T) {
 		t.Fatalf("GetCharactersByAccount: %v", err)
 	}
 
-	// Build text format (same logic as sendCharacterList in main.go)
+	// 构建文本格式（与 main.go 中 sendCharacterList 逻辑一致）
 	var sb strings.Builder
 	for i, c := range chars {
 		if i > 0 {
@@ -160,7 +160,7 @@ func TestSendCharacterListFormat(t *testing.T) {
 		t.Errorf("result should start with *, got %q", result[:5])
 	}
 
-	// Parse and verify
+	// 解析并验证
 	parts := strings.Split(result, "/")
 	if len(parts) != 10 {
 		t.Errorf("expected 10 parts, got %d: %q", len(parts), result)
@@ -175,10 +175,10 @@ func TestSendCharacterListFormat(t *testing.T) {
 }
 
 // ============================================================================
-// Test Server Helper
+// 测试服务器辅助
 // ============================================================================
 
-// testServer wraps a TCPServer with a database for integration testing.
+// testServer 封装 TCPServer 和数据库，用于集成测试。
 type testServer struct {
 	server  *netserver.TCPServer
 	db      *storage.Database
@@ -201,7 +201,7 @@ func newTestServer(t *testing.T) *testServer {
 		t.Fatalf("Open DB: %v", err)
 	}
 
-	// Find a free port
+	// 寻找空闲端口
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -232,7 +232,7 @@ func newTestServer(t *testing.T) *testServer {
 		sessionMgr.Remove(session.ID)
 	})
 
-	// Raw message handler for **runlogin (Fix 5)
+	// **runlogin 的原始消息处理器 (Fix 5)
 	ts.server.SetRawMessageHandler(func(session *netserver.Session, raw string) bool {
 		if !strings.HasPrefix(raw, "**") {
 			return false
@@ -259,7 +259,7 @@ func newTestServer(t *testing.T) *testServer {
 		case netserver.StateConnected:
 			switch msg.Ident {
 			case protocol.CMProtocol:
-				// no-op
+				// 空操作
 			case protocol.CMIDPassword:
 				username, password := parseCredentials(body)
 				accountID, passwordHash, err := db.GetAccountByUsername(username)
@@ -321,7 +321,7 @@ func newTestServer(t *testing.T) *testServer {
 				ts.server.Send(session.ID, startResp, protocol.EncodeString(fmt.Sprintf("127.0.0.1/%d", port)))
 			}
 		case netserver.StateInGame:
-			// Game messages — handled by raw handler for **login
+			// 游戏消息 — 由 **login 的原始消息处理器处理
 		}
 	})
 
@@ -329,7 +329,7 @@ func newTestServer(t *testing.T) *testServer {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Give acceptLoop goroutine time to start
+	// 等待 acceptLoop 协程启动
 	time.Sleep(200 * time.Millisecond)
 
 	return ts
@@ -346,7 +346,7 @@ func (ts *testServer) addr() string {
 }
 
 // ============================================================================
-// Mock Client
+// 模拟客户端
 // ============================================================================
 
 type mockClient struct {
@@ -437,7 +437,7 @@ func (c *mockClient) close() {
 }
 
 // ============================================================================
-// Integration Tests
+// 集成测试
 // ============================================================================
 
 func TestIntegration_LoginAndServerSelect(t *testing.T) {
@@ -448,10 +448,10 @@ func TestIntegration_LoginAndServerSelect(t *testing.T) {
 	c := newMockClient(t, ts.addr())
 	defer c.close()
 
-	// Send CMProtocol
+	// 发送 CMProtocol
 	c.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
 
-	// Login
+	// 登录
 	c.send(protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0), "alice/pass123")
 
 	msg, body := c.recv()
@@ -462,7 +462,7 @@ func TestIntegration_LoginAndServerSelect(t *testing.T) {
 		t.Errorf("login body=%q, want %q", body, "Server/1")
 	}
 
-	// Select server (Fix 2: body should be "addr/port/cert")
+	// 选服 (Fix 2: body 应为 "addr/port/cert")
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelectServer, 0, 0, 0, 0), "Server")
 
 	msg, body = c.recv()
@@ -487,7 +487,7 @@ func TestIntegration_WrongPassword(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Create account first
+	// 先创建账号
 	c1 := newMockClient(t, ts.addr())
 	c1.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
 	c1.send(protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0), "bob/correct")
@@ -499,7 +499,7 @@ func TestIntegration_WrongPassword(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Try wrong password (Fix 1: should get SMPasswdFail, not SMQueryChrFail)
+	// 尝试错误密码 (Fix 1: 应收到 SMPasswdFail，而非 SMQueryChrFail)
 	c2 := newMockClient(t, ts.addr())
 	defer c2.close()
 	c2.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
@@ -520,7 +520,7 @@ func TestIntegration_QueryChrTextFormat(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Login
+	// 登录
 	c := newMockClient(t, ts.addr())
 	defer c.close()
 	c.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
@@ -530,16 +530,16 @@ func TestIntegration_QueryChrTextFormat(t *testing.T) {
 		t.Fatalf("login: Ident=%d", msg.Ident)
 	}
 
-	// Select server
+	// 选服
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelectServer, 0, 0, 0, 0), "Server")
 	c.recv()
 
-	// Create character directly in DB
+	// 直接在数据库中创建角色
 	accID, _, _ := ts.db.GetAccountByUsername("charlie")
 	ts.db.CreateCharacter(accID, "Fighter", 0, 0)
 	ts.db.CreateCharacter(accID, "Mage", 1, 1)
 
-	// Query characters (Fix 3: should return text format)
+	// 查询角色 (Fix 3: 应返回文本格式)
 	c.send(protocol.MakeDefaultMsg(protocol.CMQueryChr, 0, 0, 0, 0), "charlie/54321")
 
 	msg, body := c.recv()
@@ -547,7 +547,7 @@ func TestIntegration_QueryChrTextFormat(t *testing.T) {
 		t.Fatalf("query: Ident=%d, want %d", msg.Ident, protocol.SMQueryChr)
 	}
 
-	// Verify text format: "*name/job/hair/level/sex/..."
+	// 验证文本格式: "*name/job/hair/level/sex/..."
 	if body == "" {
 		t.Fatal("SMQueryChr body is empty")
 	}
@@ -555,9 +555,9 @@ func TestIntegration_QueryChrTextFormat(t *testing.T) {
 		t.Errorf("body should start with *, got %q", body[:10])
 	}
 
-	// Parse and verify
+	// 解析并验证
 	parts := strings.Split(body, "/")
-	if len(parts) != 10 { // 2 chars * 5 fields
+	if len(parts) != 10 { // 2 个角色 * 5 个字段
 		t.Errorf("expected 10 parts, got %d: %q", len(parts), body)
 	}
 	if parts[0] != "*Fighter" {
@@ -573,7 +573,7 @@ func TestIntegration_SelChrAndStartPlay(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Login + select server + create character
+	// 登录 + 选服 + 创建角色
 	c := newMockClient(t, ts.addr())
 	defer c.close()
 	c.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
@@ -585,7 +585,7 @@ func TestIntegration_SelChrAndStartPlay(t *testing.T) {
 	accID, _, _ := ts.db.GetAccountByUsername("dave")
 	ts.db.CreateCharacter(accID, "Hero", 0, 0)
 
-	// Select character (Fix 4: parse name from body, Fix 6: SMStartPlay has body)
+	// 选角 (Fix 4: 从 body 解析名字, Fix 6: SMStartPlay 带 body)
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0), "dave/Hero")
 
 	msg, body := c.recv()
@@ -593,7 +593,7 @@ func TestIntegration_SelChrAndStartPlay(t *testing.T) {
 		t.Fatalf("selchr: Ident=%d, want %d", msg.Ident, protocol.SMStartPlay)
 	}
 
-	// Fix 6: body should be "addr/port", not empty
+	// Fix 6: body 应为 "addr/port"，不能为空
 	if body == "" {
 		t.Fatal("SMStartPlay body is empty, expected addr/port")
 	}
@@ -610,7 +610,7 @@ func TestIntegration_RunLoginAndNotice(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	// Full login flow up to SMStartPlay
+	// 完整登录流程到 SMStartPlay
 	c := newMockClient(t, ts.addr())
 	defer c.close()
 	c.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
@@ -625,10 +625,10 @@ func TestIntegration_RunLoginAndNotice(t *testing.T) {
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0), "eve/Rogue")
 	c.recv() // SMStartPlay
 
-	// Send **runlogin (Fix 5: raw message with ** prefix)
+	// 发送 **runlogin (Fix 5: 带 ** 前缀的原始消息)
 	c.sendRaw("**eve/Rogue/54321/120040918/9")
 
-	// Should receive SMSendNotice
+	// 应收到 SMSendNotice
 	msg, body := c.recv()
 	if msg.Ident != protocol.SMSendNotice {
 		t.Fatalf("runlogin: Ident=%d, want %d", msg.Ident, protocol.SMSendNotice)
@@ -648,55 +648,55 @@ func TestIntegration_FullLoginFlow(t *testing.T) {
 	c := newMockClient(t, ts.addr())
 	defer c.close()
 
-	// Step 1: Protocol
+	// 第1步: 协议
 	c.send(protocol.MakeDefaultMsg(protocol.CMProtocol, 120040918, 0, 0, 0), "")
 
-	// Step 2: Login
+	// 第2步: 登录
 	c.send(protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0), "frank/pass")
 	msg, body := c.recv()
 	assertMsg(t, msg, protocol.SMPassOKSelectServer, "SMPassOKSelectServer")
 	t.Logf("[1] Login OK: body=%q", body)
 
-	// Step 3: Select server
+	// 第3步: 选服
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelectServer, 0, 0, 0, 0), "Server")
 	msg, body = c.recv()
 	assertMsg(t, msg, protocol.SMSelectServerOK, "SMSelectServerOK")
 	assertNotEmpty(t, body, "SMSelectServerOK body")
 	t.Logf("[2] Server selected: body=%q", body)
 
-	// Step 4: Create character in DB
+	// 第4步: 在数据库中创建角色
 	accID, _, _ := ts.db.GetAccountByUsername("frank")
 	ts.db.CreateCharacter(accID, "Warrior", 0, 0)
 
-	// Step 5: Query characters
+	// 第5步: 查询角色
 	c.send(protocol.MakeDefaultMsg(protocol.CMQueryChr, 0, 0, 0, 0), "frank/54321")
 	msg, body = c.recv()
 	assertMsg(t, msg, protocol.SMQueryChr, "SMQueryChr")
 	assertHasPrefix(t, body, "*", "SMQueryChr body starts with *")
 	t.Logf("[3] Characters: body=%q", body)
 
-	// Step 6: Select character
+	// 第6步: 选角
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0), "frank/Warrior")
 	msg, body = c.recv()
 	assertMsg(t, msg, protocol.SMStartPlay, "SMStartPlay")
 	assertNotEmpty(t, body, "SMStartPlay body")
 	t.Logf("[4] Start play: body=%q", body)
 
-	// Step 7: Run login (**raw message)
+	// 第7步: 运行登录 (**原始消息)
 	c.sendRaw("**frank/Warrior/54321/120040918/9")
 	msg, body = c.recv()
 	assertMsg(t, msg, protocol.SMSendNotice, "SMSendNotice")
 	assertNotEmpty(t, body, "SMSendNotice body")
 	t.Logf("[5] Notice: body=%q", body)
 
-	// Step 8: Notice acknowledged
+	// 第8步: 确认公告
 	c.send(protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0), "")
 
 	t.Log("Full login flow completed successfully!")
 }
 
 // ============================================================================
-// Assertion Helpers
+// 断言辅助函数
 // ============================================================================
 
 func assertMsg(t *testing.T, msg protocol.DefaultMessage, wantIdent uint16, desc string) {
@@ -720,6 +720,6 @@ func assertHasPrefix(t *testing.T, s string, prefix string, desc string) {
 	}
 }
 
-// Suppress unused import warnings
+// 消除未使用导入的警告
 var _ = net.Listen
 var _ = os.RemoveAll

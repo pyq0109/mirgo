@@ -9,16 +9,16 @@ import (
 
 const MaxStorageItems = 39
 
-// sendStorageMenu opens the storage UI (Delphi BoStorageMenu): a mode
-// message followed by the full item list.
+// sendStorageMenu 打开仓库界面（Delphi BoStorageMenu）：先发送模式消息，
+// 再发送完整物品列表。
 func (p *PlayObject) sendStorageMenu(server *netserver.TCPServer) {
 	mode := protocol.MakeDefaultMsg(protocol.SMSendUserStorageItem, 0, 0, 0, 0)
 	server.Send(p.Session.ID, mode, "")
 	p.sendStorageList(server)
 }
 
-// sendStorageList sends the storage contents (10-byte items: WIndex, Dura,
-// DuraMax, MakeIndex — the client builds list rows from this).
+// sendStorageList 发送仓库内容（每条 10 字节：WIndex, Dura,
+// DuraMax, MakeIndex — 客户端据此构建列表行）。
 func (p *PlayObject) sendStorageList(server *netserver.TCPServer) {
 	buf := make([]byte, 2, 2+len(p.StorageItems)*10)
 	binary.LittleEndian.PutUint16(buf, uint16(len(p.StorageItems)))
@@ -38,7 +38,7 @@ func (p *PlayObject) sendStorageList(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleStorageItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	// Param1 = MakeIndex（实例ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		return
@@ -58,8 +58,8 @@ func (p *PlayObject) HandleStorageItem(msg SendMessage, server *netserver.TCPSer
 }
 
 func (p *PlayObject) HandleTakeBackStorageItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex of the stored item (Delphi passes the list entry's
-	// MakeIndex, stored as the row's "price" client-side).
+	// Param1 = 仓库物品的 MakeIndex（Delphi 传递列表条目的 MakeIndex，
+	// 客户端将其存储为该行的 "price" 字段）。
 	makeIndex := int32(msg.Param1)
 	storageIdx := -1
 	for i, item := range p.StorageItems {

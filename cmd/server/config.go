@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ServerConfig holds server configuration (matches serverconfig/server.jsonc format).
+// ServerConfig 保存服务端配置（与 serverconfig/server.jsonc 格式对应）。
 type ServerConfig struct {
 	Server struct {
 		Name   string `json:"name"`
@@ -49,7 +49,7 @@ type ServerConfig struct {
 	} `json:"plugins"`
 }
 
-// DefaultConfig returns the default configuration.
+// DefaultConfig 返回默认配置。
 func DefaultConfig() *ServerConfig {
 	return &ServerConfig{
 		Database: struct {
@@ -60,7 +60,7 @@ func DefaultConfig() *ServerConfig {
 	}
 }
 
-// LoadConfig loads configuration from serverconfig directory.
+// LoadConfig 从 serverconfig 目录加载配置。
 func LoadConfig(configDir string) (*ServerConfig, error) {
 	configFile := filepath.Join(configDir, "server.jsonc")
 
@@ -69,7 +69,7 @@ func LoadConfig(configDir string) (*ServerConfig, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	// Remove JSONC comments (lines starting with //)
+	// 移除 JSONC 注释（以 // 开头的行）
 	lines := string(data)
 	var cleanLines []string
 	for _, line := range splitLines(lines) {
@@ -127,7 +127,7 @@ func trimSpace(s string) string {
 	return s[start:end]
 }
 
-// GetListenAddr returns the listen address.
+// GetListenAddr 返回监听地址。
 func (c *ServerConfig) GetListenAddr() string {
 	if c.Server.Listen.Addr != "" {
 		return c.Server.Listen.Addr
@@ -135,7 +135,7 @@ func (c *ServerConfig) GetListenAddr() string {
 	return ":7000"
 }
 
-// GetDatabasePath returns the database path.
+// GetDatabasePath 返回数据库路径。
 func (c *ServerConfig) GetDatabasePath() string {
 	if c.Database.Path != "" {
 		return c.Database.Path
@@ -143,7 +143,7 @@ func (c *ServerConfig) GetDatabasePath() string {
 	return "serverdata/mir2.db"
 }
 
-// GetHomeMap returns the home map name.
+// GetHomeMap 返回主城地图名。
 func (c *ServerConfig) GetHomeMap() string {
 	if c.Game.HomeMap != "" {
 		return c.Game.HomeMap
@@ -151,7 +151,7 @@ func (c *ServerConfig) GetHomeMap() string {
 	return "0"
 }
 
-// GetHomeX returns the home X coordinate.
+// GetHomeX 返回主城 X 坐标。
 func (c *ServerConfig) GetHomeX() int {
 	if c.Game.HomeX > 0 {
 		return c.Game.HomeX
@@ -159,7 +159,7 @@ func (c *ServerConfig) GetHomeX() int {
 	return 289
 }
 
-// GetHomeY returns the home Y coordinate.
+// GetHomeY 返回主城 Y 坐标。
 func (c *ServerConfig) GetHomeY() int {
 	if c.Game.HomeY > 0 {
 		return c.Game.HomeY
@@ -188,8 +188,8 @@ func (c *ServerConfig) GetSpeedHackMax() int {
 	return 4
 }
 
-// GetServerHostPort returns the server address as host/port pair.
-// For listen address ":7000", returns ("localhost", 7000).
+// GetServerHostPort 以 host/port 形式返回服务端地址。
+// 对于监听地址 ":7000"，返回 ("localhost", 7000)。
 func (c *ServerConfig) GetServerHostPort() (string, int) {
 	addr := c.GetListenAddr()
 	host := "localhost"

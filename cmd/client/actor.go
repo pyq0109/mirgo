@@ -1,15 +1,15 @@
-﻿package main
+package main
 
-// ActionInfo defines animation frame information (matching Delphi TActionInfo).
+// ActionInfo 定义动画帧信息（对应 Delphi TActionInfo）。
 type ActionInfo struct {
-	Start   int // Starting frame index
-	Frame   int // Number of effective frames
-	Skip    int // Skipped frames (padding between directions)
-	FTime   int // Frame display time in milliseconds
-	UseTick int // Movement tick control
+	Start   int // 起始帧索引
+	Frame   int // 有效帧数
+	Skip    int // 跳过帧数（方向间的填充）
+	FTime   int // 帧显示时间（毫秒）
+	UseTick int // 移动 tick 控制
 }
 
-// HumanAction contains 14 actions for human characters.
+// HumanAction 包含人物角色的 14 个动作。
 type HumanAction struct {
 	ActStand       ActionInfo
 	ActWalk        ActionInfo
@@ -27,7 +27,7 @@ type HumanAction struct {
 	ActDie         ActionInfo
 }
 
-// MonsterAction contains 7 actions for monster characters.
+// MonsterAction 包含怪物角色的 7 个动作。
 type MonsterAction struct {
 	ActStand   ActionInfo
 	ActWalk    ActionInfo
@@ -38,7 +38,7 @@ type MonsterAction struct {
 	ActDeath   ActionInfo
 }
 
-// HA is the human action template (matching Delphi HA constant).
+// HA 是人物动作模板（对应 Delphi HA 常量）。
 var HA = HumanAction{
 	ActStand:       ActionInfo{Start: 0, Frame: 4, Skip: 4, FTime: 200, UseTick: 0},
 	ActWalk:        ActionInfo{Start: 64, Frame: 6, Skip: 2, FTime: 90, UseTick: 2},
@@ -56,7 +56,7 @@ var HA = HumanAction{
 	ActDie:         ActionInfo{Start: 536, Frame: 4, Skip: 4, FTime: 120, UseTick: 0},
 }
 
-// Constants
+// 常量
 const (
 	HumanFrame    = 600
 	MonFrame      = 280
@@ -65,14 +65,14 @@ const (
 	MerchantFrame = 60
 )
 
-// CalcFrame calculates the frame index for an action.
+// CalcFrame 计算动作的帧索引范围。
 func CalcFrame(action ActionInfo, dir int) (startFrame, endFrame int) {
 	startFrame = action.Start + dir*(action.Frame+action.Skip)
 	endFrame = startFrame + action.Frame - 1
 	return
 }
 
-// GetRaceByPM returns the monster action template for a given race.
+// GetRaceByPM 根据种族返回怪物动作模板。
 func GetRaceByPM(race int, appr int) *MonsterAction {
 	switch race {
 	case 9:
@@ -161,7 +161,7 @@ func getRaceByPM50(appr int) *MonsterAction {
 	}
 }
 
-// Monster action templates (matching Delphi MA9-MA47)
+// 怪物动作模板（对应 Delphi MA9-MA47）
 var MA9 = MonsterAction{
 	ActStand:   ActionInfo{Start: 0, Frame: 1, Skip: 7, FTime: 200, UseTick: 0},
 	ActWalk:    ActionInfo{Start: 64, Frame: 6, Skip: 2, FTime: 120, UseTick: 3},

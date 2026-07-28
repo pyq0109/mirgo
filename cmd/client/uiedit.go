@@ -5,14 +5,14 @@ import (
 	"unicode/utf8"
 )
 
-// EditBox — single-line text input control, port of the Delphi TEdit usage
-// (EdDlgEdit FState.pas:656-667, chat EdChat PlayScn.pas:427-440). Focused
-// via UIManager; consumes chars and Backspace/Enter/Esc.
+// EditBox — 单行文本输入控件, 移植自 Delphi TEdit 用法
+// (EdDlgEdit FState.pas:656-667, 聊天 EdChat PlayScn.pas:427-440)。
+// 通过 UIManager 获取焦点; 处理字符输入及 Backspace/Enter/Esc。
 type EditBox struct {
 	Ctrl    *UIControl
 	scene   *PlayScene
 	Text    string
-	MaxLen  int // runes
+	MaxLen  int // 字符数
 	OnEnter func(text string)
 	OnEsc   func()
 }

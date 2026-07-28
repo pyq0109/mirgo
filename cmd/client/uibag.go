@@ -6,9 +6,9 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// Bag panel — port of DItemBag/DItemGrid (FState.pas:1167-1174 window+grid,
-// 4527-4661 grid interactions, 4602-4641 double-click, 1279-1292 gold/close,
-// 4451-4520 bag direct paint + repair/close buttons).
+// 背包面板 — 移植自 DItemBag/DItemGrid (FState.pas:1167-1174 窗口+网格,
+// 4527-4661 网格交互, 4602-4641 双击, 1279-1292 金币/关闭,
+// 4451-4520 背包直接绘制 + 修理/关闭按钮)。
 const bagGridCols = 8
 
 func (s *PlayScene) buildBag() {
@@ -24,17 +24,17 @@ func (s *PlayScene) buildBag() {
 		bag.Width, bag.Height = 320, 260
 	}
 	bag.Visible = false
-	// Bag direct paint: background + gold amount + hovered item info
-	// (DItemBagDirectPaint, FState:4451-4484).
+	// 背包直接绘制: 背景 + 金币数 + 悬浮物品信息
+	// (DItemBagDirectPaint, FState:4451-4484)。
 	bag.OnDirectPaint = func(c *UIControl, proj [16]float32) {
 		s.paintBagWindow(c, proj)
 	}
 	ui.Root.AddChild(bag)
 	s.hudBag = bag
 
-	// Item grid (FState:1171-1174): origin (33,43), 8×6 @ 36×32, but the
-	// hit area is runtime-clipped to 286×162 (the 6th row is barely
-	// clickable in the original).
+	// 物品网格 (FState:1171-1174): 起点 (33,43), 8×6 @ 36×32, 但
+	// 点击区域运行时裁剪为 286×162 (原版第 6 行几乎
+	// 不可点击)。
 	grid := NewUIControl("DItemGrid", KindGrid)
 	grid.Left, grid.Top = 33, 43
 	grid.Width, grid.Height = 286, 162
@@ -52,9 +52,9 @@ func (s *PlayScene) buildBag() {
 	grid.OnGridMouseMove = func(c *UIControl, col, row int) { s.bagGridHover(col, row) }
 	bag.AddChild(grid)
 
-	// Gold button (runtime (133,231), FState:1280-1281 — the DlgConf
-	// (10,190) entry is dead data): pick up the gold stack
-	// (Index = moveIdxBagGold) so it can be dropped on the ground.
+	// 金币按钮 (运行时 (133,231), FState:1280-1281 — DlgConf 中的
+	// (10,190) 已废弃): 拿起金币堆 (Index = moveIdxBagGold)
+	// 以便丢到地上。
 	gold := NewUIControl("DGold", KindButton)
 	gold.Left, gold.Top = 133, 231
 	if prg != nil {
@@ -66,17 +66,16 @@ func (s *PlayScene) buildBag() {
 		if s.itemMove.Moving || s.State.Gold <= 0 {
 			return
 		}
-		// Gold has no item instance; the drop target prompts for the amount.
+		// 金币无物品实例; 放置目标会弹出数量输入。
 		s.itemMove.Moving = true
 		s.itemMove.Index = moveIdxBagGold
 		s.itemMove.FromBelt = -1
 	}
 	bag.AddChild(gold)
 
-	// Repair button: runtime image [64], hit rect (10,10) 48×22, face drawn
-	// at bag+(254,183) only while pressed (FState:1283-1287, 4496-4506 —
-	// the paint offset is a DFM leftover; the control has no click handler
-	// and is decorative).
+	// 修理按钮: 运行时图片 [64], 点击区域 (10,10) 48×22, 仅按下时
+	// 在 bag+(254,183) 绘制面板 (FState:1283-1287, 4496-4506 —
+	// 绘制偏移是 DFM 遗留; 该控件无点击处理, 纯装饰)。
 	repair := NewUIControl("DRepairItem", KindButton)
 	repair.Left, repair.Top = 10, 10
 	repair.Width, repair.Height = 48, 22
@@ -87,8 +86,8 @@ func (s *PlayScene) buildBag() {
 	}
 	bag.AddChild(repair)
 
-	// Close button: runtime (314,20) 14×20 [371], painted only while
-	// pressed (FState:1288-1292, 4508-4525).
+	// 关闭按钮: 运行时 (314,20) 14×20 [371], 仅按下时
+	// 绘制 (FState:1288-1292, 4508-4525)。
 	closeBtn := NewUIControl("DClosebag", KindButton)
 	closeBtn.Left, closeBtn.Top = 314, 20
 	closeBtn.Width, closeBtn.Height = 14, 20
@@ -101,8 +100,8 @@ func (s *PlayScene) buildBag() {
 	bag.AddChild(closeBtn)
 }
 
-// paintBagWindow draws the bag background plus the in-window gold amount and
-// hovered-item info lines (DItemBagDirectPaint, FState:4451-4484).
+// paintBagWindow 绘制背包背景及窗口内的金币数和悬浮物品信息行
+// (DItemBagDirectPaint, FState:4451-4484)。
 func (s *PlayScene) paintBagWindow(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -111,10 +110,10 @@ func (s *PlayScene) paintBagWindow(c *UIControl, proj [16]float32) {
 	if s.text == nil {
 		return
 	}
-	// Gold amount, white (Left+50, Top+232).
+	// 金币数, 白色 (Left+50, Top+232)。
 	s.text.DrawText(goldStr(s.State.Gold), float32(c.AbsX()+50), float32(c.AbsY()+232), 1, 1, 1, 1, proj)
-	// Hovered item info: name yellow, following lines white, last line red
-	// when unusable (Left+70, Top+215 / +229 / +243).
+	// 悬浮物品信息: 名称黄色, 后续行白色, 不可用时末行红色
+	// (Left+70, Top+215 / +229 / +243)。
 	it := s.bagHoverItem
 	if it == nil || s.State.FindBagItemByMakeIndex(it.MakeIndex) < 0 {
 		return
@@ -137,10 +136,10 @@ func (s *PlayScene) paintBagWindow(c *UIControl, proj [16]float32) {
 	}
 }
 
-// syncBagWindow keeps the control visible state and Delphi repositioning:
-// the bag slides to x=475 while NPC/shop windows are open (FState:4707,
-// 4756), but stays at (0,0) during trade — OpenDealDlg sets Left:=0
-// (FState:5621; the commented-out //475 is a stale value).
+// syncBagWindow 同步控件可见状态及 Delphi 的重定位逻辑:
+// NPC/商店窗口打开时背包滑到 x=475 (FState:4707,
+// 4756), 交易时保持在 (0,0) — OpenDealDlg 设置 Left:=0
+// (FState:5621; 被注释的 //475 是过期值)。
 func (s *PlayScene) syncBagWindow() {
 	if s.hudBag == nil {
 		return
@@ -153,8 +152,7 @@ func (s *PlayScene) syncBagWindow() {
 	}
 }
 
-// bagSlotIndex maps a grid cell to the bag slot (cells beyond the 46-slot
-// capacity are invalid).
+// bagSlotIndex 将网格坐标映射为背包槽位 (超出 46 格容量的格子无效)。
 func bagSlotIndex(col, row int) int {
 	idx := col + row*bagGridCols
 	if idx >= protocol.MaxBagItem {
@@ -163,10 +161,9 @@ func bagSlotIndex(col, row int) int {
 	return idx
 }
 
-// paintBagCell draws a single bag cell (DItemGridGridPaint, FState:
-// 4643-4661): no cell background (baked into [3]), the icon centered at
-// full size with a (-1,+1) nudge, and no selection highlight (the handler
-// ignores gdSelected).
+// paintBagCell 绘制单个背包格 (DItemGridGridPaint, FState:
+// 4643-4661): 无格子背景 (已烘焙在 [3] 中), 图标原始尺寸居中
+// 带 (-1,+1) 偏移, 无选中高亮 (处理函数忽略 gdSelected)。
 func (s *PlayScene) paintBagCell(col, row, x, y, w, h int, selected bool, proj [16]float32) {
 	idx := bagSlotIndex(col, row)
 	if idx < 0 {
@@ -187,7 +184,7 @@ func (s *PlayScene) paintBagCell(col, row, x, y, w, h int, selected bool, proj [
 	}
 }
 
-// bagGridSelect: pick up / drop / swap (FState.pas:4557-4600).
+// bagGridSelect: 拿起/放下/交换 (FState.pas:4557-4600)。
 func (s *PlayScene) bagGridSelect(col, row int) {
 	idx := bagSlotIndex(col, row)
 	if idx < 0 {
@@ -196,7 +193,7 @@ func (s *PlayScene) bagGridSelect(col, row int) {
 	st := s.State
 
 	if !s.itemMove.Moving {
-		// Pick up the item in this cell.
+		// 拿起此格中的物品。
 		if item := st.BagItems[idx]; item != nil && !st.BeltHolds(item) {
 			s.itemMove.Begin(idx, item)
 			st.BagItems[idx] = nil
@@ -207,20 +204,20 @@ func (s *PlayScene) bagGridSelect(col, row int) {
 	mi := s.itemMove.Index
 	switch {
 	case mi >= -13 && mi < 0:
-		// Equipment → bag: server-side unequip (FState:4577-4582).
+		// 装备 → 背包: 服务端脱装备 (FState:4577-4582)。
 		if st.BagItems[idx] == nil && s.sendTakeOff != nil {
 			s.sendTakeOff(moveEquipSlot(mi))
 			s.itemMove.End()
 		}
 	case mi >= -29 && mi <= -20:
-		// Trade offer → bag: take the offer back (FState:4584-4585).
+		// 交易物品 → 背包: 取回交易品 (FState:4584-4585)。
 		if st.BagItems[idx] == nil && s.sendDealDel != nil {
 			s.sendDealDel(s.itemMove.Item.MakeIndex)
 			s.itemMove.End()
 		}
 	case mi >= 0:
-		// Bag → bag: client-local place/swap (server keeps the item list;
-		// layout is client-owned until the next server re-sync).
+		// 背包 → 背包: 客户端本地放置/交换 (服务端维护物品列表;
+		// 布局由客户端管理直到下次服务端同步)。
 		if mi < len(st.BagItems) {
 			target := st.BagItems[idx]
 			held := s.itemMove.Item
@@ -231,9 +228,9 @@ func (s *PlayScene) bagGridSelect(col, row int) {
 	}
 }
 
-// bagGridDblClick uses or equips the item (FState:4602-4641). The first
-// click of the double-click lifts the cell's item, so the held branch
-// (:4622-4637) is the normal case when the double-click lands.
+// bagGridDblClick 使用或装备物品 (FState:4602-4641)。双击的第一次
+// 点击会拿起格子物品, 因此双击触发时走的是手持分支
+// (:4622-4637)。
 func (s *PlayScene) bagGridDblClick(col, row int) {
 	idx := bagSlotIndex(col, row)
 	if idx < 0 {
@@ -247,8 +244,8 @@ func (s *PlayScene) bagGridDblClick(col, row int) {
 	}
 }
 
-// takeOnTargetSlot picks the equip slot for a held item: the primary slot,
-// or the free side for dual-slot items (rings/bracelets).
+// takeOnTargetSlot 为手持物品选择装备槽: 主槽位,
+// 或双槽物品的空余侧 (戒指/手镯)。
 func (s *PlayScene) takeOnTargetSlot(stdMode byte) int {
 	switch stdMode {
 	case 22, 23:
@@ -265,9 +262,9 @@ func (s *PlayScene) takeOnTargetSlot(stdMode byte) int {
 	return getTakeOnPosition(stdMode)
 }
 
-// useOrEquipHeld consumes the held item: consumables are used, equipment is
-// equipped (Delphi's held branch only eats, FState:4622-4637; auto-equip is
-// a Go extension).
+// useOrEquipHeld 消耗手持物品: 消耗品直接使用, 装备自动穿上
+// (Delphi 手持分支仅使用, FState:4622-4637; 自动装备是
+// Go 版扩展)。
 func (s *PlayScene) useOrEquipHeld() {
 	item := s.itemMove.Item
 	if item.Def == nil {
@@ -286,7 +283,7 @@ func (s *PlayScene) useOrEquipHeld() {
 		return
 	}
 	s.sendTakeOn(item.MakeIndex, slot)
-	// Optimistic visual: server re-sync confirms.
+	// 乐观更新: 等待服务端同步确认。
 	it := item
 	s.State.UseItems[slot] = &protocol.UserItem{
 		MakeIndex: it.MakeIndex,
@@ -297,8 +294,8 @@ func (s *PlayScene) useOrEquipHeld() {
 	s.itemMove.End()
 }
 
-// bagGridHover shows the item tooltip below the cell (FState:4527-4555) and
-// feeds the in-window info area.
+// bagGridHover 在格子下方显示物品提示 (FState:4527-4555) 并
+// 更新窗口内信息区域。
 func (s *PlayScene) bagGridHover(col, row int) {
 	idx := bagSlotIndex(col, row)
 	if idx < 0 || s.hudBag == nil {
@@ -315,8 +312,8 @@ func (s *PlayScene) bagGridHover(col, row int) {
 	if !useable {
 		color = [4]float32{1, 0.3, 0.3, 1}
 	}
-	// Anchor at the cell's bottom-left, expanding downward (Delphi
-	// ShowHint drawUp=FALSE, FState:4548-4550).
+	// 锚定在格子左下角, 向下展开 (Delphi
+	// ShowHint drawUp=FALSE, FState:4548-4550)。
 	ax := s.hudBag.AbsX() + 33 + col*36
 	ay := s.hudBag.AbsY() + 43 + (row+1)*32
 	s.tooltip.Show(ax, ay, text, color, false)

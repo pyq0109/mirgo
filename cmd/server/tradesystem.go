@@ -21,11 +21,11 @@ type DealState struct {
 	Partner   *PlayObject
 	Items     []*protocol.UserItem
 	Gold      int
-	Confirmed bool // locked after CMDealEnd until the trade resolves
+	Confirmed bool // CMDealEnd 后锁定，直到交易完成
 }
 
-// encodeDealItem serializes a traded item for the client (matches the bag
-// item layout consumed by the client's deal grids).
+// encodeDealItem 将交易物品序列化为客户端格式（与客户端交易栏
+// 使用的背包物品布局一致）。
 func encodeDealItem(item *protocol.UserItem) string {
 	buf := make([]byte, 10)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(item.MakeIndex))
@@ -39,9 +39,8 @@ func (p *PlayObject) HandleDealTry(msg SendMessage, server *netserver.TCPServer)
 	if p.Deal != nil || p.envir == nil {
 		return
 	}
-	// Target: named player in range, or the closest adjacent player when no
-	// name is given (Delphi's front-actor selection is commented out too;
-	// adjacent is the usable default).
+	// 目标：范围内的指定玩家，未指定名字时取最近的相邻玩家
+	//（Delphi 的正前方角色选择也被注释掉了；相邻是可用默认值）。
 	var target *PlayObject
 	targetName := msg.Msg
 	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
@@ -74,14 +73,14 @@ func (p *PlayObject) HandleDealTry(msg SendMessage, server *netserver.TCPServer)
 	menuMsg := protocol.MakeDefaultMsg(protocol.SMDealMenu, 0, 0, 0, 0)
 	server.Send(p.Session.ID, menuMsg, protocol.EncodeString(target.Name))
 	server.Send(target.Session.ID, menuMsg, protocol.EncodeString(p.Name))
-	log.Logf(log.LevelInfo, "Trade", "%s initiated trade with %s", p.Name, target.Name)
+	log.Logf(log.LevelInfo, "Trade", "%s 向 %s 发起交易", p.Name, target.Name)
 }
 
 func (p *PlayObject) HandleDealAddItem(msg SendMessage, server *netserver.TCPServer) {
 	if p.Deal == nil || p.Deal.Partner == nil || p.Deal.Confirmed {
 		return
 	}
-	// Param1 = MakeIndex (routed from Recog).
+	// Param1 = MakeIndex（由 Recog 路由）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		resp := protocol.MakeDefaultMsg(protocol.SMDealAddItemFail, 0, 0, 0, 0)
@@ -94,18 +93,18 @@ func (p *PlayObject) HandleDealAddItem(msg SendMessage, server *netserver.TCPSer
 	item := p.ItemList[bagIdx]
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 	p.Deal.Items = append(p.Deal.Items, item)
-	// Own client: confirmation carries the item so it lands in the grid;
-	// bag re-synced separately.
+	// 本方客户端：确认消息携带物品信息以便放入交易栏；
+	// 背包另行同步。
 	resp := protocol.MakeDefaultMsg(protocol.SMDealAddItemOK, int32(len(p.Deal.Items)-1), 0, 0, 0)
 	server.Send(p.Session.ID, resp, encodeDealItem(item))
 	p.SendBagItemsFull(server)
-	// Partner sees the offered item.
+	// 对方看到放入的物品。
 	remoteResp := protocol.MakeDefaultMsg(protocol.SMDealRemoteAddItem, int32(len(p.Deal.Items)-1), 0, 0, 0)
 	server.Send(p.Deal.Partner.Session.ID, remoteResp, encodeDealItem(item))
 }
 
-// HandleDealDelItem takes an offered item back into the bag
-// (Delphi SendDelDealItem / DealItemReturnBag, FState:5713-5720).
+// HandleDealDelItem 将已放入的物品从交易栏取回背包
+//（Delphi SendDelDealItem / DealItemReturnBag，FState:5713-5720）。
 func (p *PlayObject) HandleDealDelItem(msg SendMessage, server *netserver.TCPServer) {
 	if p.Deal == nil || p.Deal.Confirmed {
 		return
@@ -150,7 +149,7 @@ func (p *PlayObject) HandleDealChgGold(msg SendMessage, server *netserver.TCPSer
 	}
 	p.Gold = p.Gold + p.Deal.Gold - gold
 	p.Deal.Gold = gold
-	// Recog = deal gold, Param = remaining wallet gold.
+	// Recog = 交易金币，Param = 剩余钱包金币。
 	resp := protocol.MakeDefaultMsg(protocol.SMDealChgGoldOK, int32(gold), uint16(p.Gold), 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	remoteResp := protocol.MakeDefaultMsg(protocol.SMDealRemoteChgGold, int32(gold), 0, 0, 0)
@@ -178,14 +177,14 @@ func (p *PlayObject) HandleDealEnd(server *netserver.TCPServer) {
 	succMsg := protocol.MakeDefaultMsg(protocol.SMDealSuccess, 0, 0, 0, 0)
 	server.Send(p.Session.ID, succMsg, "")
 	server.Send(partner.Session.ID, succMsg, "")
-	// Refresh both inventories and gold.
+	// 刷新双方背包和金币。
 	p.SendBagItemsFull(server)
 	partner.SendBagItemsFull(server)
 	goldMsg := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldMsg, "")
 	partnerGold := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(partner.Gold), 0, 0, 0)
 	server.Send(partner.Session.ID, partnerGold, "")
-	log.Logf(log.LevelInfo, "Trade", "%s and %s completed trade", p.Name, partner.Name)
+	log.Logf(log.LevelInfo, "Trade", "%s 和 %s 完成交易", p.Name, partner.Name)
 	p.Deal = nil
 	partner.Deal = nil
 }

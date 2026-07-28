@@ -434,8 +434,8 @@ func (a *Actor) calcMonsterFrame() {
 	a.FrameTime = action.FTime
 	a.LastFrameTick = 0
 
-	// SM_DEATH shows the corpse directly (last die frame); only SM_NOWDEATH
-	// plays the full death animation (Delphi Actor.pas:1415-1429).
+	// SM_DEATH 直接显示尸体（死亡动画最后一帧）；只有 SM_NOWDEATH
+	// 才播放完整死亡动画（Delphi Actor.pas:1415-1429）。
 	if a.CurrentAction == protocol.SMDeath {
 		a.CurrentFrame = a.EndFrame
 	}
@@ -457,12 +457,12 @@ func (a *Actor) Move(now int64) bool {
 		return false
 	}
 
-	// Delphi advances exactly one frame per 100ms movetick with no FrameTime
-	// gate here (Actor.pas:2683); template FTime only drives non-move actions.
+	// Delphi 每 100ms movetick 精确推进一帧，此处无 FrameTime 门控
+	// （Actor.pas:2683）；模板 FTime 只驱动非移动动作。
 	if a.CurrentAction == protocol.SMBackStep {
 		if a.CurrentFrame > a.StartFrame {
 			a.CurrentFrame--
-			// fastmove: backstep retreats 2 frames per tick (Actor.pas:2733-2734)
+			// fastmove：backstep 每 tick 后退 2 帧（Actor.pas:2733-2734）
 			if a.CurrentFrame > a.StartFrame {
 				a.CurrentFrame--
 			}
@@ -478,7 +478,7 @@ func (a *Actor) Move(now int64) bool {
 	} else {
 		if a.CurrentFrame < a.EndFrame {
 			a.CurrentFrame++
-			// Message backlog speed-up, but never for Rush/RushKung (normmove, Actor.pas:2684)
+			// 消息积压加速，但 Rush/RushKung 除外（normmove, Actor.pas:2684）
 			if a.MsgMuch && a.CurrentAction != protocol.SMRush && a.CurrentAction != protocol.SMRushKung && a.CurrentFrame < a.EndFrame {
 				a.CurrentFrame++
 			}
@@ -631,8 +631,8 @@ func (a *Actor) Shift(dir, step, cur, max int) {
 	fCur := float64(cur)
 	fMax := float64(max)
 
-	// Per-direction rounding offset v (Delphi Actor.pas:1773-1865): for max>=6
-	// the diagonals use ±2 and down uses -1 to shift the mid-step tile flip.
+	// 每方向的取整偏移 v（Delphi Actor.pas:1773-1865）：max>=6 时
+	// 对角线用 ±2、向下用 -1，使中间步的格子切换点偏移。
 	v := 0
 	if fMax >= 6 {
 		switch dir {
@@ -663,8 +663,8 @@ func (a *Actor) Shift(dir, step, cur, max int) {
 	}
 }
 
-// roundEven implements Delphi's banker's rounding: exact .5 rounds to the
-// nearest even integer (Round(0.5)=0, Round(1.5)=2, Round(2.5)=2).
+// roundEven 实现 Delphi 的银行家舍入：恰好 .5 时舍入到最近的偶数
+// （Round(0.5)=0, Round(1.5)=2, Round(2.5)=2）。
 func roundEven(x float64) int {
 	f := math.Floor(x)
 	diff := x - f

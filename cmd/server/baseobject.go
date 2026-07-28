@@ -29,54 +29,54 @@ const (
 
 const viewRange = 12
 
-// BaseObject is the base for all game objects on the server.
+// BaseObject 是服务端所有游戏对象的基类。
 type BaseObject struct {
-	// Identity
+	// 标识
 	Name string
 	ID   int32
 
-	// Position
+	// 位置
 	MapName string
 	CurrX   int
 	CurrY   int
 	Dir     int
 
-	// Appearance
+	// 外观
 	Gender    byte
 	Hair      byte
 	Job       byte
 	DressLook byte
 	WeaponLook byte
 
-	// Stats
+	// 属性
 	Abil  protocol.Ability
 	WAbil protocol.Ability
 
-	// Combat
+	// 战斗
 	HitPoint   int
 	SpeedPoint int
 	HitSpeed   int
 	Luck       int
 	Gold       int
 
-	// State
+	// 状态
 	StatusTimeArr [12]int16
 	Death         bool
 	Ghost         bool
 	Hidden        bool
 
-	// Inventory
+	// 背包
 	UseItems [13]*protocol.UserItem
 	ItemList []*protocol.UserItem
 
-	// Magic
+	// 魔法
 	MagicList []*protocol.UserMagic
 
-	// Messages (thread-safe queue)
+	// 消息队列（线程安全）
 	msgList []SendMessage
 	msgMu   sync.Mutex
 
-	// Map reference
+	// 地图引用
 	envir *Environment
 }
 
@@ -90,7 +90,7 @@ type SendMessage struct {
 	Msg      string
 }
 
-// NewBaseObject creates a new base object.
+// NewBaseObject 创建一个新的基础对象。
 func NewBaseObject(name string, id int32) *BaseObject {
 	return &BaseObject{
 		Name: name,
@@ -98,7 +98,7 @@ func NewBaseObject(name string, id int32) *BaseObject {
 	}
 }
 
-// SendMsg adds a message to the object's message queue.
+// SendMsg 向对象的消息队列添加一条消息。
 func (o *BaseObject) SendMsg(ident, param1, param2, param3 int, msg string) {
 	o.msgMu.Lock()
 	o.msgList = append(o.msgList, SendMessage{
@@ -111,7 +111,7 @@ func (o *BaseObject) SendMsg(ident, param1, param2, param3 int, msg string) {
 	o.msgMu.Unlock()
 }
 
-// GetMsg retrieves and removes the next message from the queue.
+// GetMsg 从队列中取出并移除下一条消息。
 func (o *BaseObject) GetMsg() (SendMessage, bool) {
 	o.msgMu.Lock()
 	defer o.msgMu.Unlock()
@@ -125,7 +125,7 @@ func (o *BaseObject) GetMsg() (SendMessage, bool) {
 	return msg, true
 }
 
-// Feature returns the appearance feature integer.
+// Feature 返回外观特征值。
 func (o *BaseObject) Feature() int32 {
 	dress := o.DressLook
 	weapon := o.WeaponLook
@@ -157,7 +157,7 @@ func (o *BaseObject) SendRefMsg(ident, param1, param2, param3 int, msg string) {
 	}
 }
 
-// WalkTo moves the object in the given direction.
+// WalkTo 将对象向指定方向移动。
 func (o *BaseObject) WalkTo(dir int) bool {
 	if o.envir == nil {
 		return false
@@ -171,43 +171,43 @@ func (o *BaseObject) WalkTo(dir int) bool {
 		return false
 	}
 
-	// Remove from old position
+	// 从旧位置移除
 	o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
 
-	// Update position
+	// 更新位置
 	o.CurrX = newX
 	o.CurrY = newY
 	o.Dir = dir
 
-	// Add to new position
+	// 添加到新位置
 	o.envir.AddObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
 
 	return true
 }
 
-// TurnTo changes the object's direction.
+// TurnTo 改变对象的朝向。
 func (o *BaseObject) TurnTo(dir int) {
 	o.Dir = dir
 }
 
-// dirToOffset converts a direction to dx, dy offsets.
+// dirToOffset 将方向转换为 dx、dy 偏移量。
 func dirToOffset(dir int) (dx, dy int) {
 	switch dir {
-	case 0: // Up
+	case 0: // 上
 		return 0, -1
-	case 1: // Up-Right
+	case 1: // 右上
 		return 1, -1
-	case 2: // Right
+	case 2: // 右
 		return 1, 0
-	case 3: // Down-Right
+	case 3: // 右下
 		return 1, 1
-	case 4: // Down
+	case 4: // 下
 		return 0, 1
-	case 5: // Down-Left
+	case 5: // 左下
 		return -1, 1
-	case 6: // Left
+	case 6: // 左
 		return -1, 0
-	case 7: // Up-Left
+	case 7: // 左上
 		return -1, -1
 	}
 	return 0, 0

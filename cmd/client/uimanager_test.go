@@ -1,9 +1,8 @@
 package main
 
-// Framework dispatch semantics tests (no GL required — Paint is not covered
-// here). Verifies the DWinCtl port: button click-on-up-inside, grid
-// down==up selection, window drag with clamp, modal short-circuit,
-// background click + focus release, keyboard focus routing.
+// 框架分发语义测试（无需 GL——不覆盖 Paint）。
+// 验证 DWinCtl 移植：按钮抬起且在内部才触发点击、网格按下==抬起选中、
+// 窗口拖拽带边界限制、模态窗口拦截、背景点击+焦点释放、键盘焦点路由。
 
 import "testing"
 
@@ -20,7 +19,7 @@ func TestButtonClickOnUpInside(t *testing.T) {
 	btn.Visible = true
 	m.Root.AddChild(btn)
 
-	// Press inside, release inside → one click.
+	// 内部按下，内部抬起 → 一次点击。
 	if !m.RouteMouseDown(110, 110, 0) {
 		t.Fatal("mouse down inside button should be consumed")
 	}
@@ -40,7 +39,7 @@ func TestButtonClickOnUpInside(t *testing.T) {
 		t.Fatal("button should reset Downed after release")
 	}
 
-	// Press inside, drag out, release outside → no click.
+	// 内部按下，拖出范围，外部抬起 → 不触发点击。
 	m.RouteMouseDown(110, 110, 0)
 	m.RouteMouseMove(300, 300)
 	if btn.Downed {
@@ -67,18 +66,18 @@ func TestGridSelectDownEqualsUp(t *testing.T) {
 	grid.Visible = true
 	m.Root.AddChild(grid)
 
-	// Cell (2,1): x = 33 + 2*36 + 5 = 110, y = 43 + 1*32 + 5 = 80.
+	// 格子 (2,1): x = 33 + 2*36 + 5 = 110, y = 43 + 1*32 + 5 = 80。
 	m.RouteMouseDown(110, 80, 0)
 	if m.Capture != grid {
 		t.Fatal("grid should own capture after cell press")
 	}
-	// Release on the same cell → select.
+	// 同一格子抬起 → 选中。
 	m.RouteMouseUp(115, 85, 0)
 	if selects != 1 || selCol != 2 || selRow != 1 {
 		t.Fatalf("expected select (2,1) once, got %d selects col=%d row=%d", selects, selCol, selRow)
 	}
 
-	// Press cell (0,0), release on cell (3,2) → no select.
+	// 按下格子 (0,0)，抬起格子 (3,2) → 不选中。
 	m.RouteMouseDown(40, 50, 0)
 	m.RouteMouseUp(33+3*36+5, 43+2*32+5, 0)
 	if selects != 1 {
@@ -94,19 +93,19 @@ func TestWindowDragAndClamp(t *testing.T) {
 	win.Visible = true
 	m.Root.AddChild(win)
 
-	// Press on the window body → grab spot recorded.
+	// 按下窗口主体 → 记录抓取点。
 	if !m.RouteMouseDown(210, 110, 0) {
 		t.Fatal("window should consume press")
 	}
 	if win.SpotX != 210 || win.SpotY != 110 {
 		t.Fatalf("grab spot not recorded: %d,%d", win.SpotX, win.SpotY)
 	}
-	// Drag by +50,+30 → moves.
+	// 拖拽 +50,+30 → 窗口移动。
 	m.RouteMouseMove(260, 140)
 	if win.Left != 250 || win.Top != 130 {
 		t.Fatalf("window did not follow drag: %d,%d", win.Left, win.Top)
 	}
-	// Drag far beyond the right clamp (WinRight=740).
+	// 拖到远超右边界限制处（WinRight=740）。
 	m.RouteMouseMove(2000, 140)
 	if win.Left > WinRight {
 		t.Fatalf("window Left %d exceeds WinRight %d", win.Left, WinRight)
@@ -128,7 +127,7 @@ func TestModalShortCircuit(t *testing.T) {
 	modal.OnMouseDown = func(c *UIControl, button, x, y int) { modalDown++ }
 	m.ShowModal(modal)
 
-	// Click where "behind" sits — modal must eat it.
+	// 点击 "behind" 所在位置——模态窗口必须拦截。
 	if !m.RouteMouseDown(110, 110, 0) {
 		t.Fatal("modal should consume all mouse input")
 	}
@@ -152,13 +151,13 @@ func TestBackgroundClickAndFocusRelease(t *testing.T) {
 	btn.Visible = true
 	m.Root.AddChild(btn)
 
-	// Click the button → focused.
+	// 点击按钮 → 获得焦点。
 	m.RouteMouseDown(15, 15, 0)
 	m.RouteMouseUp(15, 15, 0)
 	if m.Focused != btn {
 		t.Fatal("pressing EnableFocus button should focus it")
 	}
-	// Click empty space → background click fires and focus clears.
+	// 点击空白区域 → 触发背景点击并清除焦点。
 	m.RouteMouseDown(500, 500, 0)
 	if bgClicks != 1 {
 		t.Fatalf("expected 1 background click, got %d", bgClicks)
@@ -166,7 +165,7 @@ func TestBackgroundClickAndFocusRelease(t *testing.T) {
 	if m.Focused != nil {
 		t.Fatal("background click should release focus")
 	}
-	// WantReturn=true → background click consumes the event.
+	// WantReturn=true → 背景点击消费事件。
 	m.Root.OnBackgroundClick = func(c *UIControl) { c.WantReturn = true }
 	if !m.RouteMouseDown(500, 500, 0) {
 		t.Fatal("background click with WantReturn should be consumed")
@@ -182,11 +181,11 @@ func TestKeyboardFocusRouting(t *testing.T) {
 	btn.Visible = true
 	m.Root.AddChild(btn)
 
-	// No focus → char not delivered.
+	// 无焦点 → 字符不投递。
 	if m.RouteChar('a') {
 		t.Fatal("char should not route without focus")
 	}
-	// Focus the button (via click) → chars delivered.
+	// 通过点击使按钮获得焦点 → 字符投递成功。
 	m.RouteMouseDown(15, 15, 0)
 	m.RouteMouseUp(15, 15, 0)
 	if !m.RouteChar('a') || !m.RouteChar('b') {
@@ -213,19 +212,19 @@ func TestRaiseToTopChangesHitOrder(t *testing.T) {
 	m.Root.AddChild(w1)
 	m.Root.AddChild(w2)
 
-	// Overlap area (160,160): w2 added last → on top → hit first.
+	// 重叠区域 (160,160): w2 后添加 → 在最上层 → 先命中。
 	m.RouteMouseDown(160, 160, 0)
 	if who != "w2" {
 		t.Fatalf("expected w2 on top, got %q", who)
 	}
-	// Click w1 outside overlap → raises it above w2.
+	// 点击 w1 非重叠区域 → 提升到 w2 之上。
 	m.RouteMouseUp(160, 160, 0)
 	m.RouteMouseDown(110, 110, 0)
 	m.RouteMouseUp(110, 110, 0)
 	if who != "w1" {
 		t.Fatalf("expected w1 hit, got %q", who)
 	}
-	// Now the overlap should hit w1 (raised).
+	// 此时重叠区域应命中 w1（已提升）。
 	m.RouteMouseDown(160, 160, 0)
 	if who != "w1" {
 		t.Fatalf("expected w1 raised on top, got %q", who)

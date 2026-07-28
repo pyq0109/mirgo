@@ -7,8 +7,8 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// atoiClamped parses a gold-amount input (Delphi GetValidStrVal+Str_ToInt,
-// FState.pas:1878-1879), clamped to [lo, hi].
+// atoiClamped 解析金币数量输入（对应 Delphi GetValidStrVal+Str_ToInt,
+// FState.pas:1878-1879），结果限制在 [lo, hi] 范围内。
 func atoiClamped(s string, lo, hi int) int {
 	s = strings.ReplaceAll(s, " ", "")
 	v, err := strconv.Atoi(s)
@@ -24,8 +24,8 @@ func atoiClamped(s string, lo, hi int) int {
 	return v
 }
 
-// goldStr formats a gold amount with thousands separators (Delphi GetGoldStr,
-// ClFunc.pas:98-115).
+// goldStr 将金币数量格式化为千分位分隔（对应 Delphi GetGoldStr,
+// ClFunc.pas:98-115）。
 func goldStr(n int) string {
 	s := strconv.Itoa(n)
 	if n < 0 {
@@ -42,38 +42,38 @@ func goldStr(n int) string {
 	return out
 }
 
-// Item drag system — port of Delphi g_boItemMoving/g_MovingItem
-// (MShare.pas:365-368, FState.pas:613-621,1812-1886). The signed Index
-// encodes where the held item came from.
+// 物品拖拽系统——移植自 Delphi g_boItemMoving/g_MovingItem
+// （MShare.pas:365-368, FState.pas:613-621,1812-1886）。有符号 Index
+// 编码了手持物品的来源位置。
 const (
-	// Index >= 0: held from bag slot Index.
-	// Index -1..-13: held from equipment slot -(Index+1).
-	moveIdxDealGold = -97 // gold dragged from the trade dialog
-	moveIdxBagGold  = -98 // gold dragged from the bag gold button
-	moveIdxSellSpot = -99 // item placed on the sell/repair/storage spot
+	// Index >= 0: 从背包格 Index 拿起。
+	// Index -1..-13: 从装备格 -(Index+1) 拿起。
+	moveIdxDealGold = -97 // 从交易对话框拖出的金币
+	moveIdxBagGold  = -98 // 从背包金币按钮拖出的金币
+	moveIdxSellSpot = -99 // 放在售卖/修理/仓库格上的物品
 )
 
-// moveIdxDeal returns the moving-Index for a trade grid slot (−20..−29).
+// moveIdxDeal 返回交易格对应的移动索引（−20..−29）。
 func moveIdxDeal(slot int) int { return -slot - 20 }
 
-// moveDealSlot decodes a trade-grid moving-Index back to its slot.
+// moveDealSlot 将交易格移动索引解码回格号。
 func moveDealSlot(idx int) int { return -idx - 20 }
 
-// moveEquipSlot decodes an equipment moving-Index back to its slot.
+// moveEquipSlot 将装备移动索引解码回格号。
 func moveEquipSlot(idx int) int { return -(idx + 1) }
 
 type ItemMoveState struct {
 	Moving   bool
 	Index    int
 	Item     BagItem
-	FromBelt int // belt slot the item was lifted from, or -1
+	FromBelt int // 物品拿起的腰带格，无则 -1
 
-	// g_WaitingUseItem: equip pending server confirmation (FState.pas:3366).
+	// g_WaitingUseItem: 等待服务端确认的穿戴操作（FState.pas:3366）。
 	WaitUse  BagItem
 	WaitSlot int
 }
 
-// Begin picks the item up (clearing it from the origin is the caller's job).
+// Begin 拿起物品（从原位移除由调用方负责）。
 func (m *ItemMoveState) Begin(index int, item *BagItem) {
 	if item == nil {
 		return
@@ -91,19 +91,19 @@ func (m *ItemMoveState) End() {
 	m.FromBelt = -1
 }
 
-// Cancel restores the held item to its origin (FState.pas:1812-1839).
-// Visual only — the server stays authoritative for bag contents.
+// Cancel 将手持物品放回原处（FState.pas:1812-1839）。
+// 仅视觉恢复——背包内容仍以服务端为准。
 func (m *ItemMoveState) Cancel(gs *GameState) {
 	if !m.Moving {
 		return
 	}
 	switch {
-	case m.Index >= 0: // bag slot
+	case m.Index >= 0: // 背包格
 		if m.Index < len(gs.BagItems) && gs.BagItems[m.Index] == nil {
 			it := m.Item
 			gs.BagItems[m.Index] = &it
 		}
-	case m.Index >= -13: // equipment slot
+	case m.Index >= -13: // 装备格
 		slot := moveEquipSlot(m.Index)
 		if slot >= 0 && slot < 13 && gs.UseItems[slot] == nil {
 			gs.UseItems[slot] = &protocol.UserItem{
@@ -118,7 +118,7 @@ func (m *ItemMoveState) Cancel(gs *GameState) {
 		it := m.Item
 		gs.BeltItems[m.FromBelt] = &it
 	}
-	// Trade grid origin: return to the same offer slot.
+	// 交易格来源：放回原交易格。
 	if m.Index >= -29 && m.Index <= -20 {
 		slot := moveDealSlot(m.Index)
 		if slot >= 0 && slot < len(gs.DealItems) && gs.DealItems[slot] == nil {
@@ -129,9 +129,9 @@ func (m *ItemMoveState) Cancel(gs *GameState) {
 	m.End()
 }
 
-// getTakeOnPosition maps an item StdMode to its primary equipment slot
-// (ClFunc.pas:618-634). Dual-slot items (rings/bracelets) return the left
-// slot; equipSlotClick picks left vs right via takeOnSlotMatches.
+// getTakeOnPosition 将物品 StdMode 映射到主装备格（ClFunc.pas:618-634）。
+// 双格物品（戒指/手镯）返回左格；equipSlotClick 通过 takeOnSlotMatches
+// 决定穿左还是右。
 func getTakeOnPosition(stdMode byte) int {
 	switch stdMode {
 	case 5, 6:
@@ -160,8 +160,8 @@ func getTakeOnPosition(stdMode byte) int {
 	return -1
 }
 
-// takeOnSlotMatches reports whether slot is a valid equip target for
-// stdMode, accepting either side for dual-slot items (FState:3300-3318).
+// takeOnSlotMatches 判断 slot 是否为 stdMode 的合法穿戴目标，
+// 双格物品左右均可（FState:3300-3318）。
 func takeOnSlotMatches(stdMode byte, slot int) bool {
 	switch stdMode {
 	case 22, 23:

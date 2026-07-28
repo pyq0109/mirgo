@@ -1,10 +1,10 @@
 package protocol
 
 // ============================================================================
-// Constants
+// 常量
 // ============================================================================
 
-// Direction constants
+// 方向常量
 const (
 	DRUp        = 0
 	DRUpRight   = 1
@@ -16,57 +16,57 @@ const (
 	DRUpLeft    = 7
 )
 
-// Grid constants
+// 网格常量
 const (
-	UnitX           = 48 // Tile width in pixels
-	UnitY           = 32 // Tile height in pixels
-	LogicalMapUnit  = 40 // Logical map unit size
-	HalfX           = 24 // Half tile width
-	HalfY           = 16 // Half tile height
-	MapNameLen      = 16 // Maximum map name length
-	ActorNameLen    = 14 // Maximum actor name length
+	UnitX           = 48 // 地砖宽度（像素）
+	UnitY           = 32 // 地砖高度（像素）
+	LogicalMapUnit  = 40 // 逻辑地图单位大小
+	HalfX           = 24 // 地砖半宽
+	HalfY           = 16 // 地砖半高
+	MapNameLen      = 16 // 地图名最大长度
+	ActorNameLen    = 14 // 角色名最大长度
 )
 
-// Equipment slot constants (1.50 version - 10 slots)
+// 装备槽常量（1.50 版本 - 10 个槽）
 const (
-	UDress     = 0 // Clothes
-	UWeapon    = 1 // Weapon
-	URightHand = 2 // Shield/Right hand
-	UNecklace  = 3 // Necklace
-	UHelmet    = 4 // Helmet
-	UArmRingL  = 5 // Left bracelet
-	UArmRingR  = 6 // Right bracelet
-	URingL     = 7 // Left ring
-	URingR     = 8 // Right ring
-	UBujuk     = 9 // Amulet slot
+	UDress     = 0 // 衣服
+	UWeapon    = 1 // 武器
+	URightHand = 2 // 盾牌/右手
+	UNecklace  = 3 // 项链
+	UHelmet    = 4 // 头盔
+	UArmRingL  = 5 // 左手镯
+	UArmRingR  = 6 // 右手镯
+	URingL     = 7 // 左戒指
+	URingR     = 8 // 右戒指
+	UBujuk     = 9 // 护符槽
 )
 
-// Equipment slot constants (1.70 version - 13 slots)
+// 装备槽常量（1.70 版本 - 13 个槽）
 const (
-	UBelt  = 10 // Belt
-	UBoots = 11 // Boots
-	UCharm = 12 // Charm/Stone
+	UBelt  = 10 // 腰带
+	UBoots = 11 // 靴子
+	UCharm = 12 // 宝石/石头
 )
 
-// Item type constants
+// 物品类型常量
 const (
-	ItemWeapon   = 0  // Weapons
-	ItemArmor    = 1  // Armor
-	ItemAccessory = 2 // Accessories
-	ItemEtc      = 3  // Miscellaneous
-	ItemGold     = 10 // Gold coins
+	ItemWeapon   = 0  // 武器
+	ItemArmor    = 1  // 防具
+	ItemAccessory = 2 // 饰品
+	ItemEtc      = 3  // 杂物
+	ItemGold     = 10 // 金币
 )
 
-// Poison type constants
+// 毒药类型常量
 const (
-	PoisonDecHealth   = 0  // Fixed poison damage
-	PoisonDamageArmor = 1  // Armor damage poison
-	PoisonLockSpell   = 2  // Spell lock
-	PoisonDontMove    = 4  // Movement lock
-	PoisonStone       = 5  // Stone/petrify
+	PoisonDecHealth   = 0  // 固定毒伤
+	PoisonDamageArmor = 1  // 破甲毒
+	PoisonLockSpell   = 2  // 锁魔法
+	PoisonDontMove    = 4  // 锁移动
+	PoisonStone       = 5  // 石化
 )
 
-// State constants
+// 状态常量
 const (
 	StateTransparent     = 8
 	StateDefenceUp       = 9
@@ -74,13 +74,13 @@ const (
 	StateBubbleDefenceUp = 11
 )
 
-// State flag constants
+// 状态标志常量
 const (
 	StateStoneMode  = 0x00000001
 	StateOpenHealth = 0x00000002
 )
 
-// Event type constants
+// 事件类型常量
 const (
 	ETDigOutZombi = 1
 	ETMine        = 2
@@ -90,7 +90,7 @@ const (
 	ETSculPiece   = 6
 )
 
-// Race type constants
+// 种族类型常量
 const (
 	RCPlayObject   = 0
 	RCNpc          = 10
@@ -101,19 +101,19 @@ const (
 	RCArcherGuard  = 112
 )
 
-// Attack mode constants
+// 攻击模式常量
 const (
-	HAMAll      = 0 // Attack all
-	HAMPeace    = 1 // Peace mode
-	HAMGroup    = 2 // Group mode
-	HAMGuild    = 3 // Guild mode
-	HAMPKAttack = 4 // PK attack mode
+	HAMAll      = 0 // 全体攻击
+	HAMPeace    = 1 // 和平模式
+	HAMGroup    = 2 // 组队模式
+	HAMGuild    = 3 // 行会模式
+	HAMPKAttack = 4 // PK 攻击模式
 )
 
-// Maximum constants
+// 最大值常量
 const (
-	MaxBagItem         = 46 // Maximum bag items
-	HowManyMagics      = 20 // Maximum learned spells
+	MaxBagItem         = 46 // 背包最大物品数
+	HowManyMagics      = 20 // 最大已学魔法数
 	UserItemMax        = 46
 	MaxSkillLevel      = 3
 	MaxStatusAttribute = 12
@@ -122,40 +122,40 @@ const (
 	GroupMax           = 11
 )
 
-// Version constants
+// 版本常量
 const (
 	VersionNumber      = 20020522
 	ClientVersionNumber = 120040918
 )
 
 // ============================================================================
-// Data Structures
+// 数据结构
 // ============================================================================
 
-// StdItem is the item definition structure.
-// Size: 60 bytes (packed)
+// StdItem 是物品定义结构。
+// 大小：60 字节（紧凑排列）
 type StdItem struct {
-	Name         [20]byte // Item name (null-terminated)
-	StdMode      byte     // Item type/category
-	Shape        byte     // Shape/subtype
-	Weight       byte     // Weight
-	AniCount     byte     // Animation frame count (0=static)
-	Source       int8     // Source/holy value
-	Reserved     byte     // Reserved
-	NeedIdentify byte     // Needs identification
-	Looks        uint16   // Appearance (WIL image index)
-	DuraMax      uint32   // Max durability
-	AC           uint32   // Physical defense (Lo=base, Hi=max)
-	MAC          uint32   // Magic defense
-	DC           uint32   // Physical attack
-	MC           uint32   // Magic attack
-	SC           uint32   // Soul/Taoist attack
-	Need         uint32   // Requirement type (0=level, 1=DC, 2=MC, 3=SC)
-	NeedLevel    uint32   // Requirement value
-	Price        uint32   // Price
+	Name         [20]byte // 物品名（以 null 结尾）
+	StdMode      byte     // 物品类型/分类
+	Shape        byte     // 外形/子类型
+	Weight       byte     // 重量
+	AniCount     byte     // 动画帧数（0=静态）
+	Source       int8     // 来源/神圣值
+	Reserved     byte     // 保留
+	NeedIdentify byte     // 需要鉴定
+	Looks        uint16   // 外观（WIL 图像索引）
+	DuraMax      uint32   // 最大耐久
+	AC           uint32   // 物理防御（Lo=基础，Hi=最大）
+	MAC          uint32   // 魔法防御
+	DC           uint32   // 物理攻击
+	MC           uint32   // 魔法攻击
+	SC           uint32   // 灵魂/道术攻击
+	Need         uint32   // 需求类型（0=等级，1=DC，2=MC，3=SC）
+	NeedLevel    uint32   // 需求值
+	Price        uint32   // 价格
 }
 
-// GetName returns the item name as a string.
+// GetName 以字符串形式返回物品名。
 func (s *StdItem) GetName() string {
 	for i, b := range s.Name {
 		if b == 0 {
@@ -165,48 +165,48 @@ func (s *StdItem) GetName() string {
 	return string(s.Name[:])
 }
 
-// UserItem is an item instance carried by a player.
-// Size: 24 bytes
+// UserItem 是玩家携带的物品实例。
+// 大小：24 字节
 type UserItem struct {
-	MakeIndex int32      // Unique instance ID
-	WIndex    uint16     // Item definition index (1-based into StdItemList)
-	Dura      uint16     // Current durability
-	DuraMax   uint16     // Max durability
-	BtValue   [14]byte   // Custom values (upgrade stats, etc.)
+	MakeIndex int32      // 唯一实例 ID
+	WIndex    uint16     // 物品定义索引（从 1 开始，指向 StdItemList）
+	Dura      uint16     // 当前耐久
+	DuraMax   uint16     // 最大耐久
+	BtValue   [14]byte   // 自定义数值（升级属性等）
 }
 
-// ClientItem is a client-side item with full definition.
+// ClientItem 是带完整定义的客户端物品。
 type ClientItem struct {
-	S         StdItem  // Item definition
-	MakeIndex int32    // Unique instance ID
-	Dura      uint16   // Current durability
-	DuraMax   uint16   // Max durability
+	S         StdItem  // 物品定义
+	MakeIndex int32    // 唯一实例 ID
+	Dura      uint16   // 当前耐久
+	DuraMax   uint16   // 最大耐久
 }
 
-// Ability represents character abilities.
-// Size: 50 bytes (packed) — matches Delphi TAbility (Grobal2.pas:734)
+// Ability 表示角色能力。
+// 大小：50 字节（紧凑排列）—— 对应 Delphi TAbility（Grobal2.pas:734）
 type Ability struct {
-	Level         uint16 // Character level
-	AC            uint32 // Physical defense
-	MAC           uint32 // Magic defense
-	DC            uint32 // Physical attack
-	MC            uint32 // Magic attack
-	SC            uint32 // Soul/Taoist attack
-	HP            uint16 // Current HP
-	MP            uint16 // Current MP
-	MaxHP         uint16 // Max HP
-	MaxMP         uint16 // Max MP
-	Exp           uint32 // Current experience
-	MaxExp        uint32 // Experience to next level
-	Weight        uint16 // Current weight
-	MaxWeight     uint16 // Max weight
-	WearWeight    uint16 // Current wear weight
-	MaxWearWeight uint16 // Max wear weight
-	HandWeight    uint16 // Current hand weight
-	MaxHandWeight uint16 // Max hand weight
+	Level         uint16 // 角色等级
+	AC            uint32 // 物理防御
+	MAC           uint32 // 魔法防御
+	DC            uint32 // 物理攻击
+	MC            uint32 // 魔法攻击
+	SC            uint32 // 灵魂/道术攻击
+	HP            uint16 // 当前 HP
+	MP            uint16 // 当前 MP
+	MaxHP         uint16 // 最大 HP
+	MaxMP         uint16 // 最大 MP
+	Exp           uint32 // 当前经验
+	MaxExp        uint32 // 升级所需经验
+	Weight        uint16 // 当前重量
+	MaxWeight     uint16 // 最大重量
+	WearWeight    uint16 // 当前穿戴重量
+	MaxWearWeight uint16 // 最大穿戴重量
+	HandWeight    uint16 // 当前手持重量
+	MaxHandWeight uint16 // 最大手持重量
 }
 
-// NakedAbility represents bonus attributes.
+// NakedAbility 表示加成属性。
 type NakedAbility struct {
 	DC    uint16
 	MC    uint16
@@ -220,7 +220,7 @@ type NakedAbility struct {
 	X2    uint8
 }
 
-// AddAbility represents additional equipment bonuses.
+// AddAbility 表示额外的装备加成。
 type AddAbility struct {
 	DC      uint16
 	MC      uint16
@@ -237,27 +237,27 @@ type AddAbility struct {
 	SpellRecover uint16
 }
 
-// Magic represents a spell definition.
+// Magic 表示魔法定义。
 type Magic struct {
-	WMagicID   uint16       // Skill ID
-	SMagicName [13]byte     // Skill name
-	BtEffectType byte       // Effect type
-	BtEffect   byte         // Effect ID
-	WSpell     uint16       // MP cost
-	WPower     uint16       // Base power
-	TrainLevel [4]byte      // Level requirements for training
-	MaxTrain   [4]uint32    // Max training points per level
-	BtTrainLv  byte         // Max train level
-	BtJob      byte         // Job requirement
-	DwDelayTime int32       // Delay time
-	BtDefSpell byte         // Default spell cost
-	BtDefPower byte         // Default power
-	WMaxPower  uint16       // Max power
-	BtDefMaxPower byte      // Default max power
-	SDescr     [16]byte     // Description
+	WMagicID   uint16       // 技能 ID
+	SMagicName [13]byte     // 技能名
+	BtEffectType byte       // 效果类型
+	BtEffect   byte         // 效果 ID
+	WSpell     uint16       // MP 消耗
+	WPower     uint16       // 基础威力
+	TrainLevel [4]byte      // 各等级修炼需求
+	MaxTrain   [4]uint32    // 各等级最大修炼值
+	BtTrainLv  byte         // 最大修炼等级
+	BtJob      byte         // 职业需求
+	DwDelayTime int32       // 延迟时间
+	BtDefSpell byte         // 默认魔法消耗
+	BtDefPower byte         // 默认威力
+	WMaxPower  uint16       // 最大威力
+	BtDefMaxPower byte      // 默认最大威力
+	SDescr     [16]byte     // 描述
 }
 
-// GetName returns the magic name as a string.
+// GetName 以字符串形式返回魔法名。
 func (m *Magic) GetName() string {
 	for i, b := range m.SMagicName {
 		if b == 0 {
@@ -267,16 +267,16 @@ func (m *Magic) GetName() string {
 	return string(m.SMagicName[:])
 }
 
-// UserMagic represents a player's learned spell.
+// UserMagic 表示玩家已学的魔法。
 type UserMagic struct {
-	MagicInfo  *Magic  // Reference to spell definition
-	Level      byte    // Current level (0-3)
-	MagIdx     uint16  // Magic index
-	TranPoint  uint32  // Training points
-	Key        byte    // Hotkey binding
+	MagicInfo  *Magic  // 指向魔法定义的引用
+	Level      byte    // 当前等级（0-3）
+	MagIdx     uint16  // 魔法索引
+	TranPoint  uint32  // 修炼值
+	Key        byte    // 快捷键绑定
 }
 
-// ChrMsg is a character message for the message queue.
+// ChrMsg 是消息队列中的角色消息。
 type ChrMsg struct {
 	Ident   int32
 	X       int32
@@ -288,7 +288,7 @@ type ChrMsg struct {
 	Sound   int32
 }
 
-// UserCharacterInfo represents a character in the selection screen.
+// UserCharacterInfo 表示选角界面中的角色。
 type UserCharacterInfo struct {
 	Name  [20]byte
 	Job   byte
@@ -297,7 +297,7 @@ type UserCharacterInfo struct {
 	Sex   byte
 }
 
-// GetName returns the character name as a string.
+// GetName 以字符串形式返回角色名。
 func (u *UserCharacterInfo) GetName() string {
 	for i, b := range u.Name {
 		if b == 0 {
@@ -307,7 +307,7 @@ func (u *UserCharacterInfo) GetName() string {
 	return string(u.Name[:])
 }
 
-// UserEntry is the account registration structure.
+// UserEntry 是账号注册结构。
 type UserEntry struct {
 	SAccount  [11]byte
 	SPassword [11]byte
@@ -319,7 +319,7 @@ type UserEntry struct {
 	SEMail    [41]byte
 }
 
-// UserEntryAdd is additional user registration info.
+// UserEntryAdd 是附加的用户注册信息。
 type UserEntryAdd struct {
 	SQuiz2       [21]byte
 	SAnswer2     [13]byte
@@ -329,7 +329,7 @@ type UserEntryAdd struct {
 	SMemo2       [41]byte
 }
 
-// UserStateInfo is used for viewing other players' info.
+// UserStateInfo 用于查看其他玩家的信息。
 type UserStateInfo struct {
 	Feature       int32
 	UserName      [20]byte
@@ -339,7 +339,7 @@ type UserStateInfo struct {
 	UseItems      [13]ClientItem
 }
 
-// DropItem represents an item on the ground.
+// DropItem 表示地面上的物品。
 type DropItem struct {
 	X           int32
 	Y           int32
@@ -352,32 +352,32 @@ type DropItem struct {
 	BoFlash     bool
 }
 
-// StatusTime is an array of status effect timers.
+// StatusTime 是状态效果计时器数组。
 type StatusTime [MaxStatusAttribute]int16
 
-// QuestUnit is an array of quest flags.
+// QuestUnit 是任务标志数组。
 type QuestUnit [128]byte
 
-// QuestFlag is an array of quest flags.
+// QuestFlag 是任务标志数组。
 type QuestFlag [128]byte
 
 // ============================================================================
-// Feature encoding helpers
+// Feature 编码辅助函数
 // ============================================================================
 
-// MakeHumanFeature encodes human appearance into a 32-bit integer.
-// Bits: [31..24]=Dress, [23..16]=Hair, [15..8]=Weapon, [7..0]=RaceImg
+// MakeHumanFeature 将人物外观编码为 32 位整数。
+// 位分布：[31..24]=Dress，[23..16]=Hair，[15..8]=Weapon，[7..0]=RaceImg
 func MakeHumanFeature(raceImg, dress, weapon, hair byte) int32 {
 	return int32(raceImg) | int32(weapon)<<8 | int32(hair)<<16 | int32(dress)<<24
 }
 
-// MakeMonsterFeature encodes monster appearance into a 32-bit integer.
-// Bits: [31..16]=Appr, [15..8]=Weapon, [7..0]=RaceImg
+// MakeMonsterFeature 将怪物外观编码为 32 位整数。
+// 位分布：[31..16]=Appr，[15..8]=Weapon，[7..0]=RaceImg
 func MakeMonsterFeature(raceImg, weapon byte, appr uint16) int32 {
 	return int32(raceImg) | int32(weapon)<<8 | int32(appr)<<16
 }
 
-// ParseHumanFeature extracts human appearance components.
+// ParseHumanFeature 提取人物外观的各分量。
 func ParseHumanFeature(feature int32) (raceImg, dress, weapon, hair byte) {
 	raceImg = byte(feature & 0xFF)
 	weapon = byte((feature >> 8) & 0xFF)
@@ -386,7 +386,7 @@ func ParseHumanFeature(feature int32) (raceImg, dress, weapon, hair byte) {
 	return
 }
 
-// ParseMonsterFeature extracts monster appearance components.
+// ParseMonsterFeature 提取怪物外观的各分量。
 func ParseMonsterFeature(feature int32) (raceImg, weapon byte, appr uint16) {
 	raceImg = byte(feature & 0xFF)
 	weapon = byte((feature >> 8) & 0xFF)
@@ -395,17 +395,17 @@ func ParseMonsterFeature(feature int32) (raceImg, weapon byte, appr uint16) {
 }
 
 // ============================================================================
-// UserEntry / UserEntryAdd wire encoding (Delphi Grobal2.pas:592-609).
-// Each field is a Delphi short string: [0]=length, [1:1+len]=data, fixed N+1
-// bytes. The structs above are the exact binary layout; EncodeBuffer sends
-// them as two independently 6Bit-encoded segments (ClMain.pas:2844), so the
-// server must split the raw body at UserEntryEncodedSize before decoding.
+// UserEntry / UserEntryAdd 的网络编码（Delphi Grobal2.pas:592-609）。
+// 每个字段都是 Delphi 短字符串：[0]=长度，[1:1+len]=数据，固定 N+1 字节。
+// 上面的结构体即为精确的二进制布局；EncodeBuffer 将它们作为两段独立
+// 6Bit 编码的内容发送（ClMain.pas:2844），因此服务端必须先按
+// UserEntryEncodedSize 切分原始 body 再分别解码。
 // ============================================================================
 
 const (
 	UserEntrySize    = 148 // sizeof(TUserEntry)
 	UserEntryAddSize = 143 // sizeof(TUserEntryAdd)
-	// 6Bit-encoded segment lengths: GetCodeMsgSize(148)=198, (143)=191.
+	// 6Bit 编码后的段长度：GetCodeMsgSize(148)=198，(143)=191。
 	UserEntryEncodedSize    = 198
 	UserEntryAddEncodedSize = 191
 )
@@ -452,7 +452,7 @@ func (ua *UserEntryAdd) SetMobilePhone(s string) { putShortString(ua.SMobilePhon
 func (ua *UserEntryAdd) SetMemo(s string)        { putShortString(ua.SMemo[:], s) }
 func (ua *UserEntryAdd) SetMemo2(s string)       { putShortString(ua.SMemo2[:], s) }
 
-// Bytes returns the fixed-size wire representation.
+// Bytes 返回固定大小的网络表示。
 func (ue *UserEntry) Bytes() []byte {
 	buf := make([]byte, UserEntrySize)
 	off := 0
@@ -462,7 +462,7 @@ func (ue *UserEntry) Bytes() []byte {
 	return buf
 }
 
-// Bytes returns the fixed-size wire representation.
+// Bytes 返回固定大小的网络表示。
 func (ua *UserEntryAdd) Bytes() []byte {
 	buf := make([]byte, UserEntryAddSize)
 	off := 0
@@ -472,7 +472,7 @@ func (ua *UserEntryAdd) Bytes() []byte {
 	return buf
 }
 
-// UserEntryFromBytes parses the fixed-size wire representation.
+// UserEntryFromBytes 解析固定大小的网络表示。
 func UserEntryFromBytes(buf []byte) UserEntry {
 	var ue UserEntry
 	off := 0
@@ -485,7 +485,7 @@ func UserEntryFromBytes(buf []byte) UserEntry {
 	return ue
 }
 
-// UserEntryAddFromBytes parses the fixed-size wire representation.
+// UserEntryAddFromBytes 解析固定大小的网络表示。
 func UserEntryAddFromBytes(buf []byte) UserEntryAdd {
 	var ua UserEntryAdd
 	off := 0

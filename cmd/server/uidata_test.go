@@ -7,9 +7,9 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// These tests pin the closed-loop body layouts shared with the Go client
-// (GameState.ParseAbility / ParseItemDefs / ParseMagics). Both ends are
-// verified against the same documented layout.
+// 这些测试固定与 Go 客户端共享的闭环消息体布局
+// (GameState.ParseAbility / ParseItemDefs / ParseMagics)。
+// 两端均按同一文档化布局进行验证。
 
 func TestEncodeAbilityBodyLayout(t *testing.T) {
 	p := NewPlayObject(nil, "Tester", 1)
@@ -74,7 +74,7 @@ func TestEncodeAbilityBodyLayout(t *testing.T) {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
 		}
 	}
-	// MaxExp lives server-side (GetMaxExp); slot 34 must carry it.
+	// MaxExp 在服务端计算 (GetMaxExp)；偏移 34 必须承载该值。
 	if got := u32(34); got != p.GetMaxExp() {
 		t.Errorf("MaxExp = %d, want %d", got, p.GetMaxExp())
 	}
@@ -100,7 +100,7 @@ func TestEncodeStdItemsBodyLayout(t *testing.T) {
 		t.Fatalf("count = %d, want 2", count)
 	}
 
-	// First record.
+	// 第一条记录。
 	off := 2
 	if idx := int(binary.LittleEndian.Uint16(raw[off : off+2])); idx != 7 {
 		t.Errorf("item0 idx = %d, want 7", idx)
@@ -118,7 +118,7 @@ func TestEncodeStdItemsBodyLayout(t *testing.T) {
 	if dcMax := binary.LittleEndian.Uint16(raw[off+18 : off+20]); dcMax != 3 {
 		t.Errorf("item0 DCMax = %d, want 3", dcMax)
 	}
-	// Fixed part: 2+2+4+20+4 = 32 bytes, then NameLen u8 + Name.
+	// 固定部分: 2+2+4+20+4 = 32 字节，然后是 NameLen u8 + Name。
 	if price := binary.LittleEndian.Uint32(raw[off+28 : off+32]); price != 100 {
 		t.Errorf("item0 price = %d, want 100", price)
 	}
@@ -130,7 +130,7 @@ func TestEncodeStdItemsBodyLayout(t *testing.T) {
 		t.Errorf("item0 name = %q, want WoodSword", name)
 	}
 
-	// Second record: UTF-8 Chinese name round-trips.
+	// 第二条记录: UTF-8 中文名可正确往返。
 	off += 33 + nameLen
 	if idx := int(binary.LittleEndian.Uint16(raw[off : off+2])); idx != 9 {
 		t.Errorf("item1 idx = %d, want 9", idx)
@@ -183,8 +183,8 @@ func TestEncodeMyMagicBodyLayout(t *testing.T) {
 	}
 }
 
-// decodeTestBody mirrors what the client's NetHandler does with a message
-// body: EncodeBuffer output arrives as a DecodeString'd string of raw bytes.
+// decodeTestBody 模拟客户端 NetHandler 处理消息体的方式:
+// EncodeBuffer 的输出经 DecodeString 解码后得到原始字节字符串。
 func decodeTestBody(encoded string) string {
 	return protocol.DecodeString(encoded)
 }

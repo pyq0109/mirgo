@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// Bottom HUD — port of DBottom + DBottomDirectPaint (FState.pas:1179-1189,
-// 3560-3708): two-part blended board, HP/MP orbs, exp/weight strips, day
-// icon, chat board; plus the 4 state buttons (:1194-1205, :3733-3821), the
-// 9 function buttons (DlgConf MShare:474-494, handlers :5409-5603, hints
-// :6739-6770) and the belt (:1245-1273, :3836-3920).
+// 底部 HUD — 移植自 DBottom + DBottomDirectPaint (FState.pas:1179-1189,
+// 3560-3708): 两段混合底板、HP/MP 球、经验/负重条、昼夜图标、聊天板;
+// 另有 4 个状态按钮 (:1194-1205, :3733-3821)、9 个功能按钮
+// (DlgConf MShare:474-494, 处理函数 :5409-5603, 提示 :6739-6770)
+// 以及腰带 (:1245-1273, :3836-3920).
 const (
 	chatBoardX   = 208                // FState:3693
 	chatBoardTop = ScreenHeight - 130 // FState:3694 = 470
@@ -29,15 +29,14 @@ func (s *PlayScene) buildHUD() {
 	} else {
 		bottom.Width, bottom.Height = ScreenWidth, BottomBarImageH
 	}
-	// Bottom-anchored: Top = SCREENHEIGHT - image height (FState:1184-1189).
+	// 底部锚定: Top = SCREENHEIGHT - 图像高度 (FState:1184-1189).
 	bottom.Top = ScreenHeight - bottom.Height
 	bottom.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintBottomBar(c.Top, proj) }
 	bottom.OnMouseDown = func(c *UIControl, button, x, y int) { s.bottomMouseDown(x, y) }
 	ui.Root.AddChild(bottom)
 
-	// 4 state buttons (DlgConf coords, DBottom-relative). Delphi draws them
-	// only while pressed — the board artwork carries the resting state
-	// (DMyStateDirectPaint :3733-3747).
+	// 4 个状态按钮 (DlgConf 坐标, 相对 DBottom). Delphi 只在按下时
+	// 绘制它们 — 常态由底板美术呈现 (DMyStateDirectPaint :3733-3747).
 	stateDefs := []struct {
 		img, x, y, page int
 		bag             bool
@@ -64,12 +63,12 @@ func (s *PlayScene) buildHUD() {
 		btn.OnClick = func(c *UIControl, x, y int) {
 			switch {
 			case bag:
-				s.State.ShowBag = true // OpenItemBag = show (FState:3805)
+				s.State.ShowBag = true // OpenItemBag = 显示 (FState:3805)
 			case page == -2:
 				s.AddChatMessage("[声音] 切换(音频未实现)")
 			default:
 				s.State.StatePage = page
-				s.State.ShowEquip = true // OpenMyStatus = show (FState:3801-3809)
+				s.State.ShowEquip = true // OpenMyStatus = 显示 (FState:3801-3809)
 			}
 		}
 		hint := d.hint
@@ -77,7 +76,7 @@ func (s *PlayScene) buildHUD() {
 		bottom.AddChild(btn)
 	}
 
-	// 9 function buttons along the bar (DlgConf, Top=104).
+	// 沿底栏排列的 9 个功能按钮 (DlgConf, Top=104).
 	botDefs := []struct {
 		name    string
 		img     int
@@ -106,11 +105,11 @@ func (s *PlayScene) buildHUD() {
 			idx := img
 			switch {
 			case c.Downed:
-				idx = img + 1 // up/down pair convention
+				idx = img + 1 // 抬起/按下成对图素的约定
 			case isPlus && s.State.ShowPlusAbil:
-				idx = img + 2 // steady lit while the panel is open (FState:3779)
+				idx = img + 2 // 面板打开时常亮 (FState:3779)
 			case isPlus && time.Now().UnixMilli()/500%2 == 1:
-				idx = img + 2 // bonus-point blink (FState:3770-3795)
+				idx = img + 2 // 有技能点时闪烁 (FState:3770-3795)
 			}
 			ui.BlitImage(prg, idx, c.AbsX(), c.AbsY(), proj)
 		}
@@ -120,12 +119,12 @@ func (s *PlayScene) buildHUD() {
 		btn.OnMouseMove = func(c *UIControl, x, y int) { s.buttonHint(hint) }
 		bottom.AddChild(btn)
 		if isPlus {
-			btn.Visible = false // shown only when bonus points exist (ClMain:3523-3527)
+			btn.Visible = false // 仅有技能点时显示 (ClMain:3523-3527)
 			s.hudPlusAbil = btn
 		}
 	}
 
-	// HP/MP hover buttons: invisible hit areas showing current/max hints
+	// HP/MP 悬停按钮: 隐形命中区域, 显示当前/上限提示
 	// (DButtonHP/DButtonMP, FState:1727-1735, 6761-6762).
 	hpBtn := NewUIControl("DButtonHP", KindButton)
 	hpBtn.Left, hpBtn.Top = 40, 91
@@ -142,7 +141,7 @@ func (s *PlayScene) buildHUD() {
 	}
 	bottom.AddChild(mpBtn)
 
-	// Belt: 6 invisible hit cells with centered item icons (FState:1245-1273,
+	// 腰带: 6 个隐形命中格, 物品图标居中 (FState:1245-1273,
 	// 3836-3920).
 	for i := 0; i < 6; i++ {
 		slot := i
@@ -159,15 +158,14 @@ func (s *PlayScene) buildHUD() {
 	}
 }
 
-// buttonHint shows a yellow hover hint anchored at the cursor (DBotMouseMove,
-// FState:6739-6770; the Local/Surface math there nets to cursor coords).
+// buttonHint 在光标处显示黄色悬停提示 (DBotMouseMove,
+// FState:6739-6770; 其中 Local/Surface 换算结果即光标坐标).
 func (s *PlayScene) buttonHint(text string) {
 	s.tooltip.Show(int(s.mouseX), int(s.mouseY), text, [4]float32{1, 1, 0, 1}, false)
 }
 
-// paintBottomBar renders the board and everything painted inside
-// DBottomDirectPaint (FState.pas:3560-3708). barY is the absolute top of the
-// board control.
+// paintBottomBar 绘制底板及 DBottomDirectPaint 内的全部内容
+// (FState.pas:3560-3708). barY 是底板控件的绝对顶边.
 func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 	st := s.State
 	prg := s.resources.Prguse
@@ -177,9 +175,9 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 		s.hudPlusAbil.Visible = st.BonusPoint > 0
 	}
 
-	// Board: upper 120px color-key blended (the WIL decoder bakes black to
-	// alpha=0, so alpha 1.0 reproduces DDBLTFAST_SRCCOLORKEY exactly,
-	// FState:3577-3586), lower part opaque (:3587-3593).
+	// 底板: 上 120px 做颜色键混合 (WIL 解码器已将黑色烘焙为 alpha=0,
+	// 因此 alpha 1.0 即可精确复现 DDBLTFAST_SRCCOLORKEY,
+	// FState:3577-3586), 下半部分不透明 (:3587-3593).
 	barH := float32(ScreenHeight - barY)
 	if prg != nil {
 		img := prg.GetImage(ImgBottomBar)
@@ -203,7 +201,7 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 	}
 
 	if prg != nil {
-		// Day/night icon (FState:3597-3604).
+		// 昼夜图标 (FState:3597-3604).
 		dayImg := 0
 		switch st.DayBright {
 		case 0:
@@ -219,10 +217,10 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 			s.ui.BlitImage(prg, dayImg, 748, barY+79, proj)
 		}
 
-		// HP/MP orbs (FState:3606-3638).
+		// HP/MP 球 (FState:3606-3638).
 		if st.MaxHP > 0 && st.MaxMP > 0 {
 			if st.Job == 0 && st.Level < 28 {
-				// Warrior below level 28: single HP column [5]+[6].
+				// 28 级以下战士: 单血条 [5]+[6].
 				if base := prg.GetImage(ImgWarHPBase); base != nil && base.RGBA != nil {
 					t := s.resources.GetTexture(prg, ImgWarHPBase)
 					s.gl.DrawQuadSub(t, float32(base.Width), float32(base.Height),
@@ -243,16 +241,16 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 			} else if orb := prg.GetImage(ImgHPMPBar); orb != nil && orb.RGBA != nil {
 				t := s.resources.GetTexture(prg, ImgHPMPBar)
 				w, h := float32(orb.Width), float32(orb.Height)
-				half := float32(int(w) / 2) // Delphi integer div (FState:3627,3633)
-				// HP: left half (width half-1), cropped from the top by the
-				// missing ratio (:3627-3630).
+				half := float32(int(w) / 2) // Delphi 整数除法 (FState:3627,3633)
+				// HP: 左半边 (宽 half-1), 按缺失比例从顶部裁剪
+				// (:3627-3630).
 				hpCrop := h / float32(st.MaxHP) * float32(st.MaxHP-st.HP)
 				if hpCrop < 0 {
 					hpCrop = 0
 				}
 				s.gl.DrawQuadSub(t, w, h, 0, hpCrop, half-1, h-hpCrop,
 					40, by+91+hpCrop, half-1, h-hpCrop, 1, 1, 1, 1, proj)
-				// MP: right half, rc.Left=half+1, rc.Right=w-1 → width
+				// MP: 右半边, rc.Left=half+1, rc.Right=w-1 → 宽
 				// half-2 (:3633-3636).
 				mpCrop := h / float32(st.MaxMP) * float32(st.MaxMP-st.MP)
 				if mpCrop < 0 {
@@ -263,7 +261,7 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 			}
 		}
 
-		// Exp and weight strips (FState:3646-3676), shared image [7].
+		// 经验条和负重条 (FState:3646-3676), 共用图素 [7].
 		if strip := prg.GetImage(ImgStripBar); strip != nil && strip.RGBA != nil {
 			t := s.resources.GetTexture(prg, ImgStripBar)
 			sw, sh := float32(strip.Width), float32(strip.Height)
@@ -285,11 +283,11 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 	}
 
 	if s.text != nil {
-		// Level (FState:3643, PomiTextOut at (660, SCREENHEIGHT-104)).
+		// 等级 (FState:3643, PomiTextOut 位于 (660, SCREENHEIGHT-104)).
 		s.text.DrawTextOutline(fmt.Sprintf("%d", st.Level), 660, ScreenHeight-104,
 			1, 1, 1, 1, 0, 0, 0, 1, proj)
 
-		// Chat board: 9 lines × 12px (FState:3692-3706).
+		// 聊天板: 9 行 × 12px (FState:3692-3706).
 		total := len(s.chatMessages)
 		end := total - s.chatScroll
 		if end > total {
@@ -302,18 +300,17 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 		for i, row := start, 0; i < end; i, row = i+1, row+1 {
 			msg := s.chatMessages[i]
 			r, g, b := s.chatColor(msg.Text)
-			// Opaque black line background (Delphi SetBkMode OPAQUE with
-			// black back color, FState:3696-3703).
+			// 不透明黑色行背景 (Delphi SetBkMode OPAQUE 配黑色背景色,
+			// FState:3696-3703).
 			lw := s.text.MeasureText(msg.Text)
 			s.gl.DrawQuadColor(chatBoardX, float32(chatBoardTop+row*chatLineH),
 				float32(lw), chatLineH, 0, 0, 0, 1, proj)
 			s.text.DrawText(msg.Text, chatBoardX, float32(chatBoardTop+row*chatLineH), r, g, b, 1, proj)
 		}
 
-		// Chat input line — EdChat (208,581) 386×12, clSilver background,
-		// black text, MaxLength 70 (PlayScn.pas:267-280). Hidden while a
-		// modal dialog is up (HideAllControls hides the VCL TEdit,
-		// FState:2084).
+		// 聊天输入行 — EdChat (208,581) 386×12, clSilver 背景、黑色文字,
+		// MaxLength 70 (PlayScn.pas:267-280). 模态对话框弹出时隐藏
+		// (HideAllControls 会隐藏 VCL TEdit, FState:2084).
 		if s.chatMode && s.ui.Modal == nil {
 			s.gl.DrawQuadColor(chatBoardX, 581, 386, 12, 0.75, 0.75, 0.75, 1, proj)
 			cursor := ""
@@ -346,10 +343,9 @@ func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
-// paintBeltSlot draws the belt cell icon + slot number (FState:3836-3853).
-// Cells have no background of their own — the slot art is baked into the
-// board image; icons are centered at full size (no clamp) and the number is
-// drawn at (Left+13, Top+19).
+// paintBeltSlot 绘制腰带格图标 + 格号 (FState:3836-3853).
+// 格子本身没有背景 — 格位美术已烘焙在底板图像中; 图标按原始尺寸
+// 居中 (不缩放), 格号绘制于 (Left+13, Top+19).
 func (s *PlayScene) paintBeltSlot(slot, ax, ay int, proj [16]float32) {
 	item := s.State.BeltItems[slot]
 	if item != nil && s.resources.Items != nil {
@@ -369,13 +365,13 @@ func (s *PlayScene) paintBeltSlot(slot, ax, ay int, proj [16]float32) {
 	}
 }
 
-// beltClick picks up / places belt items (FState:3868-3900).
+// beltClick 拾取/放置腰带物品 (FState:3868-3900).
 func (s *PlayScene) beltClick(slot int) {
 	st := s.State
 	if s.itemMove.Moving {
-		// Placing: only drug-like items go on the belt (StdMode <= 3,
-		// :3883-3897). Held items from the bag keep their bag slot (server
-		// model); the belt holds a reference.
+		// 放置: 只有药品类物品可放上腰带 (StdMode <= 3,
+		// :3883-3897). 从背包拿起的物品保留其背包格位 (服务端模型);
+		// 腰带只保存引用.
 		if s.itemMove.Index >= 0 && s.itemMove.Item.Def != nil && s.itemMove.Item.Def.StdMode <= 3 {
 			it := s.itemMove.Item
 			st.BeltItems[slot] = &it
@@ -396,9 +392,8 @@ func (s *PlayScene) beltClick(slot int) {
 	}
 }
 
-// beltDblClick uses the slot's item (FState:3902-3920). The first click of
-// the double-click lifts the item, so the held branch (:3912-3917) is the
-// normal case.
+// beltDblClick 使用该格的物品 (FState:3902-3920). 双击的第一下会拿起
+// 物品, 因此通常走手持分支 (:3912-3917).
 func (s *PlayScene) beltDblClick(slot int) {
 	if s.itemMove.Moving {
 		if s.itemMove.FromBelt == slot && s.itemMove.Item.Def != nil {
@@ -417,7 +412,7 @@ func (s *PlayScene) beltDblClick(slot int) {
 	}
 }
 
-// beltHint shows the item tooltip (FState:3855-3866).
+// beltHint 显示物品提示 (FState:3855-3866).
 func (s *PlayScene) beltHint(slot, ax, ay int) {
 	item := s.State.BeltItems[slot]
 	if item == nil {
@@ -431,8 +426,8 @@ func (s *PlayScene) beltHint(slot, ax, ay int) {
 	s.tooltip.Show(ax, ay+29, text, color, false)
 }
 
-// bottomMouseDown: clicking a chat line prefills a whisper (FState:1896-1927).
-// Coords are DBottom-relative.
+// bottomMouseDown: 点击聊天行预填私聊 (FState:1896-1927).
+// 坐标相对 DBottom.
 func (s *PlayScene) bottomMouseDown(x, y int) {
 	absY := y + BottomBarTop
 	if x < chatBoardX || x > chatBoardX+474 || absY < chatBoardTop || absY >= chatBoardTop+chatLineH*ViewChatLine {
@@ -457,10 +452,10 @@ func (s *PlayScene) bottomMouseDown(x, y int) {
 	s.chatMode = true
 }
 
-// extractUserName pulls a sender name out of a chat line (FState:1898-1908).
+// extractUserName 从聊天行中提取发送者名字 (FState:1898-1908).
 func extractUserName(line string) string {
 	s := line
-	if len(s) > 0 && s[0] == '[' { // skip "[channel]" prefix
+	if len(s) > 0 && s[0] == '[' { // 跳过 "[频道]" 前缀
 		if i := indexByte(s, ']'); i >= 0 {
 			s = s[i+1:]
 		}
@@ -495,7 +490,7 @@ func indexByte(s string, b byte) int {
 	return -1
 }
 
-// tryDeal sends CMDealTry (DBotTradeClick, FState:5425-5431).
+// tryDeal 发送 CMDealTry (DBotTradeClick, FState:5425-5431).
 func (s *PlayScene) tryDeal() {
 	if s.sendDealTry != nil {
 		s.sendDealTry()

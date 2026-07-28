@@ -32,7 +32,7 @@ func LoadMerchantConfigs(dir string) {
 	merchantConfigs = make(map[string]*MerchantConfig)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		log.Logf(log.LevelWarn, "Merchant", "No merchant config dir: %v", err)
+		log.Logf(log.LevelWarn, "Merchant", "商人配置目录不存在: %v", err)
 		return
 	}
 	for _, e := range entries {
@@ -68,16 +68,16 @@ func LoadMerchantConfigs(dir string) {
 		key := strings.ToLower(cfg.NpcName)
 		merchantConfigs[key] = &cfg
 	}
-	log.Logf(log.LevelInfo, "Merchant", "Loaded %d merchant configs", len(merchantConfigs))
+	log.Logf(log.LevelInfo, "Merchant", "已加载 %d 个商人配置", len(merchantConfigs))
 }
 
 func getMerchantConfig(npcName string) *MerchantConfig {
 	return merchantConfigs[strings.ToLower(npcName)]
 }
 
-// HandleMerchantDlgSelect processes a clicked NPC dialog link. The body
-// carries the tag value after '/' in <text/tag> (Delphi
-// SendMerchantDlgSelect, ClMain.pas:3094-3110): @buy/@sell/@switch etc.
+// HandleMerchantDlgSelect 处理点击 NPC 对话链接。body
+// 携带 <text/tag> 中 '/' 之后的 tag 值（Delphi
+// SendMerchantDlgSelect，ClMain.pas:3094-3110）：@buy/@sell/@switch 等。
 func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.TCPServer) {
 	if p.envir == nil {
 		return
@@ -95,7 +95,7 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 	case "@repair":
 		p.sendRepairMode(server, npc)
 	default:
-		// '@@' tags arrive as "@@cmd\r\ninput" (ClMain.pas:3100-3105).
+		// '@@' 标签以 "@@cmd\r\ninput" 形式到达（ClMain.pas:3100-3105）。
 		if strings.HasPrefix(tag, "@@") {
 			cmd, input := tag, ""
 			if i := strings.Index(tag, "\r\n"); i >= 0 {
@@ -108,7 +108,7 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 				return
 			}
 		}
-		// Jump to the script label (labels are stored without '@').
+		// 跳转到脚本标签（标签存储时不含 '@'）。
 		if npc.Script != "" {
 			if script, err := LoadNpcScript(npc.Script); err == nil {
 				script.Execute(strings.TrimPrefix(tag, "@"), p, npc, server)
@@ -220,11 +220,11 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
-	log.Logf(log.LevelInfo, "Merchant", "%s bought %s for %d gold", p.Name, def.Name, price)
+	log.Logf(log.LevelInfo, "Merchant", "%s 购买 %s 花费 %d 金币", p.Name, def.Name, price)
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	// Param1 = MakeIndex（实例 ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		p.sendSellFail(server)
@@ -263,7 +263,7 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
-	log.Logf(log.LevelInfo, "Merchant", "%s sold %s for %d gold", p.Name, def.Name, price)
+	log.Logf(log.LevelInfo, "Merchant", "%s 出售 %s 获得 %d 金币", p.Name, def.Name, price)
 }
 
 func (p *PlayObject) HandleQuerySellPrice(msg SendMessage, server *netserver.TCPServer) {
@@ -330,7 +330,7 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
-	log.Logf(log.LevelInfo, "Merchant", "%s repaired %s for %d gold", p.Name, def.Name, cost)
+	log.Logf(log.LevelInfo, "Merchant", "%s 修理 %s 花费 %d 金币", p.Name, def.Name, cost)
 }
 
 func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TCPServer) {

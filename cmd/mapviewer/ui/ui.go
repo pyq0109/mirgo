@@ -20,7 +20,7 @@ const (
 	minimapSize     = 200
 )
 
-// UIState holds the shared state between the UI and the main loop.
+// UIState 持有 UI 和主循环之间的共享状态。
 type UIState struct {
 	Map            *mapformat.MapData
 	Renderer       *renderer.GLRenderer
@@ -33,12 +33,12 @@ type UIState struct {
 	MinimapTex     uint32
 }
 
-// toImGuiWindow converts a go-gl/glfw Window to the cimgui-go GLFWwindow type.
+// toImGuiWindow 将 go-gl/glfw Window 转换为 cimgui-go 的 GLFWwindow 类型。
 func toImGuiWindow(w *glfw.Window) *igglfw.GLFWwindow {
 	return igglfw.NewGLFWwindowFromC(unsafe.Pointer(w.Handle()))
 }
 
-// Init initializes ImGui with the given GLFW window.
+// Init 初始化 ImGui 并绑定 GLFW 窗口。
 func Init(window *glfw.Window) {
 	ig.CreateContext()
 	ig.StyleColorsDark()
@@ -48,18 +48,18 @@ func Init(window *glfw.Window) {
 	igopengl3.InitV("#version 330")
 }
 
-// Shutdown shuts down ImGui backends and destroys the context.
+// Shutdown 关闭 ImGui 后端并销毁上下文。
 func Shutdown() {
 	igopengl3.Shutdown()
 	igglfw.Shutdown()
 	ig.DestroyContext()
 }
 
-// ScrollHandler is a callback for scroll events (after ImGui processing).
+// ScrollHandler 是滚轮事件的回调（在 ImGui 处理之后调用）。
 type ScrollHandler func(window *glfw.Window, xoff, yoff float64)
 
-// SetGLFWCallbacks sets up GLFW callbacks that forward to ImGui.
-// scrollHandler is called after ImGui processes the scroll event.
+// SetGLFWCallbacks 设置 GLFW 回调并转发给 ImGui。
+// scrollHandler 在 ImGui 处理完滚轮事件后调用。
 func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler) {
 	imWin := toImGuiWindow(window)
 
@@ -83,25 +83,25 @@ func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler) {
 	})
 }
 
-// BeginFrame starts a new ImGui frame.
+// BeginFrame 开始新的 ImGui 帧。
 func BeginFrame() {
 	igopengl3.NewFrame()
 	igglfw.NewFrame()
 	ig.NewFrame()
 }
 
-// EndFrame finalizes and renders the ImGui draw data.
+// EndFrame 完成并渲染 ImGui 绘制数据。
 func EndFrame() {
 	ig.Render()
 	igopengl3.RenderDrawData(ig.CurrentDrawData())
 }
 
-// IO returns the current ImGui IO.
+// IO 返回当前 ImGui IO。
 func IO() *ig.IO {
 	return ig.CurrentIO()
 }
 
-// RenderMenuBar renders the top menu bar (File -> Exit).
+// RenderMenuBar 渲染顶部菜单栏（File -> Exit）。
 func RenderMenuBar(shouldClose *bool) {
 	if !ig.BeginMainMenuBar() {
 		return
@@ -115,13 +115,13 @@ func RenderMenuBar(shouldClose *bool) {
 	ig.EndMainMenuBar()
 }
 
-// FrameHeight returns the current ImGui frame height (menu bar height).
+// FrameHeight 返回当前 ImGui 帧高度（菜单栏高度）。
 func FrameHeight() float32 {
 	return ig.FrameHeight()
 }
 
-// RenderRightPanel renders the map info / tile info / layer toggles panel.
-// Matches C++ RenderRightPanel.
+// RenderRightPanel 渲染地图信息 / 格子信息 / 图层开关面板。
+// 对应 C++ RenderRightPanel。
 func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTileX, mouseTileY, lockedTileX, lockedTileY int, tileLocked bool) {
 	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), menuH), ig.CondAlways, ig.NewVec2(0, 0))
 	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, float32(glfwH)-menuH), ig.CondAlways)
@@ -154,7 +154,7 @@ func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTi
 	ig.Separator()
 	ig.Text("Tile Info")
 
-	// Use locked tile if active, otherwise use mouse hover.
+	// 如果已锁定格子则使用锁定的，否则使用鼠标悬停的
 	var tileX, tileY int
 	if tileLocked {
 		tileX, tileY = lockedTileX, lockedTileY
@@ -172,7 +172,7 @@ func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTi
 	}
 	ig.Separator()
 
-	// Back layer.
+	// 背景层
 	ig.TextColored(ig.NewVec4(0.5, 1, 0.5, 1), "Back Layer")
 	if tileValid {
 		info := m.InfoAt(tileX, tileY)
@@ -187,7 +187,7 @@ func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTi
 		ig.Text("  collision: -")
 	}
 
-	// Middle layer.
+	// 中间层
 	ig.TextColored(ig.NewVec4(1, 1, 0.5, 1), "Middle Layer")
 	if tileValid {
 		info := m.InfoAt(tileX, tileY)
@@ -196,7 +196,7 @@ func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTi
 		ig.Text("  lib: -, image: -")
 	}
 
-	// Front layer.
+	// 前景层
 	ig.TextColored(ig.NewVec4(0.5, 0.8, 1, 1), "Front Layer")
 	if tileValid {
 		info := m.InfoAt(tileX, tileY)
@@ -205,7 +205,7 @@ func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTi
 		ig.Text("  lib: -, image: -")
 	}
 
-	// Animation info.
+	// 动画信息
 	ig.TextColored(ig.NewVec4(1, 0.6, 0.3, 1), "Animation")
 	if tileValid {
 		info := m.InfoAt(tileX, tileY)
@@ -274,8 +274,8 @@ func RenderRightPanel(state *UIState, glfwW, glfwH int32, menuH float32, mouseTi
 	ig.End()
 }
 
-// RenderMinimapWindow renders the minimap in a separate ImGui window.
-// Matches C++ minimap window with click-to-navigate.
+// RenderMinimapWindow 在独立 ImGui 窗口中渲染小地图。
+// 对应 C++ 小地图窗口，支持点击导航。
 func RenderMinimapWindow(state *UIState) {
 	if state.Map == nil || state.MinimapTex == 0 {
 		return
@@ -292,7 +292,7 @@ func RenderMinimapWindow(state *UIState) {
 	texRef := ig.NewTextureRefTextureID(ig.TextureID(state.MinimapTex))
 	ig.ImageWithBgV(*texRef, ig.NewVec2(minimapSize, minimapSize), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
 
-	// InvisibleButton to capture mouse events on the minimap image.
+	// InvisibleButton 捕获小地图图片上的鼠标事件
 	ig.SetCursorScreenPos(imgMin)
 	ig.InvisibleButtonV("##minimap_btn", ig.NewVec2(minimapSize, minimapSize), ig.ButtonFlagsNone)
 
@@ -310,7 +310,7 @@ func RenderMinimapWindow(state *UIState) {
 		worldY := (py / minimapSize) * mapH
 		camX := float64(worldX - viewW/2)
 		camY := float64(worldY - viewH/2)
-		mlog.Logf(mlog.LevelTrace, "minimap", "navigate: click=(%.1f, %.1f) world=(%.1f, %.1f) camRaw=(%.1f, %.1f)", px, py, worldX, worldY, camX, camY)
+		mlog.Logf(mlog.LevelTrace, "minimap", "导航: click=(%.1f, %.1f) world=(%.1f, %.1f) camRaw=(%.1f, %.1f)", px, py, worldX, worldY, camX, camY)
 		if camX < 0 {
 			camX = 0
 		}
@@ -325,18 +325,18 @@ func RenderMinimapWindow(state *UIState) {
 		}
 		state.Cam.X = camX
 		state.Cam.Y = camY
-		mlog.Logf(mlog.LevelTrace, "minimap", "navigate result: cam=(%.1f, %.1f)", camX, camY)
+		mlog.Logf(mlog.LevelTrace, "minimap", "导航结果: cam=(%.1f, %.1f)", camX, camY)
 	}
 
 	if ig.IsItemActivated() {
-		// Click outside viewport rect = jump, inside = start drag.
+		// 点击视口矩形外 = 跳转，内部 = 开始拖拽
 		vx := float32(state.Cam.X) / mapW * minimapSize
 		vy := float32(state.Cam.Y) / mapH * minimapSize
 		vw := viewW / mapW * minimapSize
 		vh := viewH / mapH * minimapSize
-		mlog.Logf(mlog.LevelDebug, "minimap", "click: mmPos=(%.1f, %.1f) vpRect=(%.1f, %.1f)-(%.1f, %.1f) size=(%.1f, %.1f)", mmMx, mmMy, vx, vy, vx+vw, vy+vh, vw, vh)
+		mlog.Logf(mlog.LevelDebug, "minimap", "点击: mmPos=(%.1f, %.1f) vpRect=(%.1f, %.1f)-(%.1f, %.1f) size=(%.1f, %.1f)", mmMx, mmMy, vx, vy, vx+vw, vy+vh, vw, vh)
 		inRect := mmMx >= vx && mmMx <= vx+vw && mmMy >= vy && mmMy <= vy+vh
-		mlog.Logf(mlog.LevelDebug, "minimap", "click inRect=%v", inRect)
+		mlog.Logf(mlog.LevelDebug, "minimap", "点击 inRect=%v", inRect)
 		if !inRect {
 			minimapToWorld(mmMx, mmMy)
 		}
@@ -349,7 +349,7 @@ func RenderMinimapWindow(state *UIState) {
 	ig.End()
 }
 
-// RightPanelWidth returns the width of the right panel for viewport calculations.
+// RightPanelWidth 返回右侧面板宽度，用于视口计算。
 func RightPanelWidth() int {
 	return rightPanelWidth
 }

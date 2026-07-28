@@ -6,8 +6,8 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// ClFunc.pas:618-634 is the authoritative StdMode→slot table; the client
-// mirror must stay in lockstep with the server's getEquipSlot.
+// ClFunc.pas:618-634 是权威的 StdMode→slot 映射表；客户端
+// 必须与服务端 getEquipSlot 保持一致。
 func TestGetTakeOnPositionMapping(t *testing.T) {
 	cases := []struct {
 		stdMode byte

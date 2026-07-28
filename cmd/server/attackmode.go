@@ -84,7 +84,7 @@ func (p *PlayObject) isGroupMember(other *PlayObject) bool {
 }
 
 func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	// Param1 = MakeIndex（实例 ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		resp := protocol.MakeDefaultMsg(protocol.SMDropItemFail, 0, 0, 0, 0)

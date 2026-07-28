@@ -8,7 +8,7 @@ import (
 )
 
 // ============================================================================
-// Message Parsing Tests
+// 消息解析测试
 // ============================================================================
 
 func TestParseFirstServer(t *testing.T) {
@@ -176,11 +176,11 @@ func TestParseQueryChrBody(t *testing.T) {
 }
 
 // ============================================================================
-// Protocol Message Format Tests
+// 协议消息格式测试
 // ============================================================================
 
 func TestLoginMessageFormat(t *testing.T) {
-	// Verify CMIDPassword message format
+	// 验证 CMIDPassword 消息格式
 	msg := protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0)
 	encoded := protocol.EncodeMessage(msg)
 	decoded := protocol.DecodeMessage(encoded)
@@ -194,7 +194,7 @@ func TestLoginMessageFormat(t *testing.T) {
 }
 
 func TestCredentialBodyFormat(t *testing.T) {
-	// Verify "username/password" encoding round trip
+	// 验证 "username/password" 编码往返
 	body := "testuser/testpass"
 	encoded := protocol.EncodeString(body)
 	decoded := protocol.DecodeString(encoded)
@@ -205,7 +205,7 @@ func TestCredentialBodyFormat(t *testing.T) {
 }
 
 func TestSMSelectServerOKFormat(t *testing.T) {
-	// Verify "addr/port/cert" body format
+	// 验证 "addr/port/cert" body 格式
 	body := "localhost/7000/12345"
 	encoded := protocol.EncodeString(body)
 	decoded := protocol.DecodeString(encoded)
@@ -216,7 +216,7 @@ func TestSMSelectServerOKFormat(t *testing.T) {
 }
 
 func TestSMQueryChrTextFormat(t *testing.T) {
-	// Verify "*name/job/hair/level/sex" text format
+	// 验证 "*name/job/hair/level/sex" 文本格式
 	body := "*Warrior/0/0/10/1/Wizard/1/0/5/0"
 	chars, selectedIdx := parseQueryChrBody(body)
 
@@ -235,7 +235,7 @@ func TestSMQueryChrTextFormat(t *testing.T) {
 }
 
 func TestSMStartPlayFormat(t *testing.T) {
-	// Verify "addr/port" body format
+	// 验证 "addr/port" body 格式
 	body := "localhost/7000"
 	addr, err := parseAddrPort(body)
 	if err != nil {
@@ -247,13 +247,13 @@ func TestSMStartPlayFormat(t *testing.T) {
 }
 
 func TestRunLoginFormat(t *testing.T) {
-	// Verify **loginID/charName/cert/version/code format
+	// 验证 **loginID/charName/cert/version/code 格式
 	loginID := "testuser"
 	charName := "Warrior"
 
 	s := "**" + loginID + "/" + charName + "/" + "12345" + "/" + "120040918" + "/9"
 
-	// Verify encoding round trip
+	// 验证编码往返
 	encoded := protocol.EncodeString(s)
 	decoded := protocol.DecodeString(encoded)
 
@@ -261,7 +261,7 @@ func TestRunLoginFormat(t *testing.T) {
 		t.Errorf("run login = %q, want %q", decoded, s)
 	}
 
-	// Verify parsing
+	// 验证解析
 	if decoded[:2] != "**" {
 		t.Errorf("prefix = %q, want **", decoded[:2])
 	}
@@ -269,12 +269,12 @@ func TestRunLoginFormat(t *testing.T) {
 }
 
 // ============================================================================
-// Server Frame Format Test
+// 服务端帧格式测试
 // ============================================================================
 
 func TestServerFrameRoundTrip(t *testing.T) {
-	// Server sends: #<payload>!
-	// Client expects: #<payload>! (no digit prefix)
+	// 服务端发送: #<payload>!
+	// 客户端期望: #<payload>!（无数字前缀）
 	msg := protocol.MakeDefaultMsg(protocol.SMPasswdFail, -1, 0, 0, 0)
 	encoded := protocol.EncodeMessage(msg)
 	frame := protocol.FormatServerFrame(encoded)
@@ -283,7 +283,7 @@ func TestServerFrameRoundTrip(t *testing.T) {
 		t.Errorf("frame format = %q, expected #...!", frame)
 	}
 
-	// Simulate client parsing
+	// 模拟客户端解析
 	payload := frame[1 : len(frame)-1]
 	if len(payload) >= protocol.DefBlockSize {
 		decoded := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
@@ -297,7 +297,7 @@ func TestServerFrameRoundTrip(t *testing.T) {
 }
 
 func TestClientFrameWithCode(t *testing.T) {
-	// Client sends: #<code><payload>!
+	// 客户端发送: #<code><payload>!
 	msg := protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0)
 	encoded := protocol.EncodeMessage(msg)
 	body := protocol.EncodeString("user/pass")
@@ -316,8 +316,8 @@ func TestClientFrameWithCode(t *testing.T) {
 }
 
 // ============================================================================
-// P2 Data Sync — body layout mirrors (server side pinned in cmd/server
-// uidata_test.go; these pin the client parsers to the same layouts)
+// P2 数据同步——body 布局对照（服务端侧固定在 cmd/server
+// uidata_test.go；这些测试将客户端解析器固定到相同布局）
 // ============================================================================
 
 func TestParseAbilityLayout(t *testing.T) {
@@ -363,7 +363,7 @@ func TestParseAbilityLayout(t *testing.T) {
 
 func TestParseItemDefsAndRelink(t *testing.T) {
 	gs := NewGameState()
-	// A bag item parsed before the DB arrives has no Def.
+	// 数据库到达前解析的背包物品没有 Def。
 	gs.BagItems[0] = &BagItem{Idx: 7, Dura: 900, DuraMax: 1000, MakeIndex: 1}
 	if gs.BagItems[0].Def != nil {
 		t.Fatal("expected nil Def before DB sync")
@@ -372,7 +372,7 @@ func TestParseItemDefsAndRelink(t *testing.T) {
 		t.Errorf("Looks fallback = %d, want raw Idx 7", got)
 	}
 
-	// Build one record: fixed 32 bytes + name.
+	// 构造一条记录：固定 32 字节 + 名称。
 	raw := make([]byte, 2, 64)
 	binary.LittleEndian.PutUint16(raw, 1) // count
 	rec := make([]byte, 32)
@@ -396,7 +396,7 @@ func TestParseItemDefsAndRelink(t *testing.T) {
 		def.DC != 1 || def.DCMax != 3 || def.Price != 100 {
 		t.Errorf("def = %+v, fields mismatch", def)
 	}
-	// Existing bag item got relinked and now resolves Looks via the def.
+	// 已有背包物品已重新关联，现在通过 def 解析 Looks。
 	if gs.BagItems[0].Def != def {
 		t.Fatal("bag item not relinked to def")
 	}

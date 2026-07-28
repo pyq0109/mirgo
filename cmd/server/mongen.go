@@ -73,7 +73,7 @@ func (e *UserEngine) LoadMonGen() {
 		npc.envir = env
 		env.AddObject(npc.CurrX, npc.CurrY, OS_MOVINGOBJECT, npc)
 		e.Npcs = append(e.Npcs, npc)
-		// log.Logf(log.LevelInfo, "MonGen", "Spawned NPC %s at %s(%d,%d)", npc.Name, npc.MapName, npc.CurrX, npc.CurrY)
+		// log.Logf(log.LevelInfo, "MonGen", "已在 %s(%d,%d) 生成 NPC %s", npc.Name, npc.MapName, npc.CurrX, npc.CurrY)
 	}
 }
 
@@ -84,7 +84,7 @@ func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {
 
 	data, err := os.ReadFile(e.monGenPath)
 	if err != nil {
-		log.Logf(log.LevelWarn, "MonGen", "Failed to load %s: %v, using defaults", e.monGenPath, err)
+		log.Logf(log.LevelWarn, "MonGen", "加载 %s 失败: %v，使用默认配置", e.monGenPath, err)
 		return false
 	}
 
@@ -102,7 +102,7 @@ func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {
 		Spawns []monGenSpawn `json:"spawns"`
 	}
 	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
-		log.Logf(log.LevelWarn, "MonGen", "Failed to parse %s: %v", e.monGenPath, err)
+		log.Logf(log.LevelWarn, "MonGen", "解析 %s 失败: %v", e.monGenPath, err)
 		return false
 	}
 
@@ -125,7 +125,7 @@ func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {
 		})
 	}
 
-	log.Logf(log.LevelInfo, "MonGen", "Loaded %d spawn points from %s", len(e.MonGenList), e.monGenPath)
+	log.Logf(log.LevelInfo, "MonGen", "已从 %s 加载 %d 个刷怪点", e.monGenPath, len(e.MonGenList))
 	return len(e.MonGenList) > 0
 }
 
@@ -175,7 +175,7 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 				if m.envir != nil {
 					m.envir.RemoveObject(m.CurrX, m.CurrY, OS_MOVINGOBJECT, m)
 				}
-				log.Logf(log.LevelInfo, "MonGen", "Corpse removed: %s (id=%d)", m.Name, m.ID)
+				log.Logf(log.LevelInfo, "MonGen", "尸体已移除: %s (id=%d)", m.Name, m.ID)
 			}
 			continue
 		}
@@ -280,7 +280,7 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	e.Monsters = append(e.Monsters, mon)
 	entry.LiveList = append(entry.LiveList, mon)
 
-	// log.Logf(log.LevelInfo, "MonGen", "Spawned %s (id=%d) at %s(%d,%d)", mon.Name, mon.ID, mon.MapName, x, y)
+	// log.Logf(log.LevelInfo, "MonGen", "已生成 %s (id=%d) 于 %s(%d,%d)", mon.Name, mon.ID, mon.MapName, x, y)
 	return mon
 }
 
@@ -315,5 +315,5 @@ func (e *UserEngine) spawnSplitZombies(parent *MonsterObject, server *netserver.
 		e.Monsters = append(e.Monsters, child)
 		child.SendRefMsg(RM_TURN, child.Dir, cx, cy, child.Name)
 	}
-	log.Logf(log.LevelInfo, "Monster", "%s split into zombies", parent.Name)
+	log.Logf(log.LevelInfo, "Monster", "%s 分裂成小僵尸", parent.Name)
 }

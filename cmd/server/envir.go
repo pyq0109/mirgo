@@ -4,7 +4,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/mapformat"
 )
 
-// ObjectType constants
+// ObjectType 常量
 const (
 	OS_EVENTOBJECT  = 1
 	OS_MOVINGOBJECT = 2
@@ -14,19 +14,19 @@ const (
 	OS_DOOR         = 6
 )
 
-// OSObject represents an object on the map.
+// OSObject 表示地图上的一个对象。
 type OSObject struct {
 	Type byte
 	Obj  interface{}
 }
 
-// MapCellInfo represents a single map cell.
+// MapCellInfo 表示单个地图格子。
 type MapCellInfo struct {
 	Flag    byte
 	ObjList []OSObject
 }
 
-// MapFlag contains map properties.
+// MapFlag 包含地图属性。
 type MapFlag struct {
 	Safe     bool
 	Fight    bool
@@ -35,7 +35,7 @@ type MapFlag struct {
 	NoRecall bool
 }
 
-// Door represents a door on the map.
+// Door 表示地图上的一扇门。
 type Door struct {
 	ID       byte
 	X, Y     int
@@ -43,7 +43,7 @@ type Door struct {
 	OpenTick int64
 }
 
-// GroundItem represents an item on the ground.
+// GroundItem 表示地面上的一个物品。
 type GroundItem struct {
 	ID       int32
 	Name     string
@@ -53,7 +53,7 @@ type GroundItem struct {
 	Gold     int
 }
 
-// Environment represents a single map.
+// Environment 表示一张地图。
 type Environment struct {
 	Name        string
 	Width       int
@@ -68,7 +68,7 @@ type Environment struct {
 	rawMap *mapformat.MapData
 }
 
-// NewEnvironment creates an environment from a map file.
+// NewEnvironment 从地图文件创建环境。
 func NewEnvironment(name string, m *mapformat.MapData) *Environment {
 	env := &Environment{
 		Name:   name,
@@ -104,13 +104,13 @@ func NewEnvironment(name string, m *mapformat.MapData) *Environment {
 	return env
 }
 
-// CanWalk checks if a position is walkable (terrain + entities + doors).
+// CanWalk 检查某个位置是否可通行（地形 + 实体 + 门）。
 func (e *Environment) CanWalk(x, y int) bool {
 	return e.CanWalkEx(x, y, false)
 }
 
-// CanWalkEx checks walkability. When ignoreEntities is true, only terrain and
-// doors are checked — entity collision is skipped (Delphi CanWalkEx boFlag).
+// CanWalkEx 检查可通行性。当 ignoreEntities 为 true 时，只检查地形和门，
+// 跳过实体碰撞（对应 Delphi CanWalkEx boFlag）。
 func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return false
@@ -219,7 +219,7 @@ func objectFeature(obj interface{}) int32 {
 	return 0
 }
 
-// objectFeatureEx: low byte = horse type, high byte = dress effect (Delphi MakeWord(HorseType, DressEffType)).
+// objectFeatureEx: 低字节 = 马类型，高字节 = 衣服特效（对应 Delphi MakeWord(HorseType, DressEffType)）。
 func objectFeatureEx(obj interface{}) int32 {
 	if p, ok := obj.(*PlayObject); ok {
 		return p.FeatureEx()
@@ -227,7 +227,7 @@ func objectFeatureEx(obj interface{}) int32 {
 	return 0
 }
 
-// AddObject adds an object to the map at the given position.
+// AddObject 在指定位置向地图添加一个对象。
 func (e *Environment) AddObject(x, y int, objType byte, obj interface{}) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return false
@@ -247,7 +247,7 @@ func (e *Environment) AddObject(x, y int, objType byte, obj interface{}) bool {
 	return true
 }
 
-// RemoveObject removes an object from the map.
+// RemoveObject 从地图移除一个对象。
 func (e *Environment) RemoveObject(x, y int, objType byte, obj interface{}) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return false
@@ -264,7 +264,7 @@ func (e *Environment) RemoveObject(x, y int, objType byte, obj interface{}) bool
 	return false
 }
 
-// GetMovingObject returns the first moving object at the given position.
+// GetMovingObject 返回指定位置的第一个移动对象。
 func (e *Environment) GetMovingObject(x, y int) interface{} {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return nil
@@ -278,7 +278,7 @@ func (e *Environment) GetMovingObject(x, y int) interface{} {
 	return nil
 }
 
-// GetRangeObjects returns all objects within a radius.
+// GetRangeObjects 返回指定半径内的所有对象。
 func (e *Environment) GetRangeObjects(x, y, radius int) []interface{} {
 	var result []interface{}
 	for dy := -radius; dy <= radius; dy++ {
@@ -296,7 +296,7 @@ func (e *Environment) GetRangeObjects(x, y, radius int) []interface{} {
 	return result
 }
 
-// RawMap returns the underlying map data.
+// RawMap 返回底层地图数据。
 func (e *Environment) RawMap() *mapformat.MapData {
 	return e.rawMap
 }
@@ -348,10 +348,10 @@ func (e *Environment) broadcastRefMsg(center *BaseObject, ident int, sourceID in
 	}
 }
 
-// broadcastDeathMsg broadcasts a death to nearby players. justDied=true sends
-// SM_NOWDEATH (client plays the death animation); justDied=false sends SM_DEATH
-// (client shows the corpse directly). dir is the facing of the deceased
-// (Delphi ObjBase.pas:5523-5549, :21071).
+// broadcastDeathMsg 向附近玩家广播死亡消息。justDied=true 发送
+// SM_NOWDEATH（客户端播放死亡动画）；justDied=false 发送 SM_DEATH
+// （客户端直接显示尸体）。dir 是死者的朝向
+// （参考 Delphi ObjBase.pas:5523-5549, :21071）。
 func (e *Environment) broadcastDeathMsg(center *BaseObject, sourceID int32, x, y, dir int, justDied bool) {
 	param3 := 0
 	if justDied {

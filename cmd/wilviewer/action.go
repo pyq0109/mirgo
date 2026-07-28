@@ -1,6 +1,6 @@
 package main
 
-// ActionInfo defines an animation action template.
+// ActionInfo 定义动画动作模板。
 type ActionInfo struct {
 	Start    int // 起始帧索引
 	Frame    int // 帧数

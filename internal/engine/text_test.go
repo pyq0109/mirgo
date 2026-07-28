@@ -11,7 +11,7 @@ import (
 )
 
 func TestFontLoading(t *testing.T) {
-	// Try to find a font.
+	// 尝试查找字体。
 	var fontPath string
 	for _, p := range fontSearchPaths {
 		if _, err := os.Stat(p); err == nil {
@@ -28,7 +28,7 @@ func TestFontLoading(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	// Try single-font parse (TTF), then collection parse (TTC).
+	// 先尝试单字体解析（TTF），再尝试字体集合解析（TTC）。
 	f, err := opentype.Parse(fontData)
 	if err != nil {
 		col, colErr := opentype.ParseCollection(fontData)
@@ -56,7 +56,7 @@ func TestFontLoading(t *testing.T) {
 		metrics.Ascent.Ceil(), metrics.Descent.Ceil(),
 		(metrics.Ascent + metrics.Descent).Ceil())
 
-	// Test rasterizing a Chinese character.
+	// 测试光栅化中文字符。
 	testCases := []struct {
 		name string
 		text string
@@ -98,7 +98,7 @@ func TestFontLoading(t *testing.T) {
 					}
 					d.DrawString(string(ch))
 
-					// Count non-transparent pixels.
+					// 统计非透明像素。
 					pixels := 0
 					for y := 0; y < gh; y++ {
 						for x := 0; x < gw; x++ {

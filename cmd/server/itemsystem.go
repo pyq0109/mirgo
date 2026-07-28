@@ -23,8 +23,8 @@ func (p *PlayObject) GiveItem(itemIdx int) bool {
 	if def == nil {
 		return false
 	}
-	// Unique instance id (Delphi g_MakeItemIdx); DB idx would collide across
-	// stacks of the same item and break MakeIndex-addressed operations.
+	// 唯一实例ID（Delphi g_MakeItemIdx）；DB idx 会在同名物品堆叠间冲突，
+	// 导致基于 MakeIndex 寻址的操作出错。
 	makeIndex := int32(itemIdx)
 	if p.Engine != nil {
 		p.Engine.mu.Lock()
@@ -42,10 +42,10 @@ func (p *PlayObject) GiveItem(itemIdx int) bool {
 	return true
 }
 
-// HandleAdjustBonus applies spent bonus points (CMAdjustBonus: Recog =
-// remaining points, body = 9×u16 deltas in TNakedAbility order
+// HandleAdjustBonus 应用已分配的加成点（CMAdjustBonus: Recog =
+// 剩余点数，body = 按 TNakedAbility 顺序排列的 9×u16 增量
 // DC,MC,SC,AC,MAC,HP,MP,Hit,Speed — Delphi SendAdjustBonus,
-// ClMain.pas:3373-3379).
+// ClMain.pas:3373-3379）。
 func (p *PlayObject) HandleAdjustBonus(msg SendMessage, server *netserver.TCPServer) {
 	raw := []byte(msg.Msg)
 	if len(raw) < 18 {
@@ -61,7 +61,7 @@ func (p *PlayObject) HandleAdjustBonus(msg SendMessage, server *netserver.TCPSer
 		return
 	}
 	p.BonusPoint -= spent
-	// Per-point effects (closed-loop values).
+	// 每点加成效果（闭环数值）。
 	p.WAbil.DC += uint32(deltas[0]) << 16
 	p.WAbil.MC += uint32(deltas[1]) << 16
 	p.WAbil.SC += uint32(deltas[2]) << 16
@@ -76,12 +76,12 @@ func (p *PlayObject) HandleAdjustBonus(msg SendMessage, server *netserver.TCPSer
 	p.sendHealthSpell(server)
 	resp := protocol.MakeDefaultMsg(protocol.SMAdjustBonus, int32(p.BonusPoint), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
-	log.Logf(log.LevelInfo, "Items", "%s spent %d bonus points", p.Name, spent)
+	log.Logf(log.LevelInfo, "Items", "%s 分配了 %d 点加成点", p.Name, spent)
 }
 
-// findBagItem returns the bag position of the item with the given MakeIndex,
-// or -1. All client item CMs address instances by MakeIndex: client-side slot
-// layout is client-owned, so bag indices are not authoritative.
+// findBagItem 返回指定 MakeIndex 物品在背包中的位置，
+// 未找到返回 -1。客户端所有物品 CM 消息通过 MakeIndex 寻址实例：
+// 客户端槽位布局由客户端维护，因此背包下标不具权威性。
 func (p *PlayObject) findBagItem(makeIndex int32) int {
 	for i, item := range p.ItemList {
 		if item != nil && item.MakeIndex == makeIndex {
@@ -132,7 +132,7 @@ func (p *PlayObject) SendUseItemsFull(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex (instance id), Param2 = target slot.
+	// Param1 = MakeIndex（实例ID），Param2 = 目标槽位。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	slot := msg.Param2
 
@@ -202,7 +202,7 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 	p.SendAbility(server)
 	p.sendWeightChanged(server)
 
-	log.Logf(log.LevelInfo, "Items", "%s equipped %s to slot %d", p.Name, def.Name, slot)
+	log.Logf(log.LevelInfo, "Items", "%s 装备 %s 到槽位 %d", p.Name, def.Name, slot)
 }
 
 func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPServer) {
@@ -243,11 +243,11 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 			name = def.Name
 		}
 	}
-	log.Logf(log.LevelInfo, "Items", "%s unequipped %s from slot %d", p.Name, name, slot)
+	log.Logf(log.LevelInfo, "Items", "%s 从槽位 %d 卸下 %s", p.Name, slot, name)
 }
 
 func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex (instance id; the client layout is client-owned).
+	// Param1 = MakeIndex（实例ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		p.sendEatFail(server)
@@ -303,15 +303,15 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 	p.SendAbility(server)
 	p.sendWeightChanged(server)
 
-	log.Logf(log.LevelInfo, "Items", "%s used %s", p.Name, def.Name)
+	log.Logf(log.LevelInfo, "Items", "%s 使用了 %s", p.Name, def.Name)
 }
 
-// makeLong packs lo/hi stat bounds the way Delphi MakeLong does (lo word | hi word<<16).
+// makeLong 按 Delphi MakeLong 的方式打包 lo/hi 属性区间（lo word | hi word<<16）。
 func makeLong(lo, hi int) uint32 {
 	return uint32(uint16(lo)) | uint32(uint16(hi))<<16
 }
 
-// levelFormula mirrors Delphi Round((Level / X) * Level) with float division.
+// levelFormula 对应 Delphi Round((Level / X) * Level)，使用浮点除法。
 func levelFormula(level int, divisor float64) int {
 	return int(math.Round(float64(level) / divisor * float64(level)))
 }
@@ -322,10 +322,10 @@ func (p *PlayObject) RecalcAbilitys() {
 		level = 1
 	}
 
-	// Per-job base stats, Delphi RecalcLevelAbilitys (ObjBase.pas:1880-1941),
-	// the commented legacy formulas (config-free equivalents).
+	// 各职业基础属性，Delphi RecalcLevelAbilitys（ObjBase.pas:1880-1941），
+	// 即注释中的旧版公式（无配置等效值）。
 	switch p.Job {
-	case 0: // Warrior (jWarr, :1921-1936)
+	case 0: // 战士 (jWarr, :1921-1936)
 		p.WAbil.MaxHP = uint16(min(65535, 14+int(math.Round((float64(level)/4.0+4.5+float64(level)/20.0)*float64(level)))))
 		p.WAbil.MaxMP = uint16(min(65535, 11+int(math.Round(float64(level)*3.5))))
 		p.WAbil.MaxWeight = uint16(50 + levelFormula(level, 3))
@@ -336,7 +336,7 @@ func (p *PlayObject) RecalcAbilitys() {
 		p.WAbil.SC = 0
 		p.WAbil.AC = makeLong(0, level/7)
 		p.WAbil.MAC = 0
-	case 1: // Mage (jWizard, :1904-1920)
+	case 1: // 法师 (jWizard, :1904-1920)
 		p.WAbil.MaxHP = uint16(min(65535, 14+int(math.Round((float64(level)/15.0+1.8)*float64(level)))))
 		p.WAbil.MaxMP = uint16(min(65535, 13+int(math.Round((float64(level)/5.0+2.0)*2.2*float64(level)))))
 		p.WAbil.MaxWeight = uint16(50 + levelFormula(level, 5))
@@ -348,7 +348,7 @@ func (p *PlayObject) RecalcAbilitys() {
 		p.WAbil.SC = 0
 		p.WAbil.AC = 0
 		p.WAbil.MAC = 0
-	default: // Taoist (jTaos, :1883-1903)
+	default: // 道士 (jTaos, :1883-1903)
 		p.WAbil.MaxHP = uint16(min(65535, 14+int(math.Round((float64(level)/6.0+2.5)*float64(level)))))
 		p.WAbil.MaxMP = uint16(min(65535, 13+int(math.Round(float64(level)/8.0*2.2*float64(level)))))
 		p.WAbil.MaxWeight = uint16(50 + levelFormula(level, 4))
@@ -363,15 +363,15 @@ func (p *PlayObject) RecalcAbilitys() {
 		p.WAbil.MAC = makeLong(n/2, n+1)
 	}
 
-	// Hit/agility base (ObjBase.pas:18563-18566; DEFHIT=5, DEFSPEED=15,
-	// taoists get +3 innate speed).
+	// 命中/敏捷基础值（ObjBase.pas:18563-18566；DEFHIT=5, DEFSPEED=15，
+	// 道士天生 +3 敏捷）。
 	p.HitPoint = 5
 	p.SpeedPoint = 15
 	if p.Job == 2 {
 		p.SpeedPoint += 3
 	}
 
-	// Current bag weight (sum of item def weights).
+	// 当前背包重量（各物品定义重量之和）。
 	var bagWeight int
 	if p.ItemDB != nil {
 		for _, item := range p.ItemList {
@@ -467,9 +467,9 @@ func (p *PlayObject) updateAppearance() {
 	}
 }
 
-// getEquipSlot maps an item StdMode to its primary equipment slot
-// (ClFunc.pas:618-634). Dual-slot items (rings/bracelets) return the left
-// slot; validEquipSlot accepts either side.
+// getEquipSlot 将物品 StdMode 映射到主装备槽位
+//（ClFunc.pas:618-634）。双槽位物品（戒指/手镯）返回左侧槽位；
+// validEquipSlot 接受左右任一侧。
 func getEquipSlot(stdMode byte) int {
 	switch stdMode {
 	case 5, 6:
@@ -498,8 +498,8 @@ func getEquipSlot(stdMode byte) int {
 	return -1
 }
 
-// validEquipSlot reports whether slot is an acceptable equip target for
-// stdMode, allowing either side for dual-slot items (FState:3300-3318).
+// validEquipSlot 判断 slot 是否为 stdMode 的合法装备目标，
+// 双槽位物品允许左右任一侧（FState:3300-3318）。
 func validEquipSlot(stdMode byte, slot int) bool {
 	switch stdMode {
 	case 22, 23:
@@ -513,8 +513,8 @@ func validEquipSlot(stdMode byte, slot int) bool {
 func (p *PlayObject) sendTakeOnFail(server *netserver.TCPServer, code int) {
 	resp := protocol.MakeDefaultMsg(protocol.SMTakeOnFail, int32(code), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
-	// The client equips optimistically; the full refresh restores the
-	// authoritative bag/equipment state (SMBagItems/SMSendUseItems handlers).
+	// 客户端采用乐观装备策略；全量刷新用于恢复权威的背包/装备状态
+	//（SMBagItems/SMSendUseItems 处理逻辑）。
 	p.SendBagItemsFull(server)
 	p.SendUseItemsFull(server)
 }

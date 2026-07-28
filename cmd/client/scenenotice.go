@@ -5,9 +5,8 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 )
 
-// NoticeScene is the stLoginNotice transition screen. In Delphi this is an
-// empty scene (IntroScn.pas:1553-1561) — just a black screen between
-// character select and gameplay while RunLogin completes.
+// NoticeScene 是 stLoginNotice 过渡画面。在 Delphi 中这是一个空场景
+// (IntroScn.pas:1553-1561)——选角到进入游戏之间的黑屏，等待 RunLogin 完成。
 type NoticeScene struct {
 	gl *engine.GLState
 }
@@ -17,11 +16,11 @@ func NewNoticeScene(gl *engine.GLState, resources *engine.ResourceManager, text 
 }
 
 func (s *NoticeScene) Open() {
-	log.Logf(log.LevelInfo, "NoticeScene", "Opened")
+	log.Logf(log.LevelInfo, "NoticeScene", "已打开")
 }
 
 func (s *NoticeScene) Close() {
-	log.Logf(log.LevelInfo, "NoticeScene", "Closed")
+	log.Logf(log.LevelInfo, "NoticeScene", "已关闭")
 }
 
 func (s *NoticeScene) Update(dt float64) {}

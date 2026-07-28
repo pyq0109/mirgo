@@ -1,4 +1,4 @@
-// Package engine provides shared OpenGL rendering infrastructure for the MIR2 client.
+// Package engine 为 MIR2 客户端提供共享的 OpenGL 渲染基础设施。
 package engine
 
 import (
@@ -96,7 +96,7 @@ func linkProgram(shaders ...uint32) (uint32, error) {
 	return program, nil
 }
 
-// TextureShader holds the texture shader program and uniform locations.
+// TextureShader 保存纹理着色器程序及各 uniform 的位置。
 type TextureShader struct {
 	ID         uint32
 	ProjLoc    int32
@@ -108,7 +108,7 @@ type TextureShader struct {
 	UVOffLoc   int32
 }
 
-// NewTextureShader compiles and links the texture shader.
+// NewTextureShader 编译并链接纹理着色器。
 func NewTextureShader() (*TextureShader, error) {
 	vs, err := compileShader(vertexShader, gl.VERTEX_SHADER)
 	if err != nil {
@@ -132,14 +132,14 @@ func NewTextureShader() (*TextureShader, error) {
 		UVScaleLoc: gl.GetUniformLocation(prog, gl.Str("u_uv_scale\x00")),
 		UVOffLoc:   gl.GetUniformLocation(prog, gl.Str("u_uv_offset\x00")),
 	}
-	// Default UV transform: identity (samples the full texture).
+	// 默认 UV 变换：恒等（采样整张纹理）。
 	gl.UseProgram(prog)
 	gl.Uniform2f(ts.UVScaleLoc, 1, 1)
 	gl.Uniform2f(ts.UVOffLoc, 0, 0)
 	return ts, nil
 }
 
-// ColorShader holds the color shader program and uniform locations.
+// ColorShader 保存颜色着色器程序及各 uniform 的位置。
 type ColorShader struct {
 	ID       uint32
 	ProjLoc  int32
@@ -147,7 +147,7 @@ type ColorShader struct {
 	ColorLoc int32
 }
 
-// NewColorShader compiles and links the color shader.
+// NewColorShader 编译并链接颜色着色器。
 func NewColorShader() (*ColorShader, error) {
 	vs, err := compileShader(colorVertexShader, gl.VERTEX_SHADER)
 	if err != nil {

@@ -1,5 +1,5 @@
-// Package protocol implements the MIR2 network protocol encoding/decoding.
-// This is a faithful port of the Delphi Common/EDcode.pas 6Bit encoding algorithm.
+// Package protocol 实现 MIR2 网络协议的编解码。
+// 忠实移植自 Delphi Common/EDcode.pas 的 6Bit 编解码算法。
 package protocol
 
 import (
@@ -8,25 +8,25 @@ import (
 )
 
 const (
-	// Offset constant for 6Bit encoding
-	encodeOffset = 0x3C // 60, character '<'
+	// 6Bit 编码的偏移常量
+	encodeOffset = 0x3C // 60，字符 '<'
 
-	// BufferSize is the maximum buffer size for encoding/decoding
+	// BufferSize 是编解码的最大缓冲区大小
 	BufferSize = 10000
 
-	// DefBlockSize is the encoded size of a TDefaultMessage
+	// DefBlockSize 是 TDefaultMessage 编码后的大小
 	DefBlockSize = 16
 )
 
-// Encode6BitBuf encodes source bytes into 6Bit encoded bytes.
-// Each 3 input bytes produce 4 output characters.
-// This is a faithful port of the Delphi Encode6BitBuf procedure.
+// Encode6BitBuf 将源字节编码为 6Bit 编码字节。
+// 每 3 个输入字节产生 4 个输出字符。
+// 忠实移植自 Delphi 的 Encode6BitBuf 过程。
 func Encode6BitBuf(src []byte) []byte {
 	if len(src) == 0 {
 		return nil
 	}
 
-	// Pre-calculate output size: ceil(len * 4 / 3)
+	// 预先计算输出大小：ceil(len * 4 / 3)
 	dstLen := (len(src)*4 + 2) / 3
 	dst := make([]byte, dstLen)
 
@@ -71,17 +71,17 @@ func Encode6BitBuf(src []byte) []byte {
 	return dst[:nDestPos]
 }
 
-// Decode6BitBuf decodes 6Bit encoded bytes back to original bytes.
-// This is a faithful port of the Delphi Decode6BitBuf procedure.
+// Decode6BitBuf 将 6Bit 编码字节解码回原始字节。
+// 忠实移植自 Delphi 的 Decode6BitBuf 过程。
 func Decode6BitBuf(src []byte) []byte {
 	if len(src) == 0 {
 		return nil
 	}
 
-	// Masks for bit extraction at different positions
+	// 不同位置的位提取掩码
 	masks := [7]byte{0, 0, 0xFC, 0xF8, 0xF0, 0xE0, 0xC0}
 
-	dst := make([]byte, len(src)) // Output will be smaller, but allocate max
+	dst := make([]byte, len(src)) // 输出会更小，但按最大值分配
 	nBitPos := 2
 	nMadeBit := 0
 	nBufPos := 0
@@ -119,8 +119,8 @@ func Decode6BitBuf(src []byte) []byte {
 	return dst[:nBufPos]
 }
 
-// EncodeMessage encodes a TDefaultMessage into a 6Bit encoded string.
-// The message is 12 bytes, encoded to 16 characters.
+// EncodeMessage 将 TDefaultMessage 编码为 6Bit 编码字符串。
+// 消息为 12 字节，编码后为 16 个字符。
 func EncodeMessage(msg DefaultMessage) string {
 	buf := make([]byte, 12)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(msg.Recog))
@@ -133,7 +133,7 @@ func EncodeMessage(msg DefaultMessage) string {
 	return string(encoded)
 }
 
-// DecodeMessage decodes a 6Bit encoded string into a TDefaultMessage.
+// DecodeMessage 将 6Bit 编码字符串解码为 TDefaultMessage。
 func DecodeMessage(str string) DefaultMessage {
 	var msg DefaultMessage
 
@@ -155,7 +155,7 @@ func DecodeMessage(str string) DefaultMessage {
 	return msg
 }
 
-// EncodeString encodes a string into a 6Bit encoded string.
+// EncodeString 将字符串编码为 6Bit 编码字符串。
 func EncodeString(str string) string {
 	if str == "" {
 		return ""
@@ -164,7 +164,7 @@ func EncodeString(str string) string {
 	return string(encoded)
 }
 
-// DecodeString decodes a 6Bit encoded string back to the original string.
+// DecodeString 将 6Bit 编码字符串解码回原始字符串。
 func DecodeString(str string) string {
 	if str == "" {
 		return ""
@@ -173,7 +173,7 @@ func DecodeString(str string) string {
 	return string(decoded)
 }
 
-// EncodeBuffer encodes a byte buffer into a 6Bit encoded string.
+// EncodeBuffer 将字节缓冲区编码为 6Bit 编码字符串。
 func EncodeBuffer(buf []byte) string {
 	if len(buf) == 0 || len(buf) >= BufferSize {
 		return ""
@@ -182,7 +182,7 @@ func EncodeBuffer(buf []byte) string {
 	return string(encoded)
 }
 
-// DecodeBuffer decodes a 6Bit encoded string into a byte buffer.
+// DecodeBuffer 将 6Bit 编码字符串解码到字节缓冲区。
 func DecodeBuffer(str string, buf []byte) {
 	if str == "" || len(buf) == 0 {
 		return
@@ -191,7 +191,7 @@ func DecodeBuffer(str string, buf []byte) {
 	copy(buf, decoded)
 }
 
-// MakeDefaultMsg creates a TDefaultMessage with the given parameters.
+// MakeDefaultMsg 用给定参数创建一个 TDefaultMessage。
 func MakeDefaultMsg(ident uint16, recog int32, param, tag, series uint16) DefaultMessage {
 	return DefaultMessage{
 		Recog:  recog,
@@ -202,14 +202,14 @@ func MakeDefaultMsg(ident uint16, recog int32, param, tag, series uint16) Defaul
 	}
 }
 
-// GetCodeMsgSize returns the encoded size for a given raw size.
-// Formula: ceil(n * 4 / 3)
+// GetCodeMsgSize 返回给定原始大小编码后的大小。
+// 公式：ceil(n * 4 / 3)
 func GetCodeMsgSize(n int) int {
 	return (n*4 + 2) / 3
 }
 
-// EncodeMessageWithBody encodes a message with an optional body string.
-// This is the standard frame format: EncodeMessage + body
+// EncodeMessageWithBody 编码消息并附带可选的 body 字符串。
+// 这是标准帧格式：EncodeMessage + body
 func EncodeMessageWithBody(msg DefaultMessage, body string) string {
 	var sb strings.Builder
 	sb.WriteString(EncodeMessage(msg))
@@ -219,8 +219,8 @@ func EncodeMessageWithBody(msg DefaultMessage, body string) string {
 	return sb.String()
 }
 
-// FormatClientFrame formats a client-to-server message frame.
-// Format: #<code><payload>!
+// FormatClientFrame 格式化客户端到服务端的消息帧。
+// 格式：#<code><payload>!
 func FormatClientFrame(payload string, code *byte) string {
 	if *code >= 10 {
 		*code = 1
@@ -230,8 +230,8 @@ func FormatClientFrame(payload string, code *byte) string {
 	return frame
 }
 
-// FormatServerFrame formats a server-to-client message frame.
-// Format: #<payload>!
+// FormatServerFrame 格式化服务端到客户端的消息帧。
+// 格式：#<payload>!
 func FormatServerFrame(payload string) string {
 	return "#" + payload + "!"
 }

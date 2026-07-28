@@ -1,4 +1,4 @@
-// Package main converts Delphi server configuration files to JSONC format.
+// Package main 将 Delphi 服务端配置文件转换为 JSONC 格式。
 package main
 
 import (
@@ -15,9 +15,9 @@ import (
 	"golang.org/x/text/transform"
 )
 
-// ParseINI parses an INI-style file and returns a map of sections to key-value pairs.
-// Supports [Section] headers and Key=Value lines.
-// Lines starting with ; or # are treated as comments.
+// ParseINI 解析 INI 格式文件，返回各节（section）到键值对的映射。
+// 支持 [Section] 节头和 Key=Value 行。
+// 以 ; 或 # 开头的行视为注释。
 func ParseINI(filename string) (map[string]map[string]string, error) {
 	data, err := ReadGBKFile(filename)
 	if err != nil {
@@ -31,12 +31,12 @@ func ParseINI(filename string) (map[string]map[string]string, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		// Skip empty lines and comments
+		// 跳过空行和注释
 		if line == "" || line[0] == ';' || line[0] == '#' {
 			continue
 		}
 
-		// Section header
+		// 节头
 		if line[0] == '[' && line[len(line)-1] == ']' {
 			currentSection = line[1 : len(line)-1]
 			if _, exists := result[currentSection]; !exists {
@@ -58,7 +58,7 @@ func ParseINI(filename string) (map[string]map[string]string, error) {
 	return result, nil
 }
 
-// ParseSQLite opens a SQLite database file and returns the database connection.
+// ParseSQLite 打开 SQLite 数据库文件并返回数据库连接。
 func ParseSQLite(filename string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", filename)
 	if err != nil {
@@ -67,8 +67,8 @@ func ParseSQLite(filename string) (*sql.DB, error) {
 	return db, nil
 }
 
-// ParseCustomTable parses a custom-delimited file and returns rows as maps.
-// The first line is treated as the header row.
+// ParseCustomTable 解析自定义分隔符文件，以映射形式返回各行。
+// 第一行视为表头行。
 func ParseCustomTable(filename string, separator string) ([]map[string]string, error) {
 	data, err := ReadGBKFile(filename)
 	if err != nil {
@@ -85,14 +85,14 @@ func ParseCustomTable(filename string, separator string) ([]map[string]string, e
 		line := strings.TrimSpace(scanner.Text())
 		lineNum++
 
-		// Skip empty lines and comments
+		// 跳过空行和注释
 		if line == "" || line[0] == ';' || line[0] == '#' {
 			continue
 		}
 
 		parts := strings.Split(line, separator)
 
-		// First non-comment line is header
+		// 第一个非注释行是表头
 		if headers == nil {
 			headers = make([]string, len(parts))
 			for i, h := range parts {
@@ -113,7 +113,7 @@ func ParseCustomTable(filename string, separator string) ([]map[string]string, e
 	return result, nil
 }
 
-// ParseLineList parses a file into a list of non-empty, non-comment lines.
+// ParseLineList 将文件解析为非空、非注释行的列表。
 func ParseLineList(filename string) ([]string, error) {
 	data, err := ReadGBKFile(filename)
 	if err != nil {
@@ -134,21 +134,21 @@ func ParseLineList(filename string) ([]string, error) {
 	return result, nil
 }
 
-// ReadGBKFile reads a GBK-encoded file and converts it to UTF-8.
-// It first tries to read as UTF-8, and falls back to GBK if that fails.
+// ReadGBKFile 读取 GBK 编码文件并转换为 UTF-8。
+// 先尝试以 UTF-8 读取，失败则回退到 GBK 解码。
 func ReadGBKFile(filename string) ([]byte, error) {
-	// First try reading as UTF-8
+	// 先尝试以 UTF-8 读取
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if the data is valid UTF-8
+	// 检查数据是否为有效 UTF-8
 	if isValidUTF8(data) {
 		return data, nil
 	}
 
-	// Fall back to GBK decoding
+	// 回退到 GBK 解码
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -164,10 +164,10 @@ func ReadGBKFile(filename string) ([]byte, error) {
 	return data, nil
 }
 
-// isValidUTF8 checks if the data is valid UTF-8.
+// isValidUTF8 检查数据是否为有效 UTF-8。
 func isValidUTF8(data []byte) bool {
-	// Check for common invalid UTF-8 sequences
-	// This is a simplified check - just verify the data can be decoded as UTF-8
+	// 检查常见的无效 UTF-8 序列
+	// 这是简化检查——仅验证数据能否按 UTF-8 解码
 	for i := 0; i < len(data); {
 		b := data[i]
 		if b < 0x80 {
@@ -175,7 +175,7 @@ func isValidUTF8(data []byte) bool {
 			continue
 		}
 		if b < 0xC0 {
-			return false // Invalid start byte
+			return false // 无效的起始字节
 		}
 		if b < 0xE0 {
 			if i+1 >= len(data) || data[i+1]&0xC0 != 0x80 {
@@ -203,14 +203,14 @@ func isValidUTF8(data []byte) bool {
 	return true
 }
 
-// ReadUTF8File reads a UTF-8 encoded file.
+// ReadUTF8File 读取 UTF-8 编码文件。
 func ReadUTF8File(filename string) ([]byte, error) {
 	return os.ReadFile(filename)
 }
 
-// WriteJSONC writes data as a JSONC file with optional header comments.
+// WriteJSONC 将数据写为 JSONC 文件，可选添加头部注释。
 func WriteJSONC(filename string, data string, comment string) error {
-	// Ensure directory exists
+	// 确保目录存在
 	dir := filepath.Dir(filename)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
@@ -222,7 +222,7 @@ func WriteJSONC(filename string, data string, comment string) error {
 	}
 	defer f.Close()
 
-	// Write comment header
+	// 写入注释头
 	if comment != "" {
 		for _, line := range strings.Split(comment, "\n") {
 			fmt.Fprintf(f, "// %s\n", line)
@@ -230,12 +230,12 @@ func WriteJSONC(filename string, data string, comment string) error {
 		fmt.Fprintln(f)
 	}
 
-	// Write data
+	// 写入数据
 	_, err = f.WriteString(data)
 	return err
 }
 
-// StringSliceToJSON converts a string slice to JSON array format.
+// StringSliceToJSON 将字符串切片转换为 JSON 数组格式。
 func StringSliceToJSON(items []string) string {
 	var sb strings.Builder
 	sb.WriteString("[\n")
@@ -249,7 +249,7 @@ func StringSliceToJSON(items []string) string {
 	return sb.String()
 }
 
-// MapSliceToJSON converts a slice of maps to JSON array format.
+// MapSliceToJSON 将映射切片转换为 JSON 数组格式。
 func MapSliceToJSON(items []map[string]string) string {
 	var sb strings.Builder
 	sb.WriteString("[\n")
@@ -272,9 +272,9 @@ func MapSliceToJSON(items []map[string]string) string {
 	return sb.String()
 }
 
-// CopyFile copies a file from src to dst.
+// CopyFile 将文件从 src 复制到 dst。
 func CopyFile(src, dst string) error {
-	// Ensure destination directory exists
+	// 确保目标目录存在
 	dir := filepath.Dir(dst)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
@@ -296,7 +296,7 @@ func CopyFile(src, dst string) error {
 	return err
 }
 
-// CopyDir copies all files matching pattern from srcDir to dstDir.
+// CopyDir 将 srcDir 中匹配 pattern 的所有文件复制到 dstDir。
 func CopyDir(srcDir, dstDir, pattern string) (int, error) {
 	matches, err := filepath.Glob(filepath.Join(srcDir, pattern))
 	if err != nil {
@@ -315,7 +315,7 @@ func CopyDir(srcDir, dstDir, pattern string) (int, error) {
 	return count, nil
 }
 
-// CountLines counts the number of non-empty, non-comment lines in a file.
+// CountLines 统计文件中非空、非注释行的数量。
 func CountLines(filename string) (int, error) {
 	data, err := ReadGBKFile(filename)
 	if err != nil {
@@ -333,13 +333,13 @@ func CountLines(filename string) (int, error) {
 	return count, nil
 }
 
-// FileExists checks if a file exists.
+// FileExists 检查文件是否存在。
 func FileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return err == nil
 }
 
-// DirExists checks if a directory exists.
+// DirExists 检查目录是否存在。
 func DirExists(dirname string) bool {
 	info, err := os.Stat(dirname)
 	return err == nil && info.IsDir()

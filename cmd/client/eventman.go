@@ -7,9 +7,9 @@ import (
 	"github.com/pyq0109/mirgo/internal/engine"
 )
 
-// fireBurnBase mirrors Delphi clEvent.pas ET_FIRE (non-CUSTOMLIB): the fire
-// animation is 6 frames in Magic.wil (g_WMagicImages) starting at FIREBURNBASE,
-// cycled as (frame/2) mod 6 with additive blending.
+// fireBurnBase 对应 Delphi clEvent.pas 的 ET_FIRE（非 CUSTOMLIB）：火焰动画
+// 在 Magic.wil（g_WMagicImages）中从 FIREBURNBASE 起共 6 帧，
+// 以 (frame/2) mod 6 循环，叠加混合绘制。
 const fireBurnBase = 1630
 
 type MapEvent struct {
@@ -68,8 +68,8 @@ func (em *EventManager) Render(glState *engine.GLState, resources *engine.Resour
 	}
 }
 
-// RenderRow renders only events whose Y matches the given tile row,
-// used inside the Y-sort pass (PlayScn.pas:1188-1195).
+// RenderRow 仅渲染 Y 坐标等于指定瓦片行的事件，
+// 用于 Y 排序绘制阶段（PlayScn.pas:1188-1195）。
 func (em *EventManager) RenderRow(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32, row int) {
 	for _, ev := range em.events {
 		if ev.Y == row {

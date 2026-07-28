@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-// ExpTable represents the experience table configuration.
+// ExpTable 表示经验表配置。
 type ExpTable struct {
 	HighLevel         int            `json:"highLevel"`
 	KillMonExpMultiple int           `json:"killMonExpMultiple"`
@@ -15,17 +15,17 @@ type ExpTable struct {
 	Levels            map[string]int64 `json:"levels"`
 }
 
-// StringsConfig represents the server strings configuration.
+// StringsConfig 表示服务端字符串配置。
 type StringsConfig struct {
 	Messages map[string]string `json:"messages"`
 }
 
-// GlobalVars represents the global variables configuration.
+// GlobalVars 表示全局变量配置。
 type GlobalVars struct {
 	Variables map[string]int `json:"variables"`
 }
 
-// ConvertExpTable converts the experience table configuration.
+// ConvertExpTable 转换经验表配置。
 func ConvertExpTable(inputDir, outputDir string) error {
 	expFile := filepath.Join(inputDir, "Exps.ini")
 	expINI, err := ParseINI(expFile)
@@ -70,7 +70,7 @@ func ConvertExpTable(inputDir, outputDir string) error {
 	return WriteJSONC(outputFile, string(data), comment)
 }
 
-// ConvertStrings converts the server strings configuration.
+// ConvertStrings 转换服务端字符串配置。
 func ConvertStrings(inputDir, outputDir string) error {
 	strFile := filepath.Join(inputDir, "String.ini")
 	strINI, err := ParseINI(strFile)
@@ -102,7 +102,7 @@ func ConvertStrings(inputDir, outputDir string) error {
 	return WriteJSONC(outputFile, string(data), comment)
 }
 
-// ConvertGlobalVars converts the global variables configuration.
+// ConvertGlobalVars 转换全局变量配置。
 func ConvertGlobalVars(inputDir, outputDir string) error {
 	gvFile := filepath.Join(inputDir, "GlobalVal.ini")
 	gvINI, err := ParseINI(gvFile)

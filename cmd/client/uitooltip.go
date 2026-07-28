@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// Tooltip — port of DScreen.ShowHint/ClearHint/DrawHint (DrawScrn.pas:195-223,
-// 417-447). Recomputed on mouse-move events, rendered every frame. Callers
-// pass multi-line text split on '\' (Delphi convention).
+// Tooltip — 移植自 DScreen.ShowHint/ClearHint/DrawHint (DrawScrn.pas:195-223,
+// 417-447)。鼠标移动时重新计算, 每帧渲染。调用方传入以 '\' 分隔的
+// 多行文本 (Delphi 惯例)。
 type Tooltip struct {
 	visible bool
 	x, y    int
@@ -21,8 +21,8 @@ const (
 	hintPadY = 3
 )
 
-// Show sets the tooltip. text may contain '\' separators for multiple lines.
-// drawUp places the box above the anchor point (Delphi bag cell hints).
+// Show 设置提示框。text 可含 '\' 分隔多行。
+// drawUp 将提示框放在锚点上方 (Delphi 背包格提示)。
 func (t *Tooltip) Show(x, y int, text string, color [4]float32, drawUp bool) {
 	t.lines = strings.Split(text, "\\")
 	t.color = color
@@ -36,7 +36,7 @@ func (t *Tooltip) Clear() {
 	t.lines = nil
 }
 
-// Render draws the tooltip on top of everything else.
+// Render 在最顶层绘制提示框。
 func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 	if !t.visible || len(t.lines) == 0 || s.text == nil {
 		return
@@ -51,9 +51,9 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 	w += hintPadX * 2
 	h := len(t.lines)*lineH + hintPadY*2
 
-	// Background panel Prguse[394]. Delphi draws it 1:1 from the image top-left
-	// corner (DrawScrn.pas:426-436), clamping the box to the image size
-	// (:428-429) rather than stretching the texture.
+	// 背景面板 Prguse[394]。Delphi 从图片左上角 1:1 绘制
+	// (DrawScrn.pas:426-436), 将框体限制在图片尺寸内
+	// (:428-429), 而非拉伸纹理。
 	var hintTex uint32
 	var imgW, imgH int
 	if s.resources.Prguse != nil {
@@ -71,8 +71,8 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 		}
 	}
 
-	// Place the box, clamping to the screen edges and to non-negative coords
-	// (DrawScrn.pas:430-434; drawUp can push y negative).
+	// 定位提示框, 限制在屏幕边缘内且坐标非负
+	// (DrawScrn.pas:430-434; drawUp 可能使 y 为负)。
 	x := t.x
 	if x+w > ScreenWidth {
 		x = ScreenWidth - w
@@ -90,7 +90,7 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 	fx, fy := float32(x), float32(y)
 
 	if hintTex != 0 {
-		// 1:1 source sub-rectangle from the image top-left, alpha=1 (:436).
+		// 从图片左上角取 1:1 源子矩形, alpha=1 (:436)。
 		s.gl.DrawQuadSub(hintTex, float32(imgW), float32(imgH),
 			0, 0, float32(w), float32(h), fx, fy, float32(w), float32(h),
 			1, 1, 1, 1, proj)
@@ -104,9 +104,9 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 	}
 }
 
-// GetMouseItemInfo builds the hover text for an item (compact port of
-// FState.pas:3935-4448): name \ weight \ dura \ stat ranges. useable is
-// false when the level requirement is not met (red hint, :4400-4420).
+// GetMouseItemInfo 构建物品悬浮文本 (精简移植自
+// FState.pas:3935-4448): 名称 \ 重量 \ 持久 \ 属性范围。等级不足时
+// useable 为 false (红色提示, :4400-4420)。
 func GetMouseItemInfo(gs *GameState, item *BagItem) (text string, useable bool) {
 	if item == nil {
 		return "", false
@@ -124,7 +124,7 @@ func GetMouseItemInfo(gs *GameState, item *BagItem) (text string, useable bool) 
 	if def != nil && def.Weight > 0 {
 		parts = append(parts, "Weight "+strconv.Itoa(int(def.Weight)))
 	}
-	// Delphi shows Round(dura/1000) (FState.pas:3936-3942); +500 rounds half-up.
+	// Delphi 显示 Round(dura/1000) (FState.pas:3936-3942); +500 实现四舍五入。
 	if item.DuraMax > 0 {
 		parts = append(parts, "Dura "+strconv.Itoa((int(item.Dura)+500)/1000)+"/"+strconv.Itoa((int(item.DuraMax)+500)/1000))
 	} else if item.Dura > 0 {

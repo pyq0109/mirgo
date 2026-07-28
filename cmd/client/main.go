@@ -18,13 +18,13 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// fade implements the Delphi MakeDark transition (ClMain.pas:1114-1130).
-// g_nFadeIndex ranges 1 (fully dark) to 29 (fully bright); each frame
-// the index moves by step until it hits the boundary, then onDone fires.
+// fade 实现 Delphi MakeDark 渐变过渡（ClMain.pas:1114-1130）。
+// g_nFadeIndex 范围 1（全暗）到 29（全亮）；每帧 index 按 step 移动，
+// 到达边界后触发 onDone。
 type fadeState struct {
 	active bool
 	index  float64 // 1..29
-	step   float64 // +2 (fade in), -2 (fade out), -4 (fast fade out)
+	step   float64 // +2（淡入）、-2（淡出）、-4（快速淡出）
 	onDone func()
 }
 
@@ -85,20 +85,20 @@ func init() {
 }
 
 func main() {
-	dataDir := flag.String("data", "asset/client/Data", "Path to client data directory")
-	mapDir := flag.String("maps", "asset/client/Map", "Path to map directory")
-	serverAddr := flag.String("server", "localhost:7000", "Server address")
-	logLevel := flag.String("loglevel", "debug", "Log level: trace/debug/info/warn/error")
+	dataDir := flag.String("data", "asset/client/Data", "客户端数据目录路径")
+	mapDir := flag.String("maps", "asset/client/Map", "地图目录路径")
+	serverAddr := flag.String("server", "localhost:7000", "服务器地址")
+	logLevel := flag.String("loglevel", "debug", "日志级别: trace/debug/info/warn/error")
 	flag.Parse()
 
 	log.SetLevel(log.ParseLevel(*logLevel))
-	log.Logf(log.LevelInfo, "Client", "Starting MIR2 Client...")
-	log.Logf(log.LevelInfo, "Client", "Server: %s", *serverAddr)
+	log.Logf(log.LevelInfo, "Client", "正在启动 MIR2 客户端...")
+	log.Logf(log.LevelInfo, "Client", "服务器: %s", *serverAddr)
 
-	// Delphi runs at fixed 800×600 (SWH800, Share.pas:22-24).
+	// Delphi 固定运行在 800×600（SWH800, Share.pas:22-24）。
 	window, err := engine.NewWindow(800, 600, "MIR2 Client")
 	if err != nil {
-		log.Logf(log.LevelError, "Client", "Failed to create window: %v", err)
+		log.Logf(log.LevelError, "Client", "创建窗口失败: %v", err)
 		os.Exit(1)
 	}
 	window.SetResizable(false)
@@ -106,22 +106,22 @@ func main() {
 
 	glState, err := engine.NewGLState()
 	if err != nil {
-		log.Logf(log.LevelError, "Client", "Failed to create GL state: %v", err)
+		log.Logf(log.LevelError, "Client", "创建 GL 状态失败: %v", err)
 		os.Exit(1)
 	}
 	defer glState.Destroy()
 
 	resources, err := engine.NewResourceManager(*dataDir, glState)
 	if err != nil {
-		log.Logf(log.LevelError, "Client", "Failed to load resources: %v", err)
+		log.Logf(log.LevelError, "Client", "加载资源失败: %v", err)
 		os.Exit(1)
 	}
 	defer resources.Destroy()
-	log.Logf(log.LevelInfo, "Client", "WIL resources loaded")
+	log.Logf(log.LevelInfo, "Client", "WIL 资源已加载")
 
 	textRenderer, err := engine.NewTextRenderer(glState, "", 16)
 	if err != nil {
-		log.Logf(log.LevelWarn, "Client", "Failed to load font: %v", err)
+		log.Logf(log.LevelWarn, "Client", "加载字体失败: %v", err)
 	}
 	defer func() {
 		if textRenderer != nil {
@@ -148,41 +148,41 @@ func main() {
 
 	glfwWindow := window.GetWindow()
 
-	// Wire login scene callbacks.
+	// 连接登录场景回调。
 	loginScene.SetLoginFunc(func(id, password string) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc called: id=%s", id)
+		log.Logf(log.LevelInfo, "Client", "[回调] LoginFunc 被调用: id=%s", id)
 		if handler != nil {
-			log.Logf(log.LevelWarn, "Client", "[Callback] LoginFunc: handler already exists, skipping")
+			log.Logf(log.LevelWarn, "Client", "[回调] LoginFunc: handler 已存在，跳过")
 			return
 		}
 		var err error
-		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc: connecting to %s...", *serverAddr)
+		log.Logf(log.LevelInfo, "Client", "[回调] LoginFunc: 正在连接 %s...", *serverAddr)
 		handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
 		if err != nil {
-			log.Logf(log.LevelError, "Client", "[Callback] LoginFunc: connect failed: %v", err)
+			log.Logf(log.LevelError, "Client", "[回调] LoginFunc: 连接失败: %v", err)
 			loginScene.SetError("连接服务器失败")
 			handler = nil
 			return
 		}
 		handler.onFail = func() {
-			log.Logf(log.LevelInfo, "Client", "[Callback] onFail: resetting handler")
+			log.Logf(log.LevelInfo, "Client", "[回调] onFail: 重置 handler")
 			handler = nil
 		}
 		handler.loginID = id
-		log.Logf(log.LevelInfo, "Client", "[Callback] LoginFunc: sending login for id=%s", id)
+		log.Logf(log.LevelInfo, "Client", "[回调] LoginFunc: 发送登录 id=%s", id)
 		handler.SendLogin(id, password)
 	})
 	loginScene.SetCloseFunc(func() {
-		log.Logf(log.LevelInfo, "Client", "[Callback] CloseFunc: closing window")
+		log.Logf(log.LevelInfo, "Client", "[回调] CloseFunc: 关闭窗口")
 		glfwWindow.SetShouldClose(true)
 	})
 	loginScene.SetRegisterFunc(func(ue protocol.UserEntry, ua protocol.UserEntryAdd) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] RegisterFunc: id=%s", ue.Account())
+		log.Logf(log.LevelInfo, "Client", "[回调] RegisterFunc: id=%s", ue.Account())
 		if handler == nil {
 			var err error
 			handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
 			if err != nil {
-				log.Logf(log.LevelError, "Client", "[Callback] RegisterFunc: connect failed: %v", err)
+				log.Logf(log.LevelError, "Client", "[回调] RegisterFunc: 连接失败: %v", err)
 				loginScene.SetError("连接服务器失败")
 				handler = nil
 				return
@@ -193,16 +193,16 @@ func main() {
 		}
 		handler.registerID = ue.Account()
 		regMsg := protocol.MakeDefaultMsg(protocol.CMAddNewUser, 0, 0, 0, 0)
-		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd) (ClMain.pas:2844).
+		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd)（ClMain.pas:2844）。
 		handler.SendEncoded(regMsg, protocol.EncodeBuffer(ue.Bytes())+protocol.EncodeBuffer(ua.Bytes()))
 	})
 	loginScene.SetChgPwFunc(func(id, oldpw, newpw string) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ChgPwFunc: id=%s", id)
+		log.Logf(log.LevelInfo, "Client", "[回调] ChgPwFunc: id=%s", id)
 		if handler == nil {
 			var err error
 			handler, err = connectToServer(*serverAddr, loginScene, playScene, selectChrScene, noticeScene, sceneMgr)
 			if err != nil {
-				log.Logf(log.LevelError, "Client", "[Callback] ChgPwFunc: connect failed: %v", err)
+				log.Logf(log.LevelError, "Client", "[回调] ChgPwFunc: 连接失败: %v", err)
 				loginScene.SetError("连接服务器失败")
 				handler = nil
 				return
@@ -214,45 +214,45 @@ func main() {
 		handler.SendChgPw(id, oldpw, newpw)
 	})
 
-	// Wire server selection (DSelServerDlg overlay on the login scene). The
-	// close button reuses loginScene.closeFunc, which exits the app.
+	// 连接选服功能（DSelServerDlg 覆盖在登录场景上）。关闭按钮复用
+	// loginScene.closeFunc，会退出程序。
 	loginScene.SetSelectFunc(func(serverName string) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ServerSelectFunc: server=%s", serverName)
+		log.Logf(log.LevelInfo, "Client", "[回调] ServerSelectFunc: server=%s", serverName)
 		if handler == nil {
-			log.Logf(log.LevelWarn, "Client", "[Callback] ServerSelectFunc: handler is nil")
+			log.Logf(log.LevelWarn, "Client", "[回调] ServerSelectFunc: handler 为空")
 			return
 		}
 		handler.SendSelectServer(serverName)
 	})
 
-	// Wire select character scene callbacks.
+	// 连接选角场景回调。
 	selectChrScene.SetStartFunc(func(charName string) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ChrStartFunc: char=%s", charName)
+		log.Logf(log.LevelInfo, "Client", "[回调] ChrStartFunc: char=%s", charName)
 		if handler == nil {
-			log.Logf(log.LevelWarn, "Client", "[Callback] ChrStartFunc: handler is nil")
+			log.Logf(log.LevelWarn, "Client", "[回调] ChrStartFunc: handler 为空")
 			return
 		}
 		handler.charName = charName
 		handler.SendSelChr(charName)
 	})
 	selectChrScene.SetNewChrFunc(func(name string, hair, job, sex int) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ChrNewFunc: name=%s hair=%d job=%d sex=%d", name, hair, job, sex)
+		log.Logf(log.LevelInfo, "Client", "[回调] ChrNewFunc: name=%s hair=%d job=%d sex=%d", name, hair, job, sex)
 		if handler == nil {
-			log.Logf(log.LevelWarn, "Client", "[Callback] ChrNewFunc: handler is nil")
+			log.Logf(log.LevelWarn, "Client", "[回调] ChrNewFunc: handler 为空")
 			return
 		}
 		handler.SendNewChr(name, hair, job, sex)
 	})
 	selectChrScene.SetDelChrFunc(func(name string) {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ChrDelFunc: name=%s", name)
+		log.Logf(log.LevelInfo, "Client", "[回调] ChrDelFunc: name=%s", name)
 		if handler == nil {
-			log.Logf(log.LevelWarn, "Client", "[Callback] ChrDelFunc: handler is nil")
+			log.Logf(log.LevelWarn, "Client", "[回调] ChrDelFunc: handler 为空")
 			return
 		}
 		handler.SendDelChr(name)
 	})
 	selectChrScene.SetExitFunc(func() {
-		log.Logf(log.LevelInfo, "Client", "[Callback] ChrExitFunc: returning to login")
+		log.Logf(log.LevelInfo, "Client", "[回调] ChrExitFunc: 返回登录")
 		if handler != nil {
 			handler.Close()
 			handler = nil
@@ -263,9 +263,8 @@ func main() {
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 		log.Logf(log.LevelDebug, "Key", "key=%d action=%d mods=%d scene=%s",
 			int(key), int(action), int(mods), sceneMgr.CurrentType())
-		// Esc-quits only in pre-game scenes; the original has no global Esc
-		// in play — quitting goes through the DBotExit button there
-		// (ClMain:1575-1612).
+		// Esc 仅在游戏前场景退出；原版游戏中没有全局 Esc 退出，
+		// 游戏内通过 DBotExit 按钮退出（ClMain:1575-1612）。
 		if action == glfw.Press && key == glfw.KeyEscape && sceneMgr.CurrentType() != engine.ScenePlayGame {
 			if handler != nil {
 				handler.Close()
@@ -285,12 +284,12 @@ func main() {
 		switch action {
 		case glfw.Press:
 			x, y := w.GetCursorPos()
-			log.Logf(log.LevelDebug, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
+			log.Logf(log.LevelDebug, "Mouse", "按下 button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), int(mods), x, y, sceneMgr.CurrentType())
 			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
 			x, y := w.GetCursorPos()
-			log.Logf(log.LevelDebug, "Mouse", "release button=%d pos=(%.0f,%.0f) scene=%s",
+			log.Logf(log.LevelDebug, "Mouse", "释放 button=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), x, y, sceneMgr.CurrentType())
 			sceneMgr.OnMouse(x, y, int(button), 0, int(mods))
 		}
@@ -304,10 +303,10 @@ func main() {
 		sceneMgr.OnScroll(xoff, yoff)
 	})
 
-	log.Logf(log.LevelInfo, "Client", "Login scene ready")
+	log.Logf(log.LevelInfo, "Client", "登录场景就绪")
 	window.Run(func(dt float64) {
-		// Dispatch network messages queued by the read goroutine on the main
-		// thread, before scene updates, so all state mutation is single-threaded.
+		// 在主线程上分发读协程排队的网络消息，在场景更新之前执行，
+		// 确保所有状态修改都是单线程的。
 		if handler != nil {
 			handler.Pump()
 		}
@@ -326,16 +325,15 @@ func main() {
 	if handler != nil {
 		handler.Close()
 	}
-	log.Logf(log.LevelInfo, "Client", "Client stopped")
+	log.Logf(log.LevelInfo, "Client", "客户端已停止")
 }
 
 // ============================================================================
 // NetHandler
 // ============================================================================
 
-// netEvent is a decoded server message queued by the read goroutine and
-// dispatched on the main thread via Pump, so all actor/scene mutation is
-// single-threaded (no data races between ReadLoop and the render loop).
+// netEvent 是由读协程排队、通过 Pump 在主线程分发的已解码服务器消息，
+// 确保所有 actor/scene 修改都是单线程的（ReadLoop 和渲染循环之间无数据竞争）。
 type netEvent struct {
 	isCtrl bool
 	ctrl   string
@@ -343,7 +341,7 @@ type netEvent struct {
 	body   string
 }
 
-// NetHandler handles network communication.
+// NetHandler 处理网络通信。
 type NetHandler struct {
 	conn           net.Conn
 	loginScene     *LoginScene
@@ -354,32 +352,32 @@ type NetHandler struct {
 	code           byte
 	done           chan struct{}
 
-	// Auth state
+	// 认证状态
 	loginID       string
-	password      string // Stored for re-authentication after reconnect
-	registerID    string // Last submitted registration account (Delphi MakeNewId, ClMain.pas:2842)
+	password      string // 保存密码用于重连后重新认证
+	registerID    string // 最近提交的注册账号（Delphi MakeNewId, ClMain.pas:2842）
 	certification int
 	charName      string
-	reconnecting  bool // True when waiting for re-auth after reconnect
+	reconnecting  bool // 重连后等待重新认证时为 true
 
-	// Inbound queue: ReadLoop appends, the main thread drains via Pump.
+	// 入站队列：ReadLoop 追加，主线程通过 Pump 消费。
 	queueMu sync.Mutex
 	queue   []netEvent
 
-	// Callbacks (set by main)
+	// 回调（由 main 设置）
 	onReconnect func(addr string, loginID string, certification int)
-	onFail      func() // Called when login fails, resets handler in main
+	onFail      func() // 登录失败时调用，在 main 中重置 handler
 }
 
-// enqueue appends a decoded message for main-thread dispatch (called from ReadLoop).
+// enqueue 追加已解码消息供主线程分发（从 ReadLoop 调用）。
 func (h *NetHandler) enqueue(e netEvent) {
 	h.queueMu.Lock()
 	h.queue = append(h.queue, e)
 	h.queueMu.Unlock()
 }
 
-// Pump drains the inbound queue and dispatches on the calling (main) thread.
-// Call once per frame before scene updates.
+// Pump 消费入站队列并在调用方（主）线程上分发。
+// 每帧在场景更新前调用一次。
 func (h *NetHandler) Pump() {
 	h.queueMu.Lock()
 	events := h.queue
@@ -394,22 +392,22 @@ func (h *NetHandler) Pump() {
 	}
 }
 
-// Close stops the read loop and closes the connection.
+// Close 停止读循环并关闭连接。
 func (h *NetHandler) Close() {
 	log.Logf(log.LevelInfo, "Client", "NetHandler.Close()")
 	select {
 	case <-h.done:
-		log.Logf(log.LevelDebug, "Client", "NetHandler.Close: already closed")
+		log.Logf(log.LevelDebug, "Client", "NetHandler.Close: 已关闭")
 	default:
 		close(h.done)
 	}
 	h.conn.Close()
-	log.Logf(log.LevelInfo, "Client", "NetHandler.Close: connection closed")
+	log.Logf(log.LevelInfo, "Client", "NetHandler.Close: 连接已关闭")
 }
 
-// Send encodes and sends a message to the server.
+// Send 编码并发送消息到服务器。
 func (h *NetHandler) Send(msg protocol.DefaultMessage, body string) error {
-	log.Logf(log.LevelInfo, "Client", ">>> SEND %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+	log.Logf(log.LevelInfo, "Client", ">>> 发送 %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
 		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 	encoded := protocol.EncodeMessage(msg)
 	if body != "" {
@@ -420,11 +418,10 @@ func (h *NetHandler) Send(msg protocol.DefaultMessage, body string) error {
 	return err
 }
 
-// SendEncoded sends a message with an already-encoded body. Used for bodies
-// made of multiple independent EncodeBuffer segments (ClMain.pas:2844) that
-// must not pass through EncodeString as a single string.
+// SendEncoded 发送带有已编码 body 的消息。用于由多个独立 EncodeBuffer
+// 段组成的 body（ClMain.pas:2844），这些段不能作为单个字符串通过 EncodeString。
 func (h *NetHandler) SendEncoded(msg protocol.DefaultMessage, encodedBody string) error {
-	log.Logf(log.LevelInfo, "Client", ">>> SEND %s Recog=%d Param=%d Tag=%d Series=%d (encoded body, %d chars)",
+	log.Logf(log.LevelInfo, "Client", ">>> 发送 %s Recog=%d Param=%d Tag=%d Series=%d（已编码 body，%d 字符）",
 		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, len(encodedBody))
 	encoded := protocol.EncodeMessage(msg) + encodedBody
 	frame := protocol.FormatClientFrame(encoded, &h.code)
@@ -432,23 +429,23 @@ func (h *NetHandler) SendEncoded(msg protocol.DefaultMessage, encodedBody string
 	return err
 }
 
-// SendChgPw sends a password change request: id + #9 + passwd + #9 + newpasswd
-// (ClMain.pas:2864-2870).
+// SendChgPw 发送密码修改请求: id + #9 + passwd + #9 + newpasswd
+//（ClMain.pas:2864-2870）。
 func (h *NetHandler) SendChgPw(id, passwd, newpasswd string) {
 	msg := protocol.MakeDefaultMsg(protocol.CMChangePassword, 0, 0, 0, 0)
 	h.Send(msg, id+"\t"+passwd+"\t"+newpasswd)
 }
 
-// SendRawString sends a raw string without TDefaultMessage header.
+// SendRawString 发送不带 TDefaultMessage 头的原始字符串。
 func (h *NetHandler) SendRawString(s string) error {
-	log.Logf(log.LevelInfo, "Client", ">>> SEND RAW %q", s)
+	log.Logf(log.LevelInfo, "Client", ">>> 发送 RAW %q", s)
 	encoded := protocol.EncodeString(s)
 	frame := protocol.FormatClientFrame(encoded, &h.code)
 	_, err := h.conn.Write([]byte(frame))
 	return err
 }
 
-// SendLogin sends the login credentials.
+// SendLogin 发送登录凭据。
 func (h *NetHandler) SendLogin(id, password string) {
 	h.loginID = id
 	h.password = password
@@ -456,86 +453,86 @@ func (h *NetHandler) SendLogin(id, password string) {
 	h.Send(loginMsg, id+"/"+password)
 }
 
-// SendSelectServer sends the server selection.
+// SendSelectServer 发送选服请求。
 func (h *NetHandler) SendSelectServer(serverName string) {
 	selMsg := protocol.MakeDefaultMsg(protocol.CMSelectServer, 0, 0, 0, 0)
 	h.Send(selMsg, serverName)
 }
 
-// SendQueryChr queries the character list (includes loginId/certification).
+// SendQueryChr 查询角色列表（包含 loginId/certification）。
 func (h *NetHandler) SendQueryChr() {
 	queryMsg := protocol.MakeDefaultMsg(protocol.CMQueryChr, 0, 0, 0, 0)
 	h.Send(queryMsg, fmt.Sprintf("%s/%d", h.loginID, h.certification))
 }
 
-// SendSelChr sends the character selection.
+// SendSelChr 发送选角请求。
 func (h *NetHandler) SendSelChr(charName string) {
 	selMsg := protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0)
 	h.Send(selMsg, h.loginID+"/"+charName)
 }
 
-// SendNewChr sends a create character request.
+// SendNewChr 发送创建角色请求。
 func (h *NetHandler) SendNewChr(name string, hair, job, sex int) {
 	msg := protocol.MakeDefaultMsg(protocol.CMNewChr, 0, 0, 0, 0)
 	h.Send(msg, fmt.Sprintf("%s/%s/%d/%d/%d", h.loginID, name, hair, job, sex))
 }
 
-// SendDelChr sends a delete character request.
+// SendDelChr 发送删除角色请求。
 func (h *NetHandler) SendDelChr(name string) {
 	msg := protocol.MakeDefaultMsg(protocol.CMDelChr, 0, 0, 0, 0)
 	h.Send(msg, name)
 }
 
-// SendRunLogin sends the run login to the game server.
+// SendRunLogin 发送进入游戏服务器的 run login。
 func (h *NetHandler) SendRunLogin() {
 	s := fmt.Sprintf("**%s/%s/%d/%d/%d", h.loginID, h.charName, h.certification, clientVersion, runLoginCode)
 	h.SendRawString(s)
 }
 
-// Reconnect disconnects and reconnects to a new server address.
+// Reconnect 断开并重连到新的服务器地址。
 func (h *NetHandler) Reconnect(addr string) error {
-	log.Logf(log.LevelInfo, "Client", "Reconnect: disconnecting from current server")
-	// Stop old read loop
+	log.Logf(log.LevelInfo, "Client", "重连: 正在断开当前服务器")
+	// 停止旧的读循环
 	select {
 	case <-h.done:
-		log.Logf(log.LevelDebug, "Client", "Reconnect: done channel already closed")
+		log.Logf(log.LevelDebug, "Client", "重连: done channel 已关闭")
 	default:
 		close(h.done)
 	}
 	h.conn.Close()
-	log.Logf(log.LevelInfo, "Client", "Reconnect: old connection closed, waiting 100ms...")
+	log.Logf(log.LevelInfo, "Client", "重连: 旧连接已关闭，等待 100ms...")
 
-	// Wait briefly for read loop to exit
+	// 短暂等待读循环退出
 	time.Sleep(100 * time.Millisecond)
 
-	// Connect to new server
-	log.Logf(log.LevelInfo, "Client", "Reconnect: connecting to %s...", addr)
+	// 连接新服务器
+	log.Logf(log.LevelInfo, "Client", "重连: 正在连接 %s...", addr)
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
-		log.Logf(log.LevelError, "Client", "Reconnect: failed to connect to %s: %v", addr, err)
+		log.Logf(log.LevelError, "Client", "重连: 连接 %s 失败: %v", addr, err)
 		return fmt.Errorf("reconnect to %s: %w", addr, err)
 	}
-	log.Logf(log.LevelInfo, "Client", "Reconnect: connected to %s", addr)
+	log.Logf(log.LevelInfo, "Client", "重连: 已连接 %s", addr)
 
 	h.conn = conn
 	h.done = make(chan struct{})
 	h.code = 0
 
-	// Start new read loop
-	log.Logf(log.LevelInfo, "Client", "Reconnect: starting new ReadLoop")
+	// 启动新的读循环
+	log.Logf(log.LevelInfo, "Client", "重连: 启动新的 ReadLoop")
 	go h.ReadLoop()
 	return nil
 }
 
-// ReadLoop reads messages from the server.
+// ReadLoop 从服务器读取消息。
 func (h *NetHandler) ReadLoop() {
-	log.Logf(log.LevelInfo, "Client", "ReadLoop started")
+	log.Logf(log.LevelInfo, "Client", "ReadLoop 已启动")
 	buf := make([]byte, 4096)
-	var recvBuf []byte // accumulates bytes across Read calls; the 100ms deadline frequently splits frames
+	var recvBuf []byte // 跨 Read 调用累积字节；100ms 超时经常拆分帧
 	for {
 		select {
 		case <-h.done:
-			log.Logf(log.LevelInfo, "Client", "ReadLoop stopped (done)")
+			log.Logf(log.LevelInfo, "Client", "ReadLoop 已停止 (done)")
 			return
 		default:
 		}
@@ -546,28 +543,28 @@ func (h *NetHandler) ReadLoop() {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
-			// Check if we were intentionally closed
+			// 检查是否是主动关闭
 			select {
 			case <-h.done:
-				log.Logf(log.LevelInfo, "Client", "ReadLoop stopped (closed)")
+				log.Logf(log.LevelInfo, "Client", "ReadLoop 已停止 (closed)")
 				return
 			default:
 			}
-			log.Logf(log.LevelError, "Client", "ReadLoop error: %v", err)
+			log.Logf(log.LevelError, "Client", "ReadLoop 错误: %v", err)
 			return
 		}
 
-		// Parse all complete frames; accumulate across reads since a frame may span the 100ms deadline.
+		// 解析所有完整帧；跨读取累积，因为帧可能跨越 100ms 超时边界。
 		if n > 0 {
 			recvBuf = append(recvBuf, buf[:n]...)
 			if len(recvBuf) > 64*1024 {
-				log.Logf(log.LevelError, "Client", "Recv buffer overflow, disconnecting")
+				log.Logf(log.LevelError, "Client", "接收缓冲区溢出，断开连接")
 				return
 			}
 			data := recvBuf
 			for len(data) > 2 {
 				if data[0] != '#' {
-					data = data[1:] // tolerate noise/misalignment, resync on next '#'
+					data = data[1:] // 容忍噪声/错位，在下一个 '#' 处重新同步
 					continue
 				}
 				endIdx := -1
@@ -578,7 +575,7 @@ func (h *NetHandler) ReadLoop() {
 					}
 				}
 				if endIdx < 0 {
-					break // partial frame; wait for more data
+					break // 不完整帧；等待更多数据
 				}
 
 				payload := string(data[1:endIdx])
@@ -598,7 +595,7 @@ func (h *NetHandler) ReadLoop() {
 					h.enqueue(netEvent{msg: msg, body: body})
 				}
 			}
-			// Compact: keep any trailing partial frame, drop the consumed prefix.
+			// 压缩：保留尾部不完整帧，丢弃已消费的前缀。
 			recvBuf = recvBuf[:copy(recvBuf, data)]
 		}
 	}
@@ -625,20 +622,20 @@ func (h *NetHandler) handleControlMsg(payload string) {
 	}
 }
 
-// HandleMessage processes a server message.
+// HandleMessage 处理服务器消息。
 func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
-	log.Logf(log.LevelInfo, "Client", "<<< RECV %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+	log.Logf(log.LevelInfo, "Client", "<<< 接收 %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
 		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 
 	switch msg.Ident {
 
 	// =====================================================================
-	// Login Phase
+	// 登录阶段
 	// =====================================================================
 
 	case protocol.SMPasswdFail:
-		// Wording aligned with ClMain.pas:3708-3713.
-		log.Logf(log.LevelWarn, "Client", "Login failed: code=%d", msg.Recog)
+		// 措辞与 ClMain.pas:3708-3713 保持一致。
+		log.Logf(log.LevelWarn, "Client", "登录失败: code=%d", msg.Recog)
 		if h.loginScene != nil {
 			switch msg.Recog {
 			case -1:
@@ -655,7 +652,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				h.loginScene.SetError("ID不存在或者未知错误.请稍后重试.")
 			}
 		}
-		// Close connection and reset handler so user can retry
+		// 关闭连接并重置 handler，以便用户重试
 		h.Close()
 		if h.onFail != nil {
 			h.onFail()
@@ -663,14 +660,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMPassOKSelectServer:
 		if h.reconnecting {
-			// Re-authenticated after reconnect — switch to LoginScene for door animation
+			// 重连后重新认证成功 — 切换到 LoginScene 播放开门动画
 			h.reconnecting = false
-			log.Logf(log.LevelInfo, "Client", "Re-authenticated, switching to LoginScene for door animation")
+			log.Logf(log.LevelInfo, "Client", "重新认证成功，切换到 LoginScene 播放开门动画")
 			h.sceneMgr.ChangeScene(engine.SceneLogin)
 			if h.loginScene != nil {
 				h.loginScene.OpenLoginDoor()
 				h.loginScene.SetDoorCompleteFunc(func() {
-					log.Logf(log.LevelInfo, "Client", "Door animation complete, switching to SelectChr")
+					log.Logf(log.LevelInfo, "Client", "开门动画完成，切换到 SelectChr")
 					h.sceneMgr.ChangeScene(engine.SceneSelectChr)
 					globalFade.startIn(nil)
 					time.Sleep(100 * time.Millisecond)
@@ -678,9 +675,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				})
 			}
 		} else {
-			// First login — show the server select overlay on the login scene
-			// (Delphi DSelServerDlg, FState.pas:2453-2517).
-			log.Logf(log.LevelInfo, "Client", "Login successful, showing server selection")
+			// 首次登录 — 在登录场景上显示选服覆盖层
+			//（Delphi DSelServerDlg, FState.pas:2453-2517）。
+			log.Logf(log.LevelInfo, "Client", "登录成功，显示选服界面")
 			servers := parseServerList(body)
 			if h.loginScene != nil {
 				h.loginScene.ShowServerSelect(servers)
@@ -688,53 +685,53 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMSelectServerOK:
-		// Body: "selChrAddr/selChrPort/certification"
-		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Parsing body=%q", body)
+		// 消息体: "selChrAddr/selChrPort/certification"
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] 解析 body=%q", body)
 		addr, cert, err := parseAddrPortCert(body)
 		if err != nil {
-			log.Logf(log.LevelError, "Client", "[SMSelectServerOK] Parse error: %v", err)
+			log.Logf(log.LevelError, "Client", "[SMSelectServerOK] 解析错误: %v", err)
 			return
 		}
 		h.certification = cert
 		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] addr=%s cert=%d", addr, cert)
 
-		// Reconnect to selection server
-		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Reconnecting to %s...", addr)
+		// 重连到选角服务器
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] 正在重连到 %s...", addr)
 		if err := h.Reconnect(addr); err != nil {
-			log.Logf(log.LevelError, "Client", "[SMSelectServerOK] Reconnect failed: %v", err)
+			log.Logf(log.LevelError, "Client", "[SMSelectServerOK] 重连失败: %v", err)
 			return
 		}
-		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Reconnected, re-authenticating...")
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] 已重连，正在重新认证...")
 
-		// Re-authenticate on the new connection
+		// 在新连接上重新认证
 		h.reconnecting = true
-		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Setting reconnecting=true")
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] 设置 reconnecting=true")
 		protoMsg := protocol.MakeDefaultMsg(protocol.CMProtocol, clientVersion, 0, 0, 0)
 		h.Send(protoMsg, "")
 		h.SendLogin(h.loginID, h.password)
-		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] Re-auth sent, waiting for SM_PASSOKSELECTSERVER")
+		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] 已发送重新认证，等待 SM_PASSOKSELECTSERVER")
 
 	case protocol.SMQueryChr:
-		// Body: "*name1/job1/hair1/level1/sex1/name2/job2/hair2/level2/sex2"
-		log.Logf(log.LevelInfo, "Client", "Received character list: %s", body)
+		// 消息体: "*name1/job1/hair1/level1/sex1/name2/job2/hair2/level2/sex2"
+		log.Logf(log.LevelInfo, "Client", "收到角色列表: %s", body)
 		chars, selectedIdx := parseQueryChrBody(body)
 		if h.selectChrScene != nil {
 			h.selectChrScene.SetCharactersFromServer(chars, selectedIdx)
 		}
 
 	case protocol.SMQueryChrFail:
-		log.Logf(log.LevelWarn, "Client", "Query characters failed")
-		// Show empty selection
+		log.Logf(log.LevelWarn, "Client", "查询角色失败")
+		// 显示空选择
 		if h.selectChrScene != nil {
 			h.selectChrScene.SetCharactersFromServer(nil, -1)
 		}
 
 	case protocol.SMNewChrSuccess:
-		log.Logf(log.LevelInfo, "Client", "Character created")
+		log.Logf(log.LevelInfo, "Client", "角色已创建")
 		h.SendQueryChr()
 
 	case protocol.SMNewChrFail:
-		log.Logf(log.LevelWarn, "Client", "Create character failed: code=%d", msg.Recog)
+		log.Logf(log.LevelWarn, "Client", "创建角色失败: code=%d", msg.Recog)
 		if h.selectChrScene != nil {
 			switch msg.Recog {
 			case 0:
@@ -749,38 +746,38 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMDelChrSuccess:
-		log.Logf(log.LevelInfo, "Client", "Character deleted")
+		log.Logf(log.LevelInfo, "Client", "角色已删除")
 		h.SendQueryChr()
 
 	case protocol.SMDelChrFail:
-		log.Logf(log.LevelWarn, "Client", "Delete character failed")
+		log.Logf(log.LevelWarn, "Client", "删除角色失败")
 
 	// =====================================================================
-	// SelectChr → Play Transition
+	// 选角 → 进入游戏过渡
 	// =====================================================================
 
 	case protocol.SMStartPlay:
-		// Body: "runAddr/runPort"
+		// 消息体: "runAddr/runPort"
 		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] body=%q", body)
 		_, err := parseAddrPort(body)
 		if err != nil {
-			log.Logf(log.LevelError, "Client", "[SMStartPlay] Parse error: %v", err)
+			log.Logf(log.LevelError, "Client", "[SMStartPlay] 解析错误: %v", err)
 			return
 		}
-		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] Single-server mode, sending run login")
+		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] 单服务器模式，发送 run login")
 
-		// Single-server mode: send run login on existing connection
+		// 单服务器模式：在现有连接上发送 run login
 		h.SendRunLogin()
-		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] Run login sent, switching to LoginNotice scene")
+		log.Logf(log.LevelInfo, "Client", "[SMStartPlay] Run login 已发送，切换到 LoginNotice 场景")
 
 		// Delphi: g_boDoFastFadeOut (IntroScn.pas:1199)
 		globalFade.startOut(true, nil)
 		h.sceneMgr.ChangeScene(engine.SceneLoginNotice)
 
 	case protocol.SMStartFail:
-		// Delphi: DMessageDlg('此服务器满员') then ClientGetSelectServer
-		// (ClMain.pas:3782-3788).
-		log.Logf(log.LevelWarn, "Client", "Start play failed: server full")
+		// Delphi: DMessageDlg('此服务器满员') 然后 ClientGetSelectServer
+		//（ClMain.pas:3782-3788）。
+		log.Logf(log.LevelWarn, "Client", "开始游戏失败: 服务器满员")
 		h.sceneMgr.ChangeScene(engine.SceneLogin)
 		if h.loginScene != nil {
 			h.loginScene.SetError("此服务器满员，请稍后重试.")
@@ -788,36 +785,36 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	// =====================================================================
-	// Notice Phase
+	// 公告阶段
 	// =====================================================================
 
 	case protocol.SMSendNotice:
-		log.Logf(log.LevelInfo, "Client", "Received notice, auto-acknowledging (Delphi empty scene)")
+		log.Logf(log.LevelInfo, "Client", "收到公告，自动确认（Delphi 空场景）")
 		h.Send(protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0), "")
 
 	// =====================================================================
-	// Game Phase
+	// 游戏阶段
 	// =====================================================================
 
 	case protocol.SMNewMap:
 		mapName := body
 		x := int(msg.Recog)
 		y := int(msg.Param)
-		log.Logf(log.LevelInfo, "Client", "Map: %s (%d,%d)", mapName, x, y)
+		log.Logf(log.LevelInfo, "Client", "地图: %s (%d,%d)", mapName, x, y)
 		if err := h.playScene.LoadMap(mapName); err != nil {
-			log.Logf(log.LevelError, "Client", "Failed to load map: %v", err)
+			log.Logf(log.LevelError, "Client", "加载地图失败: %v", err)
 			return
 		}
 		h.playScene.State.MapDarkness = int(msg.Tag)
 
 	case protocol.SMLogon:
-		log.Logf(log.LevelInfo, "Client", "Game started (id=%d x=%d y=%d dir=%d)",
+		log.Logf(log.LevelInfo, "Client", "游戏开始 (id=%d x=%d y=%d dir=%d)",
 			msg.Recog, msg.Param, msg.Tag, msg.Series)
 		actor := NewActor(msg.Recog, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF)
 		actor.Type = ActorHuman
 		if body != "" {
 			actor.updateFeatureFromBody(body)
-			// Body slot 3 carries the job (see PlayObject.encodeLogonBody).
+			// Body 第 3 槽位携带职业（见 PlayObject.encodeLogonBody）。
 			if raw := []byte(body); len(raw) >= 12 {
 				h.playScene.State.Job = int(binary.LittleEndian.Uint32(raw[8:12]))
 			}
@@ -863,7 +860,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMHorseRun:
 		if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
-			break // self uses local prediction
+			break // 自身使用本地预测
 		}
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
@@ -877,7 +874,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.Actors.Remove(msg.Recog)
 
 	case protocol.SMMoveFail:
-		log.Logf(log.LevelDebug, "Client", "MoveFail from server")
+		log.Logf(log.LevelDebug, "Client", "服务器返回移动失败")
 		h.playScene.ActionLock = false
 		h.playScene.moveFailCount++
 		if h.playScene.moveFailCount >= 3 {
@@ -904,19 +901,19 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		} else {
 			st.Level = int(msg.Recog)
 		}
-		log.Logf(log.LevelInfo, "Client", "Ability: level=%d hp=%d/%d mp=%d/%d exp=%d/%d weight=%d/%d",
+		log.Logf(log.LevelInfo, "Client", "属性: level=%d hp=%d/%d mp=%d/%d exp=%d/%d weight=%d/%d",
 			st.Level, st.HP, st.MaxHP, st.MP, st.MaxMP, st.Exp, st.MaxExp, st.Weight, st.MaxWeight)
 
 	case protocol.SMStdItems:
 		h.playScene.State.ParseItemDefs(body)
-		log.Logf(log.LevelInfo, "Client", "Item DB synced: %d defs", len(h.playScene.State.ItemDefs))
+		log.Logf(log.LevelInfo, "Client", "物品数据库已同步: %d 个定义", len(h.playScene.State.ItemDefs))
 
 	case protocol.SMBagItems:
-		log.Logf(log.LevelInfo, "Client", "Received bag items: count=%d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "收到背包物品: count=%d", msg.Recog)
 		h.playScene.State.ParseBagItems(body)
 
 	case protocol.SMVersionFail:
-		log.Logf(log.LevelWarn, "Client", "Version mismatch")
+		log.Logf(log.LevelWarn, "Client", "版本不匹配")
 		if h.loginScene != nil {
 			h.loginScene.SetError("客户端版本不匹配")
 		}
@@ -926,7 +923,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMCertificationFail:
-		log.Logf(log.LevelWarn, "Client", "Certification failed")
+		log.Logf(log.LevelWarn, "Client", "认证失败")
 		if h.loginScene != nil {
 			h.loginScene.SetError("认证失败")
 		}
@@ -936,14 +933,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMNewIDSuccess:
-		log.Logf(log.LevelInfo, "Client", "Registration successful")
+		log.Logf(log.LevelInfo, "Client", "注册成功")
 		if h.loginScene != nil {
 			h.loginScene.RegistrationDone()
 		}
 
 	case protocol.SMNewIDFail:
-		// Recog aligned with ClMain.pas:3694-3702: 0=exists, -2=busy, else=illegal.
-		log.Logf(log.LevelWarn, "Client", "Registration failed: code=%d", msg.Recog)
+		// Recog 与 ClMain.pas:3694-3702 一致: 0=已存在, -2=繁忙, 其他=非法。
+		log.Logf(log.LevelWarn, "Client", "注册失败: code=%d", msg.Recog)
 		if h.loginScene != nil {
 			switch msg.Recog {
 			case 0:
@@ -956,14 +953,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMChgPasswdSuccess:
-		log.Logf(log.LevelInfo, "Client", "Password changed")
+		log.Logf(log.LevelInfo, "Client", "密码已修改")
 		if h.loginScene != nil {
 			h.loginScene.ChgPwResult("当前密码修改成功.")
 		}
 
 	case protocol.SMChgPasswdFail:
-		// Recog aligned with ClMain.pas:3765-3770: -1=wrong old password, -2=mismatch.
-		log.Logf(log.LevelWarn, "Client", "Password change failed: code=%d", msg.Recog)
+		// Recog 与 ClMain.pas:3765-3770 一致: -1=原密码错误, -2=两次密码不一致。
+		log.Logf(log.LevelWarn, "Client", "密码修改失败: code=%d", msg.Recog)
 		if h.loginScene != nil {
 			switch msg.Recog {
 			case -1:
@@ -976,47 +973,47 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMSendUseItems:
-		log.Logf(log.LevelInfo, "Client", "Received use items (equipment)")
+		log.Logf(log.LevelInfo, "Client", "收到使用物品（装备）")
 		h.playScene.State.ParseUseItems(body)
 
 	case protocol.SMSendMyMagic:
-		log.Logf(log.LevelInfo, "Client", "Received magic list: count=%d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "收到魔法列表: count=%d", msg.Recog)
 		h.playScene.State.ParseMagics(body)
 
 	case protocol.SMHear:
-		log.Logf(log.LevelInfo, "Client", "Chat: %s", body)
+		log.Logf(log.LevelInfo, "Client", "聊天: %s", body)
 		h.playScene.AddChatMessage(body)
 
 	case protocol.SMMerchantSay:
-		log.Logf(log.LevelInfo, "Client", "NPC says: %s", body)
+		log.Logf(log.LevelInfo, "Client", "NPC 说: %s", body)
 		h.playScene.parseNpcDialog(body)
 		h.playScene.State.ShowNpcDialog = true
 
 	case protocol.SMDayChanging:
-		log.Logf(log.LevelInfo, "Client", "Day changing: bright=%d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "日期变更: bright=%d", msg.Recog)
 		h.playScene.State.DayBright = int(msg.Recog)
 
 	case protocol.SMMapDescription:
-		log.Logf(log.LevelInfo, "Client", "Map description: %s", body)
+		log.Logf(log.LevelInfo, "Client", "地图描述: %s", body)
 		h.playScene.State.MapTitle = body
 
 	case protocol.SMSubAbility:
-		log.Logf(log.LevelInfo, "Client", "Received sub ability")
+		log.Logf(log.LevelInfo, "Client", "收到子属性")
 
 	case protocol.SMUsername:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
 			actor.UserName = protocol.DecodeString(body)
-			log.Logf(log.LevelDebug, "Client", "Actor name: %s", actor.UserName)
+			log.Logf(log.LevelDebug, "Client", "Actor 名字: %s", actor.UserName)
 		}
 
 	case protocol.SMChangeLight:
-		log.Logf(log.LevelInfo, "Client", "Light change: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "光照变更: %d", msg.Recog)
 		h.playScene.State.LightLevel = int(msg.Recog)
 
 	case protocol.SMHealthSpellChanged:
-		// Recog=HP, Param=MaxHP, Tag=MP, Series=MaxMP (server changed in
-		// tandem; the old HP<<16|MP packing made HP show the MP value).
+		// Recog=HP, Param=MaxHP, Tag=MP, Series=MaxMP（服务端已同步修改；
+		// 旧的 HP<<16|MP 打包方式会导致 HP 显示 MP 的值）。
 		st := h.playScene.State
 		st.HP = int(msg.Recog)
 		st.MaxHP = int(msg.Param)
@@ -1030,7 +1027,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMClearObjects:
-		log.Logf(log.LevelInfo, "Client", "Clear objects (map switch)")
+		log.Logf(log.LevelInfo, "Client", "清除对象（切换地图）")
 		h.playScene.State.Actors.Clear()
 		h.playScene.State.MySelf = nil
 
@@ -1038,9 +1035,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		mapName := body
 		newX := int(msg.Param)
 		newY := int(msg.Tag)
-		log.Logf(log.LevelInfo, "Client", "Change map: %s (%d,%d)", mapName, newX, newY)
+		log.Logf(log.LevelInfo, "Client", "切换地图: %s (%d,%d)", mapName, newX, newY)
 		if err := h.playScene.LoadMap(mapName); err != nil {
-			log.Logf(log.LevelError, "Client", "Failed to load map on change: %v", err)
+			log.Logf(log.LevelError, "Client", "切换地图时加载失败: %v", err)
 			return
 		}
 		h.playScene.State.MapDarkness = int(msg.Series)
@@ -1052,7 +1049,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor.SendMsg(protocol.SMTurn, newX, newY, 0, 0, 0)
 
 	// =====================================================================
-	// Combat
+	// 战斗
 	// =====================================================================
 
 	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit, protocol.SMPowerHit, protocol.SMLongHit, protocol.SMWideHit, protocol.SMFireHit, protocol.SMCrsHit, protocol.SMTwinHit:
@@ -1089,17 +1086,17 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMWinExp:
-		// The server follows up with a full SMAbility; apply the delta now so
-		// the exp bar moves immediately.
+		// 服务器随后会发送完整的 SMAbility；先应用增量，
+		// 让经验条立即变化。
 		h.playScene.State.Exp += int(msg.Recog)
-		log.Logf(log.LevelInfo, "Client", "Won exp: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "获得经验: %d", msg.Recog)
 
 	case protocol.SMLevelUp:
 		h.playScene.State.Level = int(msg.Recog)
-		log.Logf(log.LevelInfo, "Client", "Level up: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "升级: %d", msg.Recog)
 
 	case protocol.SMItemShow:
-		log.Logf(log.LevelDebug, "Client", "Item show: id=%d x=%d y=%d looks=%d name=%s",
+		log.Logf(log.LevelDebug, "Client", "物品显示: id=%d x=%d y=%d looks=%d name=%s",
 			msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 		h.playScene.AddGroundItem(msg.Recog, int(msg.Param), int(msg.Tag), int(msg.Series), body)
 
@@ -1107,19 +1104,19 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.RemoveGroundItem(msg.Recog)
 
 	case protocol.SMDealMenu:
-		log.Logf(log.LevelInfo, "Client", "Trade: partner=%s", body)
+		log.Logf(log.LevelInfo, "Client", "交易: partner=%s", body)
 		h.playScene.resetDeal()
 		h.playScene.State.InDeal = true
 		h.playScene.State.DealPartner = body
 
 	case protocol.SMDealSuccess:
-		log.Logf(log.LevelInfo, "Client", "Trade completed")
+		log.Logf(log.LevelInfo, "Client", "交易完成")
 		h.playScene.State.InDeal = false
 		h.playScene.State.DealPartner = ""
 		h.playScene.resetDeal()
 
 	case protocol.SMDealCancel:
-		log.Logf(log.LevelInfo, "Client", "Trade cancelled")
+		log.Logf(log.LevelInfo, "Client", "交易取消")
 		h.playScene.State.InDeal = false
 		h.playScene.State.DealPartner = ""
 		h.playScene.resetDeal()
@@ -1135,27 +1132,27 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.AddChatMessage("Guild created")
 
 	case protocol.SMGuildMessage:
-		log.Logf(log.LevelInfo, "Client", "Guild chat: %s", body)
+		log.Logf(log.LevelInfo, "Client", "行会聊天: %s", body)
 		h.playScene.addGuildChat(body)
 		h.playScene.AddChatMessage("[行会] " + body)
 
 	case protocol.SMStorageOK:
-		log.Logf(log.LevelInfo, "Client", "Item stored")
+		log.Logf(log.LevelInfo, "Client", "物品已存入仓库")
 		h.playScene.sellConfirmed()
 
 	case protocol.SMStorageFull:
-		log.Logf(log.LevelInfo, "Client", "Storage full")
+		log.Logf(log.LevelInfo, "Client", "仓库已满")
 		h.playScene.sellFailed()
 
 	case protocol.SMTakeBackStorageItemOK:
-		log.Logf(log.LevelInfo, "Client", "Item retrieved from storage")
+		log.Logf(log.LevelInfo, "Client", "已从仓库取回物品")
 
 	case protocol.SMSysMessage:
-		log.Logf(log.LevelInfo, "Client", "System: %s", body)
+		log.Logf(log.LevelInfo, "Client", "系统消息: %s", body)
 		h.playScene.AddChatMessage("[系统] " + body)
 
 	case protocol.SMGoldChanged:
-		log.Logf(log.LevelInfo, "Client", "Gold: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "金币: %d", msg.Recog)
 		h.playScene.State.Gold = int(msg.Recog)
 
 	case protocol.SMBackStep:
@@ -1202,7 +1199,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMMagicFire:
-		log.Logf(log.LevelDebug, "Client", "Magic fire: magID=%d x=%d y=%d series=%d", msg.Recog, msg.Param, msg.Tag, msg.Series)
+		log.Logf(log.LevelDebug, "Client", "魔法释放: magID=%d x=%d y=%d series=%d", msg.Recog, msg.Param, msg.Tag, msg.Series)
 		fx := float64(msg.Param)*engine.TileWidth + engine.TileWidth/2
 		fy := float64(msg.Tag)*engine.TileHeight + engine.TileHeight/2
 		effType := int(msg.Series & 0xFF)
@@ -1211,12 +1208,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		case 2:
 			h.playScene.effects.AddGround(fx, fy, effNum, 10, 50)
 		default:
-			// fly(1) carries no start coordinate in this message; degrade to explosion
+			// fly(1) 在此消息中不携带起始坐标；降级为爆炸效果
 			h.playScene.effects.AddExplosion(fx, fy, effNum, 10, 50)
 		}
 
 	case protocol.SMMagicFireFail:
-		log.Logf(log.LevelDebug, "Client", "Magic fire failed")
+		log.Logf(log.LevelDebug, "Client", "魔法释放失败")
 
 	case protocol.SMShowEvent:
 		h.playScene.events.AddEvent(&MapEvent{
@@ -1231,10 +1228,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.events.DelEventByID(msg.Recog)
 
 	case protocol.SMAddMagic:
-		log.Logf(log.LevelInfo, "Client", "Learned magic: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "学会魔法: %d", msg.Recog)
 
 	case protocol.SMDelMagic:
-		log.Logf(log.LevelInfo, "Client", "Forgot magic: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "遗忘魔法: %d", msg.Recog)
 
 	case protocol.SMFeatureChanged:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
@@ -1243,54 +1240,54 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMChangeNameColor:
-		log.Logf(log.LevelDebug, "Client", "Name color changed: %d", msg.Recog)
+		log.Logf(log.LevelDebug, "Client", "名字颜色变更: %d", msg.Recog)
 
 	case protocol.SMCry:
-		log.Logf(log.LevelInfo, "Client", "Cry: %s", body)
+		log.Logf(log.LevelInfo, "Client", "喊话: %s", body)
 		h.playScene.AddChatMessage("[喊话] " + body)
 
 	case protocol.SMWhisper:
-		log.Logf(log.LevelInfo, "Client", "Whisper: %s", body)
+		log.Logf(log.LevelInfo, "Client", "私聊: %s", body)
 		h.playScene.AddChatMessage("[私聊] " + body)
 
 	case protocol.SMGroupMessage:
-		log.Logf(log.LevelInfo, "Client", "Group: %s", body)
+		log.Logf(log.LevelInfo, "Client", "组队: %s", body)
 		h.playScene.AddChatMessage("[组队] " + body)
 
 	case protocol.SMAddItem:
-		log.Logf(log.LevelInfo, "Client", "Item added")
+		log.Logf(log.LevelInfo, "Client", "物品已添加")
 		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
 		h.Send(queryBag, "")
 
 	case protocol.SMDelItem:
-		log.Logf(log.LevelInfo, "Client", "Item deleted: idx=%d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "物品已删除: idx=%d", msg.Recog)
 		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
 		h.Send(queryBag, "")
 
 	case protocol.SMUpdateItem:
-		log.Logf(log.LevelInfo, "Client", "Item updated")
+		log.Logf(log.LevelInfo, "Client", "物品已更新")
 		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
 		h.Send(queryBag, "")
 
 	case protocol.SMDelItems:
-		log.Logf(log.LevelInfo, "Client", "Items cleared")
+		log.Logf(log.LevelInfo, "Client", "物品已清空")
 
 	case protocol.SMDropItemSuccess:
-		log.Logf(log.LevelInfo, "Client", "Drop item success")
+		log.Logf(log.LevelInfo, "Client", "丢弃物品成功")
 
 	case protocol.SMDropItemFail:
-		log.Logf(log.LevelInfo, "Client", "Drop item failed")
+		log.Logf(log.LevelInfo, "Client", "丢弃物品失败")
 
 	case protocol.SMWeightChanged:
 		h.playScene.State.Weight = int(msg.Recog)
 		h.playScene.State.MaxWeight = int(msg.Param)
-		log.Logf(log.LevelDebug, "Client", "Weight changed: %d/%d", msg.Recog, msg.Param)
+		log.Logf(log.LevelDebug, "Client", "负重变更: %d/%d", msg.Recog, msg.Param)
 
 	case protocol.SMAdjustBonus:
 		h.playScene.State.BonusPoint = int(msg.Recog)
 
 	case protocol.SMSendUserState:
-		// Body: 130 bytes of equipment followed by the player name.
+		// 消息体: 130 字节装备数据后跟玩家名字。
 		raw := []byte(body)
 		name := ""
 		if len(raw) > 130 {
@@ -1299,7 +1296,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.parseInspect(name, body)
 
 	case protocol.SMDuraChange:
-		log.Logf(log.LevelDebug, "Client", "Durability changed: makeIndex=%d dura=%d/%d", msg.Recog, msg.Param, msg.Tag)
+		log.Logf(log.LevelDebug, "Client", "耐久变更: makeIndex=%d dura=%d/%d", msg.Recog, msg.Param, msg.Tag)
 		for _, it := range h.playScene.State.UseItems {
 			if it != nil && it.MakeIndex == msg.Recog {
 				it.Dura = msg.Param
@@ -1314,29 +1311,27 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMEatOK:
-		log.Logf(log.LevelInfo, "Client", "Ate item OK")
+		log.Logf(log.LevelInfo, "Client", "使用物品成功")
 		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
 		h.Send(queryBag, "")
 
 	case protocol.SMEatFail:
-		log.Logf(log.LevelInfo, "Client", "Eat item failed")
+		log.Logf(log.LevelInfo, "Client", "使用物品失败")
 
 	case protocol.SMTakeOnOK:
-		// Bag/equipment state arrives via the full SMBagItems/SMSendUseItems
-		// refresh the server sends alongside this message (the client applies
-		// an optimistic visual at request time).
-		log.Logf(log.LevelInfo, "Client", "Equip OK: slot=%d", msg.Recog)
+		// 背包/装备状态通过服务器随此消息发送的完整 SMBagItems/SMSendUseItems
+		// 刷新到达（客户端在请求时已做了乐观视觉更新）。
+		log.Logf(log.LevelInfo, "Client", "穿戴成功: slot=%d", msg.Recog)
 
 	case protocol.SMTakeOnFail:
-		// The full refresh that accompanies this message rolls back the
-		// client's optimistic update.
-		log.Logf(log.LevelWarn, "Client", "Equip failed: code=%d", msg.Recog)
+		// 随此消息发送的完整刷新会回滚客户端的乐观更新。
+		log.Logf(log.LevelWarn, "Client", "穿戴失败: code=%d", msg.Recog)
 
 	case protocol.SMTakeOffOK:
-		log.Logf(log.LevelInfo, "Client", "Unequip OK: slot=%d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "脱下成功: slot=%d", msg.Recog)
 
 	case protocol.SMTakeOffFail:
-		log.Logf(log.LevelWarn, "Client", "Unequip failed")
+		log.Logf(log.LevelWarn, "Client", "脱下失败")
 
 	case protocol.SMMerchantDlgClose:
 		h.playScene.State.ShowNpcDialog = false
@@ -1377,36 +1372,36 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.sellPriceStr = ""
 
 	case protocol.SMBuyItemSuccess:
-		log.Logf(log.LevelInfo, "Client", "Buy success")
+		log.Logf(log.LevelInfo, "Client", "购买成功")
 
 	case protocol.SMBuyItemFail:
-		log.Logf(log.LevelInfo, "Client", "Buy failed: code=%d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "购买失败: code=%d", msg.Recog)
 
 	case protocol.SMUserSellItemOK:
-		log.Logf(log.LevelInfo, "Client", "Sell success")
+		log.Logf(log.LevelInfo, "Client", "出售成功")
 		h.playScene.sellConfirmed()
 
 	case protocol.SMUserSellItemFail:
-		log.Logf(log.LevelInfo, "Client", "Sell failed")
+		log.Logf(log.LevelInfo, "Client", "出售失败")
 		h.playScene.sellFailed()
 
 	case protocol.SMSendBuyPrice:
 		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
-		log.Logf(log.LevelInfo, "Client", "Buy price: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "购买价格: %d", msg.Recog)
 
 	case protocol.SMUserRepairItemOK:
-		log.Logf(log.LevelInfo, "Client", "Repair success")
+		log.Logf(log.LevelInfo, "Client", "修理成功")
 
 	case protocol.SMUserRepairItemFail:
-		log.Logf(log.LevelInfo, "Client", "Repair failed")
+		log.Logf(log.LevelInfo, "Client", "修理失败")
 
 	case protocol.SMSendRepairCost:
 		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
-		log.Logf(log.LevelInfo, "Client", "Repair cost: %d", msg.Recog)
+		log.Logf(log.LevelInfo, "Client", "修理费用: %d", msg.Recog)
 
 	case protocol.SMSendUserStorageItem:
-		// Storage reuses the shop panels (Delphi BoStorageMenu): the list is
-		// DMenuDlg in storage mode, deposits go through the DSellDlg spot.
+		// 仓库复用商店面板（Delphi BoStorageMenu）：列表是
+		// 存储模式的 DMenuDlg，存取通过 DSellDlg 位置。
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 3
 		h.playScene.menuTop = 0
@@ -1415,9 +1410,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.sellPriceStr = ""
 
 	case protocol.SMSaveItemList:
-		// Storage list rows: name from the item DB, "price" carries the
-		// MakeIndex used to take the item back (Delphi
-		// ClientGetSaveItemList, ClMain.pas:5651-5690).
+		// 仓库列表行：名字来自物品数据库，"price" 携带用于取回物品的
+		// MakeIndex（Delphi ClientGetSaveItemList, ClMain.pas:5651-5690）。
 		st := h.playScene.State
 		st.ShowShop = true
 		st.ShopMode = 3
@@ -1452,10 +1446,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMStorageFail:
-		log.Logf(log.LevelInfo, "Client", "Storage failed")
+		log.Logf(log.LevelInfo, "Client", "仓库存入失败")
 
 	case protocol.SMTakeBackStorageItemFail:
-		log.Logf(log.LevelInfo, "Client", "Take back storage failed")
+		log.Logf(log.LevelInfo, "Client", "仓库取回失败")
 
 	case protocol.SMGroupModeChanged:
 		h.playScene.State.AllowGroup = msg.Recog != 0
@@ -1490,7 +1484,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMOpenGuildDlg:
-		// Body: name\nrank\nperm\nnotice (server HandleOpenGuildDlg).
+		// 消息体: name\nrank\nperm\nnotice（服务端 HandleOpenGuildDlg）。
 		st := h.playScene.State
 		parts := strings.SplitN(body, "\n", 4)
 		if len(parts) > 0 {
@@ -1552,10 +1546,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.AddChatMessage(body)
 
 	case protocol.SMDealTryFail:
-		log.Logf(log.LevelInfo, "Client", "Trade request failed")
+		log.Logf(log.LevelInfo, "Client", "交易请求失败")
 
 	case protocol.SMDealAddItemOK:
-		// Recog = grid slot; body carries the offered item.
+		// Recog = 格子槽位；body 携带提供的物品。
 		if item := h.parseTradeItem(body); item != nil {
 			slot := int(msg.Recog)
 			if slot >= 0 && slot < len(h.playScene.State.DealItems) {
@@ -1564,10 +1558,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMDealAddItemFail:
-		log.Logf(log.LevelDebug, "Client", "Trade add item failed")
+		log.Logf(log.LevelDebug, "Client", "交易添加物品失败")
 
 	case protocol.SMDealDelItemOK:
-		// Recog = MakeIndex taken back; the bag re-sync returns it.
+		// Recog = 取回的 MakeIndex；背包重新同步会归还。
 		st := h.playScene.State
 		for i, it := range st.DealItems {
 			if it != nil && it.MakeIndex == msg.Recog {
@@ -1577,7 +1571,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMDealDelItemFail:
-		log.Logf(log.LevelDebug, "Client", "Trade del item failed")
+		log.Logf(log.LevelDebug, "Client", "交易删除物品失败")
 
 	case protocol.SMDealRemoteAddItem:
 		if item := h.parseTradeItem(body); item != nil {
@@ -1597,40 +1591,40 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMSpaceMoveHide:
-		log.Logf(log.LevelDebug, "Client", "Space move hide: %d", msg.Recog)
+		log.Logf(log.LevelDebug, "Client", "瞬移隐藏: %d", msg.Recog)
 
 	case protocol.SMSpaceMoveShow:
-		log.Logf(log.LevelDebug, "Client", "Space move show: %d", msg.Recog)
+		log.Logf(log.LevelDebug, "Client", "瞬移显示: %d", msg.Recog)
 
 	case protocol.SMOpenHealth:
-		log.Logf(log.LevelDebug, "Client", "Open health: %d", msg.Recog)
+		log.Logf(log.LevelDebug, "Client", "打开血条: %d", msg.Recog)
 
 	case protocol.SMCloseHealth:
-		log.Logf(log.LevelDebug, "Client", "Close health: %d", msg.Recog)
+		log.Logf(log.LevelDebug, "Client", "关闭血条: %d", msg.Recog)
 
 	case protocol.SMBreakWeapon:
-		log.Logf(log.LevelInfo, "Client", "Weapon broken!")
+		log.Logf(log.LevelInfo, "Client", "武器损坏！")
 
 	case protocol.SMButch:
 		log.Logf(log.LevelDebug, "Client", "Butch")
 
 	case protocol.SMReadMinimapOK:
-		log.Logf(log.LevelDebug, "Client", "Minimap data received")
+		log.Logf(log.LevelDebug, "Client", "收到小地图数据")
 
 	case protocol.SMMonsterSay:
-		log.Logf(log.LevelDebug, "Client", "Monster say: %s", body)
+		log.Logf(log.LevelDebug, "Client", "怪物说话: %s", body)
 
 	default:
-		log.Logf(log.LevelDebug, "Client", "Unhandled: %d", msg.Ident)
+		log.Logf(log.LevelDebug, "Client", "未处理: %d", msg.Ident)
 	}
 }
 
 // ============================================================================
-// Message Parsing Helpers
+// 消息解析辅助函数
 // ============================================================================
 
-// parseFirstServer extracts the first server name from the server list body.
-// Body format: "name1/status1/name2/status2/..."
+// parseFirstServer 从服务器列表 body 中提取第一个服务器名称。
+// 消息体格式: "name1/status1/name2/status2/..."
 func parseFirstServer(body string) string {
 	if body == "" {
 		return "Server"
@@ -1642,7 +1636,7 @@ func parseFirstServer(body string) string {
 	return "Server"
 }
 
-// parseAddrPortCert parses "addr/port/certification".
+// parseAddrPortCert 解析 "addr/port/certification"。
 func parseAddrPortCert(body string) (addr string, cert int, err error) {
 	parts := strings.Split(body, "/")
 	if len(parts) < 3 {
@@ -1657,7 +1651,7 @@ func parseAddrPortCert(body string) (addr string, cert int, err error) {
 	return parts[0] + ":" + port, c, nil
 }
 
-// parseAddrPort parses "addr/port".
+// parseAddrPort 解析 "addr/port"。
 func parseAddrPort(body string) (addr string, err error) {
 	parts := strings.Split(body, "/")
 	if len(parts) < 2 {
@@ -1666,7 +1660,7 @@ func parseAddrPort(body string) (addr string, err error) {
 	return parts[0] + ":" + parts[1], nil
 }
 
-// parsedChar holds a parsed character from SM_QUERYCHR.
+// parsedChar 保存从 SM_QUERYCHR 解析出的角色。
 type parsedChar struct {
 	Name  string
 	Job   int
@@ -1675,9 +1669,9 @@ type parsedChar struct {
 	Sex   int
 }
 
-// parseQueryChrBody parses the character list body.
-// Body format: "*name1/job1/hair1/level1/sex1/name2/job2/hair2/level2/sex2"
-// '*' prefix on a name means it was the last selected character.
+// parseQueryChrBody 解析角色列表 body。
+// 消息体格式: "*name1/job1/hair1/level1/sex1/name2/job2/hair2/level2/sex2"
+// 名字前的 '*' 前缀表示上次选择的角色。
 func parseQueryChrBody(body string) (chars []parsedChar, selectedIdx int) {
 	selectedIdx = -1
 	if body == "" {
@@ -1685,14 +1679,14 @@ func parseQueryChrBody(body string) (chars []parsedChar, selectedIdx int) {
 	}
 
 	parts := strings.Split(body, "/")
-	// Each character has 5 fields: name, job, hair, level, sex
+	// 每个角色有 5 个字段: name, job, hair, level, sex
 	for i := 0; i+4 < len(parts); i += 5 {
 		name := parts[i]
 		if name == "" {
 			continue
 		}
 
-		// Check for selected marker
+		// 检查选中标记
 		if name[0] == '*' {
 			name = name[1:]
 			selectedIdx = len(chars)
@@ -1715,15 +1709,15 @@ func parseQueryChrBody(body string) (chars []parsedChar, selectedIdx int) {
 	return
 }
 
-// connectToServer creates a new NetHandler and connects to the login server.
+// connectToServer 创建新的 NetHandler 并连接登录服务器。
 func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, selectChrScene *SelectChrScene, noticeScene *NoticeScene, sceneMgr *engine.SceneManager) (*NetHandler, error) {
-	log.Logf(log.LevelInfo, "Client", "Connecting to %s...", addr)
+	log.Logf(log.LevelInfo, "Client", "正在连接 %s...", addr)
 
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	log.Logf(log.LevelInfo, "Client", "Connected to server")
+	log.Logf(log.LevelInfo, "Client", "已连接服务器")
 
 	handler := &NetHandler{
 		conn:           conn,
@@ -1735,7 +1729,7 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 		done:           make(chan struct{}),
 	}
 
-	// Send protocol version
+	// 发送协议版本
 	protoMsg := protocol.MakeDefaultMsg(protocol.CMProtocol, clientVersion, 0, 0, 0)
 	handler.Send(protoMsg, "")
 
@@ -1775,7 +1769,7 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 	})
 
 	playScene.SetSendUseItem(func(makeIndex int32) {
-		// Recog carries the 32-bit MakeIndex (Delphi SendEatItem convention).
+		// Recog 携带 32 位 MakeIndex（Delphi SendEatItem 惯例）。
 		msg := protocol.MakeDefaultMsg(protocol.CMEat, makeIndex, 0, 0, 0)
 		handler.Send(msg, "")
 	})
@@ -1933,7 +1927,7 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 		for i, d := range deltas {
 			binary.LittleEndian.PutUint16(buf[i*2:i*2+2], uint16(d))
 		}
-		// Send encodes the body once; pass raw bytes.
+		// Send 只编码 body 一次；传入原始字节。
 		msg := protocol.MakeDefaultMsg(protocol.CMAdjustBonus, int32(remaining), 0, 0, 0)
 		handler.Send(msg, string(buf))
 	})
@@ -1956,10 +1950,10 @@ type DebugScene struct {
 }
 
 func (s *DebugScene) Open() {
-	log.Logf(log.LevelInfo, "Scene", "Opened: %s", s.name)
+	log.Logf(log.LevelInfo, "Scene", "已打开: %s", s.name)
 }
 func (s *DebugScene) Close() {
-	log.Logf(log.LevelInfo, "Scene", "Closed: %s", s.name)
+	log.Logf(log.LevelInfo, "Scene", "已关闭: %s", s.name)
 }
 func (s *DebugScene) Update(dt float64) {}
 func (s *DebugScene) Render(glState *engine.GLState, proj [16]float32) {
@@ -1977,8 +1971,8 @@ func (s *DebugScene) OnKey(key int, action int)                    {}
 func (s *DebugScene) OnMouse(x, y float64, button int, action int, mods int) {}
 func (s *DebugScene) OnScroll(x, y float64)                        {}
 
-// parseTradeItem decodes the SMDealAddItemOK/SMDealRemoteAddItem payload
-// (server encodeDealItem: MakeIndex i32, WIndex u16, Dura u16, DuraMax u16).
+// parseTradeItem 解码 SMDealAddItemOK/SMDealRemoteAddItem 的 payload
+//（服务端 encodeDealItem: MakeIndex i32, WIndex u16, Dura u16, DuraMax u16）。
 func (h *NetHandler) parseTradeItem(body string) *BagItem {
 	raw := []byte(body)
 	if len(raw) < 10 {

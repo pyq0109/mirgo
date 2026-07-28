@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// StdItem represents an item definition from the database.
+// StdItem 表示数据库中的物品定义。
 type StdItem struct {
 	Idx       int    `json:"idx"`
 	Name      string `json:"name"`
@@ -31,7 +31,7 @@ type StdItem struct {
 	Price     int    `json:"price"`
 }
 
-// MonsterDef represents a monster definition from the database.
+// MonsterDef 表示数据库中的怪物定义。
 type MonsterDef struct {
 	Name    string `json:"name"`
 	Race    int    `json:"race"`
@@ -51,7 +51,7 @@ type MonsterDef struct {
 	Hit     int    `json:"hit"`
 }
 
-// MagicDef represents a magic definition from the database.
+// MagicDef 表示数据库中的魔法定义。
 type MagicDef struct {
 	MagID      int    `json:"magId"`
 	MagName    string `json:"magName"`
@@ -70,7 +70,7 @@ type MagicDef struct {
 	Delay      int    `json:"delay"`
 }
 
-// ConvertDatabase converts the SQLite database to JSONC files.
+// ConvertDatabase 将 SQLite 数据库转换为 JSONC 文件。
 func ConvertDatabase(inputDir, outputDir string) error {
 	dbFile := filepath.Join(inputDir, "数据库", "GEEM2.db")
 
@@ -84,17 +84,17 @@ func ConvertDatabase(inputDir, outputDir string) error {
 	}
 	defer db.Close()
 
-	// Convert StdItems
+	// 转换 StdItems
 	if err := convertStdItems(db, outputDir); err != nil {
 		return fmt.Errorf("converting StdItems: %w", err)
 	}
 
-	// Convert Monster
+	// 转换 Monster
 	if err := convertMonster(db, outputDir); err != nil {
 		return fmt.Errorf("converting Monster: %w", err)
 	}
 
-	// Convert Magic
+	// 转换 Magic
 	if err := convertMagic(db, outputDir); err != nil {
 		return fmt.Errorf("converting Magic: %w", err)
 	}

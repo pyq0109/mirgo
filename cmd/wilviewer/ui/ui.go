@@ -27,36 +27,36 @@ const (
 	thumbnailSize   = 64
 )
 
-// UIState holds the shared state between the UI and the main loop.
+// UIState 持有 UI 和主循环之间的共享状态。
 type UIState struct {
-	DataDir    string // root data directory
+	DataDir    string // 根资源目录
 	WILFile    *wil.File
 	Renderer   *renderer.WILRenderer
 	CurrentIdx int
-	Mode       string // "browse" or "animation"
+	Mode       string // "browse" 或 "animation"
 
-	// Grid state.
-	GridScrollTo int // scroll to this image index in grid (-1 = no scroll)
+	// 网格状态
+	GridScrollTo int // 滚动到网格中此图片索引（-1 = 不滚动）
 
-	// Animation state.
+	// 动画状态
 	AnimPlaying   bool
 	AnimDirection int     // 0-7
-	AnimAction    string  // "stand", "walk", "run", etc.
-	AnimSpeed     float64 // playback speed multiplier
-	animFrameIdx  int     // current frame in sequence
-	animLastTick  float64 // glfw timer for animation
+	AnimAction    string  // "stand", "walk", "run" 等
+	AnimSpeed     float64 // 播放速度倍率
+	animFrameIdx  int     // 当前帧在序列中的索引
+	animLastTick  float64 // 动画用 glfw 计时器
 }
 
-// toImGuiWindow converts a go-gl/glfw Window to the cimgui-go GLFWwindow type.
+// toImGuiWindow 将 go-gl/glfw Window 转换为 cimgui-go 的 GLFWwindow 类型。
 func toImGuiWindow(w *glfw.Window) *igglfw.GLFWwindow {
 	return igglfw.NewGLFWwindowFromC(unsafe.Pointer(w.Handle()))
 }
 
-// Init initializes ImGui with the given GLFW window.
+// Init 初始化 ImGui 并绑定 GLFW 窗口。
 func Init(window *glfw.Window) {
 	ig.CreateContext()
 
-	// Load larger default font.
+	// 加载更大的默认字体
 	fontCfg := ig.NewFontConfig()
 	fontCfg.SetSizePixels(20.0)
 	ig.CurrentIO().Fonts().AddFontDefaultV(fontCfg)
@@ -70,20 +70,20 @@ func Init(window *glfw.Window) {
 	igopengl3.InitV("#version 330")
 }
 
-// Shutdown shuts down ImGui backends and destroys the context.
+// Shutdown 关闭 ImGui 后端并销毁上下文。
 func Shutdown() {
 	igopengl3.Shutdown()
 	igglfw.Shutdown()
 	ig.DestroyContext()
 }
 
-// ScrollHandler is a callback for scroll events (after ImGui processing).
+// ScrollHandler 是滚轮事件的回调（在 ImGui 处理之后调用）。
 type ScrollHandler func(window *glfw.Window, xoff, yoff float64)
 
-// KeyHandler is a callback for key events (after ImGui processing).
+// KeyHandler 是键盘事件的回调（在 ImGui 处理之后调用）。
 type KeyHandler func(window *glfw.Window, key glfw.Key, action glfw.Action)
 
-// SetGLFWCallbacks sets up GLFW callbacks that forward to ImGui.
+// SetGLFWCallbacks 设置 GLFW 回调并转发给 ImGui。
 func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler, keyHandler KeyHandler) {
 	imWin := toImGuiWindow(window)
 
@@ -110,25 +110,25 @@ func SetGLFWCallbacks(window *glfw.Window, scrollHandler ScrollHandler, keyHandl
 	})
 }
 
-// BeginFrame starts a new ImGui frame.
+// BeginFrame 开始新的 ImGui 帧。
 func BeginFrame() {
 	igopengl3.NewFrame()
 	igglfw.NewFrame()
 	ig.NewFrame()
 }
 
-// EndFrame finalizes and renders the ImGui draw data.
+// EndFrame 完成并渲染 ImGui 绘制数据。
 func EndFrame() {
 	ig.Render()
 	igopengl3.RenderDrawData(ig.CurrentDrawData())
 }
 
-// IO returns the current ImGui IO.
+// IO 返回当前 ImGui IO。
 func IO() *ig.IO {
 	return ig.CurrentIO()
 }
 
-// RenderLeftPanel renders the directory tree panel on the left side.
+// RenderLeftPanel 渲染左侧目录树面板。
 func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 	ig.SetNextWindowPosV(ig.NewVec2(0, 0), ig.CondAlways, ig.NewVec2(0, 0))
 	ig.SetNextWindowSizeV(ig.NewVec2(leftPanelWidth, float32(glfwH)), ig.CondAlways)
@@ -152,7 +152,7 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 		return
 	}
 
-	// Collect and sort .wil filenames.
+	// 收集并排序 .wil 文件名
 	var wilFiles []string
 	for _, e := range entries {
 		if e.IsDir() {
@@ -165,9 +165,9 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 	}
 	sort.Strings(wilFiles)
 
-	blue := color.RGBA{R: 102, G: 179, B: 255, A: 255}   // animation
-	green := color.RGBA{R: 102, G: 255, B: 102, A: 255}  // static
-	yellow := color.RGBA{R: 255, G: 255, B: 102, A: 255} // mixed
+	blue := color.RGBA{R: 102, G: 179, B: 255, A: 255}   // 动画
+	green := color.RGBA{R: 102, G: 255, B: 102, A: 255}  // 静态
+	yellow := color.RGBA{R: 255, G: 255, B: 102, A: 255} // 混合
 
 	ig.BeginChildStr("filetree")
 	for _, name := range wilFiles {
@@ -209,7 +209,7 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 	ig.End()
 }
 
-// RenderGridPanel renders the center grid of texture thumbnails.
+// RenderGridPanel 渲染中间的纹理缩略图网格。
 func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 	gridX := float32(leftPanelWidth)
 	gridW := float32(glfwW) - gridX - float32(rightPanelWidth)
@@ -230,8 +230,8 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 
 	ig.BeginChildStr("gridscroll")
 
-	// Calculate columns based on child window's actual available width.
-	// Button width = thumbnailSize + 2*FramePadding.X; step = button width + ItemSpacing.X.
+	// 根据子窗口的实际可用宽度计算列数
+	// 按钮宽度 = thumbnailSize + 2*FramePadding.X; 步长 = 按钮宽度 + ItemSpacing.X
 	availW := ig.ContentRegionAvail().X
 	style := ig.CurrentStyle()
 	framePadX := int(style.FramePadding().X)
@@ -267,16 +267,16 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 			continue
 		}
 
-		// Highlight selected cell.
+		// 高亮选中的格子
 		if i == selectedIdx {
 			ig.PushStyleColorVec4(ig.ColBorder, ig.NewVec4(0.2, 0.6, 1.0, 1.0))
 			ig.PushStyleVarFloat(ig.StyleVarFrameBorderSize, 2.0)
 		}
 
-		// Cell begin.
+		// 格子开始
 		ig.PushIDInt(int32(i))
 
-		// UV: full image (aspect ratio handled by ImageButton sizing).
+		// UV: 完整图像（宽高比由 ImageButton 尺寸处理）
 		uv0 := ig.NewVec2(0, 0)
 		uv1 := ig.NewVec2(1, 1)
 
@@ -284,12 +284,12 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 		size := ig.NewVec2(thumbnailSize, thumbnailSize)
 		pressed := ig.ImageButtonV(fmt.Sprintf("##thumb%d", i), *texRef, size, uv0, uv1, ig.NewVec4(0.15, 0.15, 0.15, 1), ig.NewVec4(1, 1, 1, 1))
 
-		// Hover tooltip.
+		// 悬停提示
 		if ig.IsItemHovered() {
 			ig.SetTooltip(fmt.Sprintf("#%d  %dx%d", i, img.Width, img.Height))
 		}
 
-		// Click to select.
+		// 点击选中
 		if pressed {
 			state.CurrentIdx = i
 			mlog.Logf(mlog.LevelDebug, "Grid", "选中图像: idx=%d", i)
@@ -302,7 +302,7 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 			ig.PopStyleColor()
 		}
 
-		// SameLine until we fill the row.
+		// 同行排列直到填满一行
 		col++
 		if col < cols {
 			ig.SameLine()
@@ -311,7 +311,7 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 		}
 	}
 
-	// Auto-scroll to selected image.
+	// 自动滚动到选中的图像
 	if state.GridScrollTo >= 0 {
 		row := state.GridScrollTo / cols
 		rowHeight := ig.FrameHeight() + ig.CurrentStyle().ItemSpacing().Y
@@ -324,7 +324,7 @@ func RenderGridPanel(state *UIState, glfwW, glfwH int32) {
 	ig.End()
 }
 
-// RenderInfoPanel renders the right-top panel with file info and controls.
+// RenderInfoPanel 渲染右上方的文件信息和控制面板。
 func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	infoH := float32(glfwH) * 0.4
 	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), 0), ig.CondAlways, ig.NewVec2(0, 0))
@@ -346,12 +346,12 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 
 	wf := state.WILFile
 
-	// File info.
+	// 文件信息
 	ig.Text(fmt.Sprintf("Title: %s", wf.Title))
 	ig.Text(fmt.Sprintf("Images: %d", wf.Count))
 	ig.Separator()
 
-	// Mode selection.
+	// 模式选择
 	ig.Text("Mode:")
 	if ig.RadioButtonBool("Browse", state.Mode == "browse") {
 		state.Mode = "browse"
@@ -364,7 +364,7 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	}
 	ig.Separator()
 
-	// Current image info.
+	// 当前图像信息
 	if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
 		img := wf.GetImage(state.CurrentIdx)
 		if img != nil {
@@ -375,7 +375,7 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	}
 	ig.Separator()
 
-	// Navigation.
+	// 导航
 	navW := rightPanelWidth - 20
 	ig.PushItemWidth(float32(navW))
 	if ig.Button("<<") {
@@ -410,7 +410,7 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	ig.PopItemWidth()
 	ig.Separator()
 
-	// Export.
+	// 导出
 	if ig.Button("Export PNG") {
 		if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
 			dir := state.DataDir + "/export"
@@ -440,7 +440,7 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	ig.End()
 }
 
-// RenderPreviewPanel renders the right-bottom panel with image preview or animation.
+// RenderPreviewPanel 渲染右下方的图像预览或动画面板。
 func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	infoH := float32(glfwH) * 0.4
 	previewH := float32(glfwH) - infoH
@@ -457,31 +457,31 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 
 	wf := state.WILFile
 
-	// Animation controls (only in animation mode).
+	// 动画控制（仅动画模式）
 	if state.Mode == "animation" {
 		renderAnimationControls(state, wf)
 		ig.End()
 		return
 	}
 
-	// Browse mode: show selected image as ImGui Image.
+	// 浏览模式：将选中图像显示为 ImGui Image
 	if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
 		img := wf.GetImage(state.CurrentIdx)
 		if img != nil && img.RGBA != nil {
 			tex := state.Renderer.GetOrCreateTexture(state.CurrentIdx)
 			if tex != 0 {
-				// Calculate image size to fit in available region, keeping aspect ratio.
+				// 计算图像尺寸以适应可用区域，保持宽高比
 				avail := ig.ContentRegionAvail()
 				imgW := float32(img.Width)
 				imgH := float32(img.Height)
 				scale := math.Min(float64(avail.X)/float64(imgW), float64(avail.Y)/float64(imgH))
 				if scale > 4.0 {
-					scale = 4.0 // cap at 4x
+					scale = 4.0 // 最大 4 倍
 				}
 				drawW := float32(float64(imgW) * scale)
 				drawH := float32(float64(imgH) * scale)
 
-				// Center the image.
+				// 居中图像
 				offsetX := (avail.X - drawW) / 2
 				offsetY := (avail.Y - drawH) / 2
 				if offsetX > 0 || offsetY > 0 {
@@ -497,11 +497,11 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	ig.End()
 }
 
-// renderAnimationControls renders the animation control panel.
+// renderAnimationControls 渲染动画控制面板。
 func renderAnimationControls(state *UIState, wf *wil.File) {
 	ig.TextColored(ig.NewVec4(0.4, 0.7, 1.0, 1), "Animation Controls")
 
-	// Action selection.
+	// 动作选择
 	ig.Text("Action:")
 	actions := []string{"stand", "walk", "run", "attack", "spell", "hit", "death"}
 	for i, a := range actions {
@@ -519,7 +519,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 		state.AnimAction = "stand"
 	}
 
-	// Direction selection.
+	// 方向选择
 	ig.Text("Direction:")
 	dirNames := []string{"Up", "UpRight", "Right", "DownRight", "Down", "DownLeft", "Left", "UpLeft"}
 	dirArrows := []string{"\u2191", "\u2197", "\u2192", "\u2198", "\u2193", "\u2199", "\u2190", "\u2196"}
@@ -537,7 +537,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 		}
 	}
 
-	// Playback controls.
+	// 播放控制
 	ig.Text("Playback:")
 	if ig.Button("|<") {
 		state.animFrameIdx = 0
@@ -572,7 +572,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 		state.AnimPlaying = false
 	}
 
-	// Speed control.
+	// 速度控制
 	ig.Text("Speed:")
 	if state.AnimSpeed == 0 {
 		state.AnimSpeed = 1.0
@@ -581,7 +581,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 	ig.SliderFloat("##speed", &speedF32, 0.1, 5.0)
 	state.AnimSpeed = float64(speedF32)
 
-	// Frame info.
+	// 帧信息
 	frames := calcAnimFrames(state.AnimAction, state.AnimDirection, wf.Count)
 	totalFrames := len(frames)
 	if totalFrames > 0 {
@@ -599,7 +599,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 		ig.Text(fmt.Sprintf("Direction: %s (%d)", dirName, state.AnimDirection))
 		ig.Text(fmt.Sprintf("Action: %s", state.AnimAction))
 
-		// Show animation frame preview.
+		// 显示动画帧预览
 		tex := state.Renderer.GetOrCreateTexture(actualFrame)
 		if tex != 0 {
 			img := state.Renderer.GetImage(actualFrame)
@@ -623,7 +623,7 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 			}
 		}
 
-		// Auto-advance animation.
+		// 自动推进动画
 		if state.AnimPlaying {
 			now := glfw.GetTime()
 			interval := 0.1 / state.AnimSpeed
@@ -640,8 +640,8 @@ func renderAnimationControls(state *UIState, wf *wil.File) {
 	}
 }
 
-// calcAnimFrames calculates the frame indices for an animation.
-// Frame counts match the Delphi TActionInfo definitions in Actor.pas.
+// calcAnimFrames 计算动画的帧索引序列。
+// 帧数对应 Delphi Actor.pas 中的 TActionInfo 定义。
 func calcAnimFrames(action string, direction int, maxCount int) []int {
 	var start, frameCount int
 	switch action {
@@ -674,8 +674,7 @@ func calcAnimFrames(action string, direction int, maxCount int) []int {
 		return frames
 	}
 
-	// For actions with fewer frames than directions (e.g. stand=4),
-	// all directions share the same frames. Otherwise divide by 8.
+	// 帧数少于方向数的动作（如 stand=4），所有方向共享帧序列；否则按 8 方向分配
 	dirFrames := frameCount
 	if frameCount >= 8 {
 		dirFrames = frameCount / 8
@@ -692,12 +691,12 @@ func calcAnimFrames(action string, direction int, maxCount int) []int {
 	return frames
 }
 
-// RightPanelWidth returns the width of the right panel for viewport calculations.
+// RightPanelWidth 返回右侧面板宽度，用于视口计算。
 func RightPanelWidth() int {
 	return rightPanelWidth
 }
 
-// LeftPanelWidth returns the width of the left panel.
+// LeftPanelWidth 返回左侧面板宽度。
 func LeftPanelWidth() int {
 	return leftPanelWidth
 }
@@ -715,7 +714,7 @@ func formatIdx(i int) string {
 	return fmt.Sprintf("%04d", i)
 }
 
-// wilCategory classifies a WIL file by its name.
+// wilCategory 根据文件名为 WIL 文件分类。
 func wilCategory(name string) string {
 	base := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
 	switch {

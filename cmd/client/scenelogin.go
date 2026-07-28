@@ -12,7 +12,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// GLFW key codes (matching go-gl/glfw constants).
+// GLFW 键码 (与 go-gl/glfw 常量一致)。
 const (
 	keyBackspace = 259
 	keyEnter     = 257
@@ -21,18 +21,18 @@ const (
 	keyEscape    = 256
 )
 
-// GLFW mouse button actions.
+// GLFW 鼠标按键动作。
 const (
 	mouseRelease = 0
 	mousePress   = 1
 )
 
-// loginArea defines a clickable region.
+// loginArea 定义一个可点击区域。
 type loginArea struct {
 	X, Y, W, H float32
 }
 
-// loginMode mirrors Delphi TLoginState (IntroScn.pas:17).
+// loginMode 对应 Delphi TLoginState (IntroScn.pas:17)。
 type loginMode int
 
 const (
@@ -42,43 +42,43 @@ const (
 	modeServerSelect
 )
 
-// Screen offset: the window is the fixed 800×600 Delphi game area.
+// 屏幕偏移：窗口即 Delphi 的固定 800×600 游戏区域。
 const (
 	loginOX = float32(0)
 	loginOY = float32(0)
 )
 
-// Door animation (IntroScn.pas:495,826,841,845): 10 frames, 300ms each.
+// 开门动画 (IntroScn.pas:495,826,841,845)：10 帧，每帧 300ms。
 const (
 	doorFrameCount = 10
 	doorFrameTime  = 300 * time.Millisecond
 )
 
-// Login input fields (IntroScn.pas:499-512).
+// 登录输入框 (IntroScn.pas:499-512)。
 var inputFields = []loginArea{
-	{loginOX + 255, loginOY + 511, 112, 19}, // ID
-	{loginOX + 495, loginOY + 511, 112, 19}, // Password
+	{loginOX + 255, loginOY + 511, 112, 19}, // 账号
+	{loginOX + 495, loginOY + 511, 112, 19}, // 密码
 }
 
-// Bottom buttons (FState.pas:763-774). Only pressed buttons are drawn; the
-// normal-state artwork is baked into the ChrSel.wil[22] background.
+// 底部按钮 (FState.pas:763-774)。仅绘制按下态按钮；
+// 常态面板已烘焙在 ChrSel.wil[22] 背景中。
 var buttonAreas = []loginArea{
-	{loginOX + 90, loginOY + 558, 70, 20},  // OK [62]
-	{loginOX + 268, loginOY + 558, 70, 20}, // ChangePW [53]
-	{loginOX + 447, loginOY + 558, 70, 20}, // NewAccount [61]
-	{loginOX + 613, loginOY + 558, 70, 20}, // Close [64]
+	{loginOX + 90, loginOY + 558, 70, 20},  // 确定 [62]
+	{loginOX + 268, loginOY + 558, 70, 20}, // 修改密码 [53]
+	{loginOX + 447, loginOY + 558, 70, 20}, // 新建账号 [61]
+	{loginOX + 613, loginOY + 558, 70, 20}, // 关闭 [64]
 }
 
 var buttonImages = []int{62, 53, 61, 64}
 
-// Register window fields (IntroScn.pas:279-410), base nx=800/2-320=80,
-// ny=600/2-238=62. Order: account, password, confirm, name, SSNo, birthday,
-// quiz1, answer1, quiz2, answer2, phone, mobile, email.
+// 注册窗口输入框 (IntroScn.pas:279-410)，基准 nx=800/2-320=80,
+// ny=600/2-238=62。顺序：账号、密码、确认密码、姓名、身份证、生日、
+// 问题1、答案1、问题2、答案2、电话、手机、邮箱。
 type fieldDef struct {
 	x, y, w, h float32
 	maxLen     int
 	masked     bool
-	password   bool // rejects '~', ''', ' ' at input time (IntroScn.pas:640-641)
+	password   bool // 输入时拒绝 '~', ''', ' ' (IntroScn.pas:640-641)
 }
 
 const (
@@ -87,22 +87,22 @@ const (
 )
 
 var regFieldDefs = []fieldDef{
-	{regNX + 86, regNY + 91, 104, 13, 10, false, false},   // account
-	{regNX + 86, regNY + 118, 104, 13, 10, true, true},    // password
-	{regNX + 86, regNY + 149, 104, 12, 10, true, true},    // confirm
-	{regNX + 86, regNY + 190, 105, 13, 20, false, false},  // real name
-	{regNX + 86, regNY + 207, 105, 13, 14, false, false},  // SSNo
-	{regNX + 86, regNY + 217, 105, 13, 10, false, false},  // birthday
-	{regNX + 263, regNY + 118, 124, 13, 20, false, false}, // quiz1
-	{regNX + 263, regNY + 149, 124, 12, 12, false, false}, // answer1
-	{regNX + 263, regNY + 190, 124, 13, 20, false, false}, // quiz2
-	{regNX + 263, regNY + 218, 124, 13, 12, false, false}, // answer2
-	{regNX + 263, regNY + 285, 124, 13, 14, false, false}, // phone
-	{regNX + 263, regNY + 315, 124, 12, 13, false, false}, // mobile
-	{regNX + 263, regNY + 368, 124, 13, 40, false, false}, // email
+	{regNX + 86, regNY + 91, 104, 13, 10, false, false},   // 账号
+	{regNX + 86, regNY + 118, 104, 13, 10, true, true},    // 密码
+	{regNX + 86, regNY + 149, 104, 12, 10, true, true},    // 确认密码
+	{regNX + 86, regNY + 190, 105, 13, 20, false, false},  // 真实姓名
+	{regNX + 86, regNY + 207, 105, 13, 14, false, false},  // 身份证号
+	{regNX + 86, regNY + 217, 105, 13, 10, false, false},  // 生日
+	{regNX + 263, regNY + 118, 124, 13, 20, false, false}, // 问题1
+	{regNX + 263, regNY + 149, 124, 12, 12, false, false}, // 答案1
+	{regNX + 263, regNY + 190, 124, 13, 20, false, false}, // 问题2
+	{regNX + 263, regNY + 218, 124, 13, 12, false, false}, // 答案2
+	{regNX + 263, regNY + 285, 124, 13, 14, false, false}, // 电话
+	{regNX + 263, regNY + 315, 124, 12, 13, false, false}, // 手机
+	{regNX + 263, regNY + 368, 124, 13, 40, false, false}, // 邮箱
 }
 
-// Register window buttons (FState.pas:868-876): Ok [51], Cancel [52], Close [83].
+// 注册窗口按钮 (FState.pas:868-876)：确定 [51]、取消 [52]、关闭 [83]。
 var regButtonAreas = []loginArea{
 	{loginOX + 305, loginOY + 530, 70, 20},
 	{loginOX + 445, loginOY + 530, 70, 20},
@@ -111,8 +111,8 @@ var regButtonAreas = []loginArea{
 
 var regButtonImages = []int{51, 52, 83}
 
-// Change-password window fields (IntroScn.pas:412-480), base nx=800/2-210=190,
-// ny=600/2-150=150. Order: account, old password, new password, repeat.
+// 修改密码窗口输入框 (IntroScn.pas:412-480)，基准 nx=800/2-210=190,
+// ny=600/2-150=150。顺序：账号、旧密码、新密码、确认密码。
 const (
 	chgNX = 190
 	chgNY = 150
@@ -125,19 +125,19 @@ var chgFieldDefs = []fieldDef{
 	{chgNX + 191, chgNY + 172, 104, 13, 10, true, true},
 }
 
-// Change-password buttons relative to the centered [50] window
-// (FState.pas:887-892): Ok [361] at +81,+141; Cancel [365] at +160,+141.
+// 修改密码按钮，相对于居中的 [50] 窗口
+// (FState.pas:887-892)：确定 [361] 位于 +81,+141；取消 [365] 位于 +160,+141。
 var chgButtonImages = []int{361, 365}
 
-// serverInfo holds a server entry from SM_PASSOKSELECTSERVER.
+// serverInfo 保存 SM_PASSOKSELECTSERVER 返回的服务器条目。
 type serverInfo struct {
 	Name   string
 	Status int
 }
 
-// Server-select dialog: Prguse[256] background, [79] buttons (pressed [80]),
-// close [83] (FState.pas:810-847 English version). The Chinese version
-// [160-166] images are 1×1 placeholders in this asset build.
+// 选服对话框：Prguse[256] 背景，[79] 按钮（按下态 [80]），
+// 关闭 [83] (FState.pas:810-847 英文版)。中文版 [160-166]
+// 的图片在当前资源包中是 1×1 占位图。
 const (
 	srvDlgImg   = 256
 	srvBtnImg   = 79
@@ -148,8 +148,8 @@ const (
 	srvCloseH   = float32(20)
 )
 
-// srvButtonTop returns the window-relative Top of server button i for the
-// given server count (FState.pas:2456-2474).
+// srvButtonTop 根据服务器数量返回第 i 个服务器按钮的窗口内 Top 值
+// (FState.pas:2456-2474)。
 func srvButtonTop(i, count int) float32 {
 	switch count {
 	case 1:
@@ -164,9 +164,9 @@ func srvButtonTop(i, count int) float32 {
 	}
 }
 
-// serverDisplayName returns the button label and color for a server's status
-// (FState.pas:2250-2272): 0 maintenance/clDkGray, 1 normal/clLime,
-// 2 smooth/clGreen, 3 crowded/clMaroon, 4 full/clRed.
+// serverDisplayName 根据服务器状态返回按钮文本和颜色
+// (FState.pas:2250-2272)：0 维护/clDkGray, 1 正常/clLime,
+// 2 流畅/clGreen, 3 繁忙/clMaroon, 4 满员/clRed。
 func serverDisplayName(srv serverInfo) (string, float32, float32, float32) {
 	switch srv.Status {
 	case 0:
@@ -184,12 +184,12 @@ func serverDisplayName(srv serverInfo) (string, float32, float32, float32) {
 	}
 }
 
-// parseServerList parses the server list from SM_PASSOKSELECTSERVER body.
-// Body format: "name1/status1/name2/status2/..."
+// parseServerList 解析 SM_PASSOKSELECTSERVER 消息体中的服务器列表。
+// 消息体格式："name1/status1/name2/status2/..."
 func parseServerList(body string) []serverInfo {
 	var servers []serverInfo
 	if body == "" {
-		// Default server
+		// 默认服务器
 		servers = append(servers, serverInfo{Name: "Server", Status: 1})
 		return servers
 	}
@@ -208,7 +208,7 @@ func parseServerList(body string) []serverInfo {
 	return servers
 }
 
-// splitSlash splits a string by '/'.
+// splitSlash 按 '/' 分割字符串。
 func splitSlash(s string) []string {
 	var parts []string
 	start := 0
@@ -222,9 +222,9 @@ func splitSlash(s string) []string {
 	return parts
 }
 
-// regHelps is the per-field registration help text drawn in clSilver next to
-// the focused edit (IntroScn.pas:709-786; the Delphi literals are GBK
-// mojibake, replaced with concise Chinese).
+// regHelps 是各注册输入框旁的帮助文本，以 clSilver 色绘制在
+// 当前焦点输入框旁 (IntroScn.pas:709-786; Delphi 原文是 GBK
+// 乱码，已替换为简洁中文)。
 var regHelps = [13]string{
 	"请输入账号(必填)",
 	"请输入密码(至少4位)",
@@ -241,55 +241,55 @@ var regHelps = [13]string{
 	"请输入邮箱地址",
 }
 
-// LoginScene handles the login screen (Delphi TLoginScene, IntroScn.pas:62).
+// LoginScene 处理登录界面 (Delphi TLoginScene, IntroScn.pas:62)。
 type LoginScene struct {
 	gl        *engine.GLState
 	resources *engine.ResourceManager
-	text      *engine.TextRenderer // default 16px
-	textSmall *engine.TextRenderer // 13px for input fields (Delphi Font.Size=10)
-	textSrv   *engine.TextRenderer // 15px for server names (Delphi Font.Size=11)
+	text      *engine.TextRenderer // 默认 16px
+	textSmall *engine.TextRenderer // 13px 用于输入框 (Delphi Font.Size=10)
+	textSrv   *engine.TextRenderer // 15px 用于服务器名 (Delphi Font.Size=11)
 
-	// Door animation (IntroScn.pas:804-851); fade handled by globalFade.
+	// 开门动画 (IntroScn.pas:804-851)；淡出由 globalFade 处理。
 	doorOpening   bool
 	doorFading    bool
 	doorFrame     int
 	doorStartTime time.Time
 
-	// Mode (TLoginState)
+	// 模式 (TLoginState)
 	mode        loginMode
 	showLoginUI bool
 
-	// Login fields
+	// 登录输入框
 	userID          string
 	password        string
-	focusedField    int // 0=id, 1=password, -1=none
+	focusedField    int // 0=账号, 1=密码, -1=无
 	waitingResponse bool
 	cursorBlink     time.Time
 
-	// Register fields (13) / change-password fields (4)
+	// 注册输入框 (13个) / 修改密码输入框 (4个)
 	regFields [13]string
 	regFocus  int
 	chgFields [4]string
 	chgFocus  int
 
-	// Mouse: currently pressed button index per mode (-1 = none)
+	// 鼠标：当前模式下按住的按钮索引 (-1 = 无)
 	pressedButton int
 
-	compLoggedModes uint8 // bitmask of modes whose layout has been logged
+	compLoggedModes uint8 // 已输出布局日志的模式位掩码
 
-	// Modal dialog (Delphi DMessageDlg, FState.pas:1938-2158)
+	// 模态对话框 (Delphi DMessageDlg, FState.pas:1938-2158)
 	dlgMsg        string
 	dlgLines      []string
-	dlgSize       int   // 0=small[381], 1=medium[360], 2=large[380]
-	dlgButtons    []int // button image indices (361=Ok, 363=Yes, 365=Cancel, 367=No)
-	dlgPressedBtn int   // index into dlgButtons, -1=none
+	dlgSize       int   // 0=小[381], 1=中[360], 2=大[380]
+	dlgButtons    []int // 按钮图片索引（361=确定, 363=是, 365=取消, 367=否）
+	dlgPressedBtn int   // dlgButtons 中的索引，-1=无
 
 	connecting bool
 
-	// Server select overlay (Delphi DSelServerDlg, FState.pas:778-857)
+	// 选服浮层 (Delphi DSelServerDlg, FState.pas:778-857)
 	servers []serverInfo
 
-	// Callbacks
+	// 回调
 	loginFunc        func(id, password string)
 	registerFunc     func(ue protocol.UserEntry, ua protocol.UserEntryAdd)
 	chgpwFunc        func(id, oldpw, newpw string)
@@ -362,7 +362,7 @@ func (s *LoginScene) logComponentLayout() {
 	}
 }
 
-// NewLoginScene creates a new login scene.
+// NewLoginScene 创建登录场景。
 func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *LoginScene {
 	s := &LoginScene{
 		gl:             gl,
@@ -376,20 +376,20 @@ func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *
 		cursorBlink:    time.Now(),
 		compLoggedModes: 0,
 	}
-	// Delphi input fields use Font.Size=10 ≈ 13px @96DPI (IntroScn.pas:260).
+	// Delphi 输入框使用 Font.Size=10 ≈ 13px @96DPI (IntroScn.pas:260)。
 	if t, err := text.WithSize(13); err == nil {
 		s.textSmall = t
 	}
-	// Delphi server names use Font.Size=11 ≈ 15px @96DPI (FState.pas:2274).
+	// Delphi 服务器名使用 Font.Size=11 ≈ 15px @96DPI (FState.pas:2274)。
 	if t, err := text.WithSize(15); err == nil {
 		s.textSrv = t
 	}
 	return s
 }
 
-// Open is called when the scene becomes active.
+// Open 在场景激活时调用。
 func (s *LoginScene) Open() {
-	log.Logf(log.LevelInfo, "LoginScene", "Opened")
+	log.Logf(log.LevelInfo, "LoginScene", "已打开")
 	s.mode = modeLogin
 	s.showLoginUI = true
 	s.doorOpening = false
@@ -408,13 +408,13 @@ func (s *LoginScene) Open() {
 	s.compLoggedModes = 0
 }
 
-// Close is called when the scene becomes inactive.
+// Close 在场景失活时调用。
 func (s *LoginScene) Close() {
-	log.Logf(log.LevelInfo, "LoginScene", "Closed")
+	log.Logf(log.LevelInfo, "LoginScene", "已关闭")
 }
 
-// Update advances the door animation; the fade to black is handled by
-// the global MakeDark system (ClMain.pas:1114-1130).
+// Update 推进开门动画；黑屏淡出由全局 MakeDark 系统处理
+// (ClMain.pas:1114-1130)。
 func (s *LoginScene) Update(dt float64) {
 	if !s.doorOpening {
 		return
@@ -426,7 +426,7 @@ func (s *LoginScene) Update(dt float64) {
 				s.doorFrame++
 			} else {
 				s.doorFading = true
-				log.Logf(log.LevelInfo, "LoginScene", "Door animation complete, starting fade out")
+				log.Logf(log.LevelInfo, "LoginScene", "开门动画完成, 开始淡出")
 				globalFade.startOut(false, func() {
 					if s.doorCompleteFunc != nil {
 						s.doorCompleteFunc()
@@ -438,23 +438,23 @@ func (s *LoginScene) Update(dt float64) {
 	}
 }
 
-// Render renders the login scene.
+// Render 渲染登录场景。
 func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 	ox, oy := loginOX, loginOY
 
-	// Background: ChrSel.wil[22] (IntroScn.pas:818,821)
+	// 背景：ChrSel.wil[22] (IntroScn.pas:818,821)
 	bgTex, bgErr := s.getChrSelTexture(22)
 	if bgErr == nil && bgTex != 0 {
 		w, h := s.getChrSelSize(22)
 		s.traceDraw("bg", "ChrSel", 22, ox, oy, float32(w), float32(h))
 		gl.DrawQuad(bgTex, ox, oy, float32(w), float32(h), proj)
 	} else {
-		log.Logf(log.LevelWarn, "LoginScene", "ChrSel[22] background unavailable (tex=%d err=%v)", bgTex, bgErr)
+		log.Logf(log.LevelWarn, "LoginScene", "ChrSel[22] 背景不可用 (tex=%d err=%v)", bgTex, bgErr)
 		gl.DrawQuadColor(0, 0, 800, 600, 0.05, 0.05, 0.1, 1, proj)
 	}
 
-	// Door animation: ChrSel.wil[23..32] (IntroScn.pas:841,845 — original
-	// positions {152},{96} match the 10th-anniversary ChrSel.wil assets).
+	// 开门动画：ChrSel.wil[23..32] (IntroScn.pas:841,845——原始坐标
+	// {152},{96} 与十周年版 ChrSel.wil 资源匹配)。
 	if s.doorOpening {
 		doorIdx := 23 + s.doorFrame
 		if doorTex, err := s.getChrSelTexture(doorIdx); err == nil {
@@ -482,17 +482,16 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	// Modal dialog on top of everything.
+	// 模态对话框绘制在最上层。
 	if s.dlgMsg != "" {
 		s.renderDialog(gl, proj)
 	}
 }
 
-// renderButtons draws the four bottom login buttons. The Delphi original
-// bakes normal-state art into ChrSel[22] and only draws the overlay when
-// pressed (DLoginNewDirectPaint, FState.pas:2342-2354). Since this asset
-// build's ChrSel[22] lacks button art, we always draw the Prguse images.
-// Pressed state draws at the same position (no offset, FState.pas:2351).
+// renderButtons 绘制底部四个登录按钮。Delphi 原版将常态面板烘焙在
+// ChrSel[22] 中，仅在按下时叠加绘制 (DLoginNewDirectPaint,
+// FState.pas:2342-2354)。由于当前资源包的 ChrSel[22] 没有按钮面板，
+// 所以始终绘制 Prguse 图片。按下态在同一位置绘制（无偏移, FState.pas:2351）。
 func (s *LoginScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	for i, idx := range buttonImages {
 		a := s.buttonArea(i)
@@ -504,15 +503,15 @@ func (s *LoginScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy 
 	}
 }
 
-// renderInputFields renders the account/password text and blinking cursor.
-// Labels are baked into the background; Delphi's native TEdits are black-box
-// white-text (IntroScn.pas:255-274).
+// renderInputFields 渲染账号/密码文本和闪烁光标。
+// 标签已烘焙在背景中；Delphi 的原生 TEdit 是黑底白字
+// (IntroScn.pas:255-274)。
 func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	if s.text == nil {
 		return
 	}
-	// After submit the edits are hidden while waiting for the server
-	// (IntroScn.pas:551-554).
+	// 提交后等待服务器响应期间隐藏输入框
+	// (IntroScn.pas:551-554)。
 	if s.waitingResponse {
 		return
 	}
@@ -521,8 +520,8 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 	passX, passY := ox+495, oy+511
 	masked := strings.Repeat("*", len(s.password))
 
-	// TEdit Color=clBlack: opaque black box under the white text
-	// (IntroScn.pas:258,270).
+	// TEdit Color=clBlack：白色文字下方的不透明黑色底框
+	// (IntroScn.pas:258,270)。
 	s.traceDraw("field", "quad", -1, idX, idY, 112, 19)
 	gl.DrawQuadColor(idX, idY, 112, 19, 0, 0, 0, 1, proj)
 	s.traceDraw("field", "quad", -1, passX, passY, 112, 19)
@@ -543,19 +542,19 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 			cx = passX + float32(s.textSmall.MeasureText(masked))
 			cy = passY
 		}
-		// 1px white vertical line matching native TEdit caret (IntroScn.pas:255-274).
+		// 1px 白色竖线，模拟原生 TEdit 光标 (IntroScn.pas:255-274)。
 		gl.DrawQuadColor(cx, cy, 1, 19, 1, 1, 1, 1, proj)
 	}
 }
 
-// windowOrigin returns the top-left of a centered Prguse window image.
+// windowOrigin 返回居中 Prguse 窗口图片的左上角坐标。
 func (s *LoginScene) windowOrigin(index int) (float32, float32, int, int) {
 	w, h := s.getPrguseSize(index)
 	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2, w, h
 }
 
-// renderRegisterWindow renders DNewAccount: background Prguse[63] centered,
-// 13 black edit boxes, Ok[51]/Cancel[52]/Close[83] (FState.pas:862-876).
+// renderRegisterWindow 渲染 DNewAccount：Prguse[63] 背景居中，
+// 13 个黑色输入框，确定[51]/取消[52]/关闭[83] (FState.pas:862-876)。
 func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	if tex, err := s.getPrguseTexture(63); err == nil {
 		wx, wy, w, h := s.windowOrigin(63)
@@ -575,12 +574,12 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 	}
 
 	if s.text != nil {
-		// Title NewAccountTitle at (362,121), white + black outline, bold
-		// (FState.pas:2669).
-		log.Logf(log.LevelTrace, "Render", "login title pos=(%.0f,%.0f)", float32(362), float32(121))
+		// 标题 NewAccountTitle 位于 (362,121)，白色+黑色描边，粗体
+		// (FState.pas:2669)。
+		log.Logf(log.LevelTrace, "Render", "login 标题 pos=(%.0f,%.0f)", float32(362), float32(121))
 		s.text.DrawTextBoldOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
-		// Per-field help NAHelps in clSilver, switching with the focused edit
-		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14).
+		// 各输入框帮助文本 NAHelps，clSilver 色，随焦点切换
+		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14)。
 		if s.regFocus >= 0 && s.regFocus < len(regHelps) {
 			s.textSmall.DrawText(regHelps[s.regFocus], 507, 124, 0.75, 0.75, 0.75, 1, proj)
 		}
@@ -591,8 +590,8 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 	}
 }
 
-// renderChgPwWindow renders DChgPw: background Prguse[50] centered, 4 edit
-// boxes, Ok[361]/Cancel[365] at window+81,+141 / +160,+141 (FState.pas:881-892).
+// renderChgPwWindow 渲染 DChgPw：Prguse[50] 背景居中，4 个输入框，
+// 确定[361]/取消[365] 位于窗口+81,+141 / +160,+141 (FState.pas:881-892)。
 func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	wx, wy, _, _ := s.windowOrigin(50)
 	if tex, err := s.getPrguseTexture(50); err == nil {
@@ -613,15 +612,15 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 	}
 }
 
-// srvWindowOrigin returns the runtime-centered top-left of the [256] dialog
-// (FState.pas:813-814: (SCREENWIDTH-w)/2, (SCREENHEIGHT-h)/2).
+// srvWindowOrigin 返回运行时居中的 [256] 对话框左上角坐标
+// (FState.pas:813-814: (SCREENWIDTH-w)/2, (SCREENHEIGHT-h)/2)。
 func (s *LoginScene) srvWindowOrigin() (float32, float32) {
 	w, h := s.getPrguseSize(srvDlgImg)
 	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2
 }
 
-// renderServerSelect renders DSelServerDlg: dialog [256], up to six [79]
-// buttons (pressed -> [80]), close [83] (FState.pas:810-847, 2220-2280).
+// renderServerSelect 渲染 DSelServerDlg：对话框 [256]，最多六个 [79]
+// 按钮（按下态 -> [80]），关闭 [83] (FState.pas:810-847, 2220-2280)。
 func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 	wx, wy := s.srvWindowOrigin()
 	if tex, err := s.getPrguseTexture(srvDlgImg); err == nil {
@@ -659,15 +658,15 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 				tx += 2
 				ty += 2
 			}
-			log.Logf(log.LevelTrace, "Render", "login srv-btn-text %q pos=(%.0f,%.0f)", name, tx, ty)
+			log.Logf(log.LevelTrace, "Render", "login 服务器按钮文本 %q pos=(%.0f,%.0f)", name, tx, ty)
 			s.textSrv.DrawTextBoldOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
 		}
 	}
 }
 
-// renderFieldGroup draws black edit boxes with white text (Delphi TEdit:
-// Color=clBlack, Font.Color=clWhite, IntroScn.pas:255-274) plus the blinking
-// cursor on the focused field.
+// renderFieldGroup 绘制黑底白字输入框 (Delphi TEdit:
+// Color=clBlack, Font.Color=clWhite, IntroScn.pas:255-274)，
+// 并在焦点输入框上绘制闪烁光标。
 func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs []fieldDef, values []string, focus int) {
 	for _, def := range defs {
 		s.traceDraw("field", "quad", -1, def.x, def.y, def.w, def.h)
@@ -698,8 +697,8 @@ func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs
 	}
 }
 
-// dlgGeom holds layout parameters for each DMessageDlg size
-// (FState.pas:2002-2042).
+// dlgGeom 保存各尺寸 DMessageDlg 的布局参数
+// (FState.pas:2002-2042)。
 type dlgGeom struct {
 	bgImg                    int
 	msgLX, msgLY             float32
@@ -707,14 +706,14 @@ type dlgGeom struct {
 }
 
 var dlgSizes = [3]dlgGeom{
-	{bgImg: 381, msgLX: 39, msgLY: 38, btnLX: 90, btnLY: 36},   // small
-	{bgImg: 360, msgLX: 39, msgLY: 38, btnLX: 324, btnLY: 126}, // medium
-	{bgImg: 380, msgLX: 23, msgLY: 20, btnLX: 105, btnLY: 305}, // large
+	{bgImg: 381, msgLX: 39, msgLY: 38, btnLX: 90, btnLY: 36},   // 小
+	{bgImg: 360, msgLX: 39, msgLY: 38, btnLX: 324, btnLY: 126}, // 中
+	{bgImg: 380, msgLX: 23, msgLY: 20, btnLX: 105, btnLY: 305}, // 大
 }
 
-// dlgButtonAreas returns the window rect and per-button rects for the current
-// dialog. Buttons are laid out right-to-left from btnLX with 110px spacing
-// (FState.pas:2060-2083).
+// dlgButtonAreas 返回当前对话框的窗口矩形和各按钮矩形。
+// 按钮从 btnLX 开始从右向左排列，间距 110px
+// (FState.pas:2060-2083)。
 func (s *LoginScene) dlgButtonAreas() (loginArea, []loginArea) {
 	g := dlgSizes[s.dlgSize]
 	w, h := s.getPrguseSize(g.bgImg)
@@ -732,8 +731,8 @@ func (s *LoginScene) dlgButtonAreas() (loginArea, []loginArea) {
 	return win, btns
 }
 
-// renderDialog renders DMessageDlg with the configured size and buttons
-// (FState.pas:739-752, 2002-2083, 2291-2325).
+// renderDialog 渲染指定尺寸和按钮的 DMessageDlg
+// (FState.pas:739-752, 2002-2083, 2291-2325)。
 func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 	g := dlgSizes[s.dlgSize]
 	win, btns := s.dlgButtonAreas()
@@ -759,13 +758,13 @@ func (s *LoginScene) renderDialog(gl *engine.GLState, proj [16]float32) {
 	}
 	y := win.Y + g.msgLY
 	for _, ln := range s.dlgLines {
-		log.Logf(log.LevelTrace, "Render", "login dlg-text %q pos=(%.0f,%.0f)", ln, win.X+g.msgLX, y)
+		log.Logf(log.LevelTrace, "Render", "login 对话框文本 %q pos=(%.0f,%.0f)", ln, win.X+g.msgLX, y)
 		s.text.DrawTextBoldOutline(ln, win.X+g.msgLX, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		y += 14
 	}
 }
 
-// OnChar handles character input from GLFW.
+// OnChar 处理 GLFW 字符输入。
 func (s *LoginScene) OnChar(char rune) {
 	if !s.showLoginUI || s.doorOpening || s.connecting || s.dlgMsg != "" {
 		return
@@ -777,7 +776,7 @@ func (s *LoginScene) OnChar(char rune) {
 	case modeRegister:
 		def := regFieldDefs[s.regFocus]
 		if def.password && (char == '~' || char == '\'' || char == ' ') {
-			return // filtered at input time (IntroScn.pas:640-641)
+			return // 输入时过滤 (IntroScn.pas:640-641)
 		}
 		if utf8.RuneCountInString(s.regFields[s.regFocus]) < def.maxLen {
 			s.regFields[s.regFocus] += string(char)
@@ -791,7 +790,7 @@ func (s *LoginScene) OnChar(char rune) {
 			s.chgFields[s.chgFocus] += string(char)
 		}
 	case modeServerSelect:
-		return // no text input on the server-select overlay
+		return // 选服浮层不接受文本输入
 	default:
 		if s.waitingResponse || s.focusedField < 0 {
 			return
@@ -807,7 +806,7 @@ func (s *LoginScene) OnChar(char rune) {
 	s.cursorBlink = time.Now()
 }
 
-// OnKey handles keyboard input.
+// OnKey 处理键盘输入。
 func (s *LoginScene) OnKey(key int, action int) {
 	if action != 1 {
 		return
@@ -816,7 +815,7 @@ func (s *LoginScene) OnKey(key int, action int) {
 		return
 	}
 	if s.dlgMsg != "" {
-		// DMsgDlgKeyDown: Enter/Esc close a single-Ok dialog (FState.pas:2139-2158).
+		// DMsgDlgKeyDown：Enter/Esc 关闭仅有确定按钮的对话框 (FState.pas:2139-2158)。
 		if key == keyEnter || key == keyKPEnter || key == keyEscape {
 			s.closeDialog()
 		}
@@ -829,7 +828,7 @@ func (s *LoginScene) OnKey(key int, action int) {
 		s.keyChgPw(key)
 	case modeServerSelect:
 		if key == keyEscape && s.closeFunc != nil {
-			s.closeFunc() // DSelServerDlg close == FrmMain.Close
+			s.closeFunc() // DSelServerDlg 关闭 == FrmMain.Close
 		}
 	default:
 		s.keyLogin(key)
@@ -868,9 +867,9 @@ func (s *LoginScene) keyLogin(key int) {
 		s.cursorBlink = time.Now()
 
 	case keyEnter, keyKPEnter:
-		// Enter on the account field moves focus to the password field
-		// (EdLoginIdKeyPress, IntroScn.pas:530-539); Enter on the password
-		// field submits (EdLoginPasswdKeyPress, :541-558).
+		// 账号输入框按 Enter 将焦点移到密码框
+		// (EdLoginIdKeyPress, IntroScn.pas:530-539)；密码框按 Enter
+		// 提交登录 (EdLoginPasswdKeyPress, :541-558)。
 		if s.focusedField == 0 {
 			s.focusedField = 1
 			s.cursorBlink = time.Now()
@@ -930,10 +929,10 @@ func (s *LoginScene) keyChgPw(key int) {
 	}
 }
 
-// OnMouse handles mouse button input. Clicks fire on release inside the same
-// region (TDButton.MouseUp, DWinCtl.pas:677-695).
+// OnMouse 处理鼠标按键输入。在同一区域内松开时触发点击
+// (TDButton.MouseUp, DWinCtl.pas:677-695)。
 func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
-	log.Logf(log.LevelDebug, "Mouse", "login pos=(%.0f,%.0f) button=%d action=%d", x, y, button, action)
+	log.Logf(log.LevelDebug, "Mouse", "login pos=(%.0f,%.0f) 按键=%d 动作=%d", x, y, button, action)
 	if !s.showLoginUI || s.doorOpening {
 		return
 	}
@@ -980,8 +979,8 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
 	}
 }
 
-// buttonArea returns the hit rectangle for bottom button i; its size comes
-// from the button image (TDControl.SetImgIndex, DWinCtl.pas:607-621).
+// buttonArea 返回底部第 i 个按钮的碰撞矩形；尺寸取自按钮图片
+// (TDControl.SetImgIndex, DWinCtl.pas:607-621)。
 func (s *LoginScene) buttonArea(i int) loginArea {
 	a := buttonAreas[i]
 	if w, h := s.getPrguseSize(buttonImages[i]); w > 0 && h > 0 {
@@ -990,7 +989,7 @@ func (s *LoginScene) buttonArea(i int) loginArea {
 	return a
 }
 
-// regButtonArea returns the hit rectangle for register button i.
+// regButtonArea 返回注册窗口第 i 个按钮的碰撞矩形。
 func (s *LoginScene) regButtonArea(i int) loginArea {
 	a := regButtonAreas[i]
 	if w, h := s.getPrguseSize(regButtonImages[i]); w > 0 && h > 0 {
@@ -1031,8 +1030,7 @@ func (s *LoginScene) mouseLogin(fx, fy float32, action int) {
 	}
 }
 
-// mouseGroup is the shared press/release logic for the register window's
-// field set and button row.
+// mouseGroup 是注册窗口输入框组和按钮行的共用按下/松开逻辑。
 func (s *LoginScene) mouseGroup(fx, fy float32, action int, fields, buttons []loginArea, focus *int, onClick func(int)) {
 	switch action {
 	case mousePress:
@@ -1072,8 +1070,8 @@ func (s *LoginScene) mouseGroup(fx, fy float32, action int, fields, buttons []lo
 	}
 }
 
-// mouseChgPw handles the change-password window; its Ok/Cancel buttons are
-// children of the centered [50] window (FState.pas:887-892).
+// mouseChgPw 处理修改密码窗口；其确定/取消按钮是居中 [50] 窗口的
+// 子控件 (FState.pas:887-892)。
 func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 	wx, wy, _, _ := s.windowOrigin(50)
 	buttons := make([]loginArea, 2)
@@ -1115,9 +1113,9 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 	}
 }
 
-// mouseServerSelect handles the DSelServerDlg overlay: press/release on a
-// server button selects that server; the close button exits the app
-// (FState.pas:2220-2224; DSelServerDlg close == FrmMain.Close).
+// mouseServerSelect 处理 DSelServerDlg 浮层：在服务器按钮上按下/松开
+// 即选中该服务器；关闭按钮退出程序
+// (FState.pas:2220-2224; DSelServerDlg 关闭 == FrmMain.Close)。
 func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 	wx, wy := s.srvWindowOrigin()
 	count := len(s.servers)
@@ -1154,7 +1152,7 @@ func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 		}
 		if i < count && hitTest(fx, fy, btnArea(i)) {
 			name := s.servers[i].Name
-			s.mode = modeLogin // close the overlay once a server is picked
+			s.mode = modeLogin // 选中服务器后关闭浮层
 			if s.selectFunc != nil {
 				s.selectFunc(name)
 			}
@@ -1162,7 +1160,7 @@ func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 	}
 }
 
-// handleButton dispatches the four bottom login buttons.
+// handleButton 分发底部四个登录按钮的点击。
 func (s *LoginScene) handleButton(index int) {
 	switch index {
 	case 0:
@@ -1184,7 +1182,7 @@ func (s *LoginScene) handleButton(index int) {
 	}
 }
 
-// handleRegButton dispatches the register window buttons: Ok/Cancel/Close.
+// handleRegButton 分发注册窗口按钮：确定/取消/关闭。
 func (s *LoginScene) handleRegButton(index int) {
 	if index == 0 {
 		s.submitRegister()
@@ -1193,7 +1191,7 @@ func (s *LoginScene) handleRegButton(index int) {
 	s.mode = modeLogin // NewAccountClose (IntroScn.pas:1072-1076)
 }
 
-// submitLogin validates input and triggers the login callback.
+// submitLogin 校验输入并触发登录回调。
 func (s *LoginScene) submitLogin() {
 	if s.connecting {
 		return
@@ -1207,15 +1205,15 @@ func (s *LoginScene) submitLogin() {
 		return
 	}
 	s.connecting = true
-	s.waitingResponse = true // hide the edits while waiting (IntroScn.pas:551-554)
+	s.waitingResponse = true // 等待期间隐藏输入框 (IntroScn.pas:551-554)
 	pw := strings.ReplaceAll(strings.ReplaceAll(s.password, "~", "_"), "'", "_")
 	id := strings.ToLower(s.userID) // m_sLoginId := LowerCase (IntroScn.pas:534,548)
-	log.Logf(log.LevelInfo, "LoginScene", "Submitting login: %s", id)
+	log.Logf(log.LevelInfo, "LoginScene", "提交登录: %s", id)
 	s.loginFunc(id, pw)
 }
 
-// submitRegister validates all fields (CheckUserEntrys, IntroScn.pas:976-1029)
-// and sends the registration.
+// submitRegister 校验所有字段 (CheckUserEntrys, IntroScn.pas:976-1029)
+// 并发送注册请求。
 func (s *LoginScene) submitRegister() {
 	if s.connecting {
 		return
@@ -1261,7 +1259,7 @@ func (s *LoginScene) submitRegister() {
 		s.regFocus = 3
 		return
 	}
-	if len(s.regFields[4]) < 1 { // non-English branch (:1022-1027)
+	if len(s.regFields[4]) < 1 { // 非英文分支 (:1022-1027)
 		s.regFocus = 4
 		return
 	}
@@ -1285,13 +1283,13 @@ func (s *LoginScene) submitRegister() {
 	ua.SetBirthDay(s.regFields[5])
 	ua.SetMobilePhone(s.regFields[11])
 
-	log.Logf(log.LevelInfo, "LoginScene", "Submitting registration: %s", ue.Account())
+	log.Logf(log.LevelInfo, "LoginScene", "提交注册: %s", ue.Account())
 	s.connecting = true
 	s.registerFunc(ue, ua)
 	s.mode = modeLogin // NewAccountClose (:1068,1072-1076)
 }
 
-// validBirthDay mirrors NewIdCheckBirthDay (IntroScn.pas:609-632): yyyy/mm/dd.
+// validBirthDay 对应 NewIdCheckBirthDay (IntroScn.pas:609-632)：yyyy/mm/dd 格式。
 func validBirthDay(s string) bool {
 	parts := strings.Split(s, "/")
 	if len(parts) != 3 {
@@ -1312,7 +1310,7 @@ func validBirthDay(s string) bool {
 	return day > 0 && day <= 31
 }
 
-// submitChgPw sends the password change request (ChgpwOk, IntroScn.pas:1078-1092).
+// submitChgPw 发送修改密码请求 (ChgpwOk, IntroScn.pas:1078-1092)。
 func (s *LoginScene) submitChgPw() {
 	if s.connecting {
 		return
@@ -1326,23 +1324,23 @@ func (s *LoginScene) submitChgPw() {
 		s.ShowMessage("未连接到服务器")
 		return
 	}
-	log.Logf(log.LevelInfo, "LoginScene", "Submitting password change: %s", s.chgFields[0])
+	log.Logf(log.LevelInfo, "LoginScene", "提交修改密码: %s", s.chgFields[0])
 	s.connecting = true
 	s.chgpwFunc(s.chgFields[0], s.chgFields[1], s.chgFields[2])
 	s.mode = modeLogin // ChgpwCancel (:1087,1094-1097)
 	s.chgFields = [4]string{}
 }
 
-// ShowMessage displays a modal DMessageDlg with medium size and Ok button
-// (FState.pas:1938-2158).
+// ShowMessage 显示中等尺寸、仅确定按钮的模态 DMessageDlg
+// (FState.pas:1938-2158)。
 func (s *LoginScene) ShowMessage(msg string) {
 	s.ShowMessageEx(msg, 1, []int{361})
 }
 
-// ShowMessageEx displays a modal DMessageDlg with the given size
-// (0=small, 1=medium, 2=large) and button set (361=Ok, 363=Yes,
-// 365=Cancel, 367=No). Buttons are laid out right-to-left
-// (FState.pas:2002-2083).
+// ShowMessageEx 显示指定尺寸的模态 DMessageDlg
+// (0=小, 1=中, 2=大) 和按钮组 (361=确定, 363=是,
+// 365=取消, 367=否)。按钮从右向左排列
+// (FState.pas:2002-2083)。
 func (s *LoginScene) ShowMessageEx(msg string, size int, buttons []int) {
 	s.dlgMsg = msg
 	s.dlgLines = strings.Split(msg, "\\")
@@ -1364,80 +1362,80 @@ func (s *LoginScene) closeDialog() {
 	}
 }
 
-// SetError is kept for existing call sites; it now shows a modal dialog.
+// SetError 保留给现有调用方；现在改为显示模态对话框。
 func (s *LoginScene) SetError(msg string) {
-	log.Logf(log.LevelWarn, "LoginScene", "Error: %s", msg)
+	log.Logf(log.LevelWarn, "LoginScene", "错误: %s", msg)
 	s.ShowMessage(msg)
 }
 
-// RegistrationDone handles SM_NEWID_SUCCESS: leave register mode and show the
-// success dialog (ClMain.pas:3684-3691).
+// RegistrationDone 处理 SM_NEWID_SUCCESS：退出注册模式并显示成功对话框
+// (ClMain.pas:3684-3691)。
 func (s *LoginScene) RegistrationDone() {
 	s.mode = modeLogin
 	s.regFields = [13]string{}
 	s.ShowMessage("您的账号已经注册成功.\\请牢记您的账号和密码.\\请不要以任何原因将账号和密码告诉任何人.")
 }
 
-// RegistrationFailed handles SM_NEWID_FAIL: return to register mode with the
-// fields preserved (NewIdRetry, IntroScn.pas:936-952).
+// RegistrationFailed 处理 SM_NEWID_FAIL：返回注册模式并保留已填字段
+// (NewIdRetry, IntroScn.pas:936-952)。
 func (s *LoginScene) RegistrationFailed(msg string) {
 	s.mode = modeRegister
 	s.ShowMessage(msg)
 }
 
-// ChgPwResult reports the password-change outcome dialog (ClMain.pas:3762-3771).
+// ChgPwResult 显示修改密码结果对话框 (ClMain.pas:3762-3771)。
 func (s *LoginScene) ChgPwResult(msg string) {
 	s.ShowMessage(msg)
 }
 
-// SetLoginFunc sets the callback for login attempts.
+// SetLoginFunc 设置登录尝试的回调。
 func (s *LoginScene) SetLoginFunc(fn func(id, password string)) {
 	s.loginFunc = fn
 }
 
-// SetRegisterFunc sets the callback for registration attempts.
+// SetRegisterFunc 设置注册尝试的回调。
 func (s *LoginScene) SetRegisterFunc(fn func(ue protocol.UserEntry, ua protocol.UserEntryAdd)) {
 	s.registerFunc = fn
 }
 
-// SetChgPwFunc sets the callback for password change attempts.
+// SetChgPwFunc 设置修改密码尝试的回调。
 func (s *LoginScene) SetChgPwFunc(fn func(id, oldpw, newpw string)) {
 	s.chgpwFunc = fn
 }
 
-// SetSelectFunc sets the callback for server selection.
+// SetSelectFunc 设置服务器选择的回调。
 func (s *LoginScene) SetSelectFunc(fn func(serverName string)) {
 	s.selectFunc = fn
 }
 
-// ShowServerSelect opens the DSelServerDlg overlay on top of the login
-// background instead of switching to a separate scene (FState.pas:2453-2517).
+// ShowServerSelect 在登录背景上方打开 DSelServerDlg 浮层，
+// 而非切换到独立场景 (FState.pas:2453-2517)。
 func (s *LoginScene) ShowServerSelect(servers []serverInfo) {
-	log.Logf(log.LevelInfo, "LoginScene", "Showing server select: %d servers", len(servers))
+	log.Logf(log.LevelInfo, "LoginScene", "显示选服界面: %d 个服务器", len(servers))
 	s.servers = servers
 	s.mode = modeServerSelect
 	s.pressedButton = -1
 	s.showLoginUI = true
 }
 
-// Servers returns the stored server list.
+// Servers 返回已保存的服务器列表。
 func (s *LoginScene) Servers() []serverInfo {
 	return s.servers
 }
 
-// SetCloseFunc sets the callback for closing the application.
+// SetCloseFunc 设置关闭程序的回调。
 func (s *LoginScene) SetCloseFunc(fn func()) {
 	s.closeFunc = fn
 }
 
-// SetDoorCompleteFunc sets the callback for when the door animation finishes.
+// SetDoorCompleteFunc 设置开门动画完成时的回调。
 func (s *LoginScene) SetDoorCompleteFunc(fn func()) {
 	s.doorCompleteFunc = fn
 }
 
-// OpenLoginDoor starts the door opening animation.
+// OpenLoginDoor 开始开门动画。
 func (s *LoginScene) OpenLoginDoor() {
-	log.Logf(log.LevelInfo, "LoginScene", "Opening door")
+	log.Logf(log.LevelInfo, "LoginScene", "开始开门动画")
 	s.doorOpening = true
 	s.doorFading = false
 	s.doorFrame = 0
@@ -1445,21 +1443,21 @@ func (s *LoginScene) OpenLoginDoor() {
 	s.showLoginUI = false
 }
 
-// IsDoorFullyOpen returns true once the last door frame is shown.
+// IsDoorFullyOpen 在最后一帧门画面显示后返回 true。
 func (s *LoginScene) IsDoorFullyOpen() bool {
 	return s.doorOpening && s.doorFrame >= doorFrameCount-1
 }
 
-// OnScroll handles mouse scroll input.
+// OnScroll 处理鼠标滚轮输入。
 func (s *LoginScene) OnScroll(x, y float64) {
 }
 
-// hitTest checks if (x, y) is inside the area.
+// hitTest 检查 (x, y) 是否在区域内。
 func hitTest(x, y float32, a loginArea) bool {
 	return x >= a.X && x <= a.X+a.W && y >= a.Y && y <= a.Y+a.H
 }
 
-// getChrSelTexture gets a texture from ChrSel.wil.
+// getChrSelTexture 从 ChrSel.wil 获取纹理。
 func (s *LoginScene) getChrSelTexture(index int) (uint32, error) {
 	if s.resources.ChrSel == nil {
 		return 0, fmt.Errorf("resource not loaded")
@@ -1467,7 +1465,7 @@ func (s *LoginScene) getChrSelTexture(index int) (uint32, error) {
 	return s.resources.GetTexture(s.resources.ChrSel, index), nil
 }
 
-// getChrSelSize gets the size of a texture from ChrSel.wil.
+// getChrSelSize 获取 ChrSel.wil 中纹理的尺寸。
 func (s *LoginScene) getChrSelSize(index int) (int, int) {
 	if s.resources.ChrSel == nil || index >= s.resources.ChrSel.Count {
 		return 0, 0
@@ -1479,7 +1477,7 @@ func (s *LoginScene) getChrSelSize(index int) (int, int) {
 	return img.Width, img.Height
 }
 
-// getPrguseTexture gets a texture from Prguse.wil.
+// getPrguseTexture 从 Prguse.wil 获取纹理。
 func (s *LoginScene) getPrguseTexture(index int) (uint32, error) {
 	if s.resources.Prguse == nil {
 		return 0, fmt.Errorf("resource not loaded")
@@ -1487,7 +1485,7 @@ func (s *LoginScene) getPrguseTexture(index int) (uint32, error) {
 	return s.resources.GetTexture(s.resources.Prguse, index), nil
 }
 
-// getPrguseSize gets the size of a texture from Prguse.wil.
+// getPrguseSize 获取 Prguse.wil 中纹理的尺寸。
 func (s *LoginScene) getPrguseSize(index int) (int, int) {
 	if s.resources.Prguse == nil || index >= s.resources.Prguse.Count {
 		return 0, 0

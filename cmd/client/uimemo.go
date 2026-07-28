@@ -6,17 +6,16 @@ import (
 	"unicode/utf8"
 )
 
-// MemoBox — multi-line text editor, port of the VCL TMemo used by the guild
-// notice/rank editors (FState.pas:6232-6237, 6285-6290). Focused via
-// UIManager; supports Enter newlines, arrow-key cursor movement and
-// scrolling.
+// MemoBox — 多行文本编辑器, 移植自行会公告/职位编辑器所用的 VCL TMemo
+// (FState.pas:6232-6237, 6285-6290). 通过 UIManager 获取焦点;
+// 支持回车换行、方向键移动光标和滚动.
 type MemoBox struct {
 	Ctrl       *UIControl
 	scene      *PlayScene
 	Lines      []string
-	curX, curY int // rune index / line index
+	curX, curY int // 字符索引 / 行索引
 	scroll     int
-	MaxLen     int // total runes across all lines
+	MaxLen     int // 所有行的字符总数上限
 	lineH      int
 }
 
@@ -46,7 +45,7 @@ func NewMemoBox(scene *PlayScene, name string, w, h int) *MemoBox {
 				m.Lines[m.curY] = string(append(line[:m.curX-1], line[m.curX:]...))
 				m.curX--
 			} else if m.curY > 0 {
-				// Join with the previous line.
+				// 与上一行合并.
 				prev := m.Lines[m.curY-1]
 				m.curX = utf8.RuneCountInString(prev)
 				m.Lines[m.curY-1] = prev + m.Lines[m.curY]
@@ -63,24 +62,24 @@ func NewMemoBox(scene *PlayScene, name string, w, h int) *MemoBox {
 			m.Lines = append(m.Lines[:m.curY+1], append([]string{rest}, m.Lines[m.curY+1:]...)...)
 			m.curY++
 			m.curX = 0
-		case 265: // Up
+		case 265: // 上
 			if m.curY > 0 {
 				m.curY--
 				m.clampX()
 			}
-		case 264: // Down
+		case 264: // 下
 			if m.curY < len(m.Lines)-1 {
 				m.curY++
 				m.clampX()
 			}
-		case 263: // Left
+		case 263: // 左
 			if m.curX > 0 {
 				m.curX--
 			} else if m.curY > 0 {
 				m.curY--
 				m.curX = utf8.RuneCountInString(m.Lines[m.curY])
 			}
-		case 262: // Right
+		case 262: // 右
 			if m.curX < utf8.RuneCountInString(m.Lines[m.curY]) {
 				m.curX++
 			} else if m.curY < len(m.Lines)-1 {
@@ -108,7 +107,7 @@ func (m *MemoBox) clampX() {
 	}
 }
 
-// keepVisible scrolls so the cursor line stays in view.
+// keepVisible 滚动以保证光标所在行可见.
 func (m *MemoBox) keepVisible() {
 	vis := m.Ctrl.Height / m.lineH
 	if vis < 1 {
@@ -122,7 +121,7 @@ func (m *MemoBox) keepVisible() {
 	}
 }
 
-// SetText loads text split on CR/LF.
+// SetText 载入文本, 按 CR/LF 分行.
 func (m *MemoBox) SetText(text string) {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -133,8 +132,8 @@ func (m *MemoBox) SetText(text string) {
 	m.curX, m.curY, m.scroll = 0, 0, 0
 }
 
-// JoinedText returns the content with CR separators, blank lines replaced
-// by a single space (Delphi notice join, FState:6256-6261).
+// JoinedText 以 CR 分隔返回内容, 空行替换为单个空格
+// (Delphi 公告拼接方式, FState:6256-6261).
 func (m *MemoBox) JoinedText() string {
 	parts := make([]string, len(m.Lines))
 	for i, ln := range m.Lines {

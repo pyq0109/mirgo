@@ -50,7 +50,7 @@ type Party struct {
 	Members []int32
 }
 
-// partyOf returns the party containing the player (nil if none).
+// partyOf 返回玩家所在的队伍（不在任何队伍中则返回 nil）。
 func (p *PlayObject) partyOf() *Party {
 	if p.Engine == nil {
 		return nil
@@ -65,8 +65,8 @@ func (p *PlayObject) partyOf() *Party {
 	return nil
 }
 
-// broadcastPartyMembers sends the full member-name list to every member
-// (client GroupMembers is rebuilt from this; leader first, Delphi order).
+// broadcastPartyMembers 向所有成员发送完整成员名列表
+//（客户端 GroupMembers 由该消息重建；队长在前，与 Delphi 顺序一致）。
 func (p *PlayObject) broadcastPartyMembers(party *Party, server *netserver.TCPServer) {
 	var sb strings.Builder
 	for i, id := range party.Members {
@@ -88,8 +88,8 @@ func (p *PlayObject) broadcastPartyMembers(party *Party, server *netserver.TCPSe
 	}
 }
 
-// HandleCreateGroup creates a party and optionally invites the named player
-// (Delphi SendCreateGroup carries a name, FState:5523-5536).
+// HandleCreateGroup 创建队伍，并可选邀请指定玩家
+//（Delphi SendCreateGroup 携带名称，FState:5523-5536）。
 func (p *PlayObject) HandleCreateGroup(msg SendMessage, server *netserver.TCPServer) {
 	if p.partyOf() != nil || p.Engine == nil {
 		resp := protocol.MakeDefaultMsg(protocol.SMCreateGroupFail, 0, 0, 0, 0)
@@ -113,17 +113,17 @@ func (p *PlayObject) HandleCreateGroup(msg SendMessage, server *netserver.TCPSer
 	resp := protocol.MakeDefaultMsg(protocol.SMCreateGroupOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	p.broadcastPartyMembers(party, server)
-	log.Logf(log.LevelInfo, "Party", "%s created a party", p.Name)
+	log.Logf(log.LevelInfo, "Party", "%s 创建了队伍", p.Name)
 }
 
-// HandleGroupMode toggles the allow-group flag (CMGroupMode, Param=1/0).
+// HandleGroupMode 切换允许组队标志（CMGroupMode，Param=1/0）。
 func (p *PlayObject) HandleGroupMode(msg SendMessage, server *netserver.TCPServer) {
 	p.AllowGroup = msg.Param1 != 0
 	resp := protocol.MakeDefaultMsg(protocol.SMGroupModeChanged, int32(msg.Param1), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 
-// HandleAddGroupMember invites the named player into the caller's party.
+// HandleAddGroupMember 邀请指定玩家加入调用者的队伍。
 func (p *PlayObject) HandleAddGroupMember(msg SendMessage, server *netserver.TCPServer) {
 	party := p.partyOf()
 	if party == nil || party.Leader != p.ID || p.Engine == nil {
@@ -142,11 +142,11 @@ func (p *PlayObject) HandleAddGroupMember(msg SendMessage, server *netserver.TCP
 	resp := protocol.MakeDefaultMsg(protocol.SMGroupAddMemOK, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(target.Name))
 	p.broadcastPartyMembers(party, server)
-	log.Logf(log.LevelInfo, "Party", "%s added %s to party", p.Name, target.Name)
+	log.Logf(log.LevelInfo, "Party", "%s 邀请 %s 加入队伍", p.Name, target.Name)
 }
 
-// HandleDelGroupMember removes the named player from the caller's party;
-// parties of one dissolve.
+// HandleDelGroupMember 将指定玩家从调用者的队伍中移除；
+// 只剩一人时队伍解散。
 func (p *PlayObject) HandleDelGroupMember(msg SendMessage, server *netserver.TCPServer) {
 	party := p.partyOf()
 	if party == nil || party.Leader != p.ID {
@@ -181,5 +181,5 @@ func (p *PlayObject) HandleDelGroupMember(msg SendMessage, server *netserver.TCP
 		return
 	}
 	p.broadcastPartyMembers(party, server)
-	log.Logf(log.LevelInfo, "Party", "%s removed %s from party", p.Name, targetName)
+	log.Logf(log.LevelInfo, "Party", "%s 将 %s 移出队伍", p.Name, targetName)
 }

@@ -7,11 +7,11 @@ import (
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
-// Equipment/status panel — port of DStateWin (FState.pas:981-1084 window and
-// slot layout, 2804-2998 page contents, 3041-3185 slot icons, 3257-3467
-// interactions, 5277-5398 key select dialog).
+// 装备/状态面板 — 移植自 DStateWin (FState.pas:981-1084 窗口与
+// 槽位布局, 2804-2998 页面内容, 3041-3185 槽位图标, 3257-3467
+// 交互, 5277-5398 快捷键选择对话框)。
 type stateSlotDef struct {
-	slot int // protocol.U*
+	slot int // 对应 protocol.U*
 	name string
 	x, y int
 	w, h int
@@ -37,8 +37,8 @@ func unpackLoHi(v uint32) (int, int) {
 	return int(v & 0xFFFF), int(v >> 16)
 }
 
-// stateItemFile resolves the WIL for an equipped-item Looks value
-// (ClMain.pas:6179-6210): Looks<10000 → StateItem.wil, else St<N>.wil.
+// stateItemFile 根据装备的 Looks 值解析对应的 WIL 文件
+// (ClMain.pas:6179-6210): Looks<10000 → StateItem.wil, 否则 St<N>.wil。
 func (s *PlayScene) stateItemFile(looks int) (*wil.File, int) {
 	if looks < 10000 {
 		return s.resources.StateItem, looks
@@ -46,8 +46,8 @@ func (s *PlayScene) stateItemFile(looks int) (*wil.File, int) {
 	return s.resources.GetExtraWil(fmt.Sprintf("St%d.wil", looks/10000)), looks % 10000
 }
 
-// equippedLooks resolves the StateItem sprite index for an equipped item —
-// its Looks value (FState:3051 etc.), falling back to the raw DB index.
+// equippedLooks 解析已装备物品的 StateItem 精灵索引 —
+// 即其 Looks 值 (FState:3051 等), 回退为原始数据库索引。
 func (s *PlayScene) equippedLooks(item *protocol.UserItem) int {
 	if def := s.State.ItemDefs[int(item.WIndex)]; def != nil {
 		return int(def.Looks)
@@ -60,7 +60,7 @@ func (s *PlayScene) buildState() {
 	prg := s.resources.Prguse
 
 	win := NewUIControl("DStateWin", KindWindow)
-	win.Floating = false // DFM: not draggable
+	win.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		win.SetImgIndex(prg, ImgStateBg)
 	} else {
@@ -70,9 +70,9 @@ func (s *PlayScene) buildState() {
 	win.Top = 0
 	win.Visible = false
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintStatePage(c, proj) }
-	// Page 3 magic-row hit area on the window body (FState:3187-3198):
-	// x∈[33,199], y∈[55,240], row height 37 — clicking a row opens the key
-	// binding dialog for that magic.
+	// 第 3 页魔法行点击区域 (FState:3187-3198):
+	// x∈[33,199], y∈[55,240], 行高 37 — 点击某行打开该魔法的
+	// 快捷键绑定对话框。
 	win.OnClick = func(c *UIControl, x, y int) {
 		if s.State.StatePage != 3 {
 			return
@@ -87,7 +87,7 @@ func (s *PlayScene) buildState() {
 	ui.Root.AddChild(win)
 	s.hudState = win
 
-	// Close / page turn buttons (FState:1076-1084).
+	// 关闭/翻页按钮 (FState:1076-1084)。
 	closeBtn := NewUIControl("DCloseState", KindButton)
 	closeBtn.Left, closeBtn.Top = 223, 20
 	if prg != nil {
@@ -117,7 +117,7 @@ func (s *PlayScene) buildState() {
 	}
 	win.AddChild(next)
 
-	// Magic page scroll (FState:1069-1074; only visible on page 3).
+	// 魔法页滚动 (FState:1069-1074; 仅第 3 页可见)。
 	pgUp := NewUIControl("DStPageUp", KindButton)
 	pgUp.Left, pgUp.Top = 202, 52
 	if prg != nil {
@@ -148,7 +148,7 @@ func (s *PlayScene) buildState() {
 	win.AddChild(pgDown)
 	s.statePageDown = pgDown
 
-	// 13 equipment slot buttons (FState:987-1042), page 0 only.
+	// 13 个装备槽按钮 (FState:987-1042), 仅第 0 页。
 	for _, d := range stateSlots {
 		def := d
 		btn := NewUIControl("DSW", KindButton)
@@ -164,8 +164,8 @@ func (s *PlayScene) buildState() {
 		s.stateSlotBtns[def.slot] = btn
 	}
 
-	// 5 magic icon buttons (DStMag1..5, FState:1044-1067: Left=30, Top =
-	// 37/82/127/172/216 — the 5th is 211+5, not 37+4*45), page 3 only.
+	// 5 个魔法图标按钮 (DStMag1..5, FState:1044-1067: Left=30, Top =
+	// 37/82/127/172/216 — 第 5 个是 211+5 而非 37+4*45), 仅第 3 页。
 	magTops := [5]int{37, 82, 127, 172, 216}
 	for i := 0; i < 5; i++ {
 		row := i
@@ -194,7 +194,7 @@ func (s *PlayScene) buildState() {
 	}
 }
 
-// syncStateWindow keeps panel + per-page child visibility in sync.
+// syncStateWindow 同步面板及各页子控件的可见状态。
 func (s *PlayScene) syncStateWindow() {
 	win := s.hudState
 	if win == nil {
@@ -220,9 +220,9 @@ func (s *PlayScene) syncStateWindow() {
 	}
 }
 
-// paintEquipSlot draws the equipped item icon centered in its slot
-// (FState:3041-3185): no cell background (baked into [370]), icon centered
-// on both axes from the item's Looks sprite.
+// paintEquipSlot 在槽位中居中绘制已装备物品图标
+// (FState:3041-3185): 无格子背景 (已烘焙在 [370] 中), 图标按
+// Looks 精灵在两轴上居中。
 func (s *PlayScene) paintEquipSlot(def stateSlotDef, ax, ay int, proj [16]float32) {
 	item := s.State.UseItems[def.slot]
 	if item == nil {
@@ -241,13 +241,13 @@ func (s *PlayScene) paintEquipSlot(def stateSlotDef, ax, ay int, proj [16]float3
 	s.gl.DrawQuad(tex, float32(ax)+float32(def.w-int(iw))/2, float32(ay)+float32(def.h-int(ih))/2, iw, ih, proj)
 }
 
-// paintStatePage renders the page body inside DStateWin.OnDirectPaint.
+// paintStatePage 在 DStateWin.OnDirectPaint 内渲染页面主体。
 func (s *PlayScene) paintStatePage(c *UIControl, proj [16]float32) {
 	st := s.State
 	prg := s.resources.Prguse
 	ax, ay := c.AbsX(), c.AbsY()
 
-	// Panel background.
+	// 面板背景。
 	if prg != nil {
 		s.ui.BlitImage(prg, ImgStateBg, ax, ay, proj)
 	}
@@ -270,7 +270,7 @@ func (s *PlayScene) paintStatePage(c *UIControl, proj [16]float32) {
 	}
 }
 
-// paintPaperDoll renders body/hair/dress/weapon/helmet layers (FState:2804-2853).
+// paintPaperDoll 渲染身体/头发/衣服/武器/头盔图层 (FState:2804-2853)。
 func (s *PlayScene) paintPaperDoll(ax, ay int, proj [16]float32) {
 	st := s.State
 	prg := s.resources.Prguse
@@ -278,15 +278,15 @@ func (s *PlayScene) paintPaperDoll(ax, ay int, proj [16]float32) {
 		return
 	}
 
-	// Body (376 male / 377 female).
+	// 身体 (376 男 / 377 女)。
 	body := ImgBodyMale
 	if st.Sex == 1 {
 		body = ImgBodyFemale
 	}
 	s.ui.BlitImage(prg, body, ax, ay, proj)
 
-	// Overlay layers share origin (Left+29, Top+74) and each image's own
-	// px/py offset (Delphi GetCachedImage ax/ay = our HotX/HotY).
+	// 叠加图层共享原点 (Left+29, Top+74), 各图使用自身的
+	// px/py 偏移 (Delphi GetCachedImage ax/ay = 本项目的 HotX/HotY)。
 	ox, oy := ax+29, ay+74
 	hair := ImgHairMale + st.Hair/2
 	if st.Sex == 1 {
@@ -315,7 +315,7 @@ func (s *PlayScene) paintPaperDoll(ax, ay int, proj [16]float32) {
 		}
 	}
 
-	// Name + guild (FState:3028-3035).
+	// 名字 + 行会 (FState:3028-3035)。
 	if st.MySelf != nil {
 		name := st.MySelf.UserName
 		lw := s.text.MeasureText(name)
@@ -326,8 +326,8 @@ func (s *PlayScene) paintPaperDoll(ax, ay int, proj [16]float32) {
 	}
 }
 
-// paintStateStats renders page 1 (FState:2855-2870): pure values only — the
-// labels are baked into the [370] artwork.
+// paintStateStats 渲染第 1 页 (FState:2855-2870): 仅绘制数值 —
+// 标签已烘焙在 [370] 底图中。
 func (s *PlayScene) paintStateStats(ax, ay int, proj [16]float32) {
 	if s.text == nil {
 		return
@@ -347,7 +347,7 @@ func (s *PlayScene) paintStateStats(ax, ay int, proj [16]float32) {
 	s.text.DrawText(fmt.Sprintf("%d/%d", st.MP, st.MaxMP), l, m+144, 1, 1, 1, 1, proj)
 }
 
-// paintStateDetails renders page 2 (FState:2871-2930).
+// paintStateDetails 渲染第 2 页 (FState:2871-2930)。
 func (s *PlayScene) paintStateDetails(ax, ay int, proj [16]float32) {
 	if s.text == nil {
 		return
@@ -356,8 +356,8 @@ func (s *PlayScene) paintStateDetails(ax, ay int, proj [16]float32) {
 	bbx, bby := float32(ax+60), float32(ay+70)
 	mmx := bbx + 85
 	silver := [3]float32{0.75, 0.75, 0.75}
-	// Labels stay silver; only the value column turns red on overflow
-	// (FState:2884-2930).
+	// 标签保持银色; 仅数值列在溢出时变红
+	// (FState:2884-2930)。
 	line := func(k int, label, value string, warn bool) {
 		s.text.DrawText(label, bbx, bby+float32(k*14), silver[0], silver[1], silver[2], 1, proj)
 		r, g, b := silver[0], silver[1], silver[2]
@@ -376,7 +376,7 @@ func (s *PlayScene) paintStateDetails(ax, ay int, proj [16]float32) {
 	line(3, "手上重量", fmt.Sprintf("%d/%d", st.HandWeight, st.MaxHandWeight), st.HandWeight > st.MaxHandWeight)
 	line(4, "准确度", fmt.Sprintf("%d", st.Hit), false)
 	line(5, "敏捷度", fmt.Sprintf("%d", st.Speed), false)
-	// Recovery/resistance values need a protocol extension (B5); placeholders.
+	// 恢复/抗性数值需要协议扩展 (B5); 暂用占位。
 	line(6, "魔法躲避", "+0%", false)
 	line(7, "中毒躲避", "+0%", false)
 	line(8, "中毒恢复", "+0%", false)
@@ -384,8 +384,8 @@ func (s *PlayScene) paintStateDetails(ax, ay int, proj [16]float32) {
 	line(10, "魔法恢复", "+0%", false)
 }
 
-// paintMagicList renders page 3 text/icons (FState:2931-2998); the icon
-// buttons themselves are DStMag1..5 controls.
+// paintMagicList 渲染第 3 页文字/图标 (FState:2931-2998); 图标
+// 按钮本身是 DStMag1..5 控件。
 func (s *PlayScene) paintMagicList(ax, ay int, proj [16]float32) {
 	if s.text == nil || s.resources.Prguse == nil {
 		return
@@ -399,32 +399,32 @@ func (s *PlayScene) paintMagicList(ax, ay int, proj [16]float32) {
 		mag := s.State.Magics[idx]
 		y := bby + 42 + m*44
 		s.text.DrawText(mag.Name, float32(bbx+68), float32(y), 0.75, 0.75, 0.75, 1, proj)
-		// "lv" mark + level.
+		// "lv" 标记 + 等级。
 		s.ui.BlitImage(s.resources.Prguse, ImgMagicLv, bbx+68, y+15, proj)
 		s.text.DrawText(fmt.Sprintf("%d", mag.Level), float32(bbx+84), float32(y+15), 0.75, 0.75, 0.75, 1, proj)
-		// "exp" mark + train points.
+		// "exp" 标记 + 修炼值。
 		s.ui.BlitImage(s.resources.Prguse, ImgMagicExp, bbx+94, y+15, proj)
 		train := fmt.Sprintf("%d/%d", mag.CurTrain, mag.MaxTrain)
 		if mag.Level >= 3 {
 			train = "-"
 		}
 		s.text.DrawText(train, float32(bbx+114), float32(y+15), 0.75, 0.75, 0.75, 1, proj)
-		// Key digit image ('1'..'8' → 248..255).
+		// 快捷键数字图片 ('1'..'8' → 248..255)。
 		if mag.Key >= '1' && mag.Key <= '8' {
 			s.ui.BlitImage(s.resources.Prguse, ImgKeyDigit1+int(mag.Key-'1'), bbx+169, y+10, proj)
 		}
 	}
 }
 
-// equipSlotClick: drop held item onto the slot, or pick up the equipped
-// item (FState:3257-3402).
+// equipSlotClick: 将手持物品放入槽位, 或拿起已装备物品
+// (FState:3257-3402)。
 func (s *PlayScene) equipSlotClick(slot int) {
 	st := s.State
 	if s.itemMove.Moving {
 		if s.itemMove.Index >= 0 && s.itemMove.Item.Def != nil {
 			if takeOnSlotMatches(s.itemMove.Item.Def.StdMode, slot) && s.sendTakeOn != nil {
 				s.sendTakeOn(s.itemMove.Item.MakeIndex, slot)
-				// Optimistic visual: server re-sync confirms.
+				// 乐观更新: 等待服务端同步确认。
 				if s.itemMove.Index < len(st.BagItems) {
 					st.BagItems[s.itemMove.Index] = nil
 				}
@@ -440,7 +440,7 @@ func (s *PlayScene) equipSlotClick(slot int) {
 		}
 		return
 	}
-	// Not holding anything: pick up the equipped item.
+	// 未持物: 拿起已装备物品。
 	item := st.UseItems[slot]
 	if item == nil {
 		return
@@ -455,7 +455,7 @@ func (s *PlayScene) equipSlotClick(slot int) {
 	})
 }
 
-// equipSlotHover shows the equipped item tooltip (FState:3404-3467).
+// equipSlotHover 显示已装备物品的悬浮提示 (FState:3404-3467)。
 func (s *PlayScene) equipSlotHover(def stateSlotDef, ax, ay int) {
 	item := s.State.UseItems[def.slot]
 	if item == nil {
@@ -476,8 +476,8 @@ func (s *PlayScene) equipSlotHover(def stateSlotDef, ax, ay int) {
 	s.tooltip.Show(ax, ay+def.h, text, color, false)
 }
 
-// openKeySelDlg shows the hotkey binding dialog for a magic (DKeySelDlg,
-// FState:5277-5398).
+// openKeySelDlg 显示魔法快捷键绑定对话框 (DKeySelDlg,
+// FState:5277-5398)。
 func (s *PlayScene) openKeySelDlg(magIdx int) {
 	if magIdx >= len(s.State.Magics) {
 		return
@@ -505,12 +505,12 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 		}
 	}
 
-	// Pre-selected key: F1..F8/None only update it (with highlight); the
-	// binding is applied when Ok closes the dialog (FState:5277-5398 —
-	// DKsF1Click preselects, DKsOkClick just hides, the caller applies).
+	// 预选按键: F1..F8/无 仅更新选中状态 (带高亮); 绑定在点击确定
+	// 关闭对话框时生效 (FState:5277-5398 — DKsF1Click 预选,
+	// DKsOkClick 仅隐藏, 由调用方应用绑定)。
 	selKey := mag.Key
 
-	// F1..F8 buttons, runtime positions (FState:1375-1398).
+	// F1..F8 按钮, 运行时位置 (FState:1375-1398)。
 	xs := []int{57, 89, 121, 153, 192, 224, 256, 288}
 	for i, x := range xs {
 		key := byte('1' + i)
@@ -521,9 +521,8 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 			btn.SetImgIndex(prg, img)
 		}
 		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-			// Face is only blitted when selected or pressed; the idle face
-			// is baked into the dialog background (FState:5332-5371, where
-			// the +1 pressed variant is commented out).
+			// 仅在选中或按下时绘制按钮面; 常态面已烘焙在对话框
+			// 背景中 (FState:5332-5371, 其中 +1 按下变体被注释掉)。
 			if selKey == key || c.Downed {
 				s.ui.BlitImage(prg, img, c.AbsX(), c.AbsY(), proj)
 			}
@@ -566,9 +565,8 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 	s.ui.ShowModal(win)
 }
 
-// applyMagicKey rebinds locally and tells the server: any other magic
-// holding the key is explicitly unbound first (ClMain.pas:3520-3532), then
-// the new binding is sent.
+// applyMagicKey 本地重绑并通知服务端: 先解绑占用该键的其他魔法
+// (ClMain.pas:3520-3532), 再发送新绑定。
 func (s *PlayScene) applyMagicKey(magIdx int, key byte) {
 	if magIdx >= len(s.State.Magics) {
 		return

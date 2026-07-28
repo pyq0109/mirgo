@@ -69,7 +69,7 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 
 	p.trainSkill(magID)
 
-	log.Logf(log.LevelInfo, "Magic", "%s cast %s (id=%d, power=%d)", p.Name, def.MagName, magID, power)
+	log.Logf(log.LevelInfo, "Magic", "%s 施放 %s (id=%d, 威力=%d)", p.Name, def.MagName, magID, power)
 }
 
 func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power, tx, ty int) {
@@ -284,7 +284,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				if int(mon.WAbil.HP) < mon.MaxHP/3 && rand.Intn(100) < 30+int(p.WAbil.Level) {
 					mon.TargetID = 0
 					mon.LastHiterID = 0
-					log.Logf(log.LevelInfo, "Magic", "%s tamed %s", p.Name, mon.Name)
+					log.Logf(log.LevelInfo, "Magic", "%s 驯服了 %s", p.Name, mon.Name)
 				}
 			}
 		}
@@ -411,11 +411,10 @@ func (p *PlayObject) sendMagicFail(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, resp, "")
 }
 
-// magicEffType classifies a magic into the client effect kind packed into
-// SMMagicFire.Series low byte: 0=explosion, 1=fly, 2=ground. The magic_db
-// effectType field is Delphi's animation-set selector (0..14) and does not map
-// onto this enum, so the kind is keyed by magID here; effnum (high byte) comes
-// straight from magic_db "effect".
+// magicEffType 将魔法分类为客户端特效类型，打包到
+// SMMagicFire.Series 低字节：0=爆炸, 1=飞行, 2=地面。magic_db 中的
+// effectType 字段是 Delphi 的动画集选择器（0..14），和这个枚举不对应，
+// 所以这里按 magID 来区分类型；effnum（高字节）直接取自 magic_db 的 "effect"。
 var magicEffType = map[int]int{
 	1: 1, 5: 1, 10: 1, 11: 1, 13: 1, 44: 1, // projectiles → fly
 	22: 2, 23: 2, 24: 2, 33: 2, // area effects → ground
@@ -438,14 +437,14 @@ func (p *PlayObject) sendMagicFire(server *netserver.TCPServer, magID, tx, ty in
 	server.Send(p.Session.ID, resp, "")
 }
 
-// magicMaxTrain is a placeholder training curve until the magic DB carries
-// per-level MaxTrain (Delphi Magic.MaxTrain[4]).
+// magicMaxTrain 是训练曲线的占位值，等 magic DB 支持
+// 每级 MaxTrain 后替换（对应 Delphi Magic.MaxTrain[4]）。
 var magicMaxTrain = [4]int{150, 600, 1800, 0}
 
-// encodeMyMagicBody serializes the magic list. Per magic: MagID u16,
-// Level u8, Key u8, IconIdx u16 (def.Effect*2 — Delphi draws
-// MagIcon[btEffect*2]), CurTrain u16, MaxTrain u16, NameLen u8 + Name.
-// Client mirror: GameState.ParseMagics.
+// encodeMyMagicBody 序列化魔法列表。每个魔法：MagID u16,
+// Level u8, Key u8, IconIdx u16 (def.Effect*2 — 对应 Delphi
+// MagIcon[btEffect*2]), CurTrain u16, MaxTrain u16, NameLen u8 + Name。
+// 客户端对应：GameState.ParseMagics。
 func (p *PlayObject) encodeMyMagicBody() string {
 	buf := make([]byte, 0, 2+len(p.LearnedMagics)*20)
 	var count [2]byte
@@ -464,7 +463,7 @@ func (p *PlayObject) encodeMyMagicBody() string {
 		if lv > 3 {
 			lv = 3
 		}
-		// MagID u16, Level u8, Key u8, IconIdx u16, CurTrain u16, MaxTrain u16.
+		// MagID u16, Level u8, Key u8, IconIdx u16, CurTrain u16, MaxTrain u16。
 		entry := make([]byte, 10)
 		binary.LittleEndian.PutUint16(entry[0:2], uint16(pm.MagID))
 		entry[2] = byte(lv)
@@ -488,8 +487,8 @@ func (p *PlayObject) SendMyMagicFull(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, resp, p.encodeMyMagicBody())
 }
 
-// HandleMagicKeyChange rebinds a magic's hotkey. Recog=magic id (→Param1),
-// Param=key byte '1'..'8' or 0 to unbind (→Param2) — ClMain.pas:3086-3092.
+// HandleMagicKeyChange 重新绑定魔法快捷键。Recog=魔法 id（→Param1），
+// Param=按键字节 '1'..'8' 或 0 表示解绑（→Param2）— 参考 ClMain.pas:3086-3092。
 func (p *PlayObject) HandleMagicKeyChange(msg SendMessage, server *netserver.TCPServer) {
 	magID := msg.Param1
 	key := byte(msg.Param2)
@@ -498,8 +497,8 @@ func (p *PlayObject) HandleMagicKeyChange(msg SendMessage, server *netserver.TCP
 		return
 	}
 	if key != 0 {
-		// Unbind any other magic currently using this key (client does the
-		// same before sending, ClMain.pas:3522-3528; server enforces it too).
+		// 解绑当前占用该按键的其他魔法（客户端发送前也会做同样的
+		// 处理，参考 ClMain.pas:3522-3528；服务端同样强制执行）。
 		for i := range p.LearnedMagics {
 			if p.LearnedMagics[i].MagID != magID && p.LearnedMagics[i].Key == key {
 				p.LearnedMagics[i].Key = 0
@@ -538,7 +537,7 @@ func (p *PlayObject) trainSkill(magID int) {
 			if pm.TrainPoint >= threshold {
 				pm.TrainPoint = 0
 				pm.Level++
-				log.Logf(log.LevelInfo, "Magic", "%s skill %d leveled up to %d", p.Name, magID, pm.Level)
+				log.Logf(log.LevelInfo, "Magic", "%s 技能 %d 升级到 %d", p.Name, magID, pm.Level)
 			}
 			return
 		}

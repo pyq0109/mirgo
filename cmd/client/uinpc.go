@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// NPC dialog + shop panels — port of DMerchantDlg (FState.pas:4806-4880
-// rich text paint, 5116-5162 click), DMenuDlg buy list (4887-5075) and
-// DSellDlg sell/repair/storage spot (5164-5264).
+// NPC 对话框 + 商店面板 — 移植自 DMerchantDlg (FState.pas:4806-4880
+// 富文本绘制, 5116-5162 点击), DMenuDlg 购买列表 (4887-5075) 及
+// DSellDlg 出售/修理/寄存槽 (5164-5264)。
 const (
 	npcTextX    = 30 // FState:4820
 	npcTextY    = 30 // FState:4821
@@ -19,7 +19,7 @@ const (
 
 type npcSegment struct {
 	text string
-	tag  string // non-empty = clickable link carrying this value
+	tag  string // 非空 = 可点击链接, 携带此值
 }
 
 type npcClickPoint struct {
@@ -27,8 +27,8 @@ type npcClickPoint struct {
 	tag        string
 }
 
-// parseNpcDialog parses the SMMerchantSay body (Delphi tag syntax:
-// <display text/link value>, lines separated by '\'; FState:4830-4870).
+// parseNpcDialog 解析 SMMerchantSay 消息体 (Delphi 标签语法:
+// <显示文本/链接值>, 行以 '\' 分隔; FState:4830-4870)。
 func (s *PlayScene) parseNpcDialog(body string) {
 	s.npcLines = nil
 	s.npcClicks = nil
@@ -55,14 +55,14 @@ func (s *PlayScene) parseNpcDialog(body string) {
 			tag := rest[lt+1 : lt+gt]
 			rest = rest[lt+gt+1:]
 			if tag == "C" || tag == "/C" {
-				continue // centering markers (unused in this Delphi revision too)
+				continue // 居中标记 (该 Delphi 版本中也未使用)
 			}
 			if tag == "" {
-				// Empty tag hides the shop windows (FState:4847-4850).
+				// 空标签隐藏商店窗口 (FState:4847-4850)。
 				s.State.ShowShop = false
 				continue
 			}
-			// <display text/link value>
+			// <显示文本/链接值>
 			display, link := tag, ""
 			if slash := strings.IndexByte(tag, '/'); slash >= 0 {
 				display, link = tag[:slash], tag[slash+1:]
@@ -77,9 +77,9 @@ func (s *PlayScene) buildNpcPanels() {
 	ui := s.ui
 	prg := s.resources.Prguse
 
-	// --- NPC dialog (DMerchantDlg [384] @0,0) ---
+	// --- NPC 对话框 (DMerchantDlg [384] @0,0) ---
 	npc := NewUIControl("DMerchantDlg", KindWindow)
-	npc.Floating = false // DFM: not draggable
+	npc.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		npc.SetImgIndex(prg, ImgNpcDlg)
 	} else {
@@ -94,16 +94,16 @@ func (s *PlayScene) buildNpcPanels() {
 	s.hudNpc = npc
 
 	npcClose := NewUIControl("DMerchantDlgClose", KindButton)
-	npcClose.Left, npcClose.Top = 372, 20 // runtime override (FState:1303-1305)
+	npcClose.Left, npcClose.Top = 372, 20 // 运行时覆盖 (FState:1303-1305)
 	if prg != nil {
 		npcClose.SetImgIndex(prg, ImgCloseSmall)
 	}
 	npcClose.OnClick = func(c *UIControl, x, y int) { s.State.ShowNpcDialog = false }
 	npc.AddChild(npcClose)
 
-	// --- Buy list (DMenuDlg [385], runtime pos 0,170 — FState:4751-4752) ---
+	// --- 购买列表 (DMenuDlg [385], 运行时位置 0,170 — FState:4751-4752) ---
 	menu := NewUIControl("DMenuDlg", KindWindow)
-	menu.Floating = false // DFM: not draggable
+	menu.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		menu.SetImgIndex(prg, ImgShopBg)
 	} else {
@@ -116,9 +116,9 @@ func (s *PlayScene) buildNpcPanels() {
 	ui.Root.AddChild(menu)
 	s.hudMenu = menu
 
-	// Runtime button layout (FState:1330-1341 — the DlgConf entries are
-	// dead values): Prev[387]@(328,42), Next[388]@(328,162),
-	// Buy[362]@(100,230), Close[366]@(175,230).
+	// 运行时按钮布局 (FState:1330-1341 — DlgConf 中的值已废弃):
+	// Prev[387]@(328,42), Next[388]@(328,162),
+	// Buy[362]@(100,230), Close[366]@(175,230)。
 	menuPrev := NewUIControl("DMenuPrev", KindButton)
 	menuPrev.Left, menuPrev.Top = 328, 42
 	if prg != nil {
@@ -160,9 +160,9 @@ func (s *PlayScene) buildNpcPanels() {
 	menuClose.OnClick = func(c *UIControl, x, y int) { s.State.ShowShop = false }
 	menu.AddChild(menuClose)
 
-	// --- Sell/repair/storage spot (DSellDlg [392], runtime pos 260,170) ---
+	// --- 出售/修理/寄存槽 (DSellDlg [392], 运行时位置 260,170) ---
 	sell := NewUIControl("DSellDlg", KindWindow)
-	sell.Floating = false // DFM: not draggable
+	sell.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		sell.SetImgIndex(prg, ImgSellBg)
 	} else {
@@ -174,7 +174,7 @@ func (s *PlayScene) buildNpcPanels() {
 	ui.Root.AddChild(sell)
 	s.hudSell = sell
 
-	// The spot where the item to sell/repair/store is placed (27,67 61×52).
+	// 放置待出售/修理/寄存物品的槽位 (27,67 61×52)。
 	spot := NewUIControl("DSellDlgSpot", KindButton)
 	spot.Left, spot.Top = 27, 67
 	spot.Width, spot.Height = 61, 52
@@ -191,7 +191,7 @@ func (s *PlayScene) buildNpcPanels() {
 		if img == nil || img.RGBA == nil || tex == 0 {
 			return
 		}
-		// Centered in the spot (FState:5235-5241).
+		// 在槽位中居中 (FState:5235-5241)。
 		s.gl.DrawQuad(tex, float32(c.AbsX())+float32(61-img.Width)/2,
 			float32(c.AbsY())+float32(52-img.Height)/2,
 			float32(img.Width), float32(img.Height), proj)
@@ -210,7 +210,7 @@ func (s *PlayScene) buildNpcPanels() {
 	}
 	sell.AddChild(spot)
 
-	// Runtime layout (FState:1352-1357): OK[362]@(28,135), Close[366]@(81,135).
+	// 运行时布局 (FState:1352-1357): OK[362]@(28,135), Close[366]@(81,135)。
 	sellOk := NewUIControl("DSellDlgOk", KindButton)
 	sellOk.Left, sellOk.Top = 28, 135
 	if prg != nil {
@@ -228,8 +228,8 @@ func (s *PlayScene) buildNpcPanels() {
 	sell.AddChild(sellClose)
 }
 
-// syncMerchantWindows keeps dialog/shop windows visible per state, and
-// clears transient state once after everything closes.
+// syncMerchantWindows 根据状态控制对话框/商店窗口可见性,
+// 全部关闭后清除临时状态。
 func (s *PlayScene) syncMerchantWindows() {
 	if s.hudNpc != nil {
 		s.hudNpc.Visible = s.State.ShowNpcDialog
@@ -247,8 +247,8 @@ func (s *PlayScene) syncMerchantWindows() {
 	s.merchantWasOpen = open
 }
 
-// paintNpcDialog renders parsed rich text with clickable links
-// (FState:4806-4880).
+// paintNpcDialog 渲染解析后的富文本及可点击链接
+// (FState:4806-4880)。
 func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -257,8 +257,8 @@ func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 	if s.text == nil {
 		return
 	}
-	// Rebuild click rects each paint (Delphi builds once; we need them
-	// live for hit testing).
+	// 每次绘制重建点击区域 (Delphi 只构建一次; 我们需要
+	// 实时区域用于命中检测)。
 	s.npcClicks = s.npcClicks[:0]
 	ax, ay := c.AbsX(), c.AbsY()
 	for i, segs := range s.npcLines {
@@ -269,11 +269,11 @@ func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 			if seg.tag != "" {
 				r, g, b := 1.0, 1.0, 0.0
 				if s.npcSelectTag == seg.tag {
-					r, g, b = 1.0, 0.0, 0.0 // pressed link, clRed (FState:4864-4865)
+					r, g, b = 1.0, 0.0, 0.0 // 按下链接, clRed (FState:4864-4865)
 				}
 				s.text.DrawTextOutline(seg.text, float32(ax+x), float32(ay+y),
 					float32(r), float32(g), float32(b), 1, 0, 0, 0, 1, proj)
-				// Underline (links are fsUnderline in Delphi).
+				// 下划线 (Delphi 中链接带 fsUnderline)。
 				s.gl.DrawQuadColor(float32(ax+x), float32(ay+y+13), float32(w), 1,
 					float32(r), float32(g), float32(b), 1, proj)
 				s.npcClicks = append(s.npcClicks, npcClickPoint{
@@ -288,7 +288,7 @@ func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 	}
 }
 
-// npcClick hit-tests links and sends the selection (FState:5116-5135).
+// npcClick 命中检测链接并发送选择 (FState:5116-5135)。
 func (s *PlayScene) npcClick(x, y int) {
 	absX, absY := x+s.hudNpc.AbsX(), y+s.hudNpc.AbsY()
 	now := time.Now().UnixMilli()
@@ -296,7 +296,7 @@ func (s *PlayScene) npcClick(x, y int) {
 		if absX < cp.x || absX >= cp.x+cp.w || absY < cp.y || absY >= cp.y+cp.h {
 			continue
 		}
-		if now < s.npcLastClickTick { // 5s anti-spam (FState:5121)
+		if now < s.npcLastClickTick { // 5 秒防连点 (FState:5121)
 			return
 		}
 		s.npcLastClickTick = now + 5000
@@ -306,8 +306,8 @@ func (s *PlayScene) npcClick(x, y int) {
 	}
 }
 
-// selectNpcTag sends the link tag; '@@' tags prompt for input first
-// (ClMain.pas:3094-3110).
+// selectNpcTag 发送链接标签; '@@' 前缀标签先弹出输入框
+// (ClMain.pas:3094-3110)。
 func (s *PlayScene) selectNpcTag(tag string) {
 	if strings.HasPrefix(tag, "@@") {
 		ShowInput(s, tag, func(ok bool, text string) {
@@ -326,7 +326,7 @@ func (s *PlayScene) sendNpcSelect(tag string) {
 	}
 }
 
-// paintShopMenu renders the buy list (FState:4887-4934).
+// paintShopMenu 渲染购买列表 (FState:4887-4934)。
 func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -336,7 +336,7 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		return
 	}
 	ax, ay := c.AbsX(), c.AbsY()
-	// Headers (FState:4913-4917 buy mode / 4943-4946 storage mode), white.
+	// 表头 (FState:4913-4917 购买模式 / 4943-4946 寄存模式), 白色。
 	if s.State.ShopMode == 3 {
 		s.text.DrawText("保管物品", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
 		s.text.DrawText("持久度", float32(ax+164), float32(ay+31), 1, 1, 1, 1, proj)
@@ -355,8 +355,8 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		g := goods[idx]
 		y := ay + 50 + m*menuRowH
 		if idx == s.menuIndex {
-			// Delphi draws char(7) in clRed (:4923-4925); the engine font
-			// has no glyph for the control char, so '>' stands in.
+			// Delphi 用 clRed 绘制 char(7) (:4923-4925); 引擎字体
+			// 无该控制字符字形, 以 '>' 替代。
 			s.text.DrawText(">", float32(ax+25), float32(y), 1, 0, 0, 1, proj)
 		}
 		name := g.Name
@@ -369,9 +369,8 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		}
 		s.text.DrawText(name, float32(ax+38), float32(y), 1, 1, 1, 1, proj)
 		if s.State.ShopMode == 3 {
-			// Durability column (Dura/DuraMax of the stored instance; the
-			// Delphi Stock/Grade layout needs the server-side goods format,
-			// tracked in batch B5).
+			// 持久度列 (寄存物品的 Dura/DuraMax; Delphi 的
+			// Stock/Grade 布局需要服务端商品格式, 归入 B5 批次)。
 			dura := ""
 			for i := range s.State.StorageItems {
 				if s.State.StorageItems[i].MakeIndex == int32(g.Price) {
@@ -388,7 +387,7 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 	}
 }
 
-// menuRowClick selects a goods row (FState:4969-5017).
+// menuRowClick 选择商品行 (FState:4969-5017)。
 func (s *PlayScene) menuRowClick(x, y int) {
 	if x < 14 || x > 279 || y < 32 {
 		return
@@ -399,8 +398,8 @@ func (s *PlayScene) menuRowClick(x, y int) {
 	}
 }
 
-// buySelected acts on the selected row: buy (shop) or take back (storage),
-// FState:5028-5052 (no sub-menus in the Go closed loop).
+// buySelected 对选中行执行操作: 购买 (商店) 或取回 (寄存),
+// FState:5028-5052 (Go 闭环中无子菜单)。
 func (s *PlayScene) buySelected() {
 	now := time.Now().UnixMilli()
 	if now < s.lastBuyTick {
@@ -410,7 +409,7 @@ func (s *PlayScene) buySelected() {
 	if s.menuIndex >= 0 && s.menuIndex < len(s.State.ShopGoods) {
 		g := s.State.ShopGoods[s.menuIndex]
 		if s.State.ShopMode == 3 {
-			// Storage row: "price" carries the MakeIndex (FState:5041-5043).
+			// 寄存行: "price" 字段携带 MakeIndex (FState:5041-5043)。
 			if s.sendTakeBackStorage != nil {
 				s.sendTakeBackStorage(int32(g.Price))
 			}
@@ -422,7 +421,7 @@ func (s *PlayScene) buySelected() {
 	}
 }
 
-// paintSellDlg renders the sell/repair/storage spot panel (FState:5164-5188).
+// paintSellDlg 渲染出售/修理/寄存槽面板 (FState:5164-5188)。
 func (s *PlayScene) paintSellDlg(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -443,17 +442,17 @@ func (s *PlayScene) paintSellDlg(c *UIControl, proj [16]float32) {
 	s.text.DrawText(label+s.sellPriceStr, float32(c.AbsX()+28), float32(c.AbsY()+31), 1, 1, 1, 1, proj)
 }
 
-// sellSpotClick picks up / places the sell item (FState:5195-5227).
+// sellSpotClick 拿起/放置待出售物品 (FState:5195-5227)。
 func (s *PlayScene) sellSpotClick() {
 	s.sellPriceStr = ""
 	if s.itemMove.Moving {
 		mi := s.itemMove.Index
-		// Accept bag items and the spot's own item being re-placed
-		// (FState:5210).
+		// 接受背包物品及槽位自身物品的重新放置
+		// (FState:5210)。
 		if mi >= 0 || mi == moveIdxSellSpot {
 			if s.sellItem != nil {
-				// Occupied spot: swap held ↔ spot; the cursor keeps the old
-				// spot item (Index = -99, FState:5212-5216).
+				// 槽位已占用: 交换手持 ↔ 槽位; 光标保留原槽位物品
+				// (Index = -99, FState:5212-5216)。
 				old := *s.sellItem
 				held := s.itemMove.Item
 				s.sellItem = &held
@@ -470,14 +469,14 @@ func (s *PlayScene) sellSpotClick() {
 		return
 	}
 	if s.sellItem != nil {
-		// Pick the spot item back up.
+		// 取回槽位物品。
 		s.itemMove.Begin(moveIdxSellSpot, s.sellItem)
 		s.sellItem = nil
 	}
 }
 
-// pumpSellQuery sends the delayed price query (ClMain.pas:3513-3521:
-// 500ms after the item lands on the spot).
+// pumpSellQuery 发送延迟价格查询 (ClMain.pas:3513-3521:
+// 物品放入槽位 500ms 后)。
 func (s *PlayScene) pumpSellQuery() {
 	if !s.queryPrice || s.sellItem == nil {
 		return
@@ -487,20 +486,20 @@ func (s *PlayScene) pumpSellQuery() {
 	}
 	s.queryPrice = false
 	switch s.State.ShopMode {
-	case 1: // sell
+	case 1: // 出售
 		if s.sendQueryPrice != nil {
 			s.sendQueryPrice(s.sellItem.MakeIndex)
 		}
-	case 2: // repair
+	case 2: // 修理
 		if s.sendQueryRepair != nil {
 			s.sendQueryRepair(s.sellItem.MakeIndex)
 		}
 	}
 }
 
-// sellOk confirms sell/repair/storage (FState:5251-5264). The item leaves
-// the spot visually; sellWait keeps it so SMUserSellItemFail can restore it
-// (Delphi g_SellDlgItemSellWait, :5253,5260).
+// sellOk 确认出售/修理/寄存 (FState:5251-5264)。物品从槽位移除;
+// sellWait 暂存以便 SMUserSellItemFail 时恢复
+// (Delphi g_SellDlgItemSellWait, :5253,5260)。
 func (s *PlayScene) sellOk() {
 	now := time.Now().UnixMilli()
 	if now < s.lastBuyTick || s.sellItem == nil {
@@ -527,15 +526,15 @@ func (s *PlayScene) sellOk() {
 	}
 }
 
-// sellConfirmed drops the pending item after the server accepted the sale
-// or stored it; the full bag refresh removes it from the bag.
+// sellConfirmed 服务端确认出售或寄存后清除待处理物品;
+// 背包全量刷新会将其从背包移除。
 func (s *PlayScene) sellConfirmed() {
 	s.sellItem = nil
 	s.sellWait = nil
 	s.sellPriceStr = ""
 }
 
-// sellFailed restores the pending item to the sell spot.
+// sellFailed 将待处理物品恢复到出售槽位。
 func (s *PlayScene) sellFailed() {
 	if s.sellWait != nil {
 		s.sellItem = s.sellWait
@@ -543,11 +542,11 @@ func (s *PlayScene) sellFailed() {
 	}
 }
 
-// clearMerchantState resets transient shop/dialog state when windows close.
+// clearMerchantState 窗口关闭时重置临时商店/对话框状态。
 func (s *PlayScene) clearMerchantState() {
-	// The spot item never left the bag (client-owned visual), so closing
-	// just drops the references — Delphi AddItemBag's effect is a no-op here
-	// (FState:4795-4801).
+	// 槽位物品从未离开背包 (客户端本地显示), 关闭时只需
+	// 丢弃引用 — Delphi AddItemBag 的效果在此无意义
+	// (FState:4795-4801)。
 	s.sellItem = nil
 	s.sellWait = nil
 	s.sellPriceStr = ""

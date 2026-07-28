@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// NpcDef represents an NPC definition.
+// NpcDef 表示 NPC 定义。
 type NpcDef struct {
 	Name    string `json:"name"`
 	Race    int    `json:"race"`
@@ -19,7 +19,7 @@ type NpcDef struct {
 	Body    int    `json:"body"`
 }
 
-// MerchantDef represents a merchant/NPC location.
+// MerchantDef 表示商人/NPC 位置。
 type MerchantDef struct {
 	ID       string `json:"id"`
 	MapName  string `json:"mapName"`
@@ -31,7 +31,7 @@ type MerchantDef struct {
 	Castle   int    `json:"castle"`
 }
 
-// NpcScript represents an NPC script with metadata.
+// NpcScript 表示带元数据的 NPC 脚本。
 type NpcScript struct {
 	Source     string `json:"source"`
 	Type       string `json:"type"`
@@ -41,16 +41,16 @@ type NpcScript struct {
 	Script     string `json:"script"`
 }
 
-// ConvertNPCs converts NPC configuration files.
+// ConvertNPCs 转换 NPC 配置文件。
 func ConvertNPCs(inputDir, outputDir string) error {
 	envirDir := filepath.Join(inputDir, "Envir")
 
-	// Convert Npcs.txt
+	// 转换 Npcs.txt
 	if err := convertNpcList(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting Npcs.txt: %w", err)
 	}
 
-	// Convert merchant.txt
+	// 转换 merchant.txt
 	if err := convertMerchantList(envirDir, outputDir); err != nil {
 		return fmt.Errorf("converting merchant.txt: %w", err)
 	}

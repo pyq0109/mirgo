@@ -113,8 +113,8 @@ func (s *NpcScript) Execute(label string, p *PlayObject, npc *NpcObject, server 
 		conditionsMet = s.evalConditions(section.Conditions, p)
 	}
 
-	// Lines join with '\' — the Delphi NPC dialog line separator, which the
-	// client parser (and its <text/@label> tag handling) splits on.
+	// 各行用 '\' 连接——这是 Delphi NPC 对话的行分隔符，
+	// 客户端解析器（及其 <text/@label> 标签处理）按此分割。
 	if conditionsMet {
 		s.execActions(section.Actions, p, npc, server)
 		if len(section.SayText) > 0 {
@@ -645,7 +645,7 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 		script, err := LoadNpcScript(npc.Script)
 		if err == nil {
 			script.Execute("main", p, npc, server)
-			log.Logf(log.LevelInfo, "NPC", "%s executed script for %s", p.Name, npc.Name)
+			log.Logf(log.LevelInfo, "NPC", "%s 执行了 %s 的脚本", p.Name, npc.Name)
 			return
 		}
 	}
@@ -654,5 +654,5 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(dialog))
 
-	log.Logf(log.LevelInfo, "NPC", "%s clicked NPC %s", p.Name, npc.Name)
+	log.Logf(log.LevelInfo, "NPC", "%s 点击了 NPC %s", p.Name, npc.Name)
 }

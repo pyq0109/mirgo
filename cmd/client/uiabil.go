@@ -7,21 +7,20 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// Adjust-ability panel — port of DAdjustAbility (FState.pas:1557-1619
-// layout, 6510-6710 behavior) — plus the read-only inspect window
-// DUserState1 (:1088-1163).
+// 属性调整面板 — 移植自 DAdjustAbility (FState.pas:1557-1619 布局,
+// 6510-6710 行为) — 外加只读查看窗口 DUserState1 (:1088-1163).
 
-// Row order matches Delphi AdjustAbilHints / TNakedAbility fields.
+// 行序与 Delphi AdjustAbilHints / TNakedAbility 字段一致.
 var abilStatNames = [9]string{"DC", "MC", "SC", "AC", "MAC", "HP", "MP", "Hit", "Speed"}
 var abilRowTops = [9]int{101, 121, 140, 160, 181, 201, 220, 240, 261}
 
-// Per-row hover hints (Delphi AdjustAbilHints, FState:18-28).
+// 逐行悬停提示 (Delphi AdjustAbilHints, FState:18-28).
 var abilHints = [9]string{
 	"攻击力(DC)", "魔法力(MC)", "道术(SC)", "防御力(AC)", "魔法防御(MAC)",
 	"生命值(HP)", "魔法值(MP)", "准确(Hit)", "敏捷(Speed)",
 }
 
-// DUserState1 has its own slot layout, distinct from DStateWin
+// DUserState1 有自己的格位布局, 与 DStateWin 不同
 // (FState:1095-1158).
 var inspectSlots = []stateSlotDef{
 	{protocol.UNecklace, "项链", 168, 87, 34, 31},
@@ -44,7 +43,7 @@ func (s *PlayScene) buildAbilPanel() {
 	prg := s.resources.Prguse
 
 	win := NewUIControl("DAdjustAbility", KindWindow)
-	win.Floating = false // DFM: not draggable
+	win.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		win.SetImgIndex(prg, ImgAdjustBg)
 	} else {
@@ -53,7 +52,7 @@ func (s *PlayScene) buildAbilPanel() {
 	win.Left, win.Top = 0, 0
 	win.Visible = false
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintAbilPanel(c, proj) }
-	// Row hover hints (DAdjustAbilityMouseMove, FState:6712-6737).
+	// 行悬停提示 (DAdjustAbilityMouseMove, FState:6712-6737).
 	win.OnMouseMove = func(c *UIControl, x, y int) {
 		lx, ly := x, y
 		if lx < 50 || lx >= 150 {
@@ -107,16 +106,16 @@ func (s *PlayScene) buildAbilPanel() {
 	}
 	closeBtn.Width, closeBtn.Height = 14, 20
 	closeBtn.OnClick = func(c *UIControl, x, y int) {
-		// Closing discards unspent allocation (FState:6504-6508).
+		// 关闭时丢弃未分配的点数 (FState:6504-6508).
 		s.abilDeltas = [9]int{}
 		s.abilPointsLeft = s.State.BonusPoint
 		s.State.ShowPlusAbil = false
 	}
 	win.AddChild(closeBtn)
 
-	// Inspect window (DUserState1 [370], read-only equipment view).
+	// 查看窗口 (DUserState1 [370], 只读装备视图).
 	inspect := NewUIControl("DUserState1", KindWindow)
-	inspect.Floating = false // DFM: not draggable
+	inspect.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		inspect.SetImgIndex(prg, ImgStateBg)
 	} else {
@@ -126,7 +125,7 @@ func (s *PlayScene) buildAbilPanel() {
 	inspect.Top = 0
 	inspect.Visible = false
 	inspect.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintInspect(c, proj) }
-	// Slot hover tooltips (FState:5995-6036).
+	// 格位悬停提示 (FState:5995-6036).
 	inspect.OnMouseMove = func(c *UIControl, x, y int) {
 		for _, def := range inspectSlots {
 			if x < def.x || x >= def.x+def.w || y < def.y || y >= def.y+def.h {
@@ -168,7 +167,7 @@ func (s *PlayScene) buildAbilPanel() {
 func (s *PlayScene) syncAbilWindows() {
 	if s.hudAbil != nil {
 		if s.State.ShowPlusAbil && !s.hudAbil.Visible {
-			// Opening snapshots the point budget (g_nSaveBonusPoint).
+			// 打开时快照点数预算 (g_nSaveBonusPoint).
 			s.abilDeltas = [9]int{}
 			s.abilPointsLeft = s.State.BonusPoint
 		}
@@ -179,8 +178,8 @@ func (s *PlayScene) syncAbilWindows() {
 	}
 }
 
-// abilAdjust moves points between the budget and one stat (FState:6633-6704):
-// holding Ctrl steps by 10 when enough points remain (:6638,6657).
+// abilAdjust 在预算与某项属性之间移动点数 (FState:6633-6704):
+// 点数足够时按住 Ctrl 以 10 为步进 (:6638,6657).
 func (s *PlayScene) abilAdjust(stat, delta int) {
 	step := 1
 	if s.ctrlDown && s.abilPointsLeft >= 10 {
@@ -207,8 +206,8 @@ func (s *PlayScene) abilAdjust(stat, delta int) {
 	s.abilPointsLeft += step
 }
 
-// abilCommit sends the allocation (Delphi SendAdjustBonus: Recog =
-// remaining points, body = TNakedAbility).
+// abilCommit 发送分配结果 (Delphi SendAdjustBonus: Recog =
+// 剩余点数, body = TNakedAbility).
 func (s *PlayScene) abilCommit() {
 	if s.sendAdjustBonus != nil {
 		s.sendAdjustBonus(s.abilPointsLeft, s.abilDeltas)
@@ -218,8 +217,8 @@ func (s *PlayScene) abilCommit() {
 	s.State.ShowPlusAbil = false
 }
 
-// paintAbilPanel renders the three columns (FState:6510-6631): current
-// values, remaining points, and pending allocation.
+// paintAbilPanel 绘制三列 (FState:6510-6631): 当前值、剩余点数
+// 和待提交的分配.
 func (s *PlayScene) paintAbilPanel(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -233,7 +232,7 @@ func (s *PlayScene) paintAbilPanel(c *UIControl, proj [16]float32) {
 	m := c.AbsY() + 101
 	rowY := [9]int{m - 4, m + 16, m + 36, m + 56, m + 76, m + 96, m + 116, m + 136, m + 156}
 
-	// Header hints (FState:6541-6547), silver, 14px apart.
+	// 头部提示 (FState:6541-6547), 银色, 行距 14px.
 	hints := [4]string{
 		"恭喜! 你的等级提升了.",
 		"你可以将获得的点数分配到下面的属性中.",
@@ -264,8 +263,8 @@ func loHiStr(v uint32) string {
 	return fmt.Sprintf("%d-%d", v&0xFFFF, v>>16)
 }
 
-// paintInspect renders the inspected player: paper doll + the 13 slots on
-// the DUserState1 layout (FState:5872-5964, 1095-1158).
+// paintInspect 绘制被查看的玩家: 纸娃娃 + DUserState1 布局的 13 个
+// 格位 (FState:5872-5964, 1095-1158).
 func (s *PlayScene) paintInspect(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -273,9 +272,9 @@ func (s *PlayScene) paintInspect(c *UIControl, proj [16]float32) {
 	}
 	ax, ay := c.AbsX(), c.AbsY()
 
-	// Paper doll (FState:5887-5932): body @(38,52), layers share origin
-	// (31,96) with each image's own offset. Inspect female hair uses the
-	// 480 base (:5900), unlike the own-character doll (441).
+	// 纸娃娃 (FState:5887-5932): 身体 @(38,52), 各层共用原点 (31,96),
+	// 再叠加各图像自身偏移. 查看女性发型使用 480 基址 (:5900),
+	// 不同于自身角色纸娃娃 (441).
 	if prg != nil {
 		body := ImgBodyMale
 		if s.inspectSex == 1 {
@@ -336,9 +335,8 @@ func (s *PlayScene) paintInspect(c *UIControl, proj [16]float32) {
 	}
 }
 
-// parseInspect fills the inspect window from an SMSendUserState body;
-// sex/hair come from the world actor (the message carries only name +
-// equipment).
+// parseInspect 从 SMSendUserState 的 body 填充查看窗口;
+// 性别/发型来自世界中的 actor (消息只携带名字 + 装备).
 func (s *PlayScene) parseInspect(name string, body string) {
 	raw := []byte(body)
 	if len(raw) < 130 {
@@ -370,7 +368,7 @@ func (s *PlayScene) parseInspect(name string, body string) {
 	s.showInspect = true
 }
 
-// tryInspect queries the equipment of the player under the cursor.
+// tryInspect 查询光标下玩家的装备.
 func (s *PlayScene) tryInspect(x, y float64) {
 	if s.cam == nil || s.mapData == nil || s.sendQueryUserState == nil || s.State.MySelf == nil {
 		return

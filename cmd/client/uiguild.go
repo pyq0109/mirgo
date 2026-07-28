@@ -6,17 +6,17 @@ import (
 	"unicode/utf8"
 )
 
-// Guild panel — port of DGuildDlg (FState.pas:1495-1552 layout,
-// 6187-6485 behavior) and group dialog DGroupDlg (:1435-1455,
+// 行会面板 — 移植自 DGuildDlg (FState.pas:1495-1552 布局,
+// 6187-6485 行为) 及组队对话框 DGroupDlg (:1435-1455,
 // 5461-5566).
 
 func (s *PlayScene) buildGuildPanels() {
 	ui := s.ui
 	prg := s.resources.Prguse
 
-	// --- Guild panel [180] @(0,-3) ---
+	// --- 行会面板 [180] @(0,-3) ---
 	guild := NewUIControl("DGuildDlg", KindWindow)
-	guild.Floating = false // DFM: not draggable
+	guild.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		guild.SetImgIndex(prg, ImgGuildBg)
 	} else {
@@ -32,11 +32,11 @@ func (s *PlayScene) buildGuildPanels() {
 		name    string
 		img     int
 		x, y    int
-		admin   bool // hidden unless commander
+		admin   bool // 非掌门时隐藏
 		onClick func()
 	}{
 		{"DGDClose", ImgCloseSmall, 568, 20, false, func() {
-			// Closing also leaves guild-chat mode (FState:6364-6368).
+			// 关闭时同时退出行会聊天模式 (FState:6364-6368).
 			s.State.ShowGuild = false
 			s.guildChatMode = false
 		}},
@@ -78,8 +78,8 @@ func (s *PlayScene) buildGuildPanels() {
 				}
 			})
 		}},
-		// War buttons are dead in the original (no click handlers anywhere in
-		// FState.pas); kept visible for commander parity, no behavior.
+		// 宣战按钮在原版中是死按钮 (FState.pas 中没有任何点击处理);
+		// 为与掌门界面保持一致仍显示, 但无行为.
 		{"DGDWar", 202, 488, 387, true, nil},
 		{"DGDCancelWar", 188, 488, 407, true, nil},
 	}
@@ -101,7 +101,7 @@ func (s *PlayScene) buildGuildPanels() {
 		}
 	}
 
-	// Member list scroll (FState:1538-1543).
+	// 成员列表滚动 (FState:1538-1543).
 	up := NewUIControl("DGDUp", KindButton)
 	up.Left, up.Top = 567, 110
 	if prg != nil {
@@ -127,9 +127,9 @@ func (s *PlayScene) buildGuildPanels() {
 	}
 	guild.AddChild(down)
 
-	// --- Group dialog [120] centered ---
+	// --- 组队对话框 [120] 居中 ---
 	group := NewUIControl("DGroupDlg", KindWindow)
-	group.Floating = false // DFM: not draggable
+	group.Floating = false // DFM: 不可拖动
 	if prg != nil {
 		group.SetImgIndex(prg, ImgGroupBg)
 	} else {
@@ -156,8 +156,8 @@ func (s *PlayScene) buildGuildPanels() {
 		allow.SetImgIndex(prg, ImgGroupAllow)
 	}
 	allow.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-		// Downed → FaceIndex-1 (346); else AllowGroup → FaceIndex; else
-		// nothing (baked background) — FState:5494-5512.
+		// 按下 → FaceIndex-1 (346); 否则 AllowGroup → FaceIndex;
+		// 其余不绘制 (背景已烘焙) — FState:5494-5512.
 		if prg == nil {
 			return
 		}
@@ -190,7 +190,7 @@ func (s *PlayScene) buildGuildPanels() {
 		onClick func()
 	}{
 		{"DGrpCreate", ImgGroupCreate, 46, func() {
-			if len(s.State.GroupMembers) > 0 { // must be ungrouped (FState:5527)
+			if len(s.State.GroupMembers) > 0 { // 必须未组队 (FState:5527)
 				return
 			}
 			ShowInput(s, "输入要邀请的玩家(空=独自组队)", func(ok bool, text string) {
@@ -200,7 +200,7 @@ func (s *PlayScene) buildGuildPanels() {
 			})
 		}},
 		{"DGrpAddMem", ImgGroupAdd, 123, func() {
-			if len(s.State.GroupMembers) == 0 { // must be grouped (FState:5542)
+			if len(s.State.GroupMembers) == 0 { // 必须已组队 (FState:5542)
 				return
 			}
 			ShowInput(s, "输入要加入的成员名字", func(ok bool, text string) {
@@ -210,7 +210,7 @@ func (s *PlayScene) buildGuildPanels() {
 			})
 		}},
 		{"DGrpDelMem", ImgGroupDel, 202, func() {
-			if len(s.State.GroupMembers) == 0 { // must be grouped (FState:5557)
+			if len(s.State.GroupMembers) == 0 { // 必须已组队 (FState:5557)
 				return
 			}
 			ShowInput(s, "输入要删除的成员名字", func(ok bool, text string) {
@@ -239,7 +239,7 @@ func (s *PlayScene) buildGuildPanels() {
 	}
 }
 
-// groupThrottled enforces the shared 5s gate on all party operations
+// groupThrottled 对所有组队操作强制执行共享的 5 秒间隔限制
 // (Delphi g_dwChangeGroupModeTick, FState:5514-5520).
 func (s *PlayScene) groupThrottled() bool {
 	now := time.Now().UnixMilli()
@@ -262,8 +262,8 @@ func (s *PlayScene) syncGuildWindows() {
 	}
 }
 
-// paintGuildPanel renders guild name + member/chat list (FState:6318-6351).
-// Chat mode swaps in the guild chat buffer (FState:6477-6485).
+// paintGuildPanel 绘制行会名 + 成员/聊天列表 (FState:6318-6351).
+// 聊天模式下切换显示行会聊天缓存 (FState:6477-6485).
 func (s *PlayScene) paintGuildPanel(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -284,8 +284,8 @@ func (s *PlayScene) paintGuildPanel(c *UIControl, proj [16]float32) {
 		}
 		return
 	}
-	// Notice first (Delphi folds it into the list as a <Notice> segment;
-	// the Go server format lacks segments, so it renders as a header block).
+	// 公告在前 (Delphi 将其作为 <Notice> 段折叠进列表;
+	// Go 服务端格式没有分段, 因此作为头部块绘制).
 	row := 0
 	if st.GuildNotice != "" {
 		s.text.DrawText("<公告>", float32(bx), float32(by), 1, 1, 1, 1, proj)
@@ -326,8 +326,8 @@ func parseGuildMemberLine(line string) (name, rank string, online bool) {
 	return
 }
 
-// paintGroupPanel renders the member list (FState:5461-5487): leader first,
-// then two columns.
+// paintGroupPanel 绘制成员列表 (FState:5461-5487): 队长在前,
+// 其余分两列.
 func (s *PlayScene) paintGroupPanel(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -344,8 +344,8 @@ func (s *PlayScene) paintGroupPanel(c *UIControl, proj [16]float32) {
 	}
 }
 
-// toggleGuild closes the panel, or asks the server for the guild overview
-// when opening (Delphi DBotGuildClick sends CMOpenGuildDlg, :5433-5442).
+// toggleGuild 关闭面板, 或在打开时向服务端请求行会概况
+// (Delphi DBotGuildClick 发送 CMOpenGuildDlg, :5433-5442).
 func (s *PlayScene) toggleGuild() {
 	if s.State.ShowGuild {
 		s.State.ShowGuild = false
@@ -358,8 +358,8 @@ func (s *PlayScene) toggleGuild() {
 	}
 }
 
-// sendGuildHomeSafe / sendGuildMemberListSafe share a 3s query gate and
-// leave guild-chat mode (Delphi g_dwQueryMsgTick, FState:6370-6386).
+// sendGuildHomeSafe / sendGuildMemberListSafe 共享 3 秒查询间隔,
+// 并退出行会聊天模式 (Delphi g_dwQueryMsgTick, FState:6370-6386).
 func (s *PlayScene) sendGuildHomeSafe() {
 	now := time.Now().UnixMilli()
 	if now < s.guildQueryTick {
@@ -384,8 +384,8 @@ func (s *PlayScene) sendGuildMemberListSafe() {
 	}
 }
 
-// addGuildChat appends a guild chat line, capped at 500 entries with the
-// oldest 100 trimmed (FState:6465-6475).
+// addGuildChat 追加一行行会聊天, 上限 500 条, 超出时裁掉最旧的
+// 100 条 (FState:6465-6475).
 func (s *PlayScene) addGuildChat(line string) {
 	s.guildChats = append(s.guildChats, line)
 	if len(s.guildChats) > 500 {
@@ -393,9 +393,9 @@ func (s *PlayScene) addGuildChat(line string) {
 	}
 }
 
-// openGuildNoticeEditor shows the [204] modal with a multi-line Memo
+// openGuildNoticeEditor 弹出 [204] 模态窗口, 内含多行 Memo
 // (DGuildEditNotice, FState:1546-1552, 6217-6263): Ok[361]@(514,287),
-// Close[64]@(584,6), Memo @(16,36) 571×246, 4000-rune cap.
+// Close[64]@(584,6), Memo @(16,36) 571×246, 上限 4000 字符.
 func (s *PlayScene) openGuildNoticeEditor() {
 	prg := s.resources.Prguse
 	win := NewUIControl("DGuildEditNotice", KindWindow)
@@ -442,9 +442,9 @@ func (s *PlayScene) openGuildNoticeEditor() {
 	s.ui.SetFocus(memo.Ctrl)
 }
 
-// openGuildRankEditor loads the whole member table into a Memo for editing
-// (FState:6265-6316, 5000-rune cap). The Go server currently parses a
-// single "name/rank" line; full-table submission is tracked in batch B5.
+// openGuildRankEditor 将整张成员表载入 Memo 供编辑
+// (FState:6265-6316, 上限 5000 字符). Go 服务端目前只解析单行
+// "name/rank"; 整表提交在批次 B5 中跟踪.
 func (s *PlayScene) openGuildRankEditor() {
 	if len(s.State.GuildMembers) == 0 {
 		s.AddChatMessage("[系统] 请先获取成员列表再编辑职位")

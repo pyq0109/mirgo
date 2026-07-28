@@ -6,11 +6,11 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-// ClientItemDef is the client-side copy of a server ItemDef, delivered once
-// at login via SMStdItems (layout defined in PlayObject.SendStdItems).
+// ClientItemDef 是服务端 ItemDef 的客户端副本，登录时通过 SMStdItems
+// 一次性下发（布局定义见 PlayObject.SendStdItems）。
 type ClientItemDef struct {
 	Name      string
-	Looks     uint16 // Items.wil / StateItem.wil index
+	Looks     uint16 // Items.wil / StateItem.wil 索引
 	StdMode   byte
 	Shape     byte
 	Weight    byte
@@ -24,15 +24,14 @@ type ClientItemDef struct {
 }
 
 type BagItem struct {
-	Idx       uint16 // WIndex: item DB index
+	Idx       uint16 // WIndex: 物品数据库索引
 	Dura      uint16
 	DuraMax   uint16
 	MakeIndex int32
-	Def       *ClientItemDef // resolved against GameState.ItemDefs (may be nil)
+	Def       *ClientItemDef // 关联 GameState.ItemDefs（可能为 nil）
 }
 
-// Looks returns the Items.wil sprite index, falling back to the raw WIndex
-// when the def DB is unavailable.
+// Looks 返回 Items.wil 精灵索引，当物品定义库不可用时回退到原始 WIndex。
 func (b *BagItem) Looks() uint16 {
 	if b.Def != nil {
 		return b.Def.Looks
@@ -44,7 +43,7 @@ type LearnedMagic struct {
 	MagID    uint16
 	Level    byte
 	Key      byte
-	IconIdx  uint16 // MagIcon.wil index (def.Effect*2)
+	IconIdx  uint16 // MagIcon.wil 索引（def.Effect*2）
 	CurTrain uint16
 	MaxTrain uint16
 	Name     string
@@ -61,70 +60,69 @@ type GameState struct {
 	MapTitle   string
 	LightLevel int
 
-	// ServerName is the display name of the selected server, drawn centered at
-	// the top of the character-select scene (IntroScn:1539-1545, g_sServerName).
-	// Not currently populated: SMSelectServerOK carries only addr/port/cert and
-	// the network flow is intentionally left untouched.
+	// ServerName 是所选服务器的显示名称，绘制在选角场景顶部居中位置
+	// （IntroScn:1539-1545, g_sServerName）。
+	// 当前未赋值：SMSelectServerOK 仅携带 addr/port/cert，
+	// 网络流程有意不做改动。
 	ServerName string
 
 	ItemDefs map[int]*ClientItemDef
 
-	// Bag is a fixed 46-slot array (Delphi g_ItemArr model): client-owned
-	// layout, server is authoritative for contents (full re-sync on change).
-	// Nil slot = empty.
+	// Bag 是固定 46 格数组（对应 Delphi g_ItemArr 模型）：布局由客户端管理，
+	// 内容由服务端权威（变更时全量重同步）。
+	// nil 格 = 空。
 	BagItems [protocol.MaxBagItem]*BagItem
 	Level    int
 	HP, MP   int
 	MaxHP, MaxMP int
 	Gold     int
 
-	// Full ability block (SMAbility body).
+	// 完整属性块（SMAbility body）。
 	Exp, MaxExp               int
 	Weight, MaxWeight         int
 	WearWeight, MaxWearWeight int
 	HandWeight, MaxHandWeight int
-	AC, MAC, DC, MC, SC       uint32 // packed lo | hi<<16
+	AC, MAC, DC, MC, SC       uint32 // 打包格式 lo | hi<<16
 	Hit, Speed                int
 	BonusPoint                int
 
 	Sex, Hair int
-	Job       int // 0 warrior / 1 mage / 2 taoist (SMLogon body slot 3)
+	Job       int // 0 战士 / 1 法师 / 2 道士（SMLogon body 第 3 字段）
 
 	ShowBag      bool
 	ShowEquip    bool
-	StatePage    int  // equipment panel page 0-3 (FState StatePage)
-	ShowGroupDlg bool // group dialog (panel itself arrives in P9)
-	ShowPlusAbil bool // adjust-ability panel (P10)
+	StatePage    int  // 装备面板页码 0-3（FState StatePage）
+	ShowGroupDlg bool // 组队对话框（面板本身在 P9 实现）
+	ShowPlusAbil bool // 属性调整面板（P10）
 
 	Magics        []LearnedMagic
 	ShowNpcDialog bool
 
 	InDeal          bool
 	DealPartner     string
-	DealItems       [10]*BagItem // own offered items (DDGrid 5×2)
-	DealRemoteItems [20]*BagItem // partner's offered items (DDRGrid 5×4)
+	DealItems       [10]*BagItem // 己方放入的物品（DDGrid 5×2）
+	DealRemoteItems [20]*BagItem // 对方放入的物品（DDRGrid 5×4）
 	DealGold        int
 	DealRemoteGold  int
-	DealEnd         bool // locked after pressing confirm (g_boDealEnd)
+	DealEnd         bool // 点击确认后锁定（g_boDealEnd）
 
 	GuildName      string
 	GuildRank      string
 	ShowGuild      bool
-	GuildMembers   []string // "name/rank/online" lines
+	GuildMembers   []string // "名字/职位/在线" 行
 	GuildNotice    string
-	GuildCommander bool // may use admin buttons
+	GuildCommander bool // 可使用管理按钮
 	GuildTopLine   int
 
-	GroupMembers []string // names, leader first
+	GroupMembers []string // 成员名列表，队长在前
 	AllowGroup   bool
 
 	StorageItems []BagItem
 
 	SysMessages []string
 
-	// Belt slots hold references to bag items (Delphi keeps belt items in
-	// g_ItemArr[0..5]; the server still counts them as bag items — the bag
-	// grid render skips belt-referenced items).
+	// 腰带格存放背包物品的引用（Delphi 将腰带物品放在 g_ItemArr[0..5]；
+	// 服务端仍将其计为背包物品——背包格子渲染时跳过已被腰带引用的物品）。
 	BeltItems  [6]*BagItem
 	AttackMode int
 
@@ -152,13 +150,13 @@ func (gs *GameState) Reset() {
 	gs.Actors.Clear()
 }
 
-// ItemDef resolves an item DB index to its definition (nil if unknown).
+// ItemDef 将物品数据库索引解析为定义（未知则返回 nil）。
 func (gs *GameState) ItemDef(idx int) *ClientItemDef {
 	return gs.ItemDefs[idx]
 }
 
-// linkBagDefs attaches defs to already-parsed bag/storage items (called when
-// the DB arrives after the first bag payload, and after each bag parse).
+// linkBagDefs 为已解析的背包/仓库物品关联定义（在数据库晚于背包数据到达时，
+// 以及每次背包解析后调用）。
 func (gs *GameState) linkBagDefs() {
 	for _, b := range gs.BagItems {
 		if b != nil {
@@ -170,8 +168,8 @@ func (gs *GameState) linkBagDefs() {
 	}
 }
 
-// ParseItemDefs parses the SMStdItems body (see PlayObject.SendStdItems for
-// the layout) and re-links existing items.
+// ParseItemDefs 解析 SMStdItems body（布局见 PlayObject.SendStdItems），
+// 并重新关联已有物品。
 func (gs *GameState) ParseItemDefs(body string) {
 	raw := []byte(body)
 	if len(raw) < 2 {
@@ -213,7 +211,7 @@ func (gs *GameState) ParseItemDefs(body string) {
 }
 
 func (gs *GameState) ParseBagItems(body string) {
-	// Belt layout is client-owned; preserve it across re-syncs by instance id.
+	// 腰带布局由客户端管理；通过实例 ID 在重同步时保留。
 	var beltIDs [6]int32
 	for i, b := range gs.BeltItems {
 		if b != nil {
@@ -257,8 +255,7 @@ func (gs *GameState) ParseBagItems(body string) {
 	}
 }
 
-// BeltHolds reports whether the item is referenced by a belt slot (the bag
-// grid hides belt-referenced items).
+// BeltHolds 判断物品是否被腰带格引用（背包格子会隐藏已被腰带引用的物品）。
 func (gs *GameState) BeltHolds(b *BagItem) bool {
 	for _, x := range gs.BeltItems {
 		if x == b {
@@ -268,7 +265,7 @@ func (gs *GameState) BeltHolds(b *BagItem) bool {
 	return false
 }
 
-// FindBagItemByMakeIndex returns the slot of the item, or -1.
+// FindBagItemByMakeIndex 返回物品所在格索引，未找到返回 -1。
 func (gs *GameState) FindBagItemByMakeIndex(makeIndex int32) int {
 	for i, b := range gs.BagItems {
 		if b != nil && b.MakeIndex == makeIndex {
@@ -278,9 +275,9 @@ func (gs *GameState) FindBagItemByMakeIndex(makeIndex int32) int {
 	return -1
 }
 
-// ParseMagics parses the extended SMSendMyMagic body: count u16, then per
-// magic MagID u16, Level u8, Key u8, IconIdx u16, CurTrain u16, MaxTrain u16,
-// NameLen u8 + Name.
+// ParseMagics 解析扩展 SMSendMyMagic body：count u16，之后每条魔法
+// MagID u16, Level u8, Key u8, IconIdx u16, CurTrain u16, MaxTrain u16,
+// NameLen u8 + Name。
 func (gs *GameState) ParseMagics(body string) {
 	raw := []byte(body)
 	if len(raw) < 2 {
@@ -310,7 +307,7 @@ func (gs *GameState) ParseMagics(body string) {
 	}
 }
 
-// ParseAbility parses the SMAbility body (60 bytes, see PlayObject.SendAbility).
+// ParseAbility 解析 SMAbility body（60 字节，见 PlayObject.SendAbility）。
 func (gs *GameState) ParseAbility(body string) {
 	raw := []byte(body)
 	if len(raw) < 60 {

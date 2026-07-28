@@ -6,7 +6,7 @@ import (
 	"unsafe"
 )
 
-// TestEncode6BitBufRoundTrip tests that encoding then decoding returns the original data.
+// TestEncode6BitBufRoundTrip 测试编码后再解码能还原原始数据。
 func TestEncode6BitBufRoundTrip(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -40,7 +40,7 @@ func TestEncode6BitBufRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeMessageRoundTrip tests message encoding/decoding round trip.
+// TestEncodeMessageRoundTrip 测试消息编解码的往返。
 func TestEncodeMessageRoundTrip(t *testing.T) {
 	msg := DefaultMessage{
 		Recog:  12345,
@@ -74,7 +74,7 @@ func TestEncodeMessageRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeStringRoundTrip tests string encoding/decoding round trip.
+// TestEncodeStringRoundTrip 测试字符串编解码的往返。
 func TestEncodeStringRoundTrip(t *testing.T) {
 	testCases := []string{
 		"",
@@ -96,7 +96,7 @@ func TestEncodeStringRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeBufferRoundTrip tests buffer encoding/decoding round trip.
+// TestEncodeBufferRoundTrip 测试缓冲区编解码的往返。
 func TestEncodeBufferRoundTrip(t *testing.T) {
 	original := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C}
 
@@ -111,7 +111,7 @@ func TestEncodeBufferRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMakeDefaultMsg tests message creation.
+// TestMakeDefaultMsg 测试消息创建。
 func TestMakeDefaultMsg(t *testing.T) {
 	msg := MakeDefaultMsg(CMIDPassword, 0, 0, 0, 0)
 
@@ -123,7 +123,7 @@ func TestMakeDefaultMsg(t *testing.T) {
 	}
 }
 
-// TestGetCodeMsgSize tests the encoded size calculation.
+// TestGetCodeMsgSize 测试编码后大小的计算。
 func TestGetCodeMsgSize(t *testing.T) {
 	testCases := []struct {
 		input    int
@@ -133,7 +133,7 @@ func TestGetCodeMsgSize(t *testing.T) {
 		{1, 2},   // ceil(1 * 4 / 3) = 2
 		{2, 3},   // ceil(2 * 4 / 3) = 3
 		{3, 4},   // ceil(3 * 4 / 3) = 4
-		{12, 16}, // TDefaultMessage size
+		{12, 16}, // TDefaultMessage 大小
 		{16, 22},
 	}
 
@@ -147,16 +147,16 @@ func TestGetCodeMsgSize(t *testing.T) {
 	}
 }
 
-// TestDefaultMessageSize verifies the DefaultMessage struct size.
+// TestDefaultMessageSize 验证 DefaultMessage 结构体大小。
 func TestDefaultMessageSize(t *testing.T) {
-	// DefaultMessage should be 12 bytes (4+2+2+2+2)
+	// DefaultMessage 应为 12 字节（4+2+2+2+2）
 	var msg DefaultMessage
 	size := unsafe.Sizeof(msg)
 	if size != 12 {
 		t.Errorf("DefaultMessage size: got %d, want 12", size)
 	}
 
-	// Verify binary encoding size
+	// 验证二进制编码大小
 	buf := make([]byte, 12)
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(msg.Recog))
 	binary.LittleEndian.PutUint16(buf[4:6], msg.Ident)
@@ -165,9 +165,9 @@ func TestDefaultMessageSize(t *testing.T) {
 	binary.LittleEndian.PutUint16(buf[10:12], msg.Series)
 }
 
-// TestFeatureEncoding tests the feature encoding/decoding functions.
+// TestFeatureEncoding 测试 feature 编解码函数。
 func TestFeatureEncoding(t *testing.T) {
-	// Test human feature
+	// 测试人物 feature
 	raceImg := byte(0)
 	dress := byte(1)
 	weapon := byte(2)
@@ -190,7 +190,7 @@ func TestFeatureEncoding(t *testing.T) {
 		t.Errorf("hair: got %d, want %d", gotHair, hair)
 	}
 
-	// Test monster feature
+	// 测试怪物 feature
 	mRaceImg := byte(80)
 	mWeapon := byte(0)
 	mAppr := uint16(10)
@@ -210,9 +210,9 @@ func TestFeatureEncoding(t *testing.T) {
 	}
 }
 
-// TestConstants verifies key constants match the Delphi source.
+// TestConstants 验证关键常量与 Delphi 源码一致。
 func TestConstants(t *testing.T) {
-	// Direction constants
+	// 方向常量
 	if DRUp != 0 || DRUpRight != 1 || DRRight != 2 || DRDownRight != 3 {
 		t.Error("Direction constants mismatch")
 	}
@@ -220,12 +220,12 @@ func TestConstants(t *testing.T) {
 		t.Error("Direction constants mismatch")
 	}
 
-	// Grid constants
+	// 网格常量
 	if UnitX != 48 || UnitY != 32 {
 		t.Error("Grid constants mismatch")
 	}
 
-	// Equipment slots
+	// 装备槽
 	if UDress != 0 || UWeapon != 1 || URightHand != 2 {
 		t.Error("Equipment slot constants mismatch")
 	}
@@ -233,12 +233,12 @@ func TestConstants(t *testing.T) {
 		t.Error("Equipment slot constants mismatch (necklace/helmet)")
 	}
 
-	// Item types
+	// 物品类型
 	if ItemWeapon != 0 || ItemArmor != 1 || ItemAccessory != 2 {
 		t.Error("Item type constants mismatch")
 	}
 
-	// Message IDs
+	// 消息 ID
 	if CMQueryChr != 100 || CMNewChr != 101 || CMDelChr != 102 {
 		t.Error("CM message ID constants mismatch")
 	}
@@ -250,15 +250,15 @@ func TestConstants(t *testing.T) {
 	}
 }
 
-// TestFrameFormatting tests the frame formatting functions.
+// TestFrameFormatting 测试帧格式化函数。
 func TestFrameFormatting(t *testing.T) {
-	// Test server frame
+	// 测试服务端帧
 	serverFrame := FormatServerFrame("testdata")
 	if serverFrame != "#testdata!" {
 		t.Errorf("FormatServerFrame: got %q, want %q", serverFrame, "#testdata!")
 	}
 
-	// Test client frame
+	// 测试客户端帧
 	code := byte(1)
 	clientFrame := FormatClientFrame("testdata", &code)
 	if clientFrame != "#1testdata!" {
@@ -268,21 +268,21 @@ func TestFrameFormatting(t *testing.T) {
 		t.Errorf("code should increment: got %d, want 2", code)
 	}
 
-	// Test code wrap around - code increments to 10, then next call resets to 1
+	// 测试 code 回绕——code 自增到 10，下一次调用重置为 1
 	code = 9
 	FormatClientFrame("test", &code)
 	if code != 10 {
 		t.Errorf("code should be 10: got %d", code)
 	}
-	// Next call should wrap
+	// 下一次调用应回绕
 	FormatClientFrame("test2", &code)
 	if code != 2 {
 		t.Errorf("code should wrap to 2: got %d", code)
 	}
 }
 
-// TestUserEntryRoundTrip verifies the Delphi short-string layout and the
-// two-segment EncodeBuffer split used by CM_ADDNEWUSER (ClMain.pas:2844).
+// TestUserEntryRoundTrip 验证 Delphi 短字符串布局以及 CM_ADDNEWUSER
+// 使用的两段 EncodeBuffer 切分（ClMain.pas:2844）。
 func TestUserEntryRoundTrip(t *testing.T) {
 	var ue UserEntry
 	ue.SetAccount("tester")
@@ -307,14 +307,14 @@ func TestUserEntryRoundTrip(t *testing.T) {
 		t.Fatalf("UserEntryAdd wire size: got %d, want %d", got, UserEntryAddSize)
 	}
 
-	// Client side: two independently encoded segments.
+	// 客户端：两段独立编码的内容。
 	raw := EncodeBuffer(ue.Bytes()) + EncodeBuffer(ua.Bytes())
 	if len(raw) != UserEntryEncodedSize+UserEntryAddEncodedSize {
 		t.Fatalf("encoded size: got %d, want %d", len(raw), UserEntryEncodedSize+UserEntryAddEncodedSize)
 	}
 
-	// Server side: split at the fixed boundary and decode separately
-	// (decoding the concatenation at once would misalign the second segment).
+	// 服务端：在固定边界处切分并分别解码
+	//（一次性解码整个拼接内容会导致第二段错位）。
 	ueBuf := make([]byte, UserEntrySize)
 	DecodeBuffer(raw[:UserEntryEncodedSize], ueBuf)
 	uaBuf := make([]byte, UserEntryAddSize)
@@ -340,7 +340,7 @@ func TestUserEntryRoundTrip(t *testing.T) {
 	}
 }
 
-// TestUserEntryTruncation verifies fields truncate to their short-string max.
+// TestUserEntryTruncation 验证字段会截断到其短字符串最大长度。
 func TestUserEntryTruncation(t *testing.T) {
 	var ue UserEntry
 	ue.SetAccount("this-account-is-way-too-long")
@@ -354,14 +354,14 @@ func TestUserEntryTruncation(t *testing.T) {
 	}
 }
 
-// TestEncodeMessageWithBody tests message encoding with body.
+// TestEncodeMessageWithBody 测试带 body 的消息编码。
 func TestEncodeMessageWithBody(t *testing.T) {
 	msg := MakeDefaultMsg(CMIDPassword, 0, 0, 0, 0)
 	body := EncodeString("testuser/testpass")
 
 	result := EncodeMessageWithBody(msg, body)
 
-	// Should be DefBlockSize + len(body)
+	// 应为 DefBlockSize + len(body)
 	if len(result) != DefBlockSize+len(body) {
 		t.Errorf("unexpected length: got %d, want %d", len(result), DefBlockSize+len(body))
 	}

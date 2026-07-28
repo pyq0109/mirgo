@@ -12,11 +12,11 @@ import (
 const (
 	selectedFrame   = 16
 	freezeFrame     = 13
-	selectEffFrames = 14 // ChrSel[4..17] selection-effect loop (IntroScn:1442-1454)
-	darkLevelMax    = 30 // brightness-transition overlay start value (IntroScn:1299)
+	selectEffFrames = 14 // ChrSel[4..17] 选中特效循环 (IntroScn:1442-1454)
+	darkLevelMax    = 30 // 亮度渐变遮罩起始值 (IntroScn:1299)
 )
 
-// CharacterSlot represents a character in the selection screen.
+// CharacterSlot 表示选角界面中的一个角色。
 type CharacterSlot struct {
 	Name  string
 	Job   byte
@@ -31,17 +31,17 @@ type CharacterSlot struct {
 	AniIndex    int
 	AniTick     time.Time
 
-	// DarkLevel drives the brightness transition on selection: the portrait is
-	// covered by a black overlay at alpha DarkLevel/darkLevelMax that fades out
-	// as DarkLevel decrements every 25ms (IntroScn:1299,1485-1494,1510-1514).
+	// DarkLevel 驱动选中时的亮度渐变：立绘上覆盖一层黑色遮罩，
+	// 透明度为 DarkLevel/darkLevelMax，每 25ms 递减一次直到消失
+	// (IntroScn:1299,1485-1494,1510-1514)。
 	DarkLevel int
 	DarkTick  time.Time
 }
 
-// jobNames maps job ID to display name.
+// jobNames 将职业 ID 映射为显示名称。
 var jobNames = []string{"战士", "法师", "道士"}
 
-// SelectChrScene handles the character selection screen (stSelectChr).
+// SelectChrScene 处理角色选择界面 (stSelectChr)。
 type SelectChrScene struct {
 	gl        *engine.GLState
 	resources *engine.ResourceManager
@@ -57,20 +57,20 @@ type SelectChrScene struct {
 	createJob   int
 	createSex   int
 	createIndex int
-	createDown  int // create-dialog button held down (-1 none; 0-2 class, 3-4 gender)
+	createDown  int // 创建对话框中按下的按钮 (-1 无; 0-2 职业, 3-4 性别)
 	cursorBlink time.Time
 
 	deleteConfirm bool
 	deleteName    string
 
-	downButton  int // select button held down (-1 none), for pressed-only blit
+	downButton  int // 当前按下的选择按钮 (-1 无)，用于仅绘制按下态
 	selEffIndex int
 	selEffTick  time.Time
 
-	// ServerName is drawn centered at the top of the screen (IntroScn:1539-1545).
-	// Mirrors GameState.ServerName; currently never assigned because the server
-	// name is not carried by SMSelectServerOK (body is addr/port/cert only) and
-	// the network flow is intentionally left untouched. Drawn only when non-empty.
+	// ServerName 绘制在画面顶部居中位置 (IntroScn:1539-1545)。
+	// 对应 GameState.ServerName；当前未赋值，因为 SMSelectServerOK
+	// 的消息体只有 addr/port/cert，不携带服务器名，且网络流程刻意未改动。
+	// 仅在非空时绘制。
 	ServerName string
 
 	startFunc  func(charName string)
@@ -78,9 +78,9 @@ type SelectChrScene struct {
 	newChrFunc func(name string, hair, job, sex int)
 	delChrFunc func(name string)
 
-	compLogged       bool // one-shot main layout log
-	createDlgLogged  bool // one-shot create-dialog layout log
-	deleteDlgLogged  bool // one-shot delete-dialog layout log
+	compLogged       bool // 主界面布局日志（仅输出一次）
+	createDlgLogged  bool // 创建对话框布局日志（仅输出一次）
+	deleteDlgLogged  bool // 删除对话框布局日志（仅输出一次）
 }
 
 const (
@@ -88,9 +88,9 @@ const (
 	selOY = float32(0)
 )
 
-// selButtonAreas are the select-screen button hit rectangles; sizes match the
-// image extents Delphi derives via SetImgIndex (FState:904-925). Coordinates
-// use the old layout baked into bg[65] (FState commented values {…}).
+// selButtonAreas 是选角界面按钮的碰撞矩形；尺寸取自 Delphi 通过
+// SetImgIndex 获取的图片范围 (FState:904-925)。坐标使用烘焙在
+// 背景 bg[65] 中的旧布局 (FState 中的注释值 {…})。
 var selButtonAreas = []loginArea{
 	{selOX + 134, selOY + 454, 76, 33},  // ImgSelSelect1 [66]
 	{selOX + 685, selOY + 454, 76, 33},  // ImgSelSelect2 [67]
@@ -100,9 +100,9 @@ var selButtonAreas = []loginArea{
 	{selOX + 379, selOY + 547, 56, 20},  // ImgSelExit [72]
 }
 
-// selButtons maps each select button to its Prguse image and screen position.
-// The faces are baked into the background [65] and are blit only while pressed
-// (DscSelect1DirectPaint, FState:2693-2705).
+// selButtons 将每个选择按钮映射到其 Prguse 图片和屏幕坐标。
+// 按钮面板烘焙在背景 [65] 中，仅在按下时叠加绘制
+// (DscSelect1DirectPaint, FState:2693-2705)。
 var selButtons = []struct {
 	img  int
 	x, y float32
@@ -115,7 +115,7 @@ var selButtons = []struct {
 	{ImgSelExit, selOX + 379, selOY + 547},
 }
 
-// NewSelectChrScene creates a new character selection scene.
+// NewSelectChrScene 创建角色选择场景。
 func NewSelectChrScene(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *SelectChrScene {
 	return &SelectChrScene{
 		gl:         gl,
@@ -213,7 +213,7 @@ func (s *SelectChrScene) logDeleteDialogLayout() {
 }
 
 func (s *SelectChrScene) Open() {
-	log.Logf(log.LevelInfo, "SelectChrScene", "Opened")
+	log.Logf(log.LevelInfo, "SelectChrScene", "已打开")
 	s.errorMsg = ""
 	s.createMode = false
 	s.deleteConfirm = false
@@ -223,7 +223,7 @@ func (s *SelectChrScene) Open() {
 }
 
 func (s *SelectChrScene) Close() {
-	log.Logf(log.LevelInfo, "SelectChrScene", "Closed")
+	log.Logf(log.LevelInfo, "SelectChrScene", "已关闭")
 }
 
 func (s *SelectChrScene) Update(dt float64) {
@@ -265,8 +265,8 @@ func (s *SelectChrScene) Update(dt float64) {
 		}
 	}
 
-	// Selection effect advances at 50ms/frame while a valid slot is selected
-	// (IntroScn:1449-1454).
+	// 选中特效以 50ms/帧 推进，前提是有有效角色被选中
+	// (IntroScn:1449-1454)。
 	if s.Selected >= 0 && s.Selected < 2 && s.Characters[s.Selected].Valid {
 		if now.Sub(s.selEffTick) > 50*time.Millisecond {
 			s.selEffTick = now
@@ -321,8 +321,8 @@ func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 	}
 }
 
-// slotPos returns the frozen-frame top-left (bx,by) for a job/sex in slot idx.
-// Matches IntroScn.pas:1390-1438; slot 1 is offset (+340,+2).
+// slotPos 返回指定职业/性别在槽位 idx 中冻结帧的左上角坐标 (bx,by)。
+// 对应 IntroScn.pas:1390-1438；槽位 1 偏移 (+340,+2)。
 func (s *SelectChrScene) slotPos(job, sex, idx int, ox, oy float32) (float32, float32) {
 	positions := [3][2][2]float32{
 		{{71, 52}, {65, 55}},
@@ -338,9 +338,9 @@ func (s *SelectChrScene) slotPos(job, sex, idx int, ox, oy float32) (float32, fl
 	return x, y
 }
 
-// standingPos returns the standing-frame top-left (fx,fy). For female wizard
-// and female taoist the standing frame is offset from the frozen frame
-// (IntroScn:1413-1414 fx=bx-30,fy=by-14; IntroScn:1426-1427 fx=bx-23,fy=by-20).
+// standingPos 返回站立帧的左上角坐标 (fx,fy)。女法师和女道士的
+// 站立帧相对冻结帧有偏移 (IntroScn:1413-1414 fx=bx-30,fy=by-14;
+// IntroScn:1426-1427 fx=bx-23,fy=by-20)。
 func (s *SelectChrScene) standingPos(job, sex, idx int, ox, oy float32) (float32, float32) {
 	bx, by := s.slotPos(job, sex, idx, ox, oy)
 	switch {
@@ -372,9 +372,9 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 		sex = 0
 	}
 
-	// Determine frame index and draw position. The standing state uses (fx,fy)
-	// which differs from the frozen (bx,by) for female wizard/taoist
-	// (IntroScn:1480-1494 vs 1497-1501).
+	// 确定帧索引和绘制坐标。站立状态使用 (fx,fy)，
+	// 女法师/女道士的站立坐标与冻结坐标 (bx,by) 不同
+	// (IntroScn:1480-1494 vs 1497-1501)。
 	var imgIdx int
 	var drawX, drawY float32
 	standing := !ch.FreezeState && !ch.Unfreezing && !ch.Freezing
@@ -425,24 +425,24 @@ func (s *SelectChrScene) renderCharSlot(gl *engine.GLState, proj [16]float32, ox
 		gl.DrawQuadColor(drawX, drawY, sprW, sprH, r, g, b, 0.8, proj)
 	}
 
-	// Brightness transition: a black overlay fades out over the standing
-	// portrait while DarkLevel counts down (IntroScn:1485-1494).
+	// 亮度渐变：DarkLevel 递减期间，立绘上的黑色遮罩逐渐消失
+	// (IntroScn:1485-1494)。
 	if standing && idx == s.Selected && ch.DarkLevel > 0 {
 		alpha := float32(ch.DarkLevel) / darkLevelMax
-		log.Logf(log.LevelTrace, "Render", "selchr dark overlay slot=%d alpha=%.3f", idx, alpha)
+		log.Logf(log.LevelTrace, "Render", "selchr 暗色遮罩 slot=%d alpha=%.3f", idx, alpha)
 		gl.DrawQuadColor(drawX, drawY, sprW, sprH, 0, 0, 0, alpha, proj)
 	}
 
-	// Selection glow plays only during the Unfreezing animation
-	// (IntroScn:1439-1459, DrawBlend at :1444 is inside the Unfreezing branch).
+	// 选中光效仅在解冻动画期间播放
+	// (IntroScn:1439-1459, :1444 处的 DrawBlend 位于 Unfreezing 分支内)。
 	if ch.Unfreezing {
 		s.renderSelectEffect(gl, proj, ox, oy, idx)
 	}
 }
 
-// renderCreatePreview draws the live creation portrait for the empty slot,
-// driven by createJob/createSex so the preview updates the instant a class or
-// gender is chosen (Delphi MakeNewChar → SelectChr(NewIndex), IntroScn:1286,1339-1353).
+// renderCreatePreview 为空槽位绘制实时创建预览，
+// 由 createJob/createSex 驱动，选择职业或性别后立即更新预览
+// (Delphi MakeNewChar → SelectChr(NewIndex), IntroScn:1286,1339-1353)。
 func (s *SelectChrScene) renderCreatePreview(gl *engine.GLState, proj [16]float32, ox, oy float32, idx int) {
 	job, sex := s.createJob, s.createSex
 	if job > 2 {
@@ -452,7 +452,7 @@ func (s *SelectChrScene) renderCreatePreview(gl *engine.GLState, proj [16]float3
 		sex = 0
 	}
 	slotX, slotY := s.slotPos(job, sex, idx, ox, oy)
-	imgIdx := 60 + job*40 + sex*120 // static standing pose
+	imgIdx := 60 + job*40 + sex*120 // 静态站立姿势
 	if s.resources.ChrSel == nil || imgIdx >= s.resources.ChrSel.Count {
 		return
 	}
@@ -468,8 +468,8 @@ func (s *SelectChrScene) renderCreatePreview(gl *engine.GLState, proj [16]float3
 	gl.DrawQuad(tex, slotX, slotY, float32(img.Width), float32(img.Height), proj)
 }
 
-// renderSelectEffect draws the 14-frame selection glow (ChrSel[4..17]) at the
-// fixed effect origin of the selected slot (IntroScn:1388-1389,1442-1454).
+// renderSelectEffect 在选中槽位的固定特效原点绘制 14 帧选中光效
+// (ChrSel[4..17]) (IntroScn:1388-1389,1442-1454)。
 func (s *SelectChrScene) renderSelectEffect(gl *engine.GLState, proj [16]float32, ox, oy float32, idx int) {
 	if s.resources.ChrSel == nil {
 		return
@@ -498,9 +498,9 @@ func (s *SelectChrScene) renderButtons(gl *engine.GLState, proj [16]float32, ox,
 	if s.resources.Prguse == nil {
 		return
 	}
-	// The six buttons are baked into the background [65]; only the pressed one
-	// is blit on top (DscSelect1DirectPaint draws FaceIndex only when Downed,
-	// FState:2693-2705).
+	// 六个按钮烘焙在背景 [65] 中；仅在按下时叠加绘制对应按钮
+	// (DscSelect1DirectPaint 只在 Downed 时绘制 FaceIndex,
+	// FState:2693-2705)。
 	if s.downButton < 0 || s.downButton >= len(selButtons) {
 		return
 	}
@@ -528,25 +528,25 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 		}
 		tp := textPositions[i]
 
-		// Name/level/class are white with a black outline (BoldTextOut,
-		// IntroScn:1522-1534); the level is a bare number (IntToStr, :1523).
-		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", ch.Name, ox+tp.nameX, oy+tp.nameY)
+		// 名字/等级/职业为白色带黑色描边 (BoldTextOut,
+		// IntroScn:1522-1534)；等级为纯数字 (IntToStr, :1523)。
+		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", ch.Name, ox+tp.nameX, oy+tp.nameY)
 		s.text.DrawTextOutline(ch.Name, ox+tp.nameX, oy+tp.nameY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		levelStr := fmt.Sprintf("%d", ch.Level)
-		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", levelStr, ox+tp.levelX, oy+tp.levelY)
+		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", levelStr, ox+tp.levelX, oy+tp.levelY)
 		s.text.DrawTextOutline(levelStr, ox+tp.levelX, oy+tp.levelY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 		jobName := "未知"
 		if int(ch.Job) < len(jobNames) {
 			jobName = jobNames[ch.Job]
 		}
-		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", jobName, ox+tp.jobX, oy+tp.jobY)
+		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", jobName, ox+tp.jobX, oy+tp.jobY)
 		s.text.DrawTextOutline(jobName, ox+tp.jobX, oy+tp.jobY, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
-	// Server name centered at the top (IntroScn:1539-1545).
+	// 服务器名居中显示在顶部 (IntroScn:1539-1545)。
 	if s.ServerName != "" {
 		x := float32(ScreenWidth)/2 - float32(s.text.MeasureText(s.ServerName))/2
-		log.Logf(log.LevelTrace, "Render", "selchr info-text '%s' pos=(%.0f,%.0f)", s.ServerName, x, oy+8)
+		log.Logf(log.LevelTrace, "Render", "selchr 信息文本 '%s' pos=(%.0f,%.0f)", s.ServerName, x, oy+8)
 		s.text.DrawTextOutline(s.ServerName, x, oy+8, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 
@@ -555,8 +555,8 @@ func (s *SelectChrScene) renderText(gl *engine.GLState, proj [16]float32, ox, oy
 	}
 }
 
-// createWinPos returns the creation-window origin for the current createIndex
-// (IntroScn:1272-1278): slot 0 → (469,63), slot 1 → (87,63).
+// createWinPos 根据当前 createIndex 返回创建窗口的左上角坐标
+// (IntroScn:1272-1278)：槽位 0 → (469,63)，槽位 1 → (87,63)。
 func (s *SelectChrScene) createWinPos() (float32, float32) {
 	if s.createIndex == 1 {
 		return 87, 63
@@ -564,8 +564,8 @@ func (s *SelectChrScene) createWinPos() (float32, float32) {
 	return 469, 63
 }
 
-// imgArea builds a hit rectangle at (x,y) sized from the Prguse image, with a
-// fallback when the asset is unavailable (Delphi sizes controls from SetImgIndex).
+// imgArea 以 (x,y) 为左上角、Prguse 图片尺寸为大小构建碰撞矩形，
+// 资源不可用时使用默认值 (Delphi 通过 SetImgIndex 确定控件尺寸)。
 func (s *SelectChrScene) imgArea(img int, x, y float32) loginArea {
 	w, h := s.getPrguseSize(img)
 	if w == 0 || h == 0 {
@@ -577,17 +577,17 @@ func (s *SelectChrScene) imgArea(img int, x, y float32) loginArea {
 func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32) {
 	winX, winY := s.createWinPos()
 
-	// Creation window background [73]; labels and button faces are baked into
-	// it, so there is no fullscreen dim and no separate label text (DCreateChr).
+	// 创建窗口背景 [73]；标签和按钮面板都烘焙在其中，
+	// 因此没有全屏遮罩也没有单独的标签文本 (DCreateChr)。
 	cw, ch := s.getPrguseSize(ImgCreateBg)
 	s.traceDraw("create-bg", "Prguse", ImgCreateBg, winX, winY, float32(cw), float32(ch))
 	if !s.drawPrguseImage(ImgCreateBg, winX, winY, proj) {
 		gl.DrawQuadColor(winX, winY, 260, 320, 0.12, 0.12, 0.2, 0.95, proj)
 	}
 
-	// Name edit field: black background, white text, window+(63,79) 129×21,
-	// MaxLength 14 (IntroScn:1109-1121,1282-1283).
-	log.Logf(log.LevelTrace, "Render", "selchr name-box pos=(%.0f,%.0f) size=(%.0f,%.0f)", winX+63, winY+79, float32(129), float32(21))
+	// 名字输入框：黑底白字，窗口+(63,79)，129×21，
+	// MaxLength 14 (IntroScn:1109-1121,1282-1283)。
+	log.Logf(log.LevelTrace, "Render", "selchr 名字输入框 pos=(%.0f,%.0f) size=(%.0f,%.0f)", winX+63, winY+79, float32(129), float32(21))
 	gl.DrawQuadColor(winX+63, winY+79, 129, 21, 0, 0, 0, 1, proj)
 	if s.text != nil {
 		s.text.DrawText(s.createName, winX+65, winY+81, 1, 1, 1, 1, proj)
@@ -602,9 +602,9 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 		}
 	}
 
-	// Class buttons [74/75/76] (window-relative 36/103/168,139) and gender
-	// buttons [77/78] (70/137,211): highlight when selected, own face when
-	// pressed, otherwise nothing (DccCloseDirectPaint, FState:2725-2761).
+	// 职业按钮 [74/75/76] (窗口相对坐标 36/103/168,139) 和性别按钮
+	// [77/78] (70/137,211)：选中时高亮，按下时显示自身面板，
+	// 其余状态不绘制 (DccCloseDirectPaint, FState:2725-2761)。
 	jobXs := [3]float32{36, 103, 168}
 	for i := 0; i < 3; i++ {
 		s.renderCreateChoice(gl, proj, ImgCreateJob1+i, ImgClassHi1+i,
@@ -617,8 +617,8 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 			winX+sexXs[i], winY+211, s.createSex == i, s.createDown == 3+i)
 	}
 
-	// OK [51] / Cancel [52]: only drawn when pressed (Downed), matching
-	// DccCloseDirectPaint — their normal face is baked into Prguse[73].
+	// 确定 [51] / 取消 [52]：仅在按下 (Downed) 时绘制，
+	// 与 DccCloseDirectPaint 一致——常态面板烘焙在 Prguse[73] 中。
 	if s.createDown == 5 {
 		okW, okH := s.getPrguseSize(ImgCreateOk)
 		s.traceDraw("create-ok", "Prguse", ImgCreateOk, winX+46, winY+273, float32(okW), float32(okH))
@@ -631,9 +631,9 @@ func (s *SelectChrScene) renderCreateDialog(gl *engine.GLState, proj [16]float32
 	}
 }
 
-// renderCreateChoice mirrors DccCloseDirectPaint (FState:2725-2761): pressed →
-// draw the button's own face; not pressed but currently selected → draw the
-// highlight image; otherwise draw nothing (baked into the creation window).
+// renderCreateChoice 对应 DccCloseDirectPaint (FState:2725-2761)：按下时
+// 绘制按钮自身面板；未按下但当前选中时绘制高亮图片；否则不绘制
+// （已烘焙在创建窗口中）。
 func (s *SelectChrScene) renderCreateChoice(gl *engine.GLState, proj [16]float32, faceIdx, hiIdx int, x, y float32, selected, downed bool) {
 	switch {
 	case downed:
@@ -647,8 +647,7 @@ func (s *SelectChrScene) renderCreateChoice(gl *engine.GLState, proj [16]float32
 	}
 }
 
-// drawButton blits a button image, falling back to a colored quad when the
-// asset is missing.
+// drawButton 绘制按钮图片，资源缺失时回退为纯色矩形。
 func (s *SelectChrScene) drawButton(img int, x, y float32, proj [16]float32) {
 	if s.drawPrguseImage(img, x, y, proj) {
 		return
@@ -660,7 +659,7 @@ func (s *SelectChrScene) drawButton(img int, x, y float32, proj [16]float32) {
 	s.gl.DrawQuadColor(x, y, float32(w), float32(h), 0.25, 0.3, 0.35, 0.9, proj)
 }
 
-// deleteWinPos centers the delete-confirm modal ([360]) on screen.
+// deleteWinPos 将删除确认模态框 ([360]) 居中于屏幕。
 func (s *SelectChrScene) deleteWinPos() (float32, float32) {
 	w, h := s.getPrguseSize(ImgModalNormal)
 	if w == 0 || h == 0 {
@@ -669,13 +668,13 @@ func (s *SelectChrScene) deleteWinPos() (float32, float32) {
 	return float32(ScreenWidth-w) / 2, float32(ScreenHeight-h) / 2
 }
 
-// deleteButtonAreas returns the Yes/No/Cancel hit rectangles (screen coords),
-// laid out right-to-left from window-relative lx=324 with a 110px step
-// (FState:2060-2083; mirrors uidialog.go dialogButtonLayout/dialogButtonOrder).
+// deleteButtonAreas 返回 是/否/取消 按钮的碰撞矩形（屏幕坐标），
+// 从窗口相对 lx=324 处开始从右向左排列，间距 110px
+// (FState:2060-2083; 与 uidialog.go 的 dialogButtonLayout/dialogButtonOrder 一致)。
 func (s *SelectChrScene) deleteButtonAreas() [3]loginArea {
 	winX, winY := s.deleteWinPos()
 	imgs := [3]int{ImgModalYes, ImgModalNo, ImgModalCancel}
-	lxs := [3]float32{104, 214, 324} // Yes, No, Cancel (right-to-left)
+	lxs := [3]float32{104, 214, 324} // 是、否、取消（从右到左）
 	var areas [3]loginArea
 	for i, img := range imgs {
 		w, h := s.getPrguseSize(img)
@@ -760,7 +759,7 @@ func (s *SelectChrScene) OnKey(key int, action int) {
 }
 
 func (s *SelectChrScene) OnMouse(x, y float64, button int, action int, mods int) {
-	log.Logf(log.LevelDebug, "Mouse", "selchr pos=(%.0f,%.0f) button=%d action=%d", x, y, button, action)
+	log.Logf(log.LevelDebug, "Mouse", "selchr pos=(%.0f,%.0f) 按键=%d 动作=%d", x, y, button, action)
 	fx, fy := float32(x), float32(y)
 	switch {
 	case s.createMode:
@@ -772,8 +771,8 @@ func (s *SelectChrScene) OnMouse(x, y float64, button int, action int, mods int)
 	}
 }
 
-// mouseSelect fires on release inside the same button (TDButton.MouseUp); the
-// pressed button is tracked so renderButtons can blit it while held.
+// mouseSelect 在同一按钮内松开时触发 (TDButton.MouseUp)；
+// 记录按下按钮以便 renderButtons 在按住期间绘制按下态。
 func (s *SelectChrScene) mouseSelect(fx, fy float32, action int) {
 	switch action {
 	case mousePress:
@@ -857,9 +856,9 @@ func (s *SelectChrScene) mouseDelete(fx, fy float32, action int) {
 		}
 	}
 	switch {
-	case hitTest(fx, fy, areas[0]): // Yes
+	case hitTest(fx, fy, areas[0]): // 是
 		s.confirmDelete()
-	case hitTest(fx, fy, areas[1]), hitTest(fx, fy, areas[2]): // No / Cancel
+	case hitTest(fx, fy, areas[1]), hitTest(fx, fy, areas[2]): // 否 / 取消
 		s.deleteConfirm = false
 	}
 }
@@ -893,7 +892,7 @@ func (s *SelectChrScene) selectChar(idx int) {
 	if !s.Characters[idx].Valid {
 		return
 	}
-	log.Logf(log.LevelInfo, "SelectChr", "Selected character %d: %s", idx, s.Characters[idx].Name)
+	log.Logf(log.LevelInfo, "SelectChr", "选中角色 %d: %s", idx, s.Characters[idx].Name)
 
 	if s.Selected >= 0 && s.Selected < 2 && s.Characters[s.Selected].Valid {
 		prev := &s.Characters[s.Selected]
@@ -913,8 +912,8 @@ func (s *SelectChrScene) selectChar(idx int) {
 		ch.Freezing = false
 		ch.AniIndex = 0
 		ch.AniTick = time.Now()
-		// Delphi SelChrSelect1Click/2Click sets DarkLevel=0 (IntroScn:1165,1182):
-		// manual click has no brightness transition.
+		// Delphi SelChrSelect1Click/2Click 直接设置 DarkLevel=0 (IntroScn:1165,1182)：
+		// 手动点击没有亮度渐变。
 		ch.DarkLevel = 0
 	}
 }
@@ -939,7 +938,7 @@ func (s *SelectChrScene) startCreate() {
 	s.createDown = -1
 	s.cursorBlink = time.Now()
 	s.errorMsg = ""
-	log.Logf(log.LevelInfo, "SelectChr", "Create character mode, slot=%d", emptyIdx)
+	log.Logf(log.LevelInfo, "SelectChr", "进入创建角色模式, slot=%d", emptyIdx)
 }
 
 func (s *SelectChrScene) confirmCreate() {
@@ -949,7 +948,7 @@ func (s *SelectChrScene) confirmCreate() {
 		return
 	}
 	hair := 1 + rand.Intn(5)
-	log.Logf(log.LevelInfo, "SelectChr", "Creating character: %s job=%d sex=%d hair=%d", name, s.createJob, s.createSex, hair)
+	log.Logf(log.LevelInfo, "SelectChr", "创建角色: %s job=%d sex=%d hair=%d", name, s.createJob, s.createSex, hair)
 	s.createMode = false
 	if s.newChrFunc != nil {
 		s.newChrFunc(name, hair, s.createJob, s.createSex)
@@ -964,11 +963,11 @@ func (s *SelectChrScene) startDelete() {
 	s.deleteConfirm = true
 	s.deleteName = s.Characters[s.Selected].Name
 	s.errorMsg = ""
-	log.Logf(log.LevelInfo, "SelectChr", "Delete confirm: %s", s.deleteName)
+	log.Logf(log.LevelInfo, "SelectChr", "删除确认: %s", s.deleteName)
 }
 
 func (s *SelectChrScene) confirmDelete() {
-	log.Logf(log.LevelInfo, "SelectChr", "Deleting character: %s", s.deleteName)
+	log.Logf(log.LevelInfo, "SelectChr", "删除角色: %s", s.deleteName)
 	s.deleteConfirm = false
 	if s.delChrFunc != nil {
 		s.delChrFunc(s.deleteName)
@@ -981,7 +980,7 @@ func (s *SelectChrScene) startGame() {
 		return
 	}
 	charName := s.Characters[s.Selected].Name
-	log.Logf(log.LevelInfo, "SelectChrScene", "Starting game with character: %s", charName)
+	log.Logf(log.LevelInfo, "SelectChrScene", "开始游戏, 角色: %s", charName)
 	if s.startFunc != nil {
 		s.startFunc(charName)
 	}
@@ -1007,15 +1006,14 @@ func (s *SelectChrScene) SetError(msg string) {
 	s.errorMsg = msg
 }
 
-// SetServerName sets the server name drawn centered at the top of the scene
-// (IntroScn:1539-1545). Intended to mirror GameState.ServerName once the
-// network flow exposes it.
+// SetServerName 设置绘制在场景顶部居中的服务器名
+// (IntroScn:1539-1545)。待网络流程提供服务器名后与 GameState.ServerName 同步。
 func (s *SelectChrScene) SetServerName(name string) {
 	s.ServerName = name
 }
 
 func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx int) {
-	log.Logf(log.LevelInfo, "SelectChrScene", "SetCharactersFromServer: %d chars, selectedIdx=%d", len(chars), selectedIdx)
+	log.Logf(log.LevelInfo, "SelectChrScene", "SetCharactersFromServer: %d 个角色, selectedIdx=%d", len(chars), selectedIdx)
 	s.Characters = [2]CharacterSlot{}
 	s.Selected = -1
 	s.createMode = false
@@ -1035,12 +1033,12 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 			FreezeState: true,
 			AniTick:     time.Now(),
 		}
-		log.Logf(log.LevelInfo, "SelectChrScene", "  Character %d: %s Lv%d Job=%d Sex=%d",
+		log.Logf(log.LevelInfo, "SelectChrScene", "  角色 %d: %s Lv%d Job=%d Sex=%d",
 			i, c.Name, c.Level, c.Job, c.Sex)
 	}
 
-	// Delphi (ClMain:5100-5112) sets FreezeState=FALSE directly for the
-	// pre-selected character — no unfreeze animation, no dark transition.
+	// Delphi (ClMain:5100-5112) 对预选角色直接设置 FreezeState=FALSE——
+	// 无解冻动画，无亮度渐变。
 	if selectedIdx >= 0 && selectedIdx < 2 && s.Characters[selectedIdx].Valid {
 		s.Selected = selectedIdx
 		s.Characters[selectedIdx].FreezeState = false
@@ -1048,7 +1046,7 @@ func (s *SelectChrScene) SetCharactersFromServer(chars []parsedChar, selectedIdx
 		s.Selected = 0
 		s.Characters[0].FreezeState = false
 	}
-	log.Logf(log.LevelInfo, "SelectChrScene", "Final selected=%d", s.Selected)
+	log.Logf(log.LevelInfo, "SelectChrScene", "最终选中=%d", s.Selected)
 }
 
 func (s *SelectChrScene) getPrguseSize(index int) (int, int) {

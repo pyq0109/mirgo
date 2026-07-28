@@ -26,22 +26,22 @@ func init() {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: wilviewer <datadir>")
+		fmt.Fprintln(os.Stderr, "用法: wilviewer <资源目录>")
 		os.Exit(1)
 	}
 
 	dataDir := os.Args[1]
 	mlog.Logf(mlog.LevelInfo, "Main", "启动参数: datadir=%s", dataDir)
 
-	// Verify directory exists.
+	// 验证目录是否存在
 	info, err := os.Stat(dataDir)
 	if err != nil || !info.IsDir() {
 		mlog.Logf(mlog.LevelError, "Main", "目录无效: %s, err=%v", dataDir, err)
-		log.Fatalf("Not a valid directory: %s", dataDir)
+		log.Fatalf("目录无效: %s", dataDir)
 	}
 	mlog.Logf(mlog.LevelInfo, "Main", "数据目录: %s", dataDir)
 
-	// Init GLFW.
+	// 初始化 GLFW
 	if err := glfw.Init(); err != nil {
 		mlog.Logf(mlog.LevelError, "Main", "GLFW 初始化失败: %v", err)
 		log.Fatal(err)
@@ -63,7 +63,7 @@ func main() {
 	glfw.SwapInterval(1)
 	mlog.Logf(mlog.LevelDebug, "Main", "窗口创建成功: %dx%d", windowW, windowH)
 
-	// Init OpenGL.
+	// 初始化 OpenGL
 	if err := gl.Init(); err != nil {
 		mlog.Logf(mlog.LevelError, "Main", "OpenGL 初始化失败: %v", err)
 		log.Fatal(err)
@@ -73,12 +73,12 @@ func main() {
 	gl.ClearColor(0.1, 0.1, 0.1, 1.0)
 	mlog.Logf(mlog.LevelDebug, "Main", "OpenGL 初始化成功")
 
-	// Init ImGui.
+	// 初始化 ImGui
 	ui.Init(window)
 	defer ui.Shutdown()
 	mlog.Logf(mlog.LevelDebug, "Main", "ImGui 初始化成功")
 
-	// Create renderer.
+	// 创建渲染器
 	glState, err := renderer.NewGLState()
 	if err != nil {
 		mlog.Logf(mlog.LevelError, "Main", "GLState 创建失败: %v", err)
@@ -86,12 +86,12 @@ func main() {
 	}
 	defer glState.Destroy()
 
-	// Create WIL renderer (no file loaded yet).
+	// 创建 WIL 渲染器（尚未加载文件）
 	wilRenderer := renderer.NewWILRenderer(nil, glState)
 	defer wilRenderer.Destroy()
 	mlog.Logf(mlog.LevelDebug, "Main", "WIL 渲染器创建成功")
 
-	// Create UI state.
+	// 创建 UI 状态
 	uiState := &ui.UIState{
 		DataDir:      dataDir,
 		WILFile:      nil,
@@ -103,7 +103,7 @@ func main() {
 		AnimSpeed:    1.0,
 	}
 
-	// Set GLFW callbacks: scroll for grid scrolling, keys for arrow navigation.
+	// 设置 GLFW 回调：滚轮用于网格滚动，方向键用于切换图像
 	ui.SetGLFWCallbacks(window, nil, func(w *glfw.Window, key glfw.Key, action glfw.Action) {
 		if action != glfw.Press {
 			return
@@ -127,7 +127,7 @@ func main() {
 		}
 	})
 
-	// Window resize callback.
+	// 窗口大小变化回调
 	window.SetFramebufferSizeCallback(func(w *glfw.Window, width, height int) {
 		mlog.Logf(mlog.LevelDebug, "Main", "窗口大小变更: %dx%d", width, height)
 	})
@@ -135,7 +135,7 @@ func main() {
 	mlog.Logf(mlog.LevelInfo, "Main", "WIL 查看器启动完成")
 	mlog.Logf(mlog.LevelInfo, "Main", "操作: ESC=退出, 左右箭头=切换图像")
 
-	// Main loop.
+	// 主循环
 	for !window.ShouldClose() {
 		glfw.PollEvents()
 
@@ -144,7 +144,7 @@ func main() {
 		glfwH := int32(glfwHi)
 		io := ui.IO()
 
-		// Keyboard input (only if ImGui doesn't want it).
+		// 键盘输入（仅在 ImGui 不拦截时处理）
 		if !io.WantCaptureKeyboard() {
 			if window.GetKey(glfw.KeyEscape) == glfw.Press {
 				mlog.Logf(mlog.LevelInfo, "Main", "用户按下 ESC，退出")
@@ -152,12 +152,12 @@ func main() {
 			}
 		}
 
-		// Clear full window.
+		// 清除整个窗口
 		gl.Viewport(0, 0, glfwW, glfwH)
 		gl.ClearColor(0.1, 0.1, 0.1, 1.0)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		// ImGui frame.
+		// ImGui 帧
 		ui.BeginFrame()
 
 		ui.RenderLeftPanel(uiState, glfwW, glfwH)

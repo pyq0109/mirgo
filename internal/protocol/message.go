@@ -2,51 +2,51 @@ package protocol
 
 import "fmt"
 
-// DefaultMessage is the core message structure for all client-server communication.
-// Size: 12 bytes (not 16 as some docs suggest - the 16 is the encoded size)
+// DefaultMessage 是所有客户端-服务端通信的核心消息结构。
+// 大小：12 字节（并非某些文档所说的 16——16 是编码后的大小）
 type DefaultMessage struct {
-	Recog  int32  // Recognition/identification code
-	Ident  uint16 // Message ID (CM_* or SM_*)
-	Param  uint16 // Parameter 1
-	Tag    uint16 // Parameter 2
-	Series uint16 // Parameter 3
+	Recog  int32  // 识别码
+	Ident  uint16 // 消息 ID（CM_* 或 SM_*）
+	Param  uint16 // 参数 1
+	Tag    uint16 // 参数 2
+	Series uint16 // 参数 3
 }
 
-// MsgHeader is the binary frame header for RunGate <-> M2Server communication.
-// Size: 16 bytes
+// MsgHeader 是 RunGate <-> M2Server 通信的二进制帧头。
+// 大小：16 字节
 type MsgHeader struct {
-	DwCode         uint32 // Magic code: 0xAA55AA55
-	NSocket        int32  // Client socket identifier
-	WGSocketIdx    uint16 // Gate socket index
-	WIdent         uint16 // Message type (GM_*)
-	WUserListIndex uint16 // User list index
-	NLength        int32  // Payload length
+	DwCode         uint32 // 魔数：0xAA55AA55
+	NSocket        int32  // 客户端 socket 标识
+	WGSocketIdx    uint16 // 网关 socket 索引
+	WIdent         uint16 // 消息类型（GM_*）
+	WUserListIndex uint16 // 用户列表索引
+	NLength        int32  // 负载长度
 }
 
-// RunGateCode is the magic number for RunGate protocol
+// RunGateCode 是 RunGate 协议的魔数
 const RunGateCode = 0xAA55AA55
 
-// GM_* - Gate Message types (RunGate <-> M2Server)
+// GM_* - 网关消息类型（RunGate <-> M2Server）
 const (
-	GMOpen           = 1  // New client connection
-	GMClose          = 2  // Client disconnected
-	GMCheckServer    = 3  // Keep-alive from server
-	GMCheckClient    = 4  // Keep-alive from client
-	GMData           = 5  // Game data message
-	GMServerUserIndex = 6 // Assign server-side user index
-	GMReceiveOK      = 7  // Flow control acknowledgment
-	GMTest           = 20 // Test/benchmark message
+	GMOpen           = 1  // 新客户端连接
+	GMClose          = 2  // 客户端断开
+	GMCheckServer    = 3  // 服务端保活
+	GMCheckClient    = 4  // 客户端保活
+	GMData           = 5  // 游戏数据消息
+	GMServerUserIndex = 6 // 分配服务端用户索引
+	GMReceiveOK      = 7  // 流控确认
+	GMTest           = 20 // 测试/基准消息
 )
 
-// CharDesc describes a character's appearance for movement/action messages.
-// Size: 8 bytes
+// CharDesc 描述角色外观，用于移动/动作消息。
+// 大小：8 字节
 type CharDesc struct {
-	Feature int32 // Appearance encoding
-	Status  int32 // Status flags/buffs
+	Feature int32 // 外观编码
+	Status  int32 // 状态标志/增益
 }
 
-// MessageBodyW is a Word-sized extended message body.
-// Size: 8 bytes
+// MessageBodyW 是 Word 大小的扩展消息体。
+// 大小：8 字节
 type MessageBodyW struct {
 	Param1 uint16
 	Param2 uint16
@@ -54,8 +54,8 @@ type MessageBodyW struct {
 	Tag2   uint16
 }
 
-// MessageBodyWL is a DWord-sized extended message body.
-// Size: 16 bytes
+// MessageBodyWL 是 DWord 大小的扩展消息体。
+// 大小：16 字节
 type MessageBodyWL struct {
 	LParam1 int32
 	LParam2 int32
@@ -63,18 +63,18 @@ type MessageBodyWL struct {
 	LTag2   int32
 }
 
-// ShortMessage is a compact message format.
-// Size: 4 bytes
+// ShortMessage 是紧凑的消息格式。
+// 大小：4 字节
 type ShortMessage struct {
 	Ident uint16
 	WMsg  uint16
 }
 
 // ============================================================================
-// CM_* - Client to Server Message IDs
+// CM_* - 客户端到服务端的消息 ID
 // ============================================================================
 
-// Character management
+// 角色管理
 const (
 	CMQueryUsername = 80
 	CMQueryBagItems = 81
@@ -87,7 +87,7 @@ const (
 	CMSelectServer = 104
 )
 
-// Game operations
+// 游戏操作
 const (
 	CMDropItem           = 1000
 	CMPickup             = 1001
@@ -134,7 +134,7 @@ const (
 	CMChangeAttackMode   = 1046
 )
 
-// Login/Account
+// 登录/账号
 const (
 	CMProtocol       = 2000
 	CMIDPassword     = 2001
@@ -143,7 +143,7 @@ const (
 	CMUpdateUser     = 2004
 )
 
-// Combat/Movement
+// 战斗/移动
 const (
 	CMThrow    = 3005
 	CMTurn     = 3010
@@ -165,10 +165,10 @@ const (
 )
 
 // ============================================================================
-// SM_* - Server to Client Message IDs
+// SM_* - 服务端到客户端的消息 ID
 // ============================================================================
 
-// Movement/Animation (0-34)
+// 移动/动画（0-34）
 const (
 	SMThrow     = 5
 	SMRush      = 6
@@ -202,12 +202,12 @@ const (
 	SMNowDeath  = 34
 )
 
-// Extended movement messages (5000+, Delphi Grobal2.pas:424-432)
+// 扩展移动消息（5000+，Delphi Grobal2.pas:424-432）
 const (
 	SMHorseRun = 5010
 )
 
-// State/Info (40-54)
+// 状态/信息（40-54）
 const (
 	SMHear             = 40
 	SMFeatureChanged   = 41
@@ -223,7 +223,7 @@ const (
 	SMSpell2           = 117
 )
 
-// System messages (100-104)
+// 系统消息（100-104）
 const (
 	SMSysMessage   = 100
 	SMGroupMessage = 101
@@ -232,7 +232,7 @@ const (
 	SMGuildMessage = 104
 )
 
-// Items (200-212)
+// 物品（200-212）
 const (
 	SMAddItem     = 200
 	SMBagItems    = 201
@@ -243,7 +243,7 @@ const (
 	SMDelMagic    = 212
 )
 
-// Login flow (500-533)
+// 登录流程（500-533）
 const (
 	SMCertificationSuccess = 500
 	SMCertificationFail    = 501
@@ -269,7 +269,7 @@ const (
 	SMUpdateIDFail         = 533
 )
 
-// Gameplay (600-772)
+// 游戏玩法（600-772）
 const (
 	SMDropItemSuccess = 600
 	SMDropItemFail    = 601
@@ -314,7 +314,7 @@ const (
 	SMCharStatusChanged = 657
 	SMSendNotice       = 658
 
-	// Group operations (659-667)
+	// 组队操作（659-667）
 	SMGroupModeChanged = 659
 	SMCreateGroupOK    = 660
 	SMCreateGroupFail  = 661
@@ -325,13 +325,13 @@ const (
 	SMGroupCancel      = 666
 	SMGroupMembers     = 667
 
-	// Repair operations (668-671)
+	// 修理操作（668-671）
 	SMSendUserRepair     = 668
 	SMUserRepairItemOK   = 669
 	SMUserRepairItemFail = 670
 	SMSendRepairCost     = 671
 
-	// Deal/Trade operations (673-687)
+	// 交易操作（673-687）
 	SMDealMenu          = 673
 	SMDealTryFail       = 674
 	SMDealAddItemOK     = 675
@@ -346,7 +346,7 @@ const (
 	SMDealRemoteChgGold = 686
 	SMDealSuccess       = 687
 
-	// Storage operations (700-707)
+	// 仓库操作（700-707）
 	SMSendUserStorageItem      = 700
 	SMStorageOK                = 701
 	SMStorageFull              = 702
@@ -366,11 +366,11 @@ const (
 	SMMakeDrugSuccess    = 713
 	SMMakeDrugFail       = 714
 
-	// SMStdItems delivers the item definition DB once at login (Go closed
-	// loop; Delphi embeds TStdItem in every item message instead).
+	// SMStdItems 在登录时一次性下发物品定义数据库（Go 的闭环做法；
+	// Delphi 则在每条物品消息中内嵌 TStdItem）。
 	SMStdItems = 715
 
-	// Guild operations (750-772)
+	// 行会操作（750-772）
 	SMChangeGuildName     = 750
 	SMSendUserState       = 751
 	SMSubAbility          = 752
@@ -394,10 +394,10 @@ const (
 	SMDlgMsg              = 772
 )
 
-// MsgName returns a human-readable name for a message ID.
+// MsgName 返回消息 ID 的可读名称。
 func MsgName(ident uint16) string {
 	switch ident {
-	// CM - Character management
+	// CM - 角色管理
 	case CMQueryUsername:
 		return "CM_QUERYUSERNAME"
 	case CMQueryBagItems:
@@ -414,7 +414,7 @@ func MsgName(ident uint16) string {
 		return "CM_SELCHR"
 	case CMSelectServer:
 		return "CM_SELECTSERVER"
-	// CM - Login/Account
+	// CM - 登录/账号
 	case CMProtocol:
 		return "CM_PROTOCOL"
 	case CMIDPassword:
@@ -425,7 +425,7 @@ func MsgName(ident uint16) string {
 		return "CM_CHANGEPASSWORD"
 	case CMUpdateUser:
 		return "CM_UPDATEUSER"
-	// CM - Game operations
+	// CM - 游戏操作
 	case CMDropItem:
 		return "CM_DROPITEM"
 	case CMPickup:
@@ -444,7 +444,7 @@ func MsgName(ident uint16) string {
 		return "CM_CLICKNPC"
 	case CMLoginNoticeOK:
 		return "CM_LOGINNOTICEOK"
-	// CM - Combat/Movement
+	// CM - 战斗/移动
 	case CMThrow:
 		return "CM_THROW"
 	case CMTurn:
@@ -473,7 +473,7 @@ func MsgName(ident uint16) string {
 		return "CM_FIREHIT"
 	case CMSay:
 		return "CM_SAY"
-	// SM - Movement/Animation
+	// SM - 移动/动画
 	case SMThrow:
 		return "SM_THROW"
 	case SMRush:
@@ -536,7 +536,7 @@ func MsgName(ident uint16) string {
 		return "SM_NOWDEATH"
 	case SMHorseRun:
 		return "SM_HORSERUN"
-	// SM - State/Info
+	// SM - 状态/信息
 	case SMHear:
 		return "SM_HEAR"
 	case SMFeatureChanged:
@@ -561,9 +561,9 @@ func MsgName(ident uint16) string {
 		return "SM_MAPDESCRIPTION"
 	case SMSpell2:
 		return "SM_SPELL2"
-	// SM - System messages (100-104) share values with CM 100-104,
-	// so they are handled by the CM cases above in a uint16 switch.
-	// SM - Items
+	// SM - 系统消息（100-104）与 CM 100-104 取值相同，
+	// 因此在 uint16 switch 中由上面的 CM 分支处理。
+	// SM - 物品
 	case SMAddItem:
 		return "SM_ADDITEM"
 	case SMBagItems:
@@ -578,7 +578,7 @@ func MsgName(ident uint16) string {
 		return "SM_SENDMYMAGIC"
 	case SMDelMagic:
 		return "SM_DELMAGIC"
-	// SM - Login flow
+	// SM - 登录流程
 	case SMCertificationSuccess:
 		return "SM_CERTIFICATIONSUCCESS"
 	case SMCertificationFail:
@@ -623,7 +623,7 @@ func MsgName(ident uint16) string {
 		return "SM_UPDATEIDSUCCESS"
 	case SMUpdateIDFail:
 		return "SM_UPDATEIDFAIL"
-	// SM - Gameplay
+	// SM - 游戏玩法
 	case SMDropItemSuccess:
 		return "SM_DROPITEMSUCCESS"
 	case SMDropItemFail:
@@ -700,7 +700,7 @@ func MsgName(ident uint16) string {
 		return "SM_CHARSTATUSCHANGED"
 	case SMSendNotice:
 		return "SM_SENDNOTICE"
-	// SM - Group
+	// SM - 组队
 	case SMGroupModeChanged:
 		return "SM_GROUPMODECHANGED"
 	case SMCreateGroupOK:
@@ -719,7 +719,7 @@ func MsgName(ident uint16) string {
 		return "SM_GROUPCANCEL"
 	case SMGroupMembers:
 		return "SM_GROUPMEMBERS"
-	// SM - Repair
+	// SM - 修理
 	case SMSendUserRepair:
 		return "SM_SENDUSERREPAIR"
 	case SMUserRepairItemOK:
@@ -728,7 +728,7 @@ func MsgName(ident uint16) string {
 		return "SM_USERREPAIRITEMFAIL"
 	case SMSendRepairCost:
 		return "SM_SENDREPAIRCOST"
-	// SM - Deal/Trade
+	// SM - 交易
 	case SMDealMenu:
 		return "SM_DEALMENU"
 	case SMDealTryFail:
@@ -755,7 +755,7 @@ func MsgName(ident uint16) string {
 		return "SM_DEALREMOTECHGGOLD"
 	case SMDealSuccess:
 		return "SM_DEALSUCCESS"
-	// SM - Storage
+	// SM - 仓库
 	case SMSendUserStorageItem:
 		return "SM_SENDUSERSTORAGEITEM"
 	case SMStorageOK:
@@ -772,7 +772,7 @@ func MsgName(ident uint16) string {
 		return "SM_TAKEBACKSTORAGEITEMFAIL"
 	case SMTakeBackStorageItemFullBag:
 		return "SM_TAKEBACKSTORAGEITEMFULLBAG"
-	// SM - Misc gameplay
+	// SM - 其他玩法
 	case SMAreaState:
 		return "SM_AREASTATE"
 	case SMMyStatus:
@@ -791,7 +791,7 @@ func MsgName(ident uint16) string {
 		return "SM_MAKEDRUGFAIL"
 	case SMStdItems:
 		return "SM_STDITEMS"
-	// SM - Guild
+	// SM - 行会
 	case SMChangeGuildName:
 		return "SM_CHANGEGUILDNAME"
 	case SMSendUserState:
@@ -834,7 +834,7 @@ func MsgName(ident uint16) string {
 		return "SM_GUILDBREAKALLYFAIL"
 	case SMDlgMsg:
 		return "SM_DLGMSG"
-	// SM - Teleport/Events
+	// SM - 传送/事件
 	case SMSpaceMoveHide:
 		return "SM_SPACEMOVEHIDE"
 	case SMSpaceMoveShow:
@@ -855,7 +855,7 @@ func MsgName(ident uint16) string {
 		return "SM_TIMECHECKMSG"
 	case SMAdjustBonus:
 		return "SM_ADJUSTBONUS"
-	// SM - Health/Status
+	// SM - 生命/状态
 	case SMOpenHealth:
 		return "SM_OPENHEALTH"
 	case SMCloseHealth:
@@ -866,7 +866,7 @@ func MsgName(ident uint16) string {
 		return "SM_CHANGEFACE"
 	case SMVersionFail:
 		return "SM_VERSIONFAIL"
-	// SM - Item/Monster updates
+	// SM - 物品/怪物更新
 	case SMItemUpdate:
 		return "SM_ITEMUPDATE"
 	case SMMonsterSay:
@@ -876,7 +876,7 @@ func MsgName(ident uint16) string {
 	}
 }
 
-// Teleport/Events (800-811)
+// 传送/事件（800-811）
 const (
 	SMSpaceMoveHide  = 800
 	SMSpaceMoveShow  = 801
@@ -890,7 +890,7 @@ const (
 	SMAdjustBonus    = 811
 )
 
-// Health/Status (1100+)
+// 生命/状态（1100+）
 const (
 	SMOpenHealth     = 1100
 	SMCloseHealth    = 1101
@@ -899,14 +899,14 @@ const (
 	SMVersionFail    = 1106
 )
 
-// Item/Monster updates (1500+)
+// 物品/怪物更新（1500+）
 const (
 	SMItemUpdate  = 1500
 	SMMonsterSay  = 1501
 )
 
 // ============================================================================
-// SS_* - Server to Server (Inter-server) Message IDs
+// SS_* - 服务端到服务端（跨服）消息 ID
 // ============================================================================
 const (
 	SSOpenSession    = 100
@@ -919,7 +919,7 @@ const (
 )
 
 // ============================================================================
-// DB_* - Database Message IDs
+// DB_* - 数据库消息 ID
 // ============================================================================
 const (
 	DBRFail         = 2000
@@ -931,21 +931,21 @@ const (
 )
 
 // ============================================================================
-// Control message prefixes (not 6Bit encoded)
+// 控制消息前缀（不经 6Bit 编码）
 // ============================================================================
 const (
-	CtrlGood  = "+GOOD"  // Action confirmation
-	CtrlFail  = "+FAIL"  // Action failure
-	CtrlPwr   = "+PWR"   // Enable PowerHit
-	CtrlLng   = "+LNG"   // Enable LongHit
-	CtrlULng  = "+ULNG"  // Disable LongHit
-	CtrlWid   = "+WID"   // Enable WideHit
-	CtrlUWid  = "+UWID"  // Disable WideHit
-	CtrlCrs   = "+CRS"   // Enable CrsHit
-	CtrlUCrs  = "+UCRS"  // Disable CrsHit
-	CtrlTwn   = "+TWN"   // Enable TwnHit
-	CtrlUTwn  = "+UTWN"  // Disable TwnHit
-	CtrlFir   = "+FIR"   // Enable FireHit
-	CtrlUFir  = "+UFIR"  // Disable FireHit
-	CtrlDig   = "=DIG"   // Set dig flag
+	CtrlGood  = "+GOOD"  // 操作确认
+	CtrlFail  = "+FAIL"  // 操作失败
+	CtrlPwr   = "+PWR"   // 启用 PowerHit
+	CtrlLng   = "+LNG"   // 启用 LongHit
+	CtrlULng  = "+ULNG"  // 禁用 LongHit
+	CtrlWid   = "+WID"   // 启用 WideHit
+	CtrlUWid  = "+UWID"  // 禁用 WideHit
+	CtrlCrs   = "+CRS"   // 启用 CrsHit
+	CtrlUCrs  = "+UCRS"  // 禁用 CrsHit
+	CtrlTwn   = "+TWN"   // 启用 TwnHit
+	CtrlUTwn  = "+UTWN"  // 禁用 TwnHit
+	CtrlFir   = "+FIR"   // 启用 FireHit
+	CtrlUFir  = "+UFIR"  // 禁用 FireHit
+	CtrlDig   = "=DIG"   // 设置挖掘标志
 )

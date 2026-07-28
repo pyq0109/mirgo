@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"unsafe"
@@ -10,7 +10,7 @@ import (
 
 const minimapSize = 200
 
-// Minimap renders a collision overview map.
+// Minimap 渲染碰撞概览小地图。
 type Minimap struct {
 	gl           *engine.GLState
 	mapData      *mapformat.MapData
@@ -19,7 +19,7 @@ type Minimap struct {
 	collisionTex uint32
 }
 
-// NewMinimap creates a new minimap.
+// NewMinimap 创建新的小地图。
 func NewMinimap(glState *engine.GLState, mapData *mapformat.MapData) *Minimap {
 	mm := &Minimap{
 		gl:      glState,
@@ -80,7 +80,7 @@ func (mm *Minimap) createFBO() {
 	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 }
 
-// Render updates the minimap FBO with the current camera position.
+// Render 根据当前相机位置更新小地图 FBO。
 func (mm *Minimap) Render(cam *engine.Camera2D, mapW, mapH int) {
 	var oldFBO int32
 	gl.GetIntegerv(gl.FRAMEBUFFER_BINDING, &oldFBO)
@@ -110,12 +110,12 @@ func (mm *Minimap) Render(cam *engine.Camera2D, mapW, mapH int) {
 	gl.Viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3])
 }
 
-// GetTexture returns the FBO texture.
+// GetTexture 返回 FBO 纹理。
 func (mm *Minimap) GetTexture() uint32 {
 	return mm.fboTex
 }
 
-// Destroy frees all resources.
+// Destroy 释放所有资源。
 func (mm *Minimap) Destroy() {
 	gl.DeleteTextures(1, &mm.collisionTex)
 	gl.DeleteTextures(1, &mm.fboTex)

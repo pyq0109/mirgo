@@ -12,36 +12,36 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-// glyphEntry is a cached glyph texture.
+// glyphEntry 是缓存的字形纹理。
 type glyphEntry struct {
-	tex     uint32 // GL texture ID
-	w, h    int    // glyph pixel size
-	advance int    // horizontal advance in pixels
-	bearingX int   // left-side bearing
-	bearingY int   // top bearing (from baseline to top of glyph)
+	tex     uint32 // GL 纹理 ID
+	w, h    int    // 字形像素尺寸
+	advance int    // 水平步进（像素）
+	bearingX int   // 左侧 bearing
+	bearingY int   // 顶部 bearing（从基线到字形顶部）
 }
 
-// TextRenderer renders text using a TTF font with glyph texture caching.
+// TextRenderer 使用 TTF 字体渲染文本，并缓存字形纹理。
 type TextRenderer struct {
 	gl       *GLState
 	face     font.Face
-	ascent   int // pixels from baseline to top of line
+	ascent   int // 从基线到行顶的像素数
 	cache    map[rune]*glyphEntry
 	cacheMu  sync.RWMutex
 	size     float64
-	fontData []byte // stored for WithSize
+	fontData []byte // 保存以便 WithSize 复用
 }
 
-// fontSearchPaths lists common Windows Chinese font paths.
+// fontSearchPaths 列出常见的 Windows 中文字体路径。
 var fontSearchPaths = []string{
-	`C:\Windows\Fonts\msyh.ttc`,  // Microsoft YaHei
-	`C:\Windows\Fonts\msyhbd.ttc`, // Microsoft YaHei Bold
-	`C:\Windows\Fonts\simsun.ttc`, // SimSun
-	`C:\Windows\Fonts\simhei.ttf`, // SimHei
-	`C:\Windows\Fonts\arial.ttf`,  // Arial (English fallback)
+	`C:\Windows\Fonts\msyh.ttc`,  // 微软雅黑
+	`C:\Windows\Fonts\msyhbd.ttc`, // 微软雅黑 Bold
+	`C:\Windows\Fonts\simsun.ttc`, // 宋体
+	`C:\Windows\Fonts\simhei.ttf`, // 黑体
+	`C:\Windows\Fonts\arial.ttf`,  // Arial（英文兜底）
 }
 
-// NewTextRenderer creates a TextRenderer. If fontPath is empty, it tries common Windows fonts.
+// NewTextRenderer 创建一个 TextRenderer。若 fontPath 为空，则尝试常见的 Windows 字体。
 func NewTextRenderer(glState *GLState, fontPath string, size float64) (*TextRenderer, error) {
 	if size <= 0 {
 		size = 16
@@ -65,7 +65,7 @@ func NewTextRenderer(glState *GLState, fontPath string, size float64) (*TextRend
 		return nil, fmt.Errorf("read font %s: %w", resolvedPath, err)
 	}
 
-	// Try single-font parse first (TTF), then collection parse (TTC).
+	// 先尝试单字体解析（TTF），再尝试字体集合解析（TTC）。
 	f, parseErr := opentype.Parse(fontData)
 	if parseErr != nil {
 		col, colErr := opentype.ParseCollection(fontData)
@@ -103,7 +103,7 @@ func NewTextRenderer(glState *GLState, fontPath string, size float64) (*TextRend
 	}, nil
 }
 
-// WithSize creates a new TextRenderer with the same font at a different size.
+// WithSize 用相同字体、不同字号创建一个新的 TextRenderer。
 func (tr *TextRenderer) WithSize(size float64) (*TextRenderer, error) {
 	f, parseErr := opentype.Parse(tr.fontData)
 	if parseErr != nil {
@@ -136,7 +136,7 @@ func (tr *TextRenderer) WithSize(size float64) (*TextRenderer, error) {
 	}, nil
 }
 
-// getGlyph returns the cached glyph for a rune, rasterizing it on cache miss.
+// getGlyph 返回某个 rune 缓存的字形，缓存未命中时进行光栅化。
 func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 	tr.cacheMu.RLock()
 	if g, ok := tr.cache[ch]; ok {
@@ -145,10 +145,10 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 	}
 	tr.cacheMu.RUnlock()
 
-	// Rasterize the glyph.
+	// 光栅化字形。
 	advance, ok := tr.face.GlyphAdvance(ch)
 	if !ok {
-		// Glyph not in font — return a space-width entry with no texture.
+		// 字体中无此字形——返回一个空格宽度、无纹理的条目。
 		spaceAdv, _ := tr.face.GlyphAdvance(' ')
 		return &glyphEntry{advance: spaceAdv.Ceil()}
 	}
@@ -171,7 +171,7 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 		return &glyphEntry{advance: advance.Ceil()}
 	}
 
-	// Create an RGBA image and draw the glyph.
+	// 创建一张 RGBA 图像并绘制字形。
 	img := image.NewRGBA(image.Rect(0, 0, gw, gh))
 	d := &font.Drawer{
 		Dst: img,
@@ -181,7 +181,7 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 	}
 	d.DrawString(string(ch))
 
-	// Upload to GL.
+	// 上传到 GL。
 	tex := tr.gl.UploadTexture(img)
 
 	g := &glyphEntry{
@@ -190,7 +190,7 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 		h:        gh,
 		advance:  advance.Ceil(),
 		bearingX: minX,
-		bearingY: -minY, // distance from top of image to baseline
+		bearingY: -minY, // 从图像顶部到基线的距离
 	}
 
 	tr.cacheMu.Lock()
@@ -200,14 +200,14 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 	return g
 }
 
-// DrawText renders text at (x, y) with the given RGBA color.
-// (x, y) is the top-left of the text baseline area.
+// DrawText 用给定的 RGBA 颜色在 (x, y) 处渲染文本。
+// (x, y) 是文本基线区域的左上角。
 func (tr *TextRenderer) DrawText(text string, x, y float32, r, g, b, a float32, proj [16]float32) {
 	cursorX := x
 	for _, ch := range text {
 		glyph := tr.getGlyph(ch)
 		if glyph.tex != 0 {
-			// Position: cursorX + bearingX, y + ascent - bearingY
+			// 位置：cursorX + bearingX，y + ascent - bearingY
 			dx := cursorX + float32(glyph.bearingX)
 			dy := y + float32(tr.ascent-glyph.bearingY)
 			tr.gl.DrawQuadTint(glyph.tex, dx, dy, float32(glyph.w), float32(glyph.h), r, g, b, a, proj)
@@ -216,8 +216,8 @@ func (tr *TextRenderer) DrawText(text string, x, y float32, r, g, b, a float32, 
 	}
 }
 
-// DrawTextOutline renders text with a 1px outline in (or, og, ob, oa) behind
-// the main color. Mirrors Delphi BoldTextOut used for NPC dialog and hints.
+// DrawTextOutline 在主色后面渲染 1px 描边（颜色为 or, og, ob, oa）的文本。
+// 对应 Delphi 用于 NPC 对话和提示的 BoldTextOut。
 func (tr *TextRenderer) DrawTextOutline(text string, x, y float32, r, g, b, a float32, or, og, ob, oa float32, proj [16]float32) {
 	tr.DrawText(text, x-1, y, or, og, ob, oa, proj)
 	tr.DrawText(text, x+1, y, or, og, ob, oa, proj)
@@ -226,15 +226,15 @@ func (tr *TextRenderer) DrawTextOutline(text string, x, y float32, r, g, b, a fl
 	tr.DrawText(text, x, y, r, g, b, a, proj)
 }
 
-// DrawTextBold renders pseudo-bold text by drawing twice with 1px horizontal
-// offset. Approximates Delphi fsBold style.
+// DrawTextBold 通过水平偏移 1px 绘制两次来渲染伪粗体文本。
+// 近似 Delphi 的 fsBold 样式。
 func (tr *TextRenderer) DrawTextBold(text string, x, y float32, r, g, b, a float32, proj [16]float32) {
 	tr.DrawText(text, x, y, r, g, b, a, proj)
 	tr.DrawText(text, x+1, y, r, g, b, a, proj)
 }
 
-// DrawTextBoldOutline renders pseudo-bold text with a 1px outline.
-// Mirrors Delphi BoldTextOut with fsBold style (FState.pas:2274-2279).
+// DrawTextBoldOutline 渲染带 1px 描边的伪粗体文本。
+// 对应 Delphi 中带 fsBold 样式的 BoldTextOut（FState.pas:2274-2279）。
 func (tr *TextRenderer) DrawTextBoldOutline(text string, x, y float32, r, g, b, a float32, or, og, ob, oa float32, proj [16]float32) {
 	tr.DrawText(text, x-1, y, or, og, ob, oa, proj)
 	tr.DrawText(text, x+1, y, or, og, ob, oa, proj)
@@ -247,7 +247,7 @@ func (tr *TextRenderer) DrawTextBoldOutline(text string, x, y float32, r, g, b, 
 	tr.DrawText(text, x+1, y, r, g, b, a, proj)
 }
 
-// MeasureText returns the pixel width of the text.
+// MeasureText 返回文本的像素宽度。
 func (tr *TextRenderer) MeasureText(text string) int {
 	width := 0
 	for _, ch := range text {
@@ -257,23 +257,23 @@ func (tr *TextRenderer) MeasureText(text string) int {
 	return width
 }
 
-// MeasureChar returns the pixel width of a single rune.
+// MeasureChar 返回单个 rune 的像素宽度。
 func (tr *TextRenderer) MeasureChar(ch rune) int {
 	return tr.getGlyph(ch).advance
 }
 
-// Ascent returns the ascent in pixels.
+// Ascent 返回 ascent（像素）。
 func (tr *TextRenderer) Ascent() int {
 	return tr.ascent
 }
 
-// LineHeight returns the full line height (ascent + descent).
+// LineHeight 返回完整行高（ascent + descent）。
 func (tr *TextRenderer) LineHeight() int {
 	metrics := tr.face.Metrics()
 	return (metrics.Ascent + metrics.Descent).Ceil()
 }
 
-// Destroy frees all cached GL textures.
+// Destroy 释放所有缓存的 GL 纹理。
 func (tr *TextRenderer) Destroy() {
 	tr.cacheMu.Lock()
 	for _, g := range tr.cache {

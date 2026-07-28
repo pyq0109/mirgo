@@ -6,7 +6,7 @@ import (
 	"github.com/go-gl/gl/v3.3-core/gl"
 )
 
-// GLState holds OpenGL resources for rendering.
+// GLState 持有渲染所需的 OpenGL 资源。
 type GLState struct {
 	Shader   *ShaderProgram
 	VAO      uint32
@@ -14,14 +14,14 @@ type GLState struct {
 	WhiteTex uint32
 }
 
-// NewGLState initializes OpenGL resources.
+// NewGLState 初始化 OpenGL 资源。
 func NewGLState() (*GLState, error) {
 	shader, err := NewShaderProgram()
 	if err != nil {
 		return nil, err
 	}
 
-	// Unit quad VBO: pos(2) + uv(2) per vertex, 6 vertices
+	// 单位四边形 VBO: 每顶点 pos(2) + uv(2)，共 6 个顶点
 	vertices := []float32{
 		0, 0, 0, 0,
 		1, 0, 1, 0,
@@ -48,7 +48,7 @@ func NewGLState() (*GLState, error) {
 
 	gl.BindVertexArray(0)
 
-	// White 1x1 texture
+	// 白色 1x1 纹理
 	var whiteTex uint32
 	gl.GenTextures(1, &whiteTex)
 	gl.BindTexture(gl.TEXTURE_2D, whiteTex)
@@ -65,14 +65,14 @@ func NewGLState() (*GLState, error) {
 	}, nil
 }
 
-// DrawQuad draws a textured quad at (x, y) with size (w, h).
+// DrawQuad 在 (x, y) 处绘制大小为 (w, h) 的纹理四边形。
 func (s *GLState) DrawQuad(x, y, w, h float32, texture uint32, flipV bool, proj [16]float32) {
 	gl.UseProgram(s.Shader.ID)
 	gl.BindVertexArray(s.VAO)
 
 	gl.UniformMatrix4fv(s.Shader.ProjLoc, 1, false, &proj[0])
 
-	// Model matrix: translate(x,y) scale(w,h)
+	// 模型矩阵: translate(x,y) scale(w,h)
 	model := [16]float32{
 		w, 0, 0, 0,
 		0, h, 0, 0,
@@ -100,7 +100,7 @@ func (s *GLState) DrawQuad(x, y, w, h float32, texture uint32, flipV bool, proj 
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// DrawQuadColor draws a colored quad (no texture).
+// DrawQuadColor 绘制纯色四边形（无纹理）。
 func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
 	gl.UseProgram(s.Shader.ID)
 	gl.BindVertexArray(s.VAO)
@@ -124,7 +124,7 @@ func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 }
 
-// OrthoProj computes an orthographic projection matrix (Y-down).
+// OrthoProj 计算正交投影矩阵（Y 轴向下）。
 func OrthoProj(left, right, bottom, top float32) [16]float32 {
 	return [16]float32{
 		2 / (right - left), 0, 0, 0,
@@ -134,7 +134,7 @@ func OrthoProj(left, right, bottom, top float32) [16]float32 {
 	}
 }
 
-// Destroy frees all GL resources held by the GLState.
+// Destroy 释放 GLState 持有的所有 GL 资源。
 func (s *GLState) Destroy() {
 	gl.DeleteTextures(1, &s.WhiteTex)
 	gl.DeleteBuffers(1, &s.VBO)
