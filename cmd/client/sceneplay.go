@@ -100,6 +100,7 @@ type PlayScene struct {
 	sendQueryUserState   func(targetID int32)               // CMQueryUserState
 	sendAttackMode func(mode int)
 	lastMoveTick   int64
+	lastAniTick    int64
 	text         *engine.TextRenderer
 
 	groundItems   map[int32]*GroundItemInfo
@@ -181,6 +182,7 @@ type PlayScene struct {
 
 	showMinimap bool
 	deathGray   bool
+	focusActor  *Actor
 
 	effects *EffectManager
 	events  *EventManager
@@ -386,13 +388,6 @@ func (s *PlayScene) SetSendAttackMode(fn func(mode int)) {
 	s.sendAttackMode = fn
 }
 
-func (s *PlayScene) AddChatMessage(text string) {
-	s.chatMessages = append(s.chatMessages, ChatMessage{Text: text, Time: time.Now().UnixMilli()})
-	if len(s.chatMessages) > 10 {
-		s.chatMessages = s.chatMessages[1:]
-	}
-}
-
 func (s *PlayScene) AddGroundItem(id int32, x, y, looks int, name string) {
 	s.groundItems[id] = &GroundItemInfo{ID: id, X: x, Y: y, Looks: looks, Name: name}
 }
@@ -478,6 +473,13 @@ func (s *PlayScene) Update(dt float64) {
 	if now-s.lastMoveTick >= 100 {
 		s.lastMoveTick = now
 		moveTick = true
+	}
+
+	// Map animation counter ticks every 50ms (Delphi m_nAniCount,
+	// PlayScn.pas:892-896), decoupled from the render frame rate.
+	if now-s.lastAniTick >= 50 {
+		s.lastAniTick = now
+		s.animCounter++
 	}
 
 	s.State.Actors.Update(now, moveTick)
@@ -622,7 +624,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	s.events.Render(s.gl, s.resources, proj)
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
 	s.effects.Render(s.gl, s.resources, proj)
 
@@ -652,8 +653,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	s.animCounter++
-
 	// UI layers use the full viewport in 800×600 logical space.
 	s.gl.SetViewport(0, 0, fbW, fbH)
 	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
@@ -679,13 +678,33 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 }
 
 func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, proj [16]float32) {
+	// Phase A: draw 48×32 ground-level front objects first — they are
+	// always behind every actor (PlayScn.pas:1064-1108).
+	for y := fStartY; y <= fEndY; y++ {
+		for x := fStartX; x <= fEndX; x++ {
+			info := s.mapData.InfoAt(x, y)
+			s.drawFrontSmall(info, x, y, proj)
+		}
+	}
+
+	// Phase B: per-row Y-sort pass — large/blend front objects, map
+	// events, drop items, and actors are interleaved by row
+	// (PlayScn.pas:1124-1249).
 	actors := s.State.Actors.SortedByY()
 	actorIdx := 0
 
 	for y := fStartY; y <= fEndY; y++ {
 		for x := fStartX; x <= fEndX; x++ {
 			info := s.mapData.InfoAt(x, y)
-			s.drawFront(info, x, y, proj)
+			s.drawFrontLarge(info, x, y, proj)
+		}
+
+		s.events.RenderRow(s.gl, s.resources, proj, y)
+
+		for _, gi := range s.groundItems {
+			if gi.Y == y && gi.X >= fStartX && gi.X <= fEndX {
+				s.drawGroundItemIcon(gi, proj)
+			}
 		}
 
 		for actorIdx < len(actors) && actors[actorIdx].Ry <= y {
@@ -708,8 +727,8 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		s.drawChatBubble(a, worldX, worldY, proj)
 	}
 
-	// Re-draw self on top (PlayScn.pas:1290-1295) so the player is never
-	// occluded by other actors walking past.
+	// Phase C: overlay re-draws and drop-item flash/names
+	// (PlayScn.pas:1290-1396).
 	if s.State.MySelf != nil && !s.State.MySelf.Death {
 		my := s.State.MySelf
 		wx := float32(float64(my.Rx*engine.TileWidth) + my.ShiftX)
@@ -718,50 +737,62 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		my.Draw(s.gl, s.resources, wx, wy, proj)
 	}
 
+	if s.focusActor != nil && s.focusActor != s.State.MySelf && !s.focusActor.Death {
+		fa := s.focusActor
+		fx := float32(float64(fa.Rx*engine.TileWidth) + fa.ShiftX)
+		fy := float32(float64(fa.Ry*engine.TileHeight) + fa.ShiftY)
+		fa.Draw(s.gl, s.resources, fx, fy, proj)
+	}
+
 	for _, gi := range s.groundItems {
 		if gi.X < fStartX || gi.X > fEndX || gi.Y < fStartY || gi.Y > fEndY {
 			continue
 		}
-		ix := float32(gi.X*engine.TileWidth) + 16
-		iy := float32(gi.Y*engine.TileHeight) + 8
-		if s.resources.DnItems != nil && gi.Looks >= 0 && gi.Looks < s.resources.DnItems.Count {
-			img := s.resources.DnItems.GetImage(gi.Looks)
-			if img != nil && img.RGBA != nil {
-				tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
-				if tex != 0 {
-					log.Logf(log.LevelTrace, "Render", "play item DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
-					s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
-				}
-			} else {
-				s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
-			}
-		} else {
-			s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
-		}
-		// Flash effect: Prguse[410..419], 10 frames × 20ms, 5000ms cycle
-		// (PlayScn.pas:1349-1368, FLASHBASE=410).
-		if s.resources.Prguse != nil {
-			now := time.Now().UnixMilli()
-			cycle := now % 5000
-			if cycle < 200 { // 10 frames × 20ms = 200ms active window
-				step := int(cycle / 20)
-				flashIdx := 410 + step
-				if fimg := s.resources.Prguse.GetImage(flashIdx); fimg != nil && fimg.RGBA != nil {
-					if ftex := s.resources.GetTexture(s.resources.Prguse, flashIdx); ftex != 0 {
-						log.Logf(log.LevelTrace, "Render", "play item-flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
-						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-						s.gl.DrawQuad(ftex, ix, iy, float32(fimg.Width), float32(fimg.Height), proj)
-						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-					}
-				}
+		s.drawGroundItemFlashName(gi, proj)
+	}
+}
+
+func (s *PlayScene) drawGroundItemIcon(gi *GroundItemInfo, proj [16]float32) {
+	ix := float32(gi.X*engine.TileWidth) + 16
+	iy := float32(gi.Y*engine.TileHeight) + 8
+	if s.resources.DnItems != nil && gi.Looks >= 0 && gi.Looks < s.resources.DnItems.Count {
+		img := s.resources.DnItems.GetImage(gi.Looks)
+		if img != nil && img.RGBA != nil {
+			tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
+			if tex != 0 {
+				log.Logf(log.LevelTrace, "Render", "play item DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
+				s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
+				return
 			}
 		}
-		if s.text != nil && gi.Name != "" {
-			nameW := float32(s.text.MeasureText(gi.Name))
-			nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
-			log.Logf(log.LevelTrace, "Render", "play item-name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
-			s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
+	}
+	s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
+}
+
+func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32) {
+	ix := float32(gi.X*engine.TileWidth) + 16
+	iy := float32(gi.Y*engine.TileHeight) + 8
+	if s.resources.Prguse != nil {
+		now := time.Now().UnixMilli()
+		cycle := now % 5000
+		if cycle < 200 {
+			step := int(cycle / 20)
+			flashIdx := 410 + step
+			if fimg := s.resources.Prguse.GetImage(flashIdx); fimg != nil && fimg.RGBA != nil {
+				if ftex := s.resources.GetTexture(s.resources.Prguse, flashIdx); ftex != 0 {
+					log.Logf(log.LevelTrace, "Render", "play item-flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+					s.gl.DrawQuad(ftex, ix, iy, float32(fimg.Width), float32(fimg.Height), proj)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+				}
+			}
 		}
+	}
+	if s.text != nil && gi.Name != "" {
+		nameW := float32(s.text.MeasureText(gi.Name))
+		nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
+		log.Logf(log.LevelTrace, "Render", "play item-name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
+		s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
 	}
 }
 
@@ -850,20 +881,21 @@ func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]fl
 	}
 }
 
-func (s *PlayScene) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float32) {
+// frontImageData resolves the WIL image for a front-layer cell. Returns
+// nil img when the cell has no drawable front object.
+func (s *PlayScene) frontImageData(info *mapformat.CellInfo, x, y int) (loader *wil.File, cache map[int]uint32, idx int, isBlend bool, img *wil.Image, tex uint32) {
 	if info.FrontLib < 0 {
 		return
 	}
-
 	area := int(info.FrontArea)
-	loader := s.getObjectsLoader(area)
+	loader = s.getObjectsLoader(area)
 	if loader == nil {
 		return
 	}
-	cache := s.objectsCaches[area]
+	cache = s.objectsCaches[area]
 
-	idx := info.FrontImage
-	isBlend := info.FrontAniFrame&0x80 != 0
+	idx = info.FrontImage
+	isBlend = info.FrontAniFrame&0x80 != 0
 
 	ani := int(info.FrontAniFrame & 0x7F)
 	if ani > 0 {
@@ -887,16 +919,43 @@ func (s *PlayScene) drawFront(info *mapformat.CellInfo, x, y int, proj [16]float
 	if idx < 0 || idx >= loader.Count {
 		return
 	}
-
-	tex := s.getTex(cache, loader, idx)
+	tex = s.getTex(cache, loader, idx)
 	if tex == 0 {
 		return
 	}
-	img := loader.GetImage(idx)
+	img = loader.GetImage(idx)
+	return
+}
 
+// drawFrontSmall draws only 48×32 (single-tile) front objects. These are
+// ground-level decorations that must always render behind every actor
+// (PlayScn.pas:1064-1108).
+func (s *PlayScene) drawFrontSmall(info *mapformat.CellInfo, x, y int, proj [16]float32) {
+	_, _, _, isBlend, img, tex := s.frontImageData(info, x, y)
+	if img == nil || isBlend {
+		return
+	}
+	if img.Width != 48 || img.Height != 32 {
+		return
+	}
+	wx := float32(x * engine.TileWidth)
+	wy := float32(y*engine.TileHeight) - float32(img.Height) + engine.TileHeight
+	s.gl.DrawQuad(tex, wx, wy, float32(img.Width), float32(img.Height), proj)
+}
+
+// drawFrontLarge draws front objects that are NOT 48×32 (tall buildings,
+// trees, etc.) plus alpha-blend objects. These participate in the per-row
+// Y-sort together with actors (PlayScn.pas:1124-1178).
+func (s *PlayScene) drawFrontLarge(info *mapformat.CellInfo, x, y int, proj [16]float32) {
+	_, _, _, isBlend, img, tex := s.frontImageData(info, x, y)
+	if img == nil {
+		return
+	}
+	if !isBlend && img.Width == 48 && img.Height == 32 {
+		return
+	}
 	cellWorldX := float32(x * engine.TileWidth)
 	cellWorldY := float32(y * engine.TileHeight)
-
 	if isBlend {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 		wx := cellWorldX + float32(img.HotX) - 2
@@ -1000,19 +1059,39 @@ func (s *PlayScene) ServerAcceptNextAction() bool {
 }
 
 func (s *PlayScene) calcDarkness() float32 {
-	bright := s.State.DayBright
-	if bright >= 3 {
-		return 0
-	}
-	switch bright {
-	case 0:
+	dayVal := dayBrightToDarkness(s.State.DayBright)
+	mapVal := darkLevelToDarkness(s.State.MapDarkness)
+	return max(dayVal, mapVal)
+}
+
+// dayBrightToDarkness maps SM_DAYCHANGING Param (0=darkest … 3+=brightest)
+// to a 0..1 overlay alpha.
+func dayBrightToDarkness(bright int) float32 {
+	switch {
+	case bright <= 0:
 		return 0.7
-	case 1:
+	case bright == 1:
 		return 0.45
-	case 2:
+	case bright == 2:
 		return 0.2
 	default:
 		return 0
+	}
+}
+
+// darkLevelToDarkness maps a Delphi DarkLevel (0=day, 1=deep night,
+// 2=medium, 3=dusk) to a 0..1 overlay alpha (PlayScn.pas:2275,
+// cliUtil.pas:594-599).
+func darkLevelToDarkness(level int) float32 {
+	switch {
+	case level <= 0:
+		return 0
+	case level == 1:
+		return 0.7
+	case level == 2:
+		return 0.45
+	default:
+		return 0.2
 	}
 }
 
@@ -1023,7 +1102,7 @@ func (s *PlayScene) collectLightSources() []LightSource {
 		lights = append(lights, LightSource{
 			X:     float64(my.Rx)*engine.TileWidth + engine.TileWidth/2,
 			Y:     float64(my.Ry)*engine.TileHeight + engine.TileHeight/2,
-			Level: 2,
+			Level: max(2, s.State.LightLevel),
 		})
 	}
 	lights = append(lights, s.effects.LightSources()...)
@@ -1120,7 +1199,7 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.sendAttackMode(s.State.AttackMode)
 			}
 			modes := []string{"和平", "组队", "行会", "全体", "PK"}
-			s.addChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
+			s.AddChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
 			return
 		case 77: // M — minimap (ClMain:1613-1628; three-state cycle is B5)
 			s.showMinimap = !s.showMinimap
@@ -1132,7 +1211,7 @@ func (s *PlayScene) OnKey(key int, action int) {
 			s.State.ShowGroupDlg = !s.State.ShowGroupDlg
 			return
 		case 86: // V — friend dialog (ClMain:1687-1690; server side missing)
-			s.addChatMessage("好友: 尚未实现")
+			s.AddChatMessage("好友: 尚未实现")
 			return
 		case 87: // W — trade (ClMain:1663-1666)
 			s.tryDeal()
@@ -1166,7 +1245,7 @@ func (s *PlayScene) OnKey(key int, action int) {
 			s.State.ShowEquip = true
 			return
 		case 301: // F12 — options/sound (ClMain:1509+; audio not implemented)
-			s.addChatMessage("[声音] 切换(音频未实现)")
+			s.AddChatMessage("[声音] 切换(音频未实现)")
 			return
 		}
 
@@ -1238,6 +1317,23 @@ func dirOffset(dir int) (dx, dy int) {
 func (s *PlayScene) OnMouseMove(x, y float64) {
 	s.mouseX, s.mouseY = x, y
 	s.ui.RouteMouseMove(int(x), int(y))
+
+	// Tile-based focus detection (Delphi g_FocusCret, ClMain.pas:2085-2096).
+	s.focusActor = nil
+	if y >= MapSurfaceH || s.cam == nil || s.State.MySelf == nil {
+		return
+	}
+	wx, wy := s.cam.ScreenToWorld(x, y)
+	tx, ty := s.cam.WorldToTile(wx, wy)
+	for _, a := range s.State.Actors.All() {
+		if a.RecogID == s.State.MySelf.RecogID || a.Death {
+			continue
+		}
+		if a.CurrX == tx && a.CurrY == ty {
+			s.focusActor = a
+			return
+		}
+	}
 }
 
 func absF(v float64) float64 {
@@ -1438,7 +1534,7 @@ func (s *PlayScene) OnScroll(offX, offY float64) {
 	}
 }
 
-func (s *PlayScene) addChatMessage(text string) {
+func (s *PlayScene) AddChatMessage(text string) {
 	s.chatMessages = append(s.chatMessages, ChatMessage{Text: text, Time: time.Now().UnixMilli()})
 	if len(s.chatMessages) > 100 {
 		s.chatMessages = s.chatMessages[len(s.chatMessages)-100:]

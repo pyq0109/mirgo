@@ -421,7 +421,7 @@ func (s *PlayScene) openGuildNoticeEditor() {
 	ok.OnClick = func(c *UIControl, x, y int) {
 		text := memo.JoinedText()
 		if utf8.RuneCountInString(text) > 4000 {
-			s.addChatMessage("[系统] 公告内容过长,已截断至4000字符")
+			s.AddChatMessage("[系统] 公告内容过长,已截断至4000字符")
 		}
 		s.ui.CloseModal(win)
 		if s.sendGuildUpdateNotice != nil {
@@ -447,7 +447,7 @@ func (s *PlayScene) openGuildNoticeEditor() {
 // single "name/rank" line; full-table submission is tracked in batch B5.
 func (s *PlayScene) openGuildRankEditor() {
 	if len(s.State.GuildMembers) == 0 {
-		s.addChatMessage("[系统] 请先获取成员列表再编辑职位")
+		s.AddChatMessage("[系统] 请先获取成员列表再编辑职位")
 		return
 	}
 	prg := s.resources.Prguse

@@ -55,8 +55,9 @@ type GameState struct {
 	Actors     *ActorManager
 	UseItems   [13]*protocol.UserItem
 	MagicList  []protocol.UserMagic
-	DayBright  int
-	MapName    string
+	DayBright   int
+	MapDarkness int
+	MapName     string
 	MapTitle   string
 	LightLevel int
 

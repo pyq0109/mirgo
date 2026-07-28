@@ -53,10 +53,11 @@ type BaseObject struct {
 	WAbil protocol.Ability
 
 	// Combat
-	HitPoint int
-	HitSpeed int
-	Luck     int
-	Gold     int
+	HitPoint   int
+	SpeedPoint int
+	HitSpeed   int
+	Luck       int
+	Gold       int
 
 	// State
 	StatusTimeArr [12]int16

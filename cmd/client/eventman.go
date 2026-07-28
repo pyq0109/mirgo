@@ -64,27 +64,41 @@ func (em *EventManager) Update(now int64) {
 
 func (em *EventManager) Render(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32) {
 	for _, ev := range em.events {
-		px := float32(ev.X*engine.TileWidth + engine.TileWidth/2)
-		py := float32(ev.Y*engine.TileHeight + engine.TileHeight/2)
+		em.renderEvent(glState, resources, ev, proj)
+	}
+}
 
-		if ev.EType == 1 && resources.Magic != nil {
-			idx := fireBurnBase + (ev.Frame/2)%6
-			if idx >= 0 && idx < resources.Magic.Count {
-				img := resources.Magic.GetImage(idx)
-				if img != nil && img.RGBA != nil {
-					if tex := resources.GetTexture(resources.Magic, idx); tex != 0 {
-						w := float32(img.Width)
-						h := float32(img.Height)
-						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-						glState.DrawQuad(tex, px-w/2, py-h/2, w, h, proj)
-						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-						continue
-					}
+// RenderRow renders only events whose Y matches the given tile row,
+// used inside the Y-sort pass (PlayScn.pas:1188-1195).
+func (em *EventManager) RenderRow(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32, row int) {
+	for _, ev := range em.events {
+		if ev.Y == row {
+			em.renderEvent(glState, resources, ev, proj)
+		}
+	}
+}
+
+func (em *EventManager) renderEvent(glState *engine.GLState, resources *engine.ResourceManager, ev *MapEvent, proj [16]float32) {
+	px := float32(ev.X*engine.TileWidth + engine.TileWidth/2)
+	py := float32(ev.Y*engine.TileHeight + engine.TileHeight/2)
+
+	if ev.EType == 1 && resources.Magic != nil {
+		idx := fireBurnBase + (ev.Frame/2)%6
+		if idx >= 0 && idx < resources.Magic.Count {
+			img := resources.Magic.GetImage(idx)
+			if img != nil && img.RGBA != nil {
+				if tex := resources.GetTexture(resources.Magic, idx); tex != 0 {
+					w := float32(img.Width)
+					h := float32(img.Height)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+					glState.DrawQuad(tex, px-w/2, py-h/2, w, h, proj)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+					return
 				}
 			}
 		}
-
-		glState.DrawQuadColor(px-engine.TileWidth/2, py-engine.TileHeight/2,
-			engine.TileWidth, engine.TileHeight, 1.0, 0.4, 0.1, 0.5, proj)
 	}
+
+	glState.DrawQuadColor(px-engine.TileWidth/2, py-engine.TileHeight/2,
+		engine.TileWidth, engine.TileHeight, 1.0, 0.4, 0.1, 0.5, proj)
 }

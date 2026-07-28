@@ -47,41 +47,62 @@ type MonsterObject struct {
 	CoolEye   int
 
 	lastThinkTick int64
+
+	FixedHide      bool  // 潜地状态（m_boFixedHideMode）
+	StoneMode      bool  // 石化伏击状态（m_boStoneMode）
+	Animal         bool  // 动物标志（m_boAnimal）
+	spawnTick      int64 // 出生时间（自爆计时用）
+	searchInterval int64 // SearchViewRange 随机间隔
+	burstCount     int   // 连射计数（飞斧用）
 }
 
 func getAIBehavior(race byte) int {
 	// Race→AI mapping based on Delphi factory (UsrEngn.pas:1831-1938).
-	// Animals (50+) are mostly basic melee unless specifically noted.
 	switch race {
-	case 52: // TChickenDeer — flee
+	case 51: // 鸡 — 被动动物
+		return AIPassive
+	case 52: // TChickenDeer — 逃跑
 		return AIFlee
-	case 82: // TSpitSpider — ranged + poison
+	case 80: // TMonster — 基础游荡（不主动搜索）
+		return AIPassive
+	case 82: // TSpitSpider — 远程喷吐
 		return AIRanged
-	case 90: // TGasAttackMonster — area
-		return AIArea
-	case 91: // TMagCowMonster — magic
-		return AIMagicCast
-	case 94: // TLightingZombi — ranged lightning
-		return AIRanged
-	case 95: // TDigOutZombi — burrow
+	case 85: // TStickMonster — 固定潜地伏击
 		return AIBurrow
-	case 102: // TScultureKingMonster — summoner
+	case 87: // TDualAxeMonster — 远程飞斧
+		return AIDualAxe
+	case 90: // TGasAttackMonster — 毒气近战
+		return AIPoison
+	case 91: // TMagCowMonster — 魔法近战
+		return AIMagicCast
+	case 94: // TLightingZombi — 远程闪电
+		return AIRanged
+	case 95: // TDigOutZombi — 潜地僵尸
+		return AIBurrow
+	case 96: // TZilKinZombi — 死亡分裂
+		return AISplit
+	case 101: // TScultureMonster — 石化伏击
+		return AIStone
+	case 102: // TScultureKingMonster — 召唤
 		return AISummoner
-	case 105: // TGasMothMonster — area
+	case 105: // TGasMothMonster — 毒气近战
+		return AIPoison
+	case 107: // TCentipedeKingMonster — 固定Boss（TODO: StickMode）
 		return AIArea
-	case 117: // TExplosionSpider — explode
+	case 117: // TExplosionSpider — 自爆
 		return AIExplode
-	case 118: // THighRiskSpider — ranged
+	case 118: // THighRiskSpider — 远程
 		return AIRanged
-	case 119: // TBigPoisionSpider — ranged + poison
+	case 119: // TBigPoisionSpider — 远程+毒
 		return AIRanged
-	case 200: // TElectronicScolpionMon — ranged
-		return AIRanged
+	case 131: // TRonObject — 范围攻击
+		return AIArea
+	case 200: // TElectronicScolpionMon — 闪电吸血
+		return AILeech
 	default:
-		// 51(chicken), 53(wolf), 80(oma), 81(oma knight), 83(slow),
-		// 84(scorpion), 85(stick), 87(dual axe), 92(cow king TODO),
-		// 96(zilkin TODO), 100(white skeleton), 101(sculpture TODO),
-		// 103(bee queen), 107(centipede king TODO), 130(double critical)
+		// 53(wolf), 81(oma knight), 83(slow), 84(scorpion),
+		// 92(cow king), 100(white skeleton), 103(bee queen),
+		// 113(elf), 130(double critical)
 		return AIMelee
 	}
 }
@@ -107,10 +128,10 @@ func (o *MonsterObject) Feature() int32 {
 	return protocol.MakeMonsterFeature(o.RaceImg, 0, o.Appr)
 }
 
-func (o *MonsterObject) OnStruck(attackerID int32, now int64) {
+func (o *MonsterObject) OnStruck(attackerID int32, now int64, userEngine *UserEngine) {
 	o.LastHiterID = attackerID
 	o.LastHiterTick = now
-	o.WalkTick += 800
+	// Delphi: 攻击延迟惩罚 m_dwHitTick += 150 - min(130, Level*4)
 	penalty := int64(150)
 	if lvl := int64(o.WAbil.Level) * 4; lvl < 130 {
 		penalty = 150 - lvl
@@ -118,7 +139,18 @@ func (o *MonsterObject) OnStruck(attackerID int32, now int64) {
 		penalty = 20
 	}
 	o.HitTick += penalty
-	if o.TargetID == 0 || rand.Intn(6) == 0 {
+	// Delphi: 无目标 OR 当前目标相邻 OR 1/6随机 → 切换目标
+	switchTarget := o.TargetID == 0 || rand.Intn(6) == 0
+	if !switchTarget && o.TargetID != 0 && userEngine != nil {
+		if cur := userEngine.GetPlayer(o.TargetID); cur != nil {
+			dx := abs(cur.CurrX - o.CurrX)
+			dy := abs(cur.CurrY - o.CurrY)
+			if dx <= 1 && dy <= 1 {
+				switchTarget = true
+			}
+		}
+	}
+	if switchTarget {
 		o.TargetID = attackerID
 		o.FocusTick = now
 	}
@@ -126,6 +158,37 @@ func (o *MonsterObject) OnStruck(attackerID int32, now int64) {
 
 func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *UserEngine) {
 	if o.Ghost || o.Death {
+		return
+	}
+
+	// 状态效果 tick（所有对象都需要，包括石化中的怪物）
+	for i := 0; i < 12; i++ {
+		if o.StatusTimeArr[i] > 0 {
+			o.StatusTimeArr[i]--
+		}
+	}
+	if o.StatusTimeArr[POISON_DECHEALTH] > 0 {
+		hp := int(o.WAbil.HP) - 2
+		if hp < 1 {
+			hp = 1
+		}
+		o.WAbil.HP = uint16(hp)
+	}
+
+	// Delphi: 石化状态跳过 AI（POISON_STONE 状态效果）
+	if o.StatusTimeArr[POISON_STONE] > 0 {
+		return
+	}
+
+	// Delphi: m_boStoneMode 石化伏击（TScultureMonster）
+	// 石化中只搜索目标，检测到玩家后解除石化
+	if o.StoneMode {
+		o.searchTarget(now, userEngine)
+		if o.TargetID != 0 {
+			o.StoneMode = false
+			o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
+			log.Logf(log.LevelInfo, "Monster", "%s broke out of stone", o.Name)
+		}
 		return
 	}
 
@@ -156,7 +219,10 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		}
 	}
 
-	o.searchTarget(now, userEngine)
+	// AIPassive（Race 51/80）不主动搜索目标，仅通过 OnStruck 获得
+	if o.AIBehavior != AIPassive {
+		o.searchTarget(now, userEngine)
+	}
 	o.validateTarget(now, userEngine)
 
 	if o.TargetID != 0 {
@@ -186,7 +252,11 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				if now-o.HitTick > o.AttackSpeed {
 					o.HitTick = now
 					o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-					if rand.Intn(100) < 80 {
+					spd := target.SpeedPoint
+					if spd < 1 {
+						spd = 1
+					}
+					if rand.Intn(spd) < o.HitPoint {
 						damage := o.calcMonsterDamage(target.BaseObject)
 						o.applyMonsterDamageToPlayer(server, target, damage, now)
 						o.FocusTick = now
@@ -211,7 +281,8 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.chaseTarget(target, now)
 			}
 		case 3:
-			if dist <= 1 && now-o.HitTick > o.AttackSpeed {
+			// Delphi TRonObject: 目标在6格内 → AroundAttack（1格半径AoE）
+			if dist <= 6 && now-o.HitTick > o.AttackSpeed {
 				o.HitTick = now
 				for a_dy := -1; a_dy <= 1; a_dy++ {
 					for a_dx := -1; a_dx <= 1; a_dx++ {
@@ -229,15 +300,48 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 				o.FocusTick = now
 				o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
-			} else if dist > 1 {
+			} else if dist > 6 {
 				o.chaseTarget(target, now)
 			}
 		case 4:
-			if now-o.lastSummonTick > 30000 && o.minionCount < 3 {
+			// Delphi 召唤类：创建真实 minion 对象
+			if now-o.lastSummonTick > 30000 && o.minionCount < 3 && o.Engine != nil && o.envir != nil {
 				o.lastSummonTick = now
-				o.minionCount++
-				log.Logf(log.LevelInfo, "Monster", "%s summoned a minion", o.Name)
+				cx := o.CurrX + rand.Intn(3) - 1
+				cy := o.CurrY + rand.Intn(3) - 1
+				if o.envir.CanWalk(cx, cy) {
+					o.Engine.mu.Lock()
+					id := o.Engine.nextMonsterID
+					o.Engine.nextMonsterID++
+					minion := NewMonsterObject(o.Name+"(召唤)", id, o.Race, o.RaceImg, o.Appr,
+						o.MaxHP/2, o.WalkSpeed, o.AttackSpeed, o.Exp/3)
+					minion.CurrX = cx
+					minion.CurrY = cy
+					minion.MapName = o.MapName
+					minion.envir = o.envir
+					minion.HitPoint = o.HitPoint
+					minion.SpeedPoint = o.SpeedPoint
+					minion.WAbil.DC = o.WAbil.DC
+					minion.WAbil.AC = o.WAbil.AC
+					minion.WAbil.HP = minion.WAbil.MaxHP
+					minion.TargetID = o.TargetID
+					minion.spawnTick = now
+					minion.searchInterval = 3000 + rand.Int63n(2000)
+					o.envir.AddObject(cx, cy, OS_MOVINGOBJECT, minion)
+					o.Engine.Monsters = append(o.Engine.Monsters, minion)
+					o.Engine.mu.Unlock()
+					minion.SendRefMsg(RM_TURN, minion.Dir, cx, cy, minion.Name)
+					o.minionCount++
+					log.Logf(log.LevelInfo, "Monster", "%s summoned a minion at (%d,%d)", o.Name, cx, cy)
+				}
 			}
+			if dist <= 1 {
+				o.meleeAttack(server, target, now)
+			} else {
+				o.chaseTarget(target, now)
+			}
+		case AIPassive:
+			// 被动型：有目标时正常追击/攻击（目标仅来自 OnStruck）
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
@@ -247,6 +351,10 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			o.runExtendedAI(server, target, dist, now)
 		}
 	} else {
+		// 潜地怪物无目标时不闲逛
+		if o.FixedHide {
+			return
+		}
 		if now-o.WalkTick > o.WalkSpeed {
 			if rand.Intn(20) == 0 {
 				o.WalkTick = now
@@ -273,8 +381,14 @@ func (o *MonsterObject) calcMonsterDamage(target *BaseObject) int {
 		attack = 1
 	}
 
+	// Delphi: nArmor = loAC + Random(hiAC - loAC + 1)
 	loAC := int(target.WAbil.AC & 0xFFFF)
-	damage := attack - loAC
+	hiAC := int(target.WAbil.AC >> 16)
+	armor := loAC
+	if hiAC > loAC {
+		armor = loAC + rand.Intn(hiAC-loAC+1)
+	}
+	damage := attack - armor
 	if damage < 1 {
 		damage = 1
 	}
@@ -324,8 +438,15 @@ func (o *MonsterObject) chaseTarget(target *PlayObject, now int64) {
 		o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
 		return
 	}
+	// Delphi: n20 := Random(3)，顺/逆时针随机绕行
+	clockwise := rand.Intn(3) != 0
 	for i := 0; i < 7; i++ {
-		altDir := (dir + i + 1) % 8
+		var altDir int
+		if clockwise {
+			altDir = (dir + i + 1) % 8
+		} else {
+			altDir = (dir - i - 1 + 8) % 8
+		}
 		if o.WalkTo(altDir) {
 			o.SendRefMsg(RM_WALK, altDir, o.CurrX, o.CurrY, "")
 			return
@@ -342,7 +463,12 @@ func (o *MonsterObject) meleeAttack(server *netserver.TCPServer, target *PlayObj
 	if IsSafeZone(o.envir, target.CurrX, target.CurrY) {
 		return
 	}
-	if rand.Intn(100) >= 80 {
+	// Delphi: Random(SpeedPoint) < HitPoint → 命中
+	spd := target.SpeedPoint
+	if spd < 1 {
+		spd = 1
+	}
+	if rand.Intn(spd) >= o.HitPoint {
 		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 		return
 	}
@@ -354,9 +480,13 @@ func (o *MonsterObject) meleeAttack(server *netserver.TCPServer, target *PlayObj
 
 func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 	hasTarget := o.TargetID != 0
-	interval := int64(1000)
+	interval := int64(1000) // 无目标时 1 秒搜索
 	if hasTarget {
-		interval = 8000
+		// Delphi: m_dwSearchTime = 3000 + Random(2000)
+		interval = o.searchInterval
+		if interval <= 0 {
+			interval = 8000
+		}
 	}
 	if now-o.SearchTick <= interval {
 		return
@@ -410,9 +540,10 @@ func (o *MonsterObject) validateTarget(now int64, userEngine *UserEngine) {
 		o.TargetID = 0
 		return
 	}
+	// Delphi: 曼哈顿距离 > 15 格则丢失目标
 	dx := abs(target.CurrX - o.CurrX)
 	dy := abs(target.CurrY - o.CurrY)
-	if dx > 15 || dy > 15 {
+	if dx+dy > 15 {
 		o.TargetID = 0
 	}
 }

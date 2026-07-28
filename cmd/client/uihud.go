@@ -66,7 +66,7 @@ func (s *PlayScene) buildHUD() {
 			case bag:
 				s.State.ShowBag = true // OpenItemBag = show (FState:3805)
 			case page == -2:
-				s.addChatMessage("[声音] 切换(音频未实现)")
+				s.AddChatMessage("[声音] 切换(音频未实现)")
 			default:
 				s.State.StatePage = page
 				s.State.ShowEquip = true // OpenMyStatus = show (FState:3801-3809)
@@ -90,9 +90,9 @@ func (s *PlayScene) buildHUD() {
 		{"DBotGuild", ImgBotGuild, 279, "行会(G)", func() { s.toggleGuild() }},
 		{"DBotGroup", ImgBotGroup, 309, "组队(S)", func() { s.State.ShowGroupDlg = !s.State.ShowGroupDlg }},
 		{"DBotPlusAbil", ImgBotPlusAbil, 339, "技能点(N)", func() { s.State.ShowPlusAbil = !s.State.ShowPlusAbil }},
-		{"DBotFriend", ImgBotFriend, 369, "好友(V)", func() { s.addChatMessage("好友: 尚未实现") }},
-		{"DBotLogout", ImgBotLogout, 530, "选择人物\\Alt-X", func() { s.addChatMessage("登出: 尚未实现") }},
-		{"DBotExit", ImgBotExit, 560, "退出游戏\\Alt-Q", func() { s.addChatMessage("退出: 尚未实现") }},
+		{"DBotFriend", ImgBotFriend, 369, "好友(V)", func() { s.AddChatMessage("好友: 尚未实现") }},
+		{"DBotLogout", ImgBotLogout, 530, "选择人物\\Alt-X", func() { s.AddChatMessage("登出: 尚未实现") }},
+		{"DBotExit", ImgBotExit, 560, "退出游戏\\Alt-Q", func() { s.AddChatMessage("退出: 尚未实现") }},
 	}
 	for _, d := range botDefs {
 		btn := NewUIControl(d.name, KindButton)

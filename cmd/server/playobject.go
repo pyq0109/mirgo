@@ -644,7 +644,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, target.CurrX, target.CurrY, dir)
 
 	if mon := p.envir.getMonsterByBase(target); mon != nil {
-		mon.OnStruck(p.ID, time.Now().UnixMilli())
+		mon.OnStruck(p.ID, time.Now().UnixMilli(), p.Engine)
 	}
 
 	if tp := p.envir.getPlayerByBase(target); tp != nil {
@@ -1130,7 +1130,11 @@ func (p *PlayObject) HandleQueryUserState(msg SendMessage, server *netserver.TCP
 }
 
 func (p *PlayObject) SendMapInfo(server *netserver.TCPServer) {
-	mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, int32(p.CurrX), uint16(p.CurrY), 0, 0)
+	darkness := uint16(0)
+	if p.envir != nil && p.envir.Flag.Dark {
+		darkness = 1
+	}
+	mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, int32(p.CurrX), uint16(p.CurrY), darkness, 0)
 	server.Send(p.Session.ID, mapResp, protocol.EncodeString(p.MapName))
 }
 
@@ -1301,7 +1305,11 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 
 	newEnvir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 
-	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, p.ID, uint16(p.CurrX), uint16(p.CurrY), 0)
+	darkness := uint16(0)
+	if newEnvir.Flag.Dark {
+		darkness = 1
+	}
+	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, p.ID, uint16(p.CurrX), uint16(p.CurrY), darkness)
 	server.Send(p.Session.ID, changeMsg, protocol.EncodeString(p.MapName))
 
 	p.VisibleActors = make(map[int32]*VisibleEntry)

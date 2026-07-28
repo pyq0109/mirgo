@@ -27,6 +27,7 @@ type UserEngine struct {
 	MonGenList    []MonGenEntry
 	nextMonsterID int32
 	nextItemID    int32
+	currMonGen    int // round-robin 刷怪器索引
 
 	MagicDB *MagicDB
 	Parties map[int32]*Party

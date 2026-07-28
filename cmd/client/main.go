@@ -803,6 +803,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			log.Logf(log.LevelError, "Client", "Failed to load map: %v", err)
 			return
 		}
+		h.playScene.State.MapDarkness = int(msg.Tag)
 
 	case protocol.SMLogon:
 		log.Logf(log.LevelInfo, "Client", "Game started (id=%d x=%d y=%d dir=%d)",
@@ -1031,6 +1032,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			log.Logf(log.LevelError, "Client", "Failed to load map on change: %v", err)
 			return
 		}
+		h.playScene.State.MapDarkness = int(msg.Series)
 		actor := NewActor(msg.Recog, newX, newY, 0)
 		actor.Type = ActorHuman
 		h.playScene.State.MySelf = actor
@@ -1119,7 +1121,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.DealRemoteGold = int(msg.Recog)
 
 	case protocol.SMBuildGuildOK:
-		h.playScene.addChatMessage("Guild created")
+		h.playScene.AddChatMessage("Guild created")
 
 	case protocol.SMGuildMessage:
 		log.Logf(log.LevelInfo, "Client", "Guild chat: %s", body)
@@ -1448,26 +1450,26 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.State.AllowGroup = msg.Recog != 0
 
 	case protocol.SMCreateGroupOK:
-		h.playScene.addChatMessage("[Group] created")
+		h.playScene.AddChatMessage("[Group] created")
 
 	case protocol.SMCreateGroupFail:
-		h.playScene.addChatMessage("[Group] create failed (target unavailable?)")
+		h.playScene.AddChatMessage("[Group] create failed (target unavailable?)")
 
 	case protocol.SMGroupAddMemOK:
-		h.playScene.addChatMessage("[Group] added " + body)
+		h.playScene.AddChatMessage("[Group] added " + body)
 
 	case protocol.SMGroupAddMemFail:
-		h.playScene.addChatMessage("[Group] add failed")
+		h.playScene.AddChatMessage("[Group] add failed")
 
 	case protocol.SMGroupDelMemOK:
-		h.playScene.addChatMessage("[Group] removed " + body)
+		h.playScene.AddChatMessage("[Group] removed " + body)
 
 	case protocol.SMGroupDelMemFail:
-		h.playScene.addChatMessage("[Group] remove failed")
+		h.playScene.AddChatMessage("[Group] remove failed")
 
 	case protocol.SMGroupCancel:
 		h.playScene.State.GroupMembers = nil
-		h.playScene.addChatMessage("[Group] disbanded")
+		h.playScene.AddChatMessage("[Group] disbanded")
 
 	case protocol.SMGroupMembers:
 		if strings.TrimSpace(body) == "" {
@@ -1496,7 +1498,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		st.GuildTopLine = 0
 
 	case protocol.SMOpenGuildDlgFail:
-		h.playScene.addChatMessage("You are not in a guild")
+		h.playScene.AddChatMessage("You are not in a guild")
 
 	case protocol.SMChangeGuildName:
 		h.playScene.State.GuildName = body
@@ -1509,34 +1511,34 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMGuildAddMemberOK:
-		h.playScene.addChatMessage("[Guild] added " + body)
+		h.playScene.AddChatMessage("[Guild] added " + body)
 
 	case protocol.SMGuildAddMemberFail:
-		h.playScene.addChatMessage("[Guild] add failed")
+		h.playScene.AddChatMessage("[Guild] add failed")
 
 	case protocol.SMGuildDelMemberOK:
-		h.playScene.addChatMessage("[Guild] removed " + body)
+		h.playScene.AddChatMessage("[Guild] removed " + body)
 
 	case protocol.SMGuildDelMemberFail:
-		h.playScene.addChatMessage("[Guild] remove failed")
+		h.playScene.AddChatMessage("[Guild] remove failed")
 
 	case protocol.SMBuildGuildFail:
-		h.playScene.addChatMessage("Guild creation failed")
+		h.playScene.AddChatMessage("Guild creation failed")
 
 	case protocol.SMGuildMakeAllyOK:
-		h.playScene.addChatMessage("[Guild] alliance formed")
+		h.playScene.AddChatMessage("[Guild] alliance formed")
 
 	case protocol.SMGuildMakeAllyFail:
-		h.playScene.addChatMessage("[Guild] alliance failed")
+		h.playScene.AddChatMessage("[Guild] alliance failed")
 
 	case protocol.SMGuildBreakAllyOK:
-		h.playScene.addChatMessage("[Guild] alliance broken")
+		h.playScene.AddChatMessage("[Guild] alliance broken")
 
 	case protocol.SMGuildBreakAllyFail:
-		h.playScene.addChatMessage("[Guild] break ally failed")
+		h.playScene.AddChatMessage("[Guild] break ally failed")
 
 	case protocol.SMDlgMsg:
-		h.playScene.addChatMessage(body)
+		h.playScene.AddChatMessage(body)
 
 	case protocol.SMDealTryFail:
 		log.Logf(log.LevelInfo, "Client", "Trade request failed")
