@@ -47,6 +47,9 @@ type PlayObject struct {
 	HorseType       byte
 	Permission      byte
 
+	LastHiterID   int32 // 最后攻击者 ID（供奴隶目标选择）
+	LastHiterTick int64
+
 	Deal         *DealState
 	GuildName    string
 	GuildRank    string
@@ -664,6 +667,8 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	}
 
 	if tp := p.envir.getPlayerByBase(target); tp != nil {
+		tp.LastHiterID = p.ID
+		tp.LastHiterTick = time.Now().UnixMilli()
 		if it := tp.UseItems[protocol.UDress]; it != nil && it.Dura > 0 {
 			it.Dura--
 			tp.sendDuraChange(server, it)

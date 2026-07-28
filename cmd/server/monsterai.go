@@ -30,8 +30,13 @@ const (
 	AISpit      = 19 // 锥形喷吐（Race 82/118/119）
 	AISpawnHive = 20 // 固定召唤巢穴（Race 103 蜂王 / 116 蜘蛛巢）
 	AICentiKing = 21 // 蜈蚣王潜地毒 AoE（Race 107）
-	AICowKing   = 22 // 牛魔王 AoE + 狂暴阶段（Race 92）
-	AIPulse     = 23 // 固定远程脉冲（Race 115 触角神）
+	AICowKing          = 22 // 牛魔王 AoE + 狂暴阶段（Race 92）
+	AIPulse            = 23 // 固定远程脉冲（Race 115 触角神）
+	AILightning        = 24 // 线性闪电（Race 94 TLightingZombi）
+	AIFireAura         = 25 // 火焰光环（TFireMonster）
+	AITransform        = 26 // 变形（Race 113 TElfMonster）
+	AILevelingSkeleton = 27 // 升级骷髅（Race 100 TWhiteSkeleton）
+	AIBoneKing         = 28 // 骷髅王召唤（TBoneKingMonster）
 )
 
 func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, e *UserEngine, target *PlayObject, dist int, now int64) {
@@ -70,6 +75,16 @@ func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, e *UserEngine
 		o.runCowKingAI(server, target, dist, now)
 	case AIPulse:
 		o.runPulseAI(server, now)
+	case AILightning:
+		o.runLightningAI(server, target, dist, now)
+	case AIFireAura:
+		o.runFireAuraAI(server, target, dist, now)
+	case AITransform:
+		o.runTransformAI(server, target, dist, now)
+	case AILevelingSkeleton:
+		o.runLevelingSkeletonAI(server, target, dist, now)
+	case AIBoneKing:
+		o.runBoneKingAI(server, e, target, dist, now)
 	default:
 		o.runBaseAI(server, target, dist, now)
 	}
@@ -90,20 +105,25 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 		// 潜地中：目标进入 4 格内出现（Delphi nComeOutValue=4，|dx|<4 && |dy|<4）
 		if dist <= 3 {
 			o.FixedHide = false
-			o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
+			o.SendRefMsg(RM_DIGUP, o.Dir, o.CurrX, o.CurrY, o.Name)
 			log.Logf(log.LevelInfo, "Monster", "%s emerged from underground", o.Name)
+		} else if !o.StickMode && now-o.WalkTick >= o.WalkSpeed {
+			// Delphi TDigOutZombi: 移动型可地下静默接近目标
+			o.WalkTick = now
+			dir := dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+			o.WalkTo(dir) // 无广播
 		}
 		return
 	}
 	if o.StickMode {
 		// Delphi TStickMonster（ObjMon2.pas:252）：固定伏击，不追击；
-		// 目标超出 nAttackRange=4 → ComeDown 回潜（无目标回潜由 Run 处理）
+		// 目标超出 nAttackRange=4 → ComeDown 回潜
 		if dist <= 1 {
 			o.meleeAttack(server, target, now)
 		} else if dist > 4 {
 			o.FixedHide = true
 			o.TargetID = 0
-			o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+			o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 		}
 		return
 	}
@@ -113,14 +133,14 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 		// 10% 概率回潜
 		if rand.Intn(10) == 0 {
 			o.FixedHide = true
-			o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+			o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 		}
 	} else {
 		o.chaseTarget(target, now)
 		// 远距离低概率回潜
 		if rand.Intn(30) == 0 && dist > 4 {
 			o.FixedHide = true
-			o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+			o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 		}
 	}
 }
@@ -146,15 +166,16 @@ func (o *MonsterObject) explode(server *netserver.TCPServer, target *PlayObject,
 		return
 	}
 	o.HitTick = now
-	damage := o.MaxHP / 2
-	if damage < 50 {
-		damage = 50
+	// Delphi: 50% 物理 + 50% 魔法（GetHitStruckDamage + GetMagStruckDamage）
+	power := o.MaxHP / 2
+	if power < 50 {
+		power = 50
 	}
-	// 对 1 格内所有玩家造成伤害
 	for dy := -1; dy <= 1; dy++ {
 		for dx := -1; dx <= 1; dx++ {
 			obj := o.envir.GetMovingObject(o.CurrX+dx, o.CurrY+dy)
 			if p, ok := obj.(*PlayObject); ok && !p.Death && !p.Ghost {
+				damage := halfPhysHalfMag(p.BaseObject, power)
 				o.applyMonsterDamageToPlayer(server, p, damage, now)
 			}
 		}
@@ -163,7 +184,7 @@ func (o *MonsterObject) explode(server *netserver.TCPServer, target *PlayObject,
 	o.Death = true
 	o.DeathTick = now
 	o.WAbil.HP = 0
-	log.Logf(log.LevelInfo, "Monster", "%s self-destructed dealing %d damage", o.Name, damage)
+	log.Logf(log.LevelInfo, "Monster", "%s self-destructed", o.Name)
 }
 
 func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -247,6 +268,10 @@ func (o *MonsterObject) runPoisonAI(server *netserver.TCPServer, target *PlayObj
 		if rand.Intn(3) == 0 {
 			target.MakePoison(POISON_DECHEALTH, 80)
 		}
+		// Delphi: 部分毒怪附带红毒（降防）
+		if rand.Intn(4) == 0 {
+			target.MakePoison(POISON_DAMAGEARMOR, 80)
+		}
 		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 		o.FocusTick = now
 		return
@@ -310,8 +335,18 @@ func (o *MonsterObject) runGuardAI(server *netserver.TCPServer, now int64) {
 }
 
 // runDualAxeAI — TDualAxeMonster (Race 87): 7格远程飞斧，连射机制
-// Delphi ObjAxeMon.pas:65-100
+// Delphi ObjAxeMon.pas:65-100, FlyAxeAttack 延迟 = max(dx,dy)*50+600ms
 func (o *MonsterObject) runDualAxeAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	// 结算延迟伤害
+	if o.pendingAxeDmg > 0 && now >= o.pendingAxeTick {
+		if o.engine != nil {
+			if t := o.engine.GetPlayer(o.pendingAxeTarget); t != nil && !t.Death && !t.Ghost {
+				o.applyMonsterDamageToPlayer(server, t, o.pendingAxeDmg, now)
+			}
+		}
+		o.pendingAxeDmg = 0
+		o.pendingAxeTarget = 0
+	}
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 		return
@@ -320,13 +355,12 @@ func (o *MonsterObject) runDualAxeAI(server *netserver.TCPServer, target *PlayOb
 		if now-o.HitTick > o.AttackSpeed {
 			o.HitTick = now
 			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-			// 连射：burstCount 次快速攻击，之后 1/5 概率重置
 			o.burstCount++
 			if o.burstCount >= 2 {
 				if rand.Intn(5) == 0 {
 					o.burstCount = 0
 				}
-				o.HitTick = now + o.AttackSpeed // 连射结束后正常冷却
+				o.HitTick = now + o.AttackSpeed
 			}
 			spd := target.SpeedPoint
 			if spd < 1 {
@@ -334,10 +368,17 @@ func (o *MonsterObject) runDualAxeAI(server *netserver.TCPServer, target *PlayOb
 			}
 			if rand.Intn(spd) < o.HitPoint {
 				damage := o.calcMonsterDamage(target.BaseObject)
-				o.applyMonsterDamageToPlayer(server, target, damage, now)
+				// Delphi FlyAxeAttack: 伤害延迟与距离成正比
+				maxD := abs(target.CurrX - o.CurrX)
+				if d2 := abs(target.CurrY - o.CurrY); d2 > maxD {
+					maxD = d2
+				}
+				o.pendingAxeDmg = damage
+				o.pendingAxeTarget = target.ID
+				o.pendingAxeTick = now + int64(maxD)*50 + 600
 				o.FocusTick = now
 			}
-			o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+			o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
 		}
 		return
 	}
@@ -365,9 +406,8 @@ func (o *MonsterObject) runStoneAI(server *netserver.TCPServer, target *PlayObje
 }
 
 // runLeechAI — TElectronicScolpionMon (Race 200): 闪电吸血
-// Delphi ObjMon.pas:1842-1881: 2格内闪电攻击，吸血 damage/btGetBackHP
+// Delphi ObjMon.pas:1842-1881: 2格内闪电攻击，MC 伤害，吸血 damage/btGetBackHP
 func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
-	// Delphi: 封魔状态下降级为追击
 	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
 		o.chaseTarget(target, now)
 		return
@@ -378,14 +418,16 @@ func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObje
 		}
 		o.HitTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-		damage := o.calcMonsterDamage(target.BaseObject)
-		// HP < 50% 时魔法模式：伤害增加
+		damage := o.calcMonsterMagicDamage(target.BaseObject)
 		if int(o.WAbil.HP) < o.MaxHP/2 {
 			damage = damage * 3 / 2
 		}
 		o.applyMonsterDamageToPlayer(server, target, damage, now)
-		// 吸血：回复 damage/5 HP
-		leech := damage / 5
+		divisor := o.leechDivisor
+		if divisor < 1 {
+			divisor = 5
+		}
+		leech := damage / divisor
 		if leech > 0 {
 			hp := int(o.WAbil.HP) + leech
 			if hp > o.MaxHP {
@@ -585,7 +627,7 @@ func (o *MonsterObject) runCentiKingAI(server *netserver.TCPServer, target *Play
 		o.FixedHide = true
 		o.TargetID = 0
 		o.attickTick = now
-		o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+		o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 	}
 }
 
@@ -667,6 +709,142 @@ func (o *MonsterObject) runPulseAI(server *netserver.TCPServer, now int64) {
 			}
 			damage := o.calcMonsterMagicDamage(p.BaseObject)
 			o.applyMonsterDamageToPlayer(server, p, damage, now)
+		}
+	}
+}
+
+// runLightningAI — TLightingZombi (Race 94): 线性闪电，穿透一条线上所有目标
+// Delphi: 远程闪电，沿方向命中所有玩家
+func (o *MonsterObject) runLightningAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+		return
+	}
+	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
+		o.chaseTarget(target, now)
+		return
+	}
+	if dist <= 8 && now-o.HitTick > o.AttackSpeed {
+		o.HitTick = now
+		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+		dx, dy := dirToOffset(o.Dir)
+		for i := 1; i <= 8; i++ {
+			lx, ly := o.CurrX+dx*i, o.CurrY+dy*i
+			if o.envir == nil {
+				break
+			}
+			if !o.envir.CanWalkEx(lx, ly, true) {
+				break
+			}
+			obj := o.envir.GetMovingObject(lx, ly)
+			if p, ok := obj.(*PlayObject); ok && !p.Death && !p.Ghost {
+				damage := o.calcMonsterMagicDamage(p.BaseObject)
+				o.applyMonsterDamageToPlayer(server, p, damage, now)
+			}
+		}
+		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
+		o.FocusTick = now
+		return
+	}
+	o.chaseTarget(target, now)
+}
+
+// runFireAuraAI — TFireMonster: 火焰光环，十字形 9 格地图事件（20s, 10 dmg/tick）
+// Delphi ObjMon3.pas:1064-1143: 持续区域封锁，非定向攻击
+func (o *MonsterObject) runFireAuraAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if o.envir != nil && now-o.lastAuraTick > o.AttackSpeed {
+		o.lastAuraTick = now
+		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
+		offsets := [][2]int{{0, 0}, {0, -1}, {0, -2}, {0, 1}, {0, 2}, {-1, 0}, {-2, 0}, {1, 0}, {2, 0}}
+		for _, pos := range offsets {
+			o.envir.AddFireEvent(server, o.CurrX+pos[0], o.CurrY+pos[1], 10, 20000, o.ID)
+		}
+	}
+	// 有目标时仍近战/追击
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target, now)
+	}
+}
+
+// runTransformAI — TElfMonster (Race 113): 双形态切换
+// Delphi ObjMon.pas:207: HP < 50% 切换形态，改变外观和属性
+func (o *MonsterObject) runTransformAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	shouldBeForm := 0
+	if int(o.WAbil.HP) < o.MaxHP/2 {
+		shouldBeForm = 1
+	}
+	if o.transformForm != shouldBeForm && now-o.transformTick > 5000 {
+		o.transformForm = shouldBeForm
+		o.transformTick = now
+		if shouldBeForm == 1 {
+			o.saveDC, o.saveAC, o.saveMC = o.WAbil.DC, o.WAbil.AC, o.WAbil.MC
+			o.WAbil.DC = o.WAbil.MC
+			o.WAbil.AC = o.WAbil.AC * 3 / 2
+			o.Appr = o.transformAppr2
+		} else {
+			o.WAbil.DC, o.WAbil.AC, o.WAbil.MC = o.saveDC, o.saveAC, o.saveMC
+			o.Appr = o.transformAppr2 - 1
+		}
+		o.SendRefMsg(RM_FEATURECHANGED, int(o.Feature()), o.CurrX, o.CurrY, "")
+	}
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target, now)
+	}
+}
+
+// runLevelingSkeletonAI — TWhiteSkeleton (Race 100): 道士召唤的升级骷髅
+// Delphi ObjMon.pas:159: 通过战斗获得经验升级，属性增长
+func (o *MonsterObject) runLevelingSkeletonAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target, now)
+	}
+}
+
+// gainPetXP — 升级骷髅经验获取与升级
+func (o *MonsterObject) gainPetXP(amount int) {
+	if amount < 1 {
+		return
+	}
+	o.petXP += amount
+	if o.petXP >= o.petMaxXP {
+		o.petXP -= o.petMaxXP
+		o.petLevel++
+		o.petMaxXP = o.petMaxXP * 3 / 2
+		loDC := int(o.WAbil.DC&0xFFFF) + 2
+		hiDC := int(o.WAbil.DC>>16) + 3
+		o.WAbil.DC = uint32(loDC) | uint32(hiDC)<<16
+		o.MaxHP += 20
+		o.WAbil.MaxHP = uint16(o.MaxHP)
+		o.WAbil.HP = uint16(o.MaxHP)
+		o.SendRefMsg(RM_FEATURECHANGED, int(o.Feature()), o.CurrX, o.CurrY, "")
+		log.Logf(log.LevelInfo, "Monster", "%s leveled up to %d", o.Name, o.petLevel)
+	}
+}
+
+// runBoneKingAI — TBoneKingMonster: 骷髅王召唤
+// Delphi ObjMon3.pas:54: 周期召唤骷髅战士
+func (o *MonsterObject) runBoneKingAI(server *netserver.TCPServer, e *UserEngine, target *PlayObject, dist int, now int64) {
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target, now)
+	}
+	if e == nil || o.envir == nil {
+		return
+	}
+	if now-o.lastSummonTick > 15000 && e.countLiveChildren(o.ID) < 8 {
+		o.lastSummonTick = now
+		names := []string{"骷髅战士", "骷髅精灵"}
+		for i := 0; i < 3; i++ {
+			x := o.CurrX + rand.Intn(3) - 1
+			y := o.CurrY + rand.Intn(3) - 1
+			e.spawnChild(o, names[rand.Intn(len(names))], x, y, now)
 		}
 	}
 }

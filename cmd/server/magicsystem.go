@@ -268,6 +268,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			pet.WAbil.MaxHP = uint16(petHP)
 			pet.WAbil.HP = uint16(petHP)
 			pet.initAITimers(time.Now().UnixMilli())
+			pet.PlayerMasterID = p.ID
 			p.envir.AddObject(petX, petY, OS_MOVINGOBJECT, pet)
 			p.Engine.Monsters = append(p.Engine.Monsters, pet)
 			pet.SendRefMsg(RM_TURN, pet.Dir, petX, petY, petName)
@@ -288,6 +289,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				if int(mon.WAbil.HP) < mon.MaxHP/3 && rand.Intn(100) < 30+int(p.WAbil.Level) {
 					mon.TargetID = 0
 					mon.LastHiterID = 0
+					mon.PlayerMasterID = p.ID
 					log.Logf(log.LevelInfo, "Magic", "%s tamed %s", p.Name, mon.Name)
 				}
 			}

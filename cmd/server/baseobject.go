@@ -25,6 +25,8 @@ const (
 	RM_FIREHIT   = 10018
 	RM_SPELL     = 10012
 	RM_FEATURECHANGED = 10019
+	RM_DIGUP     = 10020
+	RM_DIGDOWN   = 10021
 )
 
 const viewRange = 12
@@ -53,11 +55,12 @@ type BaseObject struct {
 	WAbil protocol.Ability
 
 	// 战斗
-	HitPoint   int
-	SpeedPoint int
-	HitSpeed   int
-	Luck       int
-	Gold       int
+	HitPoint    int
+	SpeedPoint  int
+	HitSpeed    int
+	Luck        int
+	Gold        int
+	UndeadBonus int // 不死系易伤加成（Delphi btUndead）
 
 	// 状态
 	StatusTimeArr [12]int16

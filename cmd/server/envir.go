@@ -142,6 +142,12 @@ func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 	return true
 }
 
+// CanSafeWalk 检查可通行性并排除危险地形（Delphi CanSafeWalk：lava 等）。
+// 当前地图格式无独立危险标志位，等同于 CanWalk；待 mapformat 扩展后补充。
+func (e *Environment) CanSafeWalk(x, y int) bool {
+	return e.CanWalk(x, y)
+}
+
 func (e *Environment) getPlayerByID(id int32) *PlayObject {
 	for i := range e.Cells {
 		for _, o := range e.Cells[i].ObjList {

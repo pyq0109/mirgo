@@ -9,6 +9,8 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
+const LA_UNDEAD = 1
+
 type MonsterObject struct {
 	*BaseObject
 	Race        byte
@@ -69,6 +71,45 @@ type MonsterObject struct {
 	hpBracket       int
 	saveAttackSpeed int64
 	saveWalkSpeed   int64
+
+	// 主人-奴隶系统（玩家宠物）
+	PlayerMasterID int32 // 玩家主人 ID（0=非玩家宠物，区别于 MasterID 的怪物父子关系）
+	SlaveRelax     bool  // 休息模式（不传送跟随）
+
+	// 幽灵两阶段清理
+	ghostTick int64
+
+	// 逃跑改进（Delphi GetNextPosition 5 格）
+	fleeTargetX, fleeTargetY int
+	fleeExpireTick           int64
+
+	// 飞斧延迟伤害（Delphi FlyAxeAttack: max(dx,dy)*50+600ms）
+	pendingAxeDmg    int
+	pendingAxeTarget int32
+	pendingAxeTick   int64
+
+	// 吸血配置（Delphi btGetBackHP）
+	leechDivisor int
+
+	// 升级骷髅（Delphi TWhiteSkeleton 经验升级）
+	petXP    int
+	petLevel int
+	petMaxXP int
+
+	// 变形（Delphi TElfMonster Race 113 双形态切换）
+	transformForm  int
+	transformTick  int64
+	transformAppr2 uint16
+	saveDC, saveAC, saveMC uint32
+
+	// 火焰光环（Delphi TFireMonster 十字火事件）
+	lastAuraTick int64
+
+	// 不死属性（Delphi m_btLifeAttrib）
+	LifeAttrib byte
+
+	// 运行时缓存（Run 期间有效）
+	engine *UserEngine
 }
 
 func getAIBehavior(race byte) int {
@@ -98,12 +139,14 @@ func getAIBehavior(race byte) int {
 		return AICowKing
 	case 93: // TThornDarkMonster — 远程飞斧变种
 		return AIRanged
-	case 94: // TLightingZombi — 远程闪电
-		return AIRanged
+	case 94: // TLightingZombi — 线性闪电（穿透一条线上所有目标）
+		return AILightning
 	case 95: // TDigOutZombi — 潜地僵尸
 		return AIBurrow
 	case 96: // TZilKinZombi — 死亡分裂
 		return AISplit
+	case 100: // TWhiteSkeleton — 升级骷髅（道士召唤，经验升级）
+		return AILevelingSkeleton
 	case 101: // TScultureMonster — 石化伏击
 		return AIStone
 	case 102: // TScultureKingMonster — 祖玛教主（石化 + 危险等级召唤 + 魔法近战）
@@ -124,6 +167,8 @@ func getAIBehavior(race byte) int {
 		return AIPassive
 	case 112: // TArcherGuard — 弓箭守卫（固定炮台，只打红名/攻击者）
 		return AIGuard
+	case 113: // TElfMonster — 变形精灵（HP 阈值切换形态/属性）
+		return AITransform
 	case 114: // TElfWarriorMonster — 潜地战士
 		return AIBurrow
 	case 115: // TBigHeartMonster — 触角神（固定 16 格脉冲）
@@ -211,6 +256,15 @@ func (o *MonsterObject) OnStruck(attackerID int32, now int64, userEngine *UserEn
 func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *UserEngine) {
 	if o.Ghost || o.Death {
 		return
+	}
+	o.engine = userEngine
+
+	// Delphi: 奴隶跟随/传送/叛变（ObjMon.pas:468-497）
+	if o.PlayerMasterID != 0 {
+		o.slaveFollow(userEngine, now)
+		if o.Ghost || o.Death {
+			return
+		}
 	}
 
 	// 状态效果 tick（所有对象都需要，包括石化中的怪物）
@@ -326,22 +380,29 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.chaseTarget(target, now)
 			}
 		case AIFlee:
-			// Delphi TChickenDeer (ObjMon.pas:542-598)：始终远离威胁，不反击
-			if o.StatusTimeArr[POISON_DONTMOVE] <= 0 && now-o.WalkTick >= o.WalkSpeed {
-				o.WalkTick = now
+			// Delphi TChickenDeer (ObjMon.pas:542-598)：计算远离方向 5 格目标点，跑到位
+			if o.StatusTimeArr[POISON_DONTMOVE] > 0 {
+				break
+			}
+			if o.fleeTargetX == 0 && o.fleeTargetY == 0 || now > o.fleeExpireTick {
 				fleeDir := dirToward(target.CurrX, target.CurrY, o.CurrX, o.CurrY)
-				if o.WalkTo(fleeDir) {
-					o.SendRefMsg(RM_WALK, fleeDir, o.CurrX, o.CurrY, "")
+				fdx, fdy := dirToOffset(fleeDir)
+				o.fleeTargetX = o.CurrX + fdx*5
+				o.fleeTargetY = o.CurrY + fdy*5
+				o.fleeExpireTick = now + 5000
+			}
+			if now-o.WalkTick >= o.WalkSpeed {
+				o.WalkTick = now
+				if o.CurrX == o.fleeTargetX && o.CurrY == o.fleeTargetY {
+					o.fleeTargetX, o.fleeTargetY = 0, 0
+					break
+				}
+				dir := dirToward(o.CurrX, o.CurrY, o.fleeTargetX, o.fleeTargetY)
+				if o.WalkTo(dir) {
+					o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
 				} else {
-					// 被阻挡时尝试绕行
-					clockwise := rand.Intn(3) != 0
-					for i := 0; i < 7; i++ {
-						var altDir int
-						if clockwise {
-							altDir = (fleeDir + i + 1) % 8
-						} else {
-							altDir = (fleeDir - i - 1 + 8) % 8
-						}
+					for i := 1; i < 8; i++ {
+						altDir := (dir + i) % 8
 						if o.WalkTo(altDir) {
 							o.SendRefMsg(RM_WALK, altDir, o.CurrX, o.CurrY, "")
 							break
@@ -408,7 +469,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			// Delphi TStickMonster/TCentipedeKingMonster：出土状态下丢失目标 → 回潜
 			if o.StickMode && !o.FixedHide && (o.AIBehavior == AIBurrow || o.AIBehavior == AICentiKing) {
 				o.FixedHide = true
-				o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+				o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 			}
 			return
 		}
@@ -431,7 +492,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				} else if rand.Intn(4) == 0 {
 					o.TurnTo(rand.Intn(8))
 				} else {
-					if o.WalkTo(o.Dir) {
+					if o.monsterWalkTo(o.Dir, userEngine) {
 						o.SendRefMsg(RM_WALK, o.Dir, o.CurrX, o.CurrY, "")
 					}
 				}
@@ -451,12 +512,21 @@ func (o *MonsterObject) calcMonsterDamage(target *BaseObject) int {
 		attack = 1
 	}
 
+	// Delphi: 不死系加成（ObjBase.pas:22000）
+	if o.LifeAttrib == LA_UNDEAD {
+		attack += target.UndeadBonus
+	}
+
 	// Delphi: nArmor = loAC + Random(hiAC - loAC + 1)
 	loAC := int(target.WAbil.AC & 0xFFFF)
 	hiAC := int(target.WAbil.AC >> 16)
 	armor := loAC
 	if hiAC > loAC {
 		armor = loAC + rand.Intn(hiAC-loAC+1)
+	}
+	// Delphi: 红毒（POISON_DAMAGEARMOR）降低防御力
+	if target.StatusTimeArr[POISON_DAMAGEARMOR] > 0 {
+		armor /= 2
 	}
 	damage := attack - armor
 	if damage < 1 {
@@ -557,6 +627,12 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	if IsSafeZone(o.envir, target.CurrX, target.CurrY) {
 		return
 	}
+	target.LastHiterID = o.ID
+	target.LastHiterTick = now
+	// Delphi TWhiteSkeleton: 战斗获得经验
+	if o.AIBehavior == AILevelingSkeleton {
+		o.gainPetXP(damage / 10)
+	}
 	hp := int(target.WAbil.HP)
 	hp -= damage
 	if hp < 0 {
@@ -605,7 +681,7 @@ func (o *MonsterObject) chaseTarget(target *PlayObject, now int64) {
 	o.WalkTick = now
 
 	dir := dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-	if o.WalkTo(dir) {
+	if o.monsterWalkTo(dir, o.engine) {
 		o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
 		return
 	}
@@ -618,7 +694,7 @@ func (o *MonsterObject) chaseTarget(target *PlayObject, now int64) {
 		} else {
 			altDir = (dir - i - 1 + 8) % 8
 		}
-		if o.WalkTo(altDir) {
+		if o.monsterWalkTo(altDir, o.engine) {
 			o.SendRefMsg(RM_WALK, altDir, o.CurrX, o.CurrY, "")
 			return
 		}
@@ -650,6 +726,12 @@ func (o *MonsterObject) meleeAttack(server *netserver.TCPServer, target *PlayObj
 }
 
 func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
+	// Delphi IsProperTarget（ObjBase.pas:21344-21373）：奴隶目标受主人约束
+	if o.PlayerMasterID != 0 {
+		o.searchTargetAsSlave(now, userEngine)
+		return
+	}
+
 	hasTarget := o.TargetID != 0
 	interval := int64(1000) // 无目标时 1 秒搜索
 	if hasTarget {
@@ -717,6 +799,137 @@ func (o *MonsterObject) validateTarget(now int64, userEngine *UserEngine) {
 	if dx+dy > 15 {
 		o.TargetID = 0
 	}
+}
+
+// slaveFollow — Delphi 主人跟随与瞬移（ObjMon.pas:468-497）：
+// 主人死亡/离线 → 叛变；距离 >20 格或跨图 → 瞬移到主人背后。
+func (o *MonsterObject) slaveFollow(e *UserEngine, now int64) {
+	master := e.GetPlayer(o.PlayerMasterID)
+	if master == nil || master.Ghost {
+		o.PlayerMasterID = 0
+		return
+	}
+	if master.Death {
+		o.PlayerMasterID = 0
+		o.TargetID = 0
+		return
+	}
+	if master.MapName == o.MapName {
+		dx := abs(master.CurrX - o.CurrX)
+		dy := abs(master.CurrY - o.CurrY)
+		dist := dx
+		if dy > dist {
+			dist = dy
+		}
+		if dist <= 3 {
+			return
+		}
+	}
+	if o.SlaveRelax {
+		return
+	}
+	// Delphi: dist > 20 或不同地图 → SpaceMove 瞬移
+	needTeleport := master.MapName != o.MapName
+	if !needTeleport {
+		dx := abs(master.CurrX - o.CurrX)
+		dy := abs(master.CurrY - o.CurrY)
+		dist := dx
+		if dy > dist {
+			dist = dy
+		}
+		needTeleport = dist > 20
+	}
+	if !needTeleport {
+		return
+	}
+	// GetBackPosition: 主人背后一格
+	bdx, bdy := dirToOffset((master.Dir + 4) % 8)
+	tx, ty := master.CurrX+bdx, master.CurrY+bdy
+	if o.envir != nil {
+		o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
+	}
+	o.MapName = master.MapName
+	o.CurrX, o.CurrY = tx, ty
+	o.envir = master.envir
+	if o.envir != nil {
+		o.envir.AddObject(tx, ty, OS_MOVINGOBJECT, o)
+	}
+	o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
+}
+
+// searchTargetAsSlave — Delphi IsProperTarget 奴隶规则（ObjBase.pas:21344-21373）：
+// 优先攻击主人的 LastHiter，不攻击同主人奴隶，不攻击安全区目标。
+func (o *MonsterObject) searchTargetAsSlave(now int64, userEngine *UserEngine) {
+	hasTarget := o.TargetID != 0
+	interval := int64(1000)
+	if hasTarget {
+		interval = o.searchInterval
+		if interval <= 0 {
+			interval = 8000
+		}
+	}
+	if now-o.SearchTick <= interval {
+		return
+	}
+	o.SearchTick = now
+
+	master := userEngine.GetPlayer(o.PlayerMasterID)
+	if master == nil || master.Death || master.Ghost {
+		return
+	}
+	// 优先：主人的 LastHiter（10s 内）
+	if master.LastHiterID != 0 && now-master.LastHiterTick < 10000 {
+		if t := userEngine.GetPlayer(master.LastHiterID); t != nil && !t.Death && !t.Ghost {
+			if !IsSafeZone(o.envir, t.CurrX, t.CurrY) {
+				o.TargetID = t.ID
+				return
+			}
+		}
+	}
+	// 其次：正在攻击主人的玩家（视野内 LastHiter 指向主人的）
+	if o.envir == nil {
+		return
+	}
+	vr := o.ViewRange
+	if vr <= 0 {
+		vr = 5
+	}
+	for _, obj := range o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr) {
+		p, ok := obj.(*PlayObject)
+		if !ok || p.Ghost || p.Death {
+			continue
+		}
+		if p.LastHiterID == master.ID && now-p.LastHiterTick < 5000 {
+			continue // 这是主人正在打的，不是打主人的
+		}
+		// 检查该玩家是否在打主人（简化：玩家的 LastHiter 是主人不算）
+		if p.Hidden && rand.Intn(100) >= o.CoolEye {
+			continue
+		}
+		if IsSafeZone(o.envir, p.CurrX, p.CurrY) {
+			continue
+		}
+		o.TargetID = p.ID
+		return
+	}
+}
+
+// monsterWalkTo — 怪物专用移动：危险地形检查 + 主人面前阻挡（Delphi WalkTo 守卫）。
+func (o *MonsterObject) monsterWalkTo(dir int, e *UserEngine) bool {
+	dx, dy := dirToOffset(dir)
+	newX, newY := o.CurrX+dx, o.CurrY+dy
+	if o.envir != nil && !o.envir.CanSafeWalk(newX, newY) {
+		return false
+	}
+	if o.PlayerMasterID != 0 && e != nil {
+		if master := e.GetPlayer(o.PlayerMasterID); master != nil {
+			fdx, fdy := dirToOffset(master.Dir)
+			if newX == master.CurrX+fdx && newY == master.CurrY+fdy {
+				return false
+			}
+		}
+	}
+	return o.WalkTo(dir)
 }
 
 func dirToward(fromX, fromY, toX, toY int) int {

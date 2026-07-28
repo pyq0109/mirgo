@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -204,7 +206,25 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 			}
 			entry.LiveList = newList
 
-			for live < entry.Count {
+			// Delphi nMonGenRate: 按配置比率调整刷怪数量
+			count := entry.Count
+			if e.Config != nil {
+				rate := e.Config.GetMonGenRate()
+				if rate > 0 && rate != 10 {
+					count = int(math.Max(1, math.Round(float64(max(1, count))/(float64(rate)/10.0))))
+				}
+			}
+
+			// Delphi g_dwZenLimit: 单 tick 刷怪时间预算
+			var zenLimit int64 = 50
+			if e.Config != nil {
+				zenLimit = e.Config.GetZenLimit()
+			}
+			spawnStart := time.Now().UnixMilli()
+			for live < count {
+				if time.Now().UnixMilli()-spawnStart > zenLimit {
+					break
+				}
 				e.SpawnMonster(entry, server, now)
 				live++
 			}
@@ -226,17 +246,29 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 					e.spawnSplitZombies(m, server, now)
 				}
 			}
-			if m.DeathTick > 0 && now-m.DeathTick > 180000 {
+			// Delphi 两阶段清理：3 min → ghost（从地图消失），+5 min → 从列表移除
+			if m.ghostTick == 0 && m.DeathTick > 0 && now-m.DeathTick > 180000 {
 				m.Ghost = true
+				m.ghostTick = now
 				if m.envir != nil {
 					m.envir.RemoveObject(m.CurrX, m.CurrY, OS_MOVINGOBJECT, m)
 				}
-				log.Logf(log.LevelInfo, "MonGen", "corpse removed: %s (id=%d)", m.Name, m.ID)
+				log.Logf(log.LevelInfo, "MonGen", "corpse ghosted: %s (id=%d)", m.Name, m.ID)
 			}
 			continue
 		}
 		m.Run(server, now, e)
 	}
+
+	// Delphi: ghost + 5 min → 从 Monsters 切片彻底移除
+	alive := e.Monsters[:0]
+	for _, m := range e.Monsters {
+		if m.ghostTick > 0 && now-m.ghostTick > 300000 {
+			continue
+		}
+		alive = append(alive, m)
+	}
+	e.Monsters = alive
 
 	e.despawnGroundItems(server, now)
 }
@@ -337,6 +369,11 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 	}
 	mon.initAITimers(now)
 
+	// Delphi 对齐：不死属性
+	if def.Undead > 0 {
+		mon.LifeAttrib = LA_UNDEAD
+	}
+
 	// Delphi 对齐：特殊 Race 初始状态
 	switch byte(def.Race) {
 	case 51, 53, 84:
@@ -372,6 +409,13 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 		if mon.ViewRange <= 0 {
 			mon.ViewRange = 16
 		}
+	case 200: // TElectronicScolpionMon — 吸血除数
+		mon.leechDivisor = 5
+	case 113: // TElfMonster — 变形精灵，备用外观
+		mon.transformAppr2 = uint16(def.Appr + 1)
+	case 100: // TWhiteSkeleton — 升级骷髅初始等级
+		mon.petLevel = 1
+		mon.petMaxXP = 100
 	}
 }
 
