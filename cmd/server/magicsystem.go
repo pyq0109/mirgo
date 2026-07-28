@@ -263,7 +263,11 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			pet.CurrX = petX
 			pet.CurrY = petY
 			pet.envir = p.envir
+			pet.WAbil.Level = p.WAbil.Level
 			pet.WAbil.DC = uint32(5 + int(p.WAbil.Level)/2)
+			pet.WAbil.MaxHP = uint16(petHP)
+			pet.WAbil.HP = uint16(petHP)
+			pet.initAITimers(time.Now().UnixMilli())
 			p.envir.AddObject(petX, petY, OS_MOVINGOBJECT, pet)
 			p.Engine.Monsters = append(p.Engine.Monsters, pet)
 			pet.SendRefMsg(RM_TURN, pet.Dir, petX, petY, petName)

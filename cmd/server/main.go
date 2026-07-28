@@ -320,8 +320,8 @@ func main() {
 			tickCount++
 			now := time.Now().UnixMilli()
 			userEngine.ProcessHumans(server)
-			userEngine.ProcessMonsters(server, tickCount*100)
-			userEngine.ProcessDoors(tickCount * 100)
+			userEngine.ProcessMonsters(server, now)
+			userEngine.ProcessDoors(now)
 			userEngine.ProcessEvents(server, now)
 			if tickCount%300 == 0 {
 				userEngine.SaveAllPlayers(db)

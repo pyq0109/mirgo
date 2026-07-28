@@ -3,6 +3,7 @@ package main
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
@@ -69,15 +70,11 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 		}
 		dx, dy := dirToOffset(p.Dir)
 		mx, my := p.CurrX+dx*2, p.CurrY+dy*2
-		mon := NewMonsterObject(parts[1], p.Engine.nextMonsterID, 19, 50, 190, 100, 600, 1500, 50)
-		p.Engine.nextMonsterID++
-		mon.CurrX, mon.CurrY = mx, my
-		mon.MapName = p.MapName
-		mon.envir = p.envir
-		mon.HomeX, mon.HomeY = mx, my
-		p.envir.AddObject(mx, my, OS_MOVINGOBJECT, mon)
-		p.Engine.Monsters = append(p.Engine.Monsters, mon)
-		p.sysMsg(server, "召唤: "+parts[1])
+		if mon := p.Engine.SpawnMonsterByName(p.MapName, mx, my, parts[1], time.Now().UnixMilli()); mon != nil {
+			p.sysMsg(server, "召唤: "+parts[1])
+		} else {
+			p.sysMsg(server, "召唤失败: "+parts[1])
+		}
 		return true
 	case "gold":
 		if len(parts) < 2 {

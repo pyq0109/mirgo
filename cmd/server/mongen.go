@@ -234,27 +234,43 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 		def = &MonsterDef{Race: 51, RaceImg: 11, Appr: 160, HP: 5, Exp: 9, DC: 1, DCMax: 1, Speed: 10}
 	}
 
-	walkSpeed := int64(1400)
-	attackSpeed := int64(2000)
-	if def.Speed > 0 {
-		walkSpeed = int64(2000 - def.Speed*100)
-		if walkSpeed < 200 {
-			walkSpeed = 200
-		}
-		attackSpeed = walkSpeed + 900
-	}
-
-	mon := NewMonsterObject(entry.MonName, id, byte(def.Race), byte(def.RaceImg), uint16(def.Appr), def.HP, walkSpeed, attackSpeed, def.Exp)
+	mon := NewMonsterObject(entry.MonName, id, byte(def.Race), byte(def.RaceImg), uint16(def.Appr), def.HP, 1400, 2000, def.Exp)
 	mon.MapName = entry.MapName
 	mon.CurrX = x
 	mon.CurrY = y
 	mon.HomeX = entry.X
 	mon.HomeY = entry.Y
 	mon.envir = env
+	e.initMonsterFromDef(mon, def, now)
+
+	env.AddObject(x, y, OS_MOVINGOBJECT, mon)
+	e.Monsters = append(e.Monsters, mon)
+	entry.LiveList = append(entry.LiveList, mon)
+
+	// log.Logf(log.LevelInfo, "MonGen", "spawned %s (id=%d) at %s(%d,%d)", mon.Name, mon.ID, mon.MapName, x, y)
+	return mon
+}
+
+// initMonsterFromDef — Delphi MonInitialize (UsrEngn.pas:2578)：
+// 从数据库定义加载完整属性，设置 AI 计时器与特殊 Race 初始状态。
+func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now int64) {
+	if def.Speed > 0 {
+		mon.WalkSpeed = int64(2000 - def.Speed*100)
+		if mon.WalkSpeed < 200 {
+			mon.WalkSpeed = 200
+		}
+		mon.AttackSpeed = mon.WalkSpeed + 900
+	}
 	mon.HitPoint = def.Hit
 	mon.SpeedPoint = def.Speed
-	mon.BaseObject.WAbil.DC = uint32(def.DC) | uint32(def.DCMax)<<16
-	mon.BaseObject.WAbil.AC = uint32(def.AC) | uint32(def.MAC)<<16
+	mon.WAbil.Level = uint16(def.Lvl)
+	mon.WAbil.MaxHP = uint16(def.HP)
+	mon.WAbil.HP = uint16(def.HP)
+	mon.WAbil.AC = uint32(def.AC) | uint32(def.AC)<<16    // MakeLong(wAC, wAC)
+	mon.WAbil.MAC = uint32(def.MAC) | uint32(def.MAC)<<16 // MakeLong(wMAC, wMAC)
+	mon.WAbil.DC = uint32(def.DC) | uint32(def.DCMax)<<16
+	mon.WAbil.MC = uint32(def.MC) | uint32(def.MC)<<16
+	mon.WAbil.SC = uint32(def.SC) | uint32(def.SC)<<16
 	mon.ViewRange = def.ViewRange
 	mon.CoolEye = def.CoolEye
 	if def.WalkStep > 0 {
@@ -263,10 +279,9 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	if def.WalkWait > 0 {
 		mon.WalkWait = int64(def.WalkWait)
 	}
+	mon.initAITimers(now)
 
 	// Delphi 对齐：特殊 Race 初始状态
-	mon.spawnTick = now
-	mon.searchInterval = 3000 + rand.Int63n(2000) // 3-5秒随机
 	switch byte(def.Race) {
 	case 51, 53, 84:
 		mon.Animal = true
@@ -277,22 +292,154 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 		} else {
 			mon.AIBehavior = AIPassive
 		}
+	case 82, 119: // TSpitSpider/TBigPoisionSpider — 喷吐附带绿毒
+		mon.spitPoison = true
 	case 83: // TSlowATMonster — 慢速近战，攻击冷却翻倍
 		mon.AttackSpeed *= 2
-	case 85: // TStickMonster — 出生即潜地
+	case 85: // TStickMonster — 出生即潜地，固定不可移动
 		mon.FixedHide = true
+		mon.StickMode = true
 	case 101: // TScultureMonster — 出生即石化
 		mon.StoneMode = true
-	case 107: // TCentipedeKingMonster — 固定Boss，不可移动
+	case 102: // TScultureKingMonster — 出生即石化 + 危险等级召唤
+		mon.StoneMode = true
+		mon.dangerLevel = 5
+	case 107: // TCentipedeKingMonster — 出生即潜地，固定不可移动
 		mon.StickMode = true
+		mon.FixedHide = true
+	case 103, 116: // TBeeQueen/TSpiderHouseMonster — 固定召唤巢穴
+		mon.StickMode = true
+	case 110, 111, 112: // TCastleDoor/TWallStructure/TArcherGuard — 固定
+		mon.StickMode = true
+	case 115: // TBigHeartMonster — 固定脉冲，视野 16 格
+		mon.StickMode = true
+		if mon.ViewRange <= 0 {
+			mon.ViewRange = 16
+		}
+	}
+}
+
+// SpawnMonsterByName 按数据库定义在指定位置生成怪物（GM 命令/NPC 脚本/子体生成共用）。
+// 数据库无对应条目时使用通用近战怪兜底。位置不可走时在 3×3 范围内另找空位。
+func (e *UserEngine) SpawnMonsterByName(mapName string, x, y int, name string, now int64) *MonsterObject {
+	if e.mapMgr == nil {
+		return nil
+	}
+	env := e.mapMgr.FindMap(mapName)
+	if env == nil {
+		return nil
+	}
+	if !env.CanWalk(x, y) {
+		placed := false
+		for dy := -1; dy <= 1 && !placed; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				if env.CanWalk(x+dx, y+dy) {
+					x, y = x+dx, y+dy
+					placed = true
+					break
+				}
+			}
+		}
+		if !placed {
+			return nil
+		}
 	}
 
-	env.AddObject(x, y, OS_MOVINGOBJECT, mon)
-	e.Monsters = append(e.Monsters, mon)
-	entry.LiveList = append(entry.LiveList, mon)
+	def := e.MonsterDB.GetByName(name)
+	if def == nil {
+		def = &MonsterDef{Name: name, Race: 81, RaceImg: 50, Appr: 190, HP: 100, Exp: 50, DC: 10, DCMax: 15, Speed: 12, Hit: 5}
+	}
 
-	// log.Logf(log.LevelInfo, "MonGen", "spawned %s (id=%d) at %s(%d,%d)", mon.Name, mon.ID, mon.MapName, x, y)
+	e.mu.Lock()
+	id := e.nextMonsterID
+	e.nextMonsterID++
+	e.mu.Unlock()
+
+	mon := NewMonsterObject(def.Name, id, byte(def.Race), byte(def.RaceImg), uint16(def.Appr), def.HP, 1400, 2000, def.Exp)
+	mon.MapName = mapName
+	mon.CurrX, mon.CurrY = x, y
+	mon.HomeX, mon.HomeY = x, y
+	mon.envir = env
+	e.initMonsterFromDef(mon, def, now)
+
+	env.AddObject(x, y, OS_MOVINGOBJECT, mon)
+	e.mu.Lock()
+	e.Monsters = append(e.Monsters, mon)
+	e.mu.Unlock()
+	mon.SendRefMsg(RM_TURN, mon.Dir, x, y, mon.Name)
 	return mon
+}
+
+// countLiveChildren 统计 masterID 名下存活（未死亡、未幽灵）的子体数量。
+func (e *UserEngine) countLiveChildren(masterID int32) int {
+	n := 0
+	for _, m := range e.Monsters {
+		if m.MasterID == masterID && !m.Death && !m.Ghost {
+			n++
+		}
+	}
+	return n
+}
+
+// spawnChild 生成子体怪物（Delphi RegenMonsterByName 的对应实现）。
+// childName 非空且数据库有定义时按定义生成；否则克隆父体属性（HP 减半）。
+// 子体继承父体的目标，MasterID 记为父体 ID。位置不可走时返回 nil。
+func (e *UserEngine) spawnChild(parent *MonsterObject, childName string, x, y int, now int64) *MonsterObject {
+	if e.mapMgr == nil || parent.envir == nil {
+		return nil
+	}
+	env := e.mapMgr.FindMap(parent.MapName)
+	if env == nil || !env.CanWalk(x, y) {
+		return nil
+	}
+	e.mu.Lock()
+	id := e.nextMonsterID
+	e.nextMonsterID++
+	e.mu.Unlock()
+
+	var child *MonsterObject
+	var def *MonsterDef
+	if childName != "" && e.MonsterDB != nil {
+		def = e.MonsterDB.GetByName(childName)
+	}
+	if def != nil {
+		// 按数据库定义生成（与 SpawnMonster 相同的属性接线）
+		child = NewMonsterObject(def.Name, id, byte(def.Race), byte(def.RaceImg), uint16(def.Appr),
+			def.HP, 1400, 2000, def.Exp)
+		e.initMonsterFromDef(child, def, now)
+	} else {
+		// 数据库无对应条目：克隆父体（召唤惯例 HP 减半），强制普通近战
+		// 避免子体继承召唤/蜂巢等特殊 AI
+		child = NewMonsterObject(parent.Name+"(召唤)", id, parent.Race, parent.RaceImg, parent.Appr,
+			parent.MaxHP/2, parent.WalkSpeed, parent.AttackSpeed, parent.Exp/3)
+		child.AIBehavior = AIMelee
+		child.HitPoint = parent.HitPoint
+		child.SpeedPoint = parent.SpeedPoint
+		child.WAbil.Level = parent.WAbil.Level
+		child.WAbil.DC = parent.WAbil.DC
+		child.WAbil.AC = parent.WAbil.AC
+		child.WAbil.MAC = parent.WAbil.MAC
+		child.WAbil.MaxHP = uint16(child.MaxHP)
+		child.WAbil.HP = uint16(child.MaxHP)
+		child.ViewRange = parent.ViewRange
+		child.CoolEye = parent.CoolEye
+	}
+	child.MapName = parent.MapName
+	child.CurrX = x
+	child.CurrY = y
+	child.HomeX = x
+	child.HomeY = y
+	child.envir = env
+	child.MasterID = parent.ID
+	child.TargetID = parent.TargetID
+	child.initAITimers(now)
+
+	env.AddObject(x, y, OS_MOVINGOBJECT, child)
+	e.mu.Lock()
+	e.Monsters = append(e.Monsters, child)
+	e.mu.Unlock()
+	child.SendRefMsg(RM_TURN, child.Dir, x, y, child.Name)
+	return child
 }
 
 // spawnSplitZombies — TZilKinZombi 死亡分裂：生成 2-3 个小僵尸
@@ -314,14 +461,17 @@ func (e *UserEngine) spawnSplitZombies(parent *MonsterObject, server *netserver.
 		child.HomeX = parent.HomeX
 		child.HomeY = parent.HomeY
 		child.envir = parent.envir
+		child.MasterID = parent.ID
 		child.HitPoint = parent.HitPoint
 		child.SpeedPoint = parent.SpeedPoint
+		child.WAbil.Level = parent.WAbil.Level
 		child.WAbil.DC = parent.WAbil.DC
 		child.WAbil.AC = parent.WAbil.AC
-		child.WAbil.HP = child.WAbil.MaxHP
+		child.WAbil.MAC = parent.WAbil.MAC
+		child.WAbil.MaxHP = uint16(child.MaxHP)
+		child.WAbil.HP = uint16(child.MaxHP)
 		child.AIBehavior = AIMelee // 分裂体为普通近战
-		child.spawnTick = now
-		child.searchInterval = 3000 + rand.Int63n(2000)
+		child.initAITimers(now)
 		parent.envir.AddObject(cx, cy, OS_MOVINGOBJECT, child)
 		e.Monsters = append(e.Monsters, child)
 		child.SendRefMsg(RM_TURN, child.Dir, cx, cy, child.Name)

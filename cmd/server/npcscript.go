@@ -525,18 +525,12 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			count, _ = strconv.Atoi(parts[2])
 		}
 		if p.Engine != nil && p.envir != nil {
-			p.Engine.mu.Lock()
+			now := time.Now().UnixMilli()
 			for i := 0; i < count; i++ {
-				id := p.Engine.nextMonsterID
-				p.Engine.nextMonsterID++
-				mon := NewMonsterObject(monName, id, 0, 0, 0, 100, 2000, 2000, 50)
-				mon.CurrX = p.CurrX + rand.Intn(5) - 2
-				mon.CurrY = p.CurrY + rand.Intn(5) - 2
-				mon.MapName = p.MapName
-				p.envir.AddObject(mon.CurrX, mon.CurrY, OS_MOVINGOBJECT, mon)
-				p.Engine.Monsters = append(p.Engine.Monsters, mon)
+				x := p.CurrX + rand.Intn(5) - 2
+				y := p.CurrY + rand.Intn(5) - 2
+				p.Engine.SpawnMonsterByName(p.MapName, x, y, monName, now)
 			}
-			p.Engine.mu.Unlock()
 		}
 	case "MONCLEAR":
 		if p.envir != nil && p.Engine != nil {

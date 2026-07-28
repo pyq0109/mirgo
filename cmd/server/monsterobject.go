@@ -22,6 +22,7 @@ type MonsterObject struct {
 	AIBehavior int // 0=近战, 1=远程, 2=逃跑, 3=范围, 4=召唤, 5+=扩展
 
 	TargetID       int32
+	MasterID       int32 // 所属召唤者怪物 ID（0 = 野生）
 	HomeX, HomeY   int
 	WalkTick       int64
 	SearchTick     int64
@@ -29,7 +30,6 @@ type MonsterObject struct {
 	DeathTick      int64
 	LootDropped    bool
 	lastSummonTick int64
-	minionCount    int
 
 	LastHiterID   int32
 	LastHiterTick int64
@@ -42,7 +42,6 @@ type MonsterObject struct {
 	WalkWait       int64
 
 	lastRegenTick int64
-	Engine        *UserEngine
 
 	ViewRange int
 	CoolEye   int
@@ -56,6 +55,20 @@ type MonsterObject struct {
 	spawnTick      int64 // 出生时间（自爆计时用）
 	searchInterval int64 // SearchViewRange 随机间隔
 	burstCount     int   // 连射计数（飞斧用）
+	spitPoison     bool  // 喷吐附带绿毒（Race 82/119 true，Race 118 false）
+
+	// TScultureKingMonster（Race 102）：危险等级召唤（ObjMon.pas:1444）
+	dangerLevel int
+
+	// TCentipedeKingMonster（Race 107）：潜地/出土节奏（ObjMon2.pas:153）
+	attickTick int64
+
+	// TCowKingMonster（Race 92）：血量阶段狂暴
+	rageState       int // 0=正常 1=停滞 2=狂暴
+	rageTick        int64
+	hpBracket       int
+	saveAttackSpeed int64
+	saveWalkSpeed   int64
 }
 
 func getAIBehavior(race byte) int {
@@ -81,8 +94,8 @@ func getAIBehavior(race byte) int {
 		return AIPoison
 	case 91: // TMagCowMonster — 魔法近战
 		return AIMagicCast
-	case 92: // TCowKingMonster — 牛魔王（范围攻击 Boss）
-		return AIArea
+	case 92: // TCowKingMonster — 牛魔王（目标点 AoE + 血量阶段狂暴）
+		return AICowKing
 	case 93: // TThornDarkMonster — 远程飞斧变种
 		return AIRanged
 	case 94: // TLightingZombi — 远程闪电
@@ -93,22 +106,36 @@ func getAIBehavior(race byte) int {
 		return AISplit
 	case 101: // TScultureMonster — 石化伏击
 		return AIStone
-	case 102: // TScultureKingMonster — 召唤
+	case 102: // TScultureKingMonster — 祖玛教主（石化 + 危险等级召唤 + 魔法近战）
 		return AISummoner
+	case 103: // TBeeQueen — 蜂王（固定召唤蜂群）
+		return AISpawnHive
 	case 104: // TArcherMonster — 远程弓箭
 		return AIRanged
 	case 105: // TGasMothMonster — 毒气近战
 		return AIPoison
-	case 107: // TCentipedeKingMonster — 固定 Boss（StickMode 在 SpawnMonster 中设置）
-		return AIArea
+	case 106: // TGasDungMonster — 毒气近战
+		return AIPoison
+	case 107: // TCentipedeKingMonster — 蜈蚣王（潜地 + 毒 AoE）
+		return AICentiKing
+	case 110: // TCastleDoor — 城门（静态建筑，攻城战未实现）
+		return AIPassive
+	case 111: // TWallStructure — 城墙（静态建筑）
+		return AIPassive
+	case 112: // TArcherGuard — 弓箭守卫（固定炮台，只打红名/攻击者）
+		return AIGuard
 	case 114: // TElfWarriorMonster — 潜地战士
 		return AIBurrow
+	case 115: // TBigHeartMonster — 触角神（固定 16 格脉冲）
+		return AIPulse
+	case 116: // TSpiderHouseMonster — 蜘蛛巢（固定召唤蜘蛛）
+		return AISpawnHive
 	case 117: // TExplosionSpider — 自爆
 		return AIExplode
-	case 118: // THighRiskSpider — 远程（非毒喷吐）
-		return AIRanged
-	case 119: // TBigPoisionSpider — 远程+毒
-		return AIRanged
+	case 118: // THighRiskSpider — 非毒喷吐
+		return AISpit
+	case 119: // TBigPoisionSpider — 毒喷吐
+		return AISpit
 	case 130: // TDoubleCriticalMonster — 远程双暴击
 		return AICritical
 	case 131: // TRonObject — 范围攻击
@@ -119,10 +146,15 @@ func getAIBehavior(race byte) int {
 		return AIMagicCast
 	case 200: // TElectronicScolpionMon — 闪电吸血
 		return AILeech
+	case 201: // TClone — 分身怪（DB 未使用）
+		return AIClone
+	case 203: // TTeleMonster — 瞬移怪（DB 未使用）
+		return AITeleport
 	case 215: // TFireBallMonster — 远程火球
 		return AIFireball
 	default:
-		// 81(沃玛战士), 84(蝎子), 100(骷髅战士), 103(蜂王), 113(精灵)
+		// 81(沃玛战士), 84(蝎子), 86/88/89(TATMonster), 97(牛怪),
+		// 100(骷髅战士), 113(精灵), 150/156(人形怪) 等
 		return AIMelee
 	}
 }
@@ -239,11 +271,18 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		}
 	}
 
-	// AIPassive（Race 51/80）不主动搜索目标，仅通过 OnStruck 获得
-	if o.AIBehavior != AIPassive {
+	// AIPassive（Race 51/80）不主动搜索目标，仅通过 OnStruck 获得；
+	// AIGuard（Race 112）使用自己的目标规则（红名/攻击者），不走通用搜索
+	if o.AIBehavior != AIPassive && o.AIBehavior != AIGuard {
 		o.searchTarget(now, userEngine)
 	}
 	o.validateTarget(now, userEngine)
+
+	// Delphi TArcherGuard (ObjMon2.pas:887)：固定炮台，自带扫描与攻击
+	if o.AIBehavior == AIGuard {
+		o.runGuardAI(server, now)
+		return
+	}
 
 	if o.TargetID != 0 {
 		target := userEngine.GetPlayer(o.TargetID)
@@ -312,6 +351,9 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			}
 		case AIArea:
 			// Delphi TRonObject: 目标在6格内 → AroundAttack（1格半径AoE）
+			if o.envir == nil {
+				return
+			}
 			if dist <= 6 && now-o.HitTick > o.AttackSpeed {
 				o.HitTick = now
 				for a_dy := -1; a_dy <= 1; a_dy++ {
@@ -334,41 +376,21 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.chaseTarget(target, now)
 			}
 		case AISummoner:
-			// Delphi 召唤类：创建真实 minion 对象
-			if now-o.lastSummonTick > 30000 && o.minionCount < 3 && o.Engine != nil && o.envir != nil {
-				o.lastSummonTick = now
-				cx := o.CurrX + rand.Intn(3) - 1
-				cy := o.CurrY + rand.Intn(3) - 1
-				if o.envir.CanWalk(cx, cy) {
-					o.Engine.mu.Lock()
-					id := o.Engine.nextMonsterID
-					o.Engine.nextMonsterID++
-					minion := NewMonsterObject(o.Name+"(召唤)", id, o.Race, o.RaceImg, o.Appr,
-						o.MaxHP/2, o.WalkSpeed, o.AttackSpeed, o.Exp/3)
-					minion.CurrX = cx
-					minion.CurrY = cy
-					minion.MapName = o.MapName
-					minion.envir = o.envir
-					minion.HitPoint = o.HitPoint
-					minion.SpeedPoint = o.SpeedPoint
-					minion.WAbil.DC = o.WAbil.DC
-					minion.WAbil.AC = o.WAbil.AC
-					minion.WAbil.HP = minion.WAbil.MaxHP
-					minion.TargetID = o.TargetID
-					minion.spawnTick = now
-					minion.searchInterval = 3000 + rand.Int63n(2000)
-					o.envir.AddObject(cx, cy, OS_MOVINGOBJECT, minion)
-					o.Engine.Monsters = append(o.Engine.Monsters, minion)
-					o.Engine.mu.Unlock()
-					minion.SendRefMsg(RM_TURN, minion.Dir, cx, cy, minion.Name)
-					o.minionCount++
-					log.Logf(log.LevelInfo, "Monster", "%s summoned a minion at (%d,%d)", o.Name, cx, cy)
-				}
-			}
+			// Delphi TScultureKingMonster (ObjMon.pas:1444)：魔法近战 + 危险等级召唤。
+			// dangerLevel 初始 5；HP 跌破 dangerLevel/5 对应血量档时召唤一批祖玛随从，
+			// 满血时重置危险等级。
 			if dist <= 1 {
-				o.meleeAttack(server, target, now)
+				o.magicMeleeAttack(server, target, now)
 			} else {
 				o.chaseTarget(target, now)
+			}
+			if o.dangerLevel > 0 && o.MaxHP > 0 &&
+				int64(o.dangerLevel) > int64(o.WAbil.HP)*5/int64(o.MaxHP) {
+				o.dangerLevel--
+				o.callSlave(userEngine, now)
+			}
+			if int(o.WAbil.HP) >= o.MaxHP {
+				o.dangerLevel = 5
 			}
 		case AIPassive:
 			// 被动型：有目标时正常追击/攻击（目标仅来自 OnStruck）
@@ -378,11 +400,16 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.chaseTarget(target, now)
 			}
 		default:
-			o.runExtendedAI(server, target, dist, now)
+			o.runExtendedAI(server, userEngine, target, dist, now)
 		}
 	} else {
 		// 潜地/固定/定身怪物无目标时不闲逛
 		if o.FixedHide || o.StickMode || o.StatusTimeArr[POISON_DONTMOVE] > 0 {
+			// Delphi TStickMonster/TCentipedeKingMonster：出土状态下丢失目标 → 回潜
+			if o.StickMode && !o.FixedHide && (o.AIBehavior == AIBurrow || o.AIBehavior == AICentiKing) {
+				o.FixedHide = true
+				o.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+			}
 			return
 		}
 		if now-o.WalkTick > o.WalkSpeed {
@@ -438,7 +465,98 @@ func (o *MonsterObject) calcMonsterDamage(target *BaseObject) int {
 	return damage
 }
 
+// calcMonsterMagicDamage — Delphi GetMagStruckDamage (ObjBase.pas:22441)：
+// DC 掷骰作为伤害源，目标 MAC 掷骰减伤（祖玛教主/蜈蚣王/触角神的魔法路径）。
+func (o *MonsterObject) calcMonsterMagicDamage(target *BaseObject) int {
+	loDC := int(o.WAbil.DC & 0xFFFF)
+	hiDC := int(o.WAbil.DC >> 16)
+	attack := loDC
+	if hiDC > loDC {
+		attack = loDC + rand.Intn(hiDC-loDC+1)
+	}
+	if attack < 1 {
+		attack = 1
+	}
+
+	loMAC := int(target.WAbil.MAC & 0xFFFF)
+	hiMAC := int(target.WAbil.MAC >> 16)
+	antiMagic := loMAC
+	if hiMAC > loMAC {
+		antiMagic = loMAC + rand.Intn(hiMAC-loMAC+1)
+	}
+	damage := attack - antiMagic
+	if damage < 1 {
+		damage = 1
+	}
+	return damage
+}
+
+// magicMeleeAttack — 相邻魔法近战（祖玛教主 Attack：DC 掷骰、魔法减伤路径）。
+func (o *MonsterObject) magicMeleeAttack(server *netserver.TCPServer, target *PlayObject, now int64) {
+	if now-o.HitTick < o.AttackSpeed {
+		return
+	}
+	o.HitTick = now
+	o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+	if IsSafeZone(o.envir, target.CurrX, target.CurrY) {
+		return
+	}
+	spd := target.SpeedPoint
+	if spd < 1 {
+		spd = 1
+	}
+	if rand.Intn(spd) >= o.HitPoint {
+		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+		return
+	}
+	damage := o.calcMonsterMagicDamage(target.BaseObject)
+	o.applyMonsterDamageToPlayer(server, target, damage, now)
+	o.FocusTick = now
+	o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+}
+
+// callSlave — Delphi TScultureKingMonster.CallSlave (ObjMon.pas:1490)：
+// 一次生成 6-11 只祖玛随从（存活上限 30），优先生成于面前格。
+func (o *MonsterObject) callSlave(e *UserEngine, now int64) {
+	if e == nil || o.envir == nil {
+		return
+	}
+	names := []string{"祖玛雕像", "祖玛卫士", "祖玛弓箭手"}
+	count := 6 + rand.Intn(6)
+	fdx, fdy := dirToOffset(o.Dir)
+	for i := 0; i < count; i++ {
+		if e.countLiveChildren(o.ID) >= 30 {
+			break
+		}
+		x, y := o.CurrX+fdx, o.CurrY+fdy
+		if !o.envir.CanWalk(x, y) {
+			x = o.CurrX + rand.Intn(3) - 1
+			y = o.CurrY + rand.Intn(3) - 1
+		}
+		e.spawnChild(o, names[rand.Intn(len(names))], x, y, now)
+	}
+	log.Logf(log.LevelInfo, "Monster", "%s called Zuma slaves", o.Name)
+}
+
+// initAITimers — 初始化 AI 计时器为 now 附近（Delphi 出生错峰：
+// m_dwHitTick/m_dwWalkTick := GetTickCount - Random(3000)，防止首 tick 齐射）。
+func (o *MonsterObject) initAITimers(now int64) {
+	o.spawnTick = now
+	o.SearchTick = now
+	o.WalkTick = now - rand.Int63n(3000)
+	o.HitTick = now - rand.Int63n(3000)
+	o.lastRegenTick = now
+	o.lastThinkTick = now
+	o.lastSummonTick = now
+	o.attickTick = now
+	o.searchInterval = 3000 + rand.Int63n(2000) // Delphi: 3000 + Random(2000)
+}
+
 func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, target *PlayObject, damage int, now int64) {
+	// Delphi: 安全区内怪物不能攻击玩家（IsProperTarget 安全区检查）
+	if IsSafeZone(o.envir, target.CurrX, target.CurrY) {
+		return
+	}
 	hp := int(target.WAbil.HP)
 	hp -= damage
 	if hp < 0 {
