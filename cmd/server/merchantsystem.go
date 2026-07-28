@@ -75,9 +75,7 @@ func getMerchantConfig(npcName string) *MerchantConfig {
 	return merchantConfigs[strings.ToLower(npcName)]
 }
 
-// HandleMerchantDlgSelect 处理点击 NPC 对话链接。body
-// 携带 <text/tag> 中 '/' 之后的 tag 值（Delphi
-// SendMerchantDlgSelect，ClMain.pas:3094-3110）：@buy/@sell/@switch 等。
+// HandleMerchantDlgSelect 处理点击 NPC 对话链接（Delphi TMerchant.UserSelect, ObjNpc.pas:1419-1607）。
 func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.TCPServer) {
 	if p.envir == nil {
 		return
@@ -86,66 +84,150 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 	if !ok {
 		return
 	}
+
 	tag := strings.TrimSpace(msg.Msg)
-	switch strings.ToLower(tag) {
-	case "@buy":
-		p.sendGoodsList(server, npc)
-	case "@sell":
-		p.sendSellMode(server, npc)
-	case "@repair":
-		p.sendRepairMode(server, npc)
-	default:
-		// '@@' 标签以 "@@cmd\r\ninput" 形式到达（ClMain.pas:3100-3105）。
-		if strings.HasPrefix(tag, "@@") {
-			cmd, input := tag, ""
-			if i := strings.Index(tag, "\r\n"); i >= 0 {
-				cmd, input = tag[:i], tag[i+2:]
-			}
-			if cmd == "@@buildguildnow" && input != "" {
-				build := msg
-				build.Msg = input
-				p.HandleBuildGuild(build, server)
-				return
-			}
+
+	// 管理返回导航
+	if strings.EqualFold(tag, "@back") {
+		backLabel := p.ScriptGoBackLabel
+		if backLabel == "" {
+			backLabel = "main"
 		}
-		// 跳转到脚本标签（标签存储时不含 '@'）。
-		if npc.Script != "" {
-			if script, err := LoadNpcScript(npc.Script); err == nil {
-				script.Execute(strings.TrimPrefix(tag, "@"), p, npc, server)
-			}
+		p.ScriptGoBackLabel = p.ScriptCurrLabel
+		p.ScriptCurrLabel = backLabel
+		if script := npc.GetScript(); script != nil {
+			script.Execute(backLabel, p, npc, server)
+		}
+		return
+	}
+
+	// 记录导航历史
+	if !strings.EqualFold(tag, "@exit") {
+		p.ScriptGoBackLabel = p.ScriptCurrLabel
+		p.ScriptCurrLabel = strings.TrimPrefix(tag, "@")
+	}
+
+	// @@ 前缀命令（需要用户输入）
+	if strings.HasPrefix(tag, "@@") {
+		cmd, input := tag, ""
+		if i := strings.Index(tag, "\r\n"); i >= 0 {
+			cmd, input = tag[:i], tag[i+2:]
+		}
+		if cmd == "@@buildguildnow" && input != "" {
+			build := msg
+			build.Msg = input
+			p.HandleBuildGuild(build, server)
+			return
+		}
+	}
+
+	// 先尝试脚本标签跳转
+	label := strings.TrimPrefix(tag, "@")
+	if script := npc.GetScript(); script != nil {
+		if _, exists := script.Labels[label]; exists {
+			script.Execute(label, p, npc, server)
+			return
+		}
+	}
+
+	// 内置商人命令分发
+	switch strings.ToLower(tag) {
+	case "@buy", "@trading":
+		if npc.CanBuy {
+			p.sendGoodsList(server, npc)
+		}
+	case "@sell":
+		if npc.CanSell {
+			p.sendSellMode(server, npc)
+		}
+	case "@repair":
+		if npc.CanRepair {
+			p.sendRepairMode(server, npc)
+		}
+	case "@s_repair", "@superrepair":
+		if npc.CanSRepair {
+			p.sendRepairMode(server, npc)
+		}
+	case "@storage":
+		if npc.CanStorage {
+			p.sendStorageMenu(server)
+		}
+	case "@getback":
+		if npc.CanGetback {
+			p.sendStorageMenu(server)
+		}
+	case "@exit":
+		resp := protocol.MakeDefaultMsg(protocol.SMMerchantDlgClose, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, "")
+	case "@makedrug":
+		if npc.CanMakeDrug {
+			// 发送制药列表（简化：发送通用商品列表）
+			p.sendGoodsListFromDB(server, npc)
+		}
+	case "@upgradenow":
+		if npc.CanUpgrade {
+			p.HandleUpgradeWeapon(npc, server)
+		}
+	case "@getbackupgnow":
+		if npc.CanGetBackup {
+			p.HandleGetBackupWeapon(npc, server)
 		}
 	}
 }
 
 func (p *PlayObject) sendGoodsList(server *netserver.TCPServer, npc *NpcObject) {
-	cfg := getMerchantConfig(npc.Name)
-	if cfg == nil {
-		p.sendGoodsListFromDB(server, npc)
+	// 优先从三层商品架构发送
+	if len(npc.GoodsList) > 0 {
+		p.sendGoodsListFromStock(server, npc)
 		return
 	}
-	buf := make([]byte, 0, 2+len(cfg.Goods)*4)
+	// 回退：从 ItemDB 发送通用商品
+	p.sendGoodsListFromDB(server, npc)
+}
+
+func (p *PlayObject) sendGoodsListFromStock(server *netserver.TCPServer, npc *NpcObject) {
+	if p.ItemDB == nil {
+		return
+	}
+
+	type goodsEntry struct {
+		idx   uint16
+		price uint16
+	}
+	var entries []goodsEntry
+
+	npc.mu.RLock()
+	for name, stock := range npc.GoodsList {
+		if len(stock.Items) == 0 {
+			continue
+		}
+		def := p.ItemDB.GetByName(name)
+		if def == nil {
+			continue
+		}
+		price := int(def.Price)
+		if ip, ok := npc.PriceList[def.Idx]; ok && ip.Price > 0 {
+			price = ip.Price
+		}
+		price = price * npc.PriceRate / 100
+		if price <= 0 {
+			price = 1
+		}
+		entries = append(entries, goodsEntry{idx: uint16(def.Idx), price: uint16(price)})
+	}
+	npc.mu.RUnlock()
+
+	buf := make([]byte, 0, 2+len(entries)*4)
 	count := make([]byte, 2)
-	binary.LittleEndian.PutUint16(count, uint16(len(cfg.Goods)))
+	binary.LittleEndian.PutUint16(count, uint16(len(entries)))
 	buf = append(buf, count...)
-	for _, g := range cfg.Goods {
+	for _, e := range entries {
 		entry := make([]byte, 4)
-		idx := 0
-		if p.ItemDB != nil {
-			if def := p.ItemDB.GetByName(g.ItemName); def != nil {
-				idx = def.Idx
-			}
-		}
-		binary.LittleEndian.PutUint16(entry[0:2], uint16(idx))
-		price := g.Price
-		if price == 0 && p.ItemDB != nil {
-			if def := p.ItemDB.GetByName(g.ItemName); def != nil {
-				price = int(def.Price)
-			}
-		}
-		binary.LittleEndian.PutUint16(entry[2:4], uint16(price))
+		binary.LittleEndian.PutUint16(entry[0:2], e.idx)
+		binary.LittleEndian.PutUint16(entry[2:4], e.price)
 		buf = append(buf, entry...)
 	}
-	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(len(cfg.Goods)), 0, 0)
+	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(len(entries)), 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
 }
 
@@ -196,7 +278,22 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 		return
 	}
 
+	// 查找当前交互的 NPC
+	var npc *NpcObject
+	if p.CurrentNpc != nil {
+		npc = p.CurrentNpc
+	}
+
+	// 计算价格
 	price := int(def.Price)
+	if npc != nil {
+		npc.mu.RLock()
+		if ip, ok := npc.PriceList[def.Idx]; ok && ip.Price > 0 {
+			price = ip.Price
+		}
+		price = price * npc.PriceRate / 100
+		npc.mu.RUnlock()
+	}
 	if price <= 0 {
 		price = 100
 	}
@@ -205,22 +302,42 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 		return
 	}
 
-	p.Gold -= price
-	if !p.GiveItem(itemIdx) {
-		p.Gold += price
-		p.sendBuyFail(server)
-		return
+	// 尝试从 NPC 库存购买
+	bought := false
+	if npc != nil && len(npc.GoodsList) > 0 {
+		npc.mu.Lock()
+		if stock, ok := npc.GoodsList[def.Name]; ok && len(stock.Items) > 0 {
+			item := stock.Items[0]
+			stock.Items = stock.Items[1:]
+			// 分配唯一 MakeIndex
+			if p.Engine != nil {
+				p.Engine.mu.Lock()
+				item.MakeIndex = int32(p.Engine.nextItemID)
+				p.Engine.nextItemID++
+				p.Engine.mu.Unlock()
+			}
+			p.ItemList = append(p.ItemList, item)
+			bought = true
+		}
+		npc.mu.Unlock()
 	}
 
-	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(itemIdx), 0, 0, 0)
+	// 回退：从 ItemDB 创建（无库存 NPC）
+	if !bought {
+		if !p.GiveItem(itemIdx) {
+			p.sendBuyFail(server)
+			return
+		}
+	}
+
+	p.Gold -= price
+	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
 	p.sendWeightChanged(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
-
-	log.Logf(log.LevelInfo, "Merchant", "%s bought %s for %d gold", p.Name, def.Name, price)
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {
@@ -255,15 +372,34 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 	p.Gold += price
 
-	resp := protocol.MakeDefaultMsg(protocol.SMUserSellItemOK, int32(price), 0, 0, 0)
+	// 将物品添加到 NPC 商品列表（深拷贝，修复 Delphi 原始 bug）
+	if p.CurrentNpc != nil && p.CurrentNpc.IsMerchant {
+		npc := p.CurrentNpc
+		itemCopy := &protocol.UserItem{
+			WIndex:  item.WIndex,
+			Dura:    item.Dura,
+			DuraMax: item.DuraMax,
+		}
+		copy(itemCopy.BtValue[:], item.BtValue[:])
+		npc.mu.Lock()
+		stock := npc.GoodsList[def.Name]
+		if stock == nil {
+			stock = &GoodsStock{}
+			npc.GoodsList[def.Name] = stock
+		}
+		if len(stock.Items) < 5000 {
+			stock.Items = append(stock.Items, itemCopy)
+		}
+		npc.mu.Unlock()
+	}
+
+	resp := protocol.MakeDefaultMsg(protocol.SMUserSellItemOK, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
 	p.sendWeightChanged(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
-
-	log.Logf(log.LevelInfo, "Merchant", "%s sold %s for %d gold", p.Name, def.Name, price)
 }
 
 func (p *PlayObject) HandleQuerySellPrice(msg SendMessage, server *netserver.TCPServer) {
@@ -314,23 +450,38 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 		return
 	}
 
-	cost := p.calcRepairCost(def, item)
+	// 判断是否为特殊修理（通过 CurrentNpc 的 CanSRepair 标志）
+	isSpecial := false
+	if p.CurrentNpc != nil && p.CurrentNpc.CanSRepair {
+		isSpecial = true
+	}
+
+	cost := p.calcRepairCost(def, item, isSpecial)
 	if p.Gold < cost {
 		p.sendRepairFail(server)
 		return
 	}
 
 	p.Gold -= cost
-	item.Dura = item.DuraMax
+	if isSpecial {
+		// 特殊修理：不降低 DuraMax
+		item.Dura = item.DuraMax
+	} else {
+		// 普通修理：永久降低 DuraMax（Delphi nRepairItemDecDura=30）
+		lostDura := int(item.DuraMax) - int(item.Dura)
+		decay := lostDura / 30
+		if decay > 0 && int(item.DuraMax) > decay {
+			item.DuraMax -= uint16(decay)
+		}
+		item.Dura = item.DuraMax
+	}
 	p.sendDuraChange(server, item)
 
-	resp := protocol.MakeDefaultMsg(protocol.SMUserRepairItemOK, int32(bagIdx), 0, 0, 0)
+	resp := protocol.MakeDefaultMsg(protocol.SMUserRepairItemOK, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	p.SendBagItemsFull(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
-
-	log.Logf(log.LevelInfo, "Merchant", "%s repaired %s for %d gold", p.Name, def.Name, cost)
 }
 
 func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TCPServer) {
@@ -347,19 +498,24 @@ func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TC
 	if def == nil {
 		return
 	}
-	cost := p.calcRepairCost(def, item)
+	isSpecial := p.CurrentNpc != nil && p.CurrentNpc.CanSRepair
+	cost := p.calcRepairCost(def, item, isSpecial)
 	resp := protocol.MakeDefaultMsg(protocol.SMSendRepairCost, int32(cost), uint16(makeIndex), 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 
-func (p *PlayObject) calcRepairCost(def *ItemDef, item *protocol.UserItem) int {
+func (p *PlayObject) calcRepairCost(def *ItemDef, item *protocol.UserItem, isSpecial bool) int {
 	if item.DuraMax == 0 {
 		return 0
 	}
+	// Delphi 公式: price / 3 / DuraMax * (DuraMax - Dura)
 	lostDura := int(item.DuraMax) - int(item.Dura)
-	cost := int(def.Price) * lostDura / int(item.DuraMax) / 20
+	cost := int(def.Price) / 3 * lostDura / int(item.DuraMax)
 	if cost < 1 {
 		cost = 1
+	}
+	if isSpecial {
+		cost *= 3 // 特殊修理费用为普通的 3 倍
 	}
 	return cost
 }

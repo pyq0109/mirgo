@@ -69,7 +69,15 @@ type PlayObject struct {
 	HasMagicShield bool
 	HasMuscle      bool
 
-	ScriptVars [10]int
+	ScriptVars  [10]int
+	ScriptVarsD [10]int  // 动态变量 D0-D9
+	ScriptVarsM [100]int // 持久变量 M0-M99
+
+	// NPC 脚本导航状态（Delphi m_nScriptGotoCount/m_sScriptGoBackLable/m_sScriptCurrLable）
+	ScriptGotoCount int
+	ScriptGoBackLabel string
+	ScriptCurrLabel   string
+	CurrentNpc        *NpcObject
 }
 
 type VisibleEntry struct {
@@ -218,6 +226,8 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleQuerySellPrice(msg, server)
 	case protocol.CMMerchantQueryRepairCost:
 		p.HandleQueryRepairCost(msg, server)
+	case protocol.CMUserMakeDrugItem:
+		p.HandleMakeDrugItem(msg, server)
 	case protocol.CMMerchantDlgSelect:
 		p.HandleMerchantDlgSelect(msg, server)
 	case protocol.CMDropItem:

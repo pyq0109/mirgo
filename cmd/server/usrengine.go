@@ -21,6 +21,7 @@ type UserEngine struct {
 	MonsterDB  *MonsterDB
 	DropTables *DropTable
 	monGenPath string
+	npcConfigDir string
 
 	Monsters      []*MonsterObject
 	Npcs          []*NpcObject
@@ -123,4 +124,19 @@ func (e *UserEngine) SaveAllPlayers(db *storage.Database) {
 	for _, p := range players {
 		saveCharacterData(db, p)
 	}
+}
+
+func (e *UserEngine) ProcessNpcs() {
+	for _, npc := range e.Npcs {
+		if npc.IsMerchant && len(npc.RefillConfig) > 0 {
+			npc.RefillGoods(e.ItemDB)
+		}
+	}
+}
+
+func (e *UserEngine) InvalidateAllNpcScripts() {
+	for _, npc := range e.Npcs {
+		npc.InvalidateScript()
+	}
+	log.Logf(log.LevelInfo, "NPC", "all NPC scripts invalidated (%d NPCs)", len(e.Npcs))
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -21,8 +20,20 @@ type ScriptSection struct {
 	ElseAct    []string
 }
 
+type ScriptGoods struct {
+	ItemName   string
+	Count      int
+	RefillTime int // 小时
+}
+
 type NpcScript struct {
 	Labels map[string]*ScriptSection
+	Goods  []ScriptGoods
+
+	// 商人脚本头
+	PriceRate    int
+	ItemTypes    []int
+	Capabilities map[string]bool
 }
 
 func LoadNpcScript(path string) (*NpcScript, error) {
@@ -32,12 +43,18 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 	}
 	defer f.Close()
 
-	script := &NpcScript{Labels: make(map[string]*ScriptSection)}
+	script := &NpcScript{
+		Labels:       make(map[string]*ScriptSection),
+		PriceRate:    100,
+		Capabilities: make(map[string]bool),
+	}
 	scanner := bufio.NewScanner(f)
 
 	var currentLabel string
 	var currentSection *ScriptSection
 	mode := ""
+	inGoods := false
+	inHeader := true
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -45,8 +62,32 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 			continue
 		}
 
-		if strings.HasPrefix(line, "[@") || strings.HasPrefix(line, "[") {
+		// [goods] 段
+		if strings.EqualFold(line, "[goods]") {
+			inGoods = true
+			inHeader = false
+			mode = ""
+			currentSection = nil
+			continue
+		}
+
+		if inGoods {
+			if strings.HasPrefix(line, "[") {
+				inGoods = false
+			} else {
+				parseGoodsLine(line, script)
+				continue
+			}
+		}
+
+		// [@label] 或 [label] 段头
+		if strings.HasPrefix(line, "[") {
+			inHeader = false
 			label := strings.TrimSuffix(strings.TrimPrefix(line, "["), "]")
+			// 处理 [@label] TRUE 格式
+			if idx := strings.IndexByte(label, ' '); idx > 0 {
+				label = label[:idx]
+			}
 			if strings.HasPrefix(label, "@") {
 				label = label[1:]
 			}
@@ -54,6 +95,12 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 			currentSection = &ScriptSection{}
 			script.Labels[currentLabel] = currentSection
 			mode = ""
+			continue
+		}
+
+		// 商人脚本头解析（在第一个 [ 之前的行）
+		if inHeader {
+			parseMerchantHeader(line, script)
 			continue
 		}
 
@@ -72,10 +119,10 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 		case upper == "#SAY":
 			mode = "SAY"
 			continue
-		case upper == "#ELSESAY":
+		case upper == "#ELSESAY" || upper == "#ELSE":
 			mode = "ELSESAY"
 			continue
-		case upper == "#ELSEACT":
+		case upper == "#ELSEACT" || upper == "#ELACT":
 			mode = "ELSEACT"
 			continue
 		}
@@ -97,6 +144,57 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 	}
 
 	return script, nil
+}
+
+func parseMerchantHeader(line string, script *NpcScript) {
+	if strings.HasPrefix(line, "%") {
+		rate, err := strconv.Atoi(line[1:])
+		if err == nil && rate >= 55 {
+			script.PriceRate = rate
+		}
+		return
+	}
+
+	if strings.HasPrefix(line, "+") {
+		typeID, err := strconv.Atoi(line[1:])
+		if err == nil {
+			script.ItemTypes = append(script.ItemTypes, typeID)
+		}
+		return
+	}
+
+	if strings.HasPrefix(line, "(") && strings.HasSuffix(line, ")") {
+		inner := line[1 : len(line)-1]
+		caps := strings.Fields(inner)
+		for _, cap := range caps {
+			cap = strings.ToLower(strings.TrimPrefix(cap, "@"))
+			script.Capabilities[cap] = true
+		}
+	}
+}
+
+func parseGoodsLine(line string, script *NpcScript) {
+	line = strings.Trim(line, "\"")
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return
+	}
+
+	itemName := strings.Trim(fields[0], "\"")
+	count, _ := strconv.Atoi(fields[1])
+	refillTime := 1
+	if len(fields) >= 3 {
+		refillTime, _ = strconv.Atoi(fields[2])
+	}
+	if refillTime <= 0 {
+		refillTime = 1
+	}
+
+	script.Goods = append(script.Goods, ScriptGoods{
+		ItemName:   itemName,
+		Count:      count,
+		RefillTime: refillTime,
+	})
 }
 
 func (s *NpcScript) Execute(label string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
@@ -149,20 +247,24 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 
 	cmd := strings.ToUpper(parts[0])
 	switch cmd {
-	case "CHECKLEVEL":
+	case "CHECK":
+		// CHECK [N] value — 任务标志检查
 		if len(parts) < 3 {
 			return true
 		}
-		op := parts[1]
+		flagStr := strings.Trim(parts[1], "[]")
+		idx, _ := strconv.Atoi(flagStr)
 		val, _ := strconv.Atoi(parts[2])
+		if idx >= 0 && idx < 10 {
+			return p.ScriptVars[idx] == val
+		}
+		return true
+	case "CHECKLEVEL":
+		val, op := parseConditionValue(parts)
 		level := int(p.WAbil.Level)
 		return compareOp(level, op, val)
 	case "CHECKGOLD":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		return compareOp(p.Gold, op, val)
 	case "CHECKJOB":
 		if len(parts) < 2 {
@@ -183,6 +285,14 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 			return true
 		}
 		itemName := parts[1]
+		// 特殊处理：金币
+		if itemName == "金币" || strings.EqualFold(itemName, "gold") {
+			count := 1
+			if len(parts) >= 3 {
+				count, _ = strconv.Atoi(parts[2])
+			}
+			return p.Gold >= count
+		}
 		count := 1
 		if len(parts) >= 3 {
 			count, _ = strconv.Atoi(parts[2])
@@ -191,58 +301,30 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 	case "CHECKBAGGAGE":
 		return len(p.ItemList) < MaxBagItems
 	case "CHECKHP":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		return compareOp(int(p.WAbil.HP), op, val)
 	case "CHECKMP":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		return compareOp(int(p.WAbil.MP), op, val)
 	case "CHECKPKPOINT":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		return compareOp(p.PkPoint, op, val)
 	case "CHECKDC":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		hiDC := int(p.WAbil.DC >> 16)
 		return compareOp(hiDC, op, val)
 	case "CHECKMC":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		hiMC := int(p.WAbil.MC >> 16)
 		return compareOp(hiMC, op, val)
 	case "CHECKSC":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		hiSC := int(p.WAbil.SC >> 16)
 		return compareOp(hiSC, op, val)
 	case "CHECKEXP":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		return compareOp(int(p.WAbil.Exp), op, val)
-	case "CHECKGENDER":
+	case "CHECKGENDER", "GENDER":
 		if len(parts) < 2 {
 			return true
 		}
@@ -263,11 +345,7 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 	case "ISGUILDMASTER":
 		return p.GuildName != "" && p.GuildRank == "master"
 	case "CHECKGROUPCOUNT":
-		if len(parts) < 3 {
-			return true
-		}
-		op := parts[1]
-		val, _ := strconv.Atoi(parts[2])
+		val, op := parseConditionValue(parts)
 		count := 1
 		if p.Engine != nil {
 			p.Engine.mu.RLock()
@@ -277,9 +355,123 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 			p.Engine.mu.RUnlock()
 		}
 		return compareOp(count, op, val)
+	case "RANDOM":
+		if len(parts) < 2 {
+			return true
+		}
+		n, _ := strconv.Atoi(parts[1])
+		if n <= 0 {
+			return true
+		}
+		return rand.Intn(n) == 0
+	case "CHECKITEMW":
+		if len(parts) < 2 {
+			return true
+		}
+		slot := strings.ToUpper(strings.Trim(parts[1], "[]"))
+		return p.hasEquipmentInSlot(slot)
+	case "DAYTIME":
+		if len(parts) < 2 {
+			return true
+		}
+		hour := time.Now().Hour()
+		switch strings.ToUpper(parts[1]) {
+		case "SUNRAISE", "SUNRISE":
+			return hour >= 5 && hour < 8
+		case "DAY":
+			return hour >= 8 && hour < 17
+		case "SUNSET":
+			return hour >= 17 && hour < 20
+		case "NIGHT":
+			return hour >= 20 || hour < 5
+		}
+		return true
+	case "DAYOFWEEK":
+		if len(parts) < 2 {
+			return true
+		}
+		day := strings.ToUpper(parts[1])
+		weekdays := []string{"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"}
+		today := weekdays[time.Now().Weekday()]
+		return day == today
+	case "HOUR":
+		if len(parts) < 2 {
+			return true
+		}
+		h, _ := strconv.Atoi(parts[1])
+		hour := time.Now().Hour()
+		if len(parts) >= 3 {
+			h2, _ := strconv.Atoi(parts[2])
+			return hour >= h && hour <= h2
+		}
+		return hour == h
+	case "CHECKMONMAP":
+		if len(parts) < 3 {
+			return true
+		}
+		mapName := parts[1]
+		count, _ := strconv.Atoi(parts[2])
+		if p.Engine == nil {
+			return true
+		}
+		n := 0
+		p.Engine.mu.RLock()
+		for _, m := range p.Engine.Monsters {
+			if m.MapName == mapName && !m.Ghost && !m.Death {
+				n++
+			}
+		}
+		p.Engine.mu.RUnlock()
+		return n >= count
+	case "CHECKHUM":
+		if len(parts) < 3 {
+			return true
+		}
+		mapName := parts[1]
+		count, _ := strconv.Atoi(parts[2])
+		if p.Engine == nil {
+			return true
+		}
+		n := 0
+		p.Engine.mu.RLock()
+		for _, pl := range p.Engine.PlayObjectList {
+			if pl.MapName == mapName && !pl.Ghost {
+				n++
+			}
+		}
+		p.Engine.mu.RUnlock()
+		return n >= count
+	case "ISSYSOP":
+		return p.Permission >= 4
+	case "ISADMIN":
+		return p.Permission >= 6
+	case "EQUAL":
+		return p.evalVarCondition(parts, "==")
+	case "LARGE":
+		return p.evalVarCondition(parts, ">")
+	case "SMALL":
+		return p.evalVarCondition(parts, "<")
 	default:
 		return true
 	}
+}
+
+// parseConditionValue 解析条件参数：支持 "CMD op val" 和 "CMD val"（默认 >=）两种格式。
+func parseConditionValue(parts []string) (int, string) {
+	if len(parts) >= 3 {
+		val, err := strconv.Atoi(parts[2])
+		if err == nil {
+			return val, parts[1]
+		}
+		// parts[1] 可能是数值（无运算符格式）
+		val, _ = strconv.Atoi(parts[1])
+		return val, ">="
+	}
+	if len(parts) >= 2 {
+		val, _ := strconv.Atoi(parts[1])
+		return val, ">="
+	}
+	return 0, ">="
 }
 
 func (s *NpcScript) execActions(actions []string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
@@ -305,6 +497,13 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		if len(parts) >= 3 {
 			count, _ = strconv.Atoi(parts[2])
 		}
+		// 特殊处理：金币
+		if itemName == "金币" || strings.EqualFold(itemName, "gold") {
+			p.Gold += count
+			resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
+			server.Send(p.Session.ID, resp, "")
+			return
+		}
 		if p.ItemDB != nil {
 			def := p.ItemDB.GetByName(itemName)
 			if def != nil {
@@ -322,6 +521,16 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		count := 1
 		if len(parts) >= 3 {
 			count, _ = strconv.Atoi(parts[2])
+		}
+		// 特殊处理：金币
+		if itemName == "金币" || strings.EqualFold(itemName, "gold") {
+			p.Gold -= count
+			if p.Gold < 0 {
+				p.Gold = 0
+			}
+			resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
+			server.Send(p.Session.ID, resp, "")
+			return
 		}
 		p.takeItem(itemName, count)
 		p.SendBagItemsFull(server)
@@ -384,7 +593,11 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		if len(parts) < 2 {
 			return
 		}
-		label := parts[1]
+		p.ScriptGotoCount++
+		if p.ScriptGotoCount > 10 {
+			return
+		}
+		label := strings.TrimPrefix(parts[1], "@")
 		s.Execute(label, p, npc, server)
 	case "STORAGE", "SAVEITEM":
 		p.sendStorageMenu(server)
@@ -551,47 +764,187 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		if len(parts) < 3 {
 			return
 		}
-		idx, _ := strconv.Atoi(parts[1])
+		// 支持 SET [N] val 和 SET P0 val 两种格式
+		varName := strings.Trim(parts[1], "[]")
 		val, _ := strconv.Atoi(parts[2])
-		if idx >= 0 && idx < len(p.ScriptVars) {
-			p.ScriptVars[idx] = val
+		if idx, err := strconv.Atoi(varName); err == nil {
+			// 纯数字：任务标志（存入 P 变量）
+			if idx >= 0 && idx < 10 {
+				p.ScriptVars[idx] = val
+			}
+		} else {
+			p.setScriptVar(varName, val)
 		}
 	case "INC":
-		if len(parts) < 3 {
+		if len(parts) < 2 {
 			return
 		}
-		idx, _ := strconv.Atoi(parts[1])
-		val, _ := strconv.Atoi(parts[2])
-		if idx >= 0 && idx < len(p.ScriptVars) {
-			p.ScriptVars[idx] += val
+		varName := strings.Trim(parts[1], "[]")
+		val := 1
+		if len(parts) >= 3 {
+			val, _ = strconv.Atoi(parts[2])
+		}
+		if idx, err := strconv.Atoi(varName); err == nil {
+			if idx >= 0 && idx < 10 {
+				p.ScriptVars[idx] += val
+			}
+		} else {
+			cur := p.getScriptVar(varName)
+			p.setScriptVar(varName, cur+val)
 		}
 	case "DEC":
-		if len(parts) < 3 {
+		if len(parts) < 2 {
 			return
 		}
-		idx, _ := strconv.Atoi(parts[1])
-		val, _ := strconv.Atoi(parts[2])
-		if idx >= 0 && idx < len(p.ScriptVars) {
-			p.ScriptVars[idx] -= val
+		varName := strings.Trim(parts[1], "[]")
+		val := 1
+		if len(parts) >= 3 {
+			val, _ = strconv.Atoi(parts[2])
+		}
+		if idx, err := strconv.Atoi(varName); err == nil {
+			if idx >= 0 && idx < 10 {
+				p.ScriptVars[idx] -= val
+			}
+		} else {
+			cur := p.getScriptVar(varName)
+			p.setScriptVar(varName, cur-val)
 		}
 	case "MOV":
 		if len(parts) < 3 {
 			return
 		}
-		idx, _ := strconv.Atoi(parts[1])
+		varName := parts[1]
 		val, _ := strconv.Atoi(parts[2])
-		if idx >= 0 && idx < len(p.ScriptVars) {
-			p.ScriptVars[idx] = val
+		p.setScriptVar(varName, val)
+	case "MOVR":
+		if len(parts) < 3 {
+			return
 		}
+		varName := parts[1]
+		n, _ := strconv.Atoi(parts[2])
+		if n > 0 {
+			p.setScriptVar(varName, rand.Intn(n))
+		}
+	case "SUM":
+		if len(parts) < 3 {
+			return
+		}
+		v1 := p.getScriptVar(parts[1])
+		v2 := p.getScriptVar(parts[2])
+		p.ScriptVars[9] = v1 + v2
+	case "RESET":
+		if len(parts) < 3 {
+			return
+		}
+		startStr := strings.Trim(parts[1], "[]")
+		start, _ := strconv.Atoi(startStr)
+		count, _ := strconv.Atoi(parts[2])
+		for i := start; i < start+count && i < 10; i++ {
+			if i >= 0 {
+				p.ScriptVars[i] = 0
+			}
+		}
+	case "TAKEW":
+		if len(parts) < 2 {
+			return
+		}
+		slot := strings.ToUpper(strings.Trim(parts[1], "[]"))
+		slotMap := map[string]int{
+			"DRESS": protocol.UDress, "WEAPON": protocol.UWeapon,
+			"NECKLACE": protocol.UNecklace, "HELMET": protocol.UHelmet,
+			"RING": protocol.URingL, "ARMRING": protocol.UArmRingL,
+			"BUJUK": protocol.UBujuk,
+		}
+		if idx, ok := slotMap[slot]; ok {
+			if p.UseItems[idx] != nil {
+				p.UseItems[idx] = nil
+				p.RecalcAbilitys()
+				p.SendUseItemsFull(server)
+			}
+		}
+	case "RECALLMOB":
+		if len(parts) < 2 {
+			return
+		}
+		monName := parts[1]
+		level := 1
+		if len(parts) >= 3 {
+			level, _ = strconv.Atoi(parts[2])
+		}
+		if p.Engine != nil && p.envir != nil {
+			now := time.Now().UnixMilli()
+			x := p.CurrX + rand.Intn(3) - 1
+			y := p.CurrY + rand.Intn(3) - 1
+			mon := p.Engine.SpawnMonsterByName(p.MapName, x, y, monName, now)
+			if mon != nil {
+				mon.MasterID = p.ID
+				mon.WAbil.Level = uint16(level)
+			}
+		}
+	case "SKILLLEVEL":
+		if len(parts) < 3 {
+			return
+		}
+		magicID, _ := strconv.Atoi(parts[1])
+		level, _ := strconv.Atoi(parts[2])
+		p.learnMagic(magicID, level, 0)
+		p.SendMyMagicFull(server)
+	case "CLEARSKILL":
+		p.LearnedMagics = nil
+		p.SendMyMagicFull(server)
+	case "GAMEPOINT":
+		// 游戏点数（暂不实现，仅日志）
+	case "CHANGENAMECOLOR":
+		// 名字颜色（暂不实现）
 	case "TIMERECALL":
+	case "BREAKTIMERECALL":
 	case "GROUPRECALL":
 	case "GUILDRECALL":
+	case "GROUPMOVEMAP":
+	case "ADDNAMELIST":
+	case "DELNAMELIST":
 	default:
 		_ = parts
 	}
 }
 
 func (s *NpcScript) replaceVars(text string, p *PlayObject) string {
+	text = strings.ReplaceAll(text, "<$USERNAME>", p.Name)
+	text = strings.ReplaceAll(text, "<$LEVEL>", strconv.Itoa(int(p.WAbil.Level)))
+	text = strings.ReplaceAll(text, "<$HP>", strconv.Itoa(int(p.WAbil.HP)))
+	text = strings.ReplaceAll(text, "<$MAXHP>", strconv.Itoa(int(p.WAbil.MaxHP)))
+	text = strings.ReplaceAll(text, "<$MP>", strconv.Itoa(int(p.WAbil.MP)))
+	text = strings.ReplaceAll(text, "<$MAXMP>", strconv.Itoa(int(p.WAbil.MaxMP)))
+	text = strings.ReplaceAll(text, "<$GOLDCOUNT>", strconv.Itoa(p.Gold))
+	text = strings.ReplaceAll(text, "<$PKPOINT>", strconv.Itoa(p.PkPoint))
+	text = strings.ReplaceAll(text, "<$GUILDNAME>", p.GuildName)
+	text = strings.ReplaceAll(text, "<$SERVERNAME>", "MirGo")
+	text = strings.ReplaceAll(text, "<$JOB>", jobName(p.Job))
+	text = strings.ReplaceAll(text, "<$DC>", strconv.Itoa(int(p.WAbil.DC>>16)))
+	text = strings.ReplaceAll(text, "<$MAXDC>", strconv.Itoa(int(p.WAbil.DC>>16)))
+	text = strings.ReplaceAll(text, "<$MC>", strconv.Itoa(int(p.WAbil.MC>>16)))
+	text = strings.ReplaceAll(text, "<$MAXMC>", strconv.Itoa(int(p.WAbil.MC>>16)))
+	text = strings.ReplaceAll(text, "<$SC>", strconv.Itoa(int(p.WAbil.SC>>16)))
+	text = strings.ReplaceAll(text, "<$MAXSC>", strconv.Itoa(int(p.WAbil.SC>>16)))
+	text = strings.ReplaceAll(text, "<$AC>", strconv.Itoa(int(p.WAbil.AC&0xFFFF)))
+	text = strings.ReplaceAll(text, "<$MAXAC>", strconv.Itoa(int(p.WAbil.AC>>16)))
+	text = strings.ReplaceAll(text, "<$MAC>", strconv.Itoa(int(p.WAbil.MAC&0xFFFF)))
+	text = strings.ReplaceAll(text, "<$MAXMAC>", strconv.Itoa(int(p.WAbil.MAC>>16)))
+	text = strings.ReplaceAll(text, "<$EXP>", strconv.Itoa(int(p.WAbil.Exp)))
+	text = strings.ReplaceAll(text, "<$MAXEXP>", strconv.Itoa(int(p.GetMaxExp())))
+	text = strings.ReplaceAll(text, "<$DATETIME>", time.Now().Format("2006-01-02 15:04:05"))
+
+	// 装备名称
+	text = strings.ReplaceAll(text, "<$WEAPON>", p.getEquipName(protocol.UWeapon))
+	text = strings.ReplaceAll(text, "<$DRESS>", p.getEquipName(protocol.UDress))
+	text = strings.ReplaceAll(text, "<$HELMET>", p.getEquipName(protocol.UHelmet))
+	text = strings.ReplaceAll(text, "<$NECKLACE>", p.getEquipName(protocol.UNecklace))
+	text = strings.ReplaceAll(text, "<$RING_R>", p.getEquipName(protocol.URingR))
+	text = strings.ReplaceAll(text, "<$RING_L>", p.getEquipName(protocol.URingL))
+	text = strings.ReplaceAll(text, "<$ARMRING_R>", p.getEquipName(protocol.UArmRingR))
+	text = strings.ReplaceAll(text, "<$ARMRING_L>", p.getEquipName(protocol.UArmRingL))
+
+	// 兼容无尖括号格式
 	text = strings.ReplaceAll(text, "$USERNAME", p.Name)
 	text = strings.ReplaceAll(text, "$LEVEL", strconv.Itoa(int(p.WAbil.Level)))
 	text = strings.ReplaceAll(text, "$HP", strconv.Itoa(int(p.WAbil.HP)))
@@ -602,7 +955,32 @@ func (s *NpcScript) replaceVars(text string, p *PlayObject) string {
 	text = strings.ReplaceAll(text, "$PKPOINT", strconv.Itoa(p.PkPoint))
 	text = strings.ReplaceAll(text, "$GUILDNAME", p.GuildName)
 	text = strings.ReplaceAll(text, "$SERVERNAME", "MirGo")
+
 	return text
+}
+
+func jobName(job byte) string {
+	switch job {
+	case 0:
+		return "战士"
+	case 1:
+		return "法师"
+	case 2:
+		return "道士"
+	}
+	return "未知"
+}
+
+func (p *PlayObject) getEquipName(slot int) string {
+	item := p.UseItems[slot]
+	if item == nil || p.ItemDB == nil {
+		return "无"
+	}
+	def := p.ItemDB.GetByIdx(int(item.WIndex))
+	if def == nil {
+		return "无"
+	}
+	return def.Name
 }
 
 func compareOp(a int, op string, b int) bool {
@@ -635,18 +1013,117 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 		return
 	}
 
-	if npc.Script != "" {
-		script, err := LoadNpcScript(npc.Script)
-		if err == nil {
-			script.Execute("main", p, npc, server)
-			log.Logf(log.LevelInfo, "NPC", "%s executed script of %s", p.Name, npc.Name)
-			return
-		}
+	// 城堡 NPC 权限检查
+	if npc.Castle && !p.canAccessCastleNpc(npc) {
+		resp := protocol.MakeDefaultMsg(protocol.SMMerchantDlgClose, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, "")
+		return
+	}
+
+	script := npc.GetScript()
+	if script != nil {
+		npc.InitGoodsFromScript(script)
+		p.ScriptGotoCount = 0
+		p.ScriptGoBackLabel = ""
+		p.ScriptCurrLabel = ""
+		p.CurrentNpc = npc
+		script.Execute("main", p, npc, server)
+		return
 	}
 
 	dialog := npc.Name + ": 欢迎光临！"
 	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(dialog))
+}
 
-	log.Logf(log.LevelInfo, "NPC", "%s clicked NPC %s", p.Name, npc.Name)
+func (p *PlayObject) hasEquipmentInSlot(slot string) bool {
+	slotMap := map[string]int{
+		"DRESS":     protocol.UDress,
+		"WEAPON":    protocol.UWeapon,
+		"RIGHTHAND": protocol.URightHand,
+		"NECKLACE":  protocol.UNecklace,
+		"HELMET":    protocol.UHelmet,
+		"ARMRINGL":  protocol.UArmRingL,
+		"ARMRINGR":  protocol.UArmRingR,
+		"ARMRING":   protocol.UArmRingL,
+		"RINGL":     protocol.URingL,
+		"RINGR":     protocol.URingR,
+		"RING":      protocol.URingL,
+		"BUJUK":     protocol.UBujuk,
+		"BELT":      protocol.UBelt,
+		"BOOTS":     protocol.UBoots,
+	}
+	idx, ok := slotMap[slot]
+	if !ok {
+		return false
+	}
+	return p.UseItems[idx] != nil
+}
+
+func (p *PlayObject) evalVarCondition(parts []string, defaultOp string) bool {
+	if len(parts) < 3 {
+		return true
+	}
+	varName := parts[1]
+	val, _ := strconv.Atoi(parts[2])
+
+	currentVal := p.getScriptVar(varName)
+	return compareOp(currentVal, defaultOp, val)
+}
+
+func (p *PlayObject) getScriptVar(name string) int {
+	name = strings.ToUpper(name)
+	if len(name) < 2 {
+		return 0
+	}
+	prefix := name[0]
+	idx, _ := strconv.Atoi(name[1:])
+
+	switch prefix {
+	case 'P':
+		if idx >= 0 && idx < 10 {
+			return p.ScriptVars[idx]
+		}
+	case 'G':
+		if idx >= 0 && idx < 20 {
+			return globalScriptVars.G[idx]
+		}
+	case 'D':
+		if idx >= 0 && idx < 10 {
+			return p.ScriptVarsD[idx]
+		}
+	case 'M':
+		if idx >= 0 && idx < 100 {
+			return p.ScriptVarsM[idx]
+		}
+	}
+	return 0
+}
+
+func (p *PlayObject) setScriptVar(name string, val int) {
+	name = strings.ToUpper(name)
+	if len(name) < 2 {
+		return
+	}
+	prefix := name[0]
+	idx, _ := strconv.Atoi(name[1:])
+
+	switch prefix {
+	case 'P':
+		if idx >= 0 && idx < 10 {
+			p.ScriptVars[idx] = val
+		}
+	case 'G':
+		if idx >= 0 && idx < 20 {
+			globalScriptVars.G[idx] = val
+		}
+	case 'D':
+		if idx >= 0 && idx < 10 {
+			p.ScriptVarsD[idx] = val
+		}
+	case 'M':
+		if idx >= 0 && idx < 100 {
+			p.ScriptVarsM[idx] = val
+		}
+	}
 }

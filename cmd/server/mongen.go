@@ -36,6 +36,7 @@ type monGenSpawn struct {
 func (e *UserEngine) InitWorld(mapMgr *MapManager) {
 	e.mapMgr = mapMgr
 	e.LoadMonGen()
+	e.LoadNpcs()
 }
 
 func (e *UserEngine) LoadMonGen() {
@@ -59,22 +60,77 @@ func (e *UserEngine) LoadMonGen() {
 			ZenTime: 30000,
 		})
 	}
+}
 
-	npc := NewNpcObject("Merchant", e.nextMonsterID, 1)
-	e.nextMonsterID++
-	scriptPath := filepath.Join("serverconfig", "npcs", "npc_scripts", npc.Name+".txt")
-	if _, err := os.Stat(scriptPath); err == nil {
-		npc.Script = scriptPath
+func (e *UserEngine) LoadNpcs() {
+	if e.npcConfigDir == "" {
+		return
 	}
-	if env := e.mapMgr.FindMap(homeMap); env != nil {
-		npc.MapName = homeMap
-		npc.CurrX = 291
-		npc.CurrY = 615
+
+	npcListPath := filepath.Join(e.npcConfigDir, "npc_list.jsonc")
+	merchantListPath := filepath.Join(e.npcConfigDir, "merchant_list.jsonc")
+	npcScriptsDir := filepath.Join(e.npcConfigDir, "npc_scripts")
+	merchantScriptsDir := filepath.Join(e.npcConfigDir, "merchant_scripts")
+
+	npcDefs := LoadNpcList(npcListPath)
+	merchantDefs := LoadMerchantList(merchantListPath)
+
+	npcCount := 0
+	merchantCount := 0
+
+	for _, def := range npcDefs {
+		env := e.mapMgr.FindMap(def.MapName)
+		if env == nil {
+			continue
+		}
+
+		npc := NewNpcObject(def.Name, e.nextMonsterID, uint16(def.Body))
+		e.nextMonsterID++
+		npc.MapName = def.MapName
+		npc.CurrX = def.X
+		npc.CurrY = def.Y
+		npc.Face = def.Face
+		npc.Race = def.Race
 		npc.envir = env
+
+		scriptPath := filepath.Join(npcScriptsDir, def.Name+"-"+def.MapName+".txt")
+		if _, err := os.Stat(scriptPath); err == nil {
+			npc.Script = scriptPath
+		}
+
 		env.AddObject(npc.CurrX, npc.CurrY, OS_MOVINGOBJECT, npc)
 		e.Npcs = append(e.Npcs, npc)
-		// log.Logf(log.LevelInfo, "MonGen", "spawned NPC %s at %s(%d,%d)", npc.Name, npc.MapName, npc.CurrX, npc.CurrY)
+		npcCount++
 	}
+
+	for _, def := range merchantDefs {
+		env := e.mapMgr.FindMap(def.MapName)
+		if env == nil {
+			continue
+		}
+
+		npc := NewNpcObject(def.Name, e.nextMonsterID, uint16(def.Body))
+		e.nextMonsterID++
+		npc.MapName = def.MapName
+		npc.CurrX = def.X
+		npc.CurrY = def.Y
+		npc.Face = def.Face
+		npc.IsMerchant = true
+		npc.MerchantID = def.ID
+		npc.Castle = def.Castle != 0
+		npc.envir = env
+
+		scriptPath := filepath.Join(merchantScriptsDir, def.ID+"-"+def.MapName+".txt")
+		if _, err := os.Stat(scriptPath); err == nil {
+			npc.Script = scriptPath
+		}
+
+		env.AddObject(npc.CurrX, npc.CurrY, OS_MOVINGOBJECT, npc)
+		e.Npcs = append(e.Npcs, npc)
+		merchantCount++
+	}
+
+	log.Logf(log.LevelInfo, "MonGen", "spawned %d NPCs + %d merchants from config", npcCount, merchantCount)
 }
 
 func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
+	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
 type ItemDef struct {
@@ -81,4 +82,20 @@ func (db *ItemDB) GetByName(name string) *ItemDef {
 
 func (db *ItemDB) GetByIdx(idx int) *ItemDef {
 	return db.byIdx[idx]
+}
+
+func (db *ItemDB) CreateUserItem(idx int) *protocol.UserItem {
+	def := db.GetByIdx(idx)
+	if def == nil {
+		return nil
+	}
+	dura := uint16(def.DuraMax)
+	if dura == 0 {
+		dura = 1000
+	}
+	return &protocol.UserItem{
+		WIndex:  uint16(idx),
+		Dura:    dura,
+		DuraMax: dura,
+	}
 }

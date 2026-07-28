@@ -115,6 +115,12 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 		}
 		p.sysMsg(server, "PK点数: "+strconv.Itoa(p.PkPoint))
 		return true
+	case "reloadnpc":
+		if p.Engine != nil {
+			p.Engine.InvalidateAllNpcScripts()
+			p.sysMsg(server, "NPC脚本已重载")
+		}
+		return true
 	default:
 		return false
 	}

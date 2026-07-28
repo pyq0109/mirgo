@@ -89,6 +89,7 @@ func main() {
 	LoadMerchantConfigs(merchantDir)
 
 	monGenPath := filepath.Join(*configDir, "monsters", "mon_gen.jsonc")
+	npcConfigDir := filepath.Join(*configDir, "npcs")
 
 	sessionMgr := NewSessionManager()
 	userEngine := NewUserEngine(db, mapMgr)
@@ -98,6 +99,7 @@ func main() {
 	userEngine.MonsterDB = monsterDB
 	userEngine.DropTables = dropTables
 	userEngine.monGenPath = monGenPath
+	userEngine.npcConfigDir = npcConfigDir
 	userEngine.InitWorld(mapMgr)
 	server := netserver.NewTCPServer(listenAddr)
 
@@ -324,6 +326,7 @@ func main() {
 			userEngine.ProcessDoors(now)
 			userEngine.ProcessEvents(server, now)
 			if tickCount%300 == 0 {
+				userEngine.ProcessNpcs()
 				userEngine.SaveAllPlayers(db)
 			}
 		case sig := <-sigChan:
@@ -679,6 +682,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMMerchantQuerySellPrice, int(msg.Recog), 0, 0, "")
 	case protocol.CMMerchantQueryRepairCost:
 		player.SendMsg(protocol.CMMerchantQueryRepairCost, int(msg.Recog), 0, 0, "")
+	case protocol.CMUserMakeDrugItem:
+		player.SendMsg(protocol.CMUserMakeDrugItem, int(msg.Param), 0, 0, "")
 	case protocol.CMMerchantDlgSelect:
 		// Body 携带点击的链接标签。
 		player.SendMsg(protocol.CMMerchantDlgSelect, int(msg.Recog), int(msg.Param), 0, body)
