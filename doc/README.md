@@ -41,9 +41,10 @@ go run ./cmd/serverconfig -v
 
 运行:
 
-```PowerShell
+```bash
 # WIL 资源默认从 asset/client/Data/ 加载
-go run ".\cmd\mapviewer\" ".\asset\client\Map\0.map"
+# Linux 需 -tags x11 跳过 Wayland 编译；Windows 可省略
+go run -tags x11 ./cmd/mapviewer ./asset/client/Map/0.map
 ```
 
 操作：鼠标拖拽平移、滚轮缩放、左键查看格子、右侧面板切换图层
@@ -54,9 +55,9 @@ WIL资源查看器，用于查看热血传奇游戏专用的 .wil/.wix 图像资
 
 编译运行:
 
-```PowerShell
-# WIL 资源默认从 asset/client/Data/ 加载
-go run ".\cmd\wilviewer\" ".\asset\client\Data"
+```bash
+# Linux 需 -tags x11 跳过 Wayland 编译；Windows 可省略
+go run -tags x11 ./cmd/wilviewer ./asset/client/Data
 ```
 
 操作：左侧点击选择WIL文件，中间网格点击选择图像，箭头键左右切换，ESC退出
@@ -69,10 +70,11 @@ go run ./cmd/server
 
 ## client
 
-```PowerShell
-go run ./cmd/client
+```bash
+# Linux 需 -tags x11 跳过 Wayland 编译；Windows 可省略
+go run -tags x11 ./cmd/client
 
-go run ./cmd/client -server localhost:7000 -loglevel trace
+go run -tags x11 ./cmd/client -server localhost:7000 -loglevel trace
 ```
 
 # 资源

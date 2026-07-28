@@ -127,13 +127,17 @@ cmd/client/
 ## 编译运行
 
 ```bash
-# 客户端
-go build -o client.exe ./cmd/client
+# 客户端（Linux 需 -tags x11 跳过 Wayland 编译；Windows 加上也无害）
+go build -tags x11 -o client.exe ./cmd/client
 ./client.exe -data asset/client/Data -maps asset/client/Map -server localhost:7000
 
-# 服务端
+# 服务端（不依赖 GLFW，无需 tag）
 go build -o server.exe ./cmd/server
 ./server.exe -config serverconfig -maps asset/server/Map
+
+# 查看器工具（同客户端，Linux 需 -tags x11）
+go build -tags x11 -o mapviewer.exe ./cmd/mapviewer
+go build -tags x11 -o wilviewer.exe ./cmd/wilviewer
 
 # 配置转换
 go run ./cmd/serverconfig -v
