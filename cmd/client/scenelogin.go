@@ -103,6 +103,7 @@ var regFieldDefs = []fieldDef{
 }
 
 // 注册窗口按钮 (FState.pas:868-876)：确定 [51]、取消 [52]、关闭 [83]。
+// 坐标为绝对屏幕坐标——DParent 是 DBackground(0,0) 而非 DNewAccount。
 var regButtonAreas = []loginArea{
 	{loginOX + 305, loginOY + 530, 70, 20},
 	{loginOX + 445, loginOY + 530, 70, 20},
@@ -269,6 +270,7 @@ type LoginScene struct {
 	// 注册输入框 (13个) / 修改密码输入框 (4个)
 	regFields [13]string
 	regFocus  int
+	regCache  [13]string // 提交时缓存，失败重试时恢复 (IntroScn.pas:936-952)
 	chgFields [4]string
 	chgFocus  int
 
@@ -329,7 +331,8 @@ func (s *LoginScene) logComponentLayout() {
 		}
 		regBtnNames := [3]string{"Ok", "Cancel", "Close"}
 		for i, a := range regButtonAreas {
-			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", regBtnNames[i], a.X, a.Y, a.W, a.H, regButtonImages[i])
+			bw, bh := s.getPrguseSize(regButtonImages[i])
+			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", regBtnNames[i], a.X, a.Y, bw, bh, regButtonImages[i])
 		}
 		log.Logf(log.LevelInfo, "LoginScene", "  title text %-12s pos=(362,121)", "Create New Account")
 
@@ -558,14 +561,14 @@ func (s *LoginScene) windowOrigin(index int) (float32, float32, int, int) {
 // renderRegisterWindow 渲染 DNewAccount：Prguse[63] 背景居中，
 // 13 个黑色输入框，确定[51]/取消[52]/关闭[83] (FState.pas:862-876)。
 func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, ox, oy float32) {
+	wx, wy, _, _ := s.windowOrigin(63)
 	if tex, err := s.getPrguseTexture(63); err == nil {
-		wx, wy, w, h := s.windowOrigin(63)
+		w, h := s.getPrguseSize(63)
 		s.traceDraw("reg-bg", "Prguse", 63, wx, wy, float32(w), float32(h))
 		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
 	}
 
-	s.renderFieldGroup(gl, proj, regFieldDefs[:], s.regFields[:], s.regFocus)
-
+	// 按钮先绘制，输入框后绘制——Delphi TEdit 是原生控件，始终在最上层。
 	for i, area := range regButtonAreas {
 		idx := regButtonImages[i]
 		if tex, err := s.getPrguseTexture(idx); err == nil {
@@ -574,6 +577,8 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 			gl.DrawQuad(tex, area.X, area.Y, float32(w), float32(h), proj)
 		}
 	}
+
+	s.renderFieldGroup(gl, proj, regFieldDefs[:], s.regFields[:], s.regFocus)
 
 	if s.text != nil {
 		// 标题 NewAccountTitle 位于 (362,121)，白色+黑色描边，粗体
@@ -602,8 +607,7 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
 	}
 
-	s.renderFieldGroup(gl, proj, chgFieldDefs[:], s.chgFields[:], s.chgFocus)
-
+	// 按钮先绘制，输入框后绘制——Delphi TEdit 是原生控件，始终在最上层。
 	for i, off := range []loginArea{{wx + 81, wy + 141, 0, 0}, {wx + 160, wy + 141, 0, 0}} {
 		idx := chgButtonImages[i]
 		if tex, err := s.getPrguseTexture(idx); err == nil {
@@ -612,6 +616,8 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 			gl.DrawQuad(tex, off.X, off.Y, float32(w), float32(h), proj)
 		}
 	}
+
+	s.renderFieldGroup(gl, proj, chgFieldDefs[:], s.chgFields[:], s.chgFocus)
 }
 
 // srvWindowOrigin 返回运行时居中的 [256] 对话框左上角坐标
@@ -621,8 +627,15 @@ func (s *LoginScene) srvWindowOrigin() (float32, float32) {
 	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2
 }
 
-// renderServerSelect 渲染 DSelServerDlg：对话框 [256]，最多六个 [79]
-// 按钮（按下态 -> [80]），关闭 [83] (FState.pas:810-847, 2220-2280)。
+// 选服按钮显示尺寸——Prguse[79] 原始 36×27 太小，用固定矩形做可点击区域。
+const (
+	srvBtnDispW = float32(180)
+	srvBtnDispH = float32(35)
+)
+
+// renderServerSelect 渲染 DSelServerDlg：对话框 [256]，最多六个服务器
+// 按钮（Prguse[79] 纹理 + 黑底矩形），关闭 [83]
+// (FState.pas:810-847, 2220-2280)。
 func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 	wx, wy := s.srvWindowOrigin()
 	if tex, err := s.getPrguseTexture(srvDlgImg); err == nil {
@@ -633,29 +646,40 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 
 	if tex, err := s.getPrguseTexture(srvCloseImg); err == nil {
 		cw, ch := s.getPrguseSize(srvCloseImg)
-		s.traceDraw("srv-close", "Prguse", srvCloseImg, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch))
-		gl.DrawQuad(tex, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch), proj)
+		if cw > 1 && ch > 1 {
+			s.traceDraw("srv-close", "Prguse", srvCloseImg, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch))
+			gl.DrawQuad(tex, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch), proj)
+		}
 	}
 
-	bw, bh := s.getPrguseSize(srvBtnImg)
 	count := len(s.servers)
 	for i := 0; i < count && i < 6; i++ {
 		bx := wx + 65
 		by := wy + srvButtonTop(i, count)
+		// 黑底矩形作为按钮背景
+		if s.pressedButton == i {
+			gl.DrawQuadColor(bx, by, srvBtnDispW, srvBtnDispH, 0.15, 0.15, 0.15, 1, proj)
+		} else {
+			gl.DrawQuadColor(bx, by, srvBtnDispW, srvBtnDispH, 0, 0, 0, 1, proj)
+		}
+		// Prguse[79] 纹理叠加（如果尺寸有效）
 		idx := srvBtnImg
 		if s.pressedButton == i {
 			idx = srvBtnImg + 1
 		}
 		if tex, err := s.getPrguseTexture(idx); err == nil {
-			s.traceDraw("srv-btn", "Prguse", idx, bx, by, float32(bw), float32(bh))
-			gl.DrawQuad(tex, bx, by, float32(bw), float32(bh), proj)
+			iw, ih := s.getPrguseSize(idx)
+			if iw > 1 && ih > 1 {
+				s.traceDraw("srv-btn", "Prguse", idx, bx, by, float32(iw), float32(ih))
+				gl.DrawQuad(tex, bx, by, float32(iw), float32(ih), proj)
+			}
 		}
 		if s.textSrv != nil {
 			name, r, g, b := serverDisplayName(s.servers[i])
 			tw := float32(s.textSrv.MeasureText(name))
 			th := float32(s.textSrv.LineHeight())
-			tx := bx + (float32(bw)-tw)/2
-			ty := by + (float32(bh)-th)/2
+			tx := bx + (srvBtnDispW-tw)/2
+			ty := by + (srvBtnDispH-th)/2
 			if s.pressedButton == i {
 				tx += 2
 				ty += 2
@@ -801,8 +825,14 @@ func (s *LoginScene) OnChar(char rune) {
 			if utf8.RuneCountInString(s.userID) < 10 {
 				s.userID += string(char)
 			}
-		} else if utf8.RuneCountInString(s.password) < 10 {
-			s.password += string(char)
+		} else {
+			// 密码字段实时替换 ~ ' → _ (IntroScn.pas:543)
+			if char == '~' || char == '\'' {
+				char = '_'
+			}
+			if utf8.RuneCountInString(s.password) < 10 {
+				s.password += string(char)
+			}
 		}
 	}
 	s.cursorBlink = time.Now()
@@ -899,7 +929,12 @@ func (s *LoginScene) keyRegister(key int) {
 		s.regFocus = (s.regFocus + 1) % len(s.regFields)
 		s.cursorBlink = time.Now()
 	case keyEnter, keyKPEnter:
-		s.submitRegister()
+		// Enter 逐字段校验并导航 (IntroScn.pas:634-707)
+		if !s.validateRegField(s.regFocus) {
+			return
+		}
+		s.regFocus = (s.regFocus + 1) % len(s.regFields)
+		s.cursorBlink = time.Now()
 	case keyEscape:
 		s.mode = modeLogin
 		s.pressedButton = -1
@@ -924,7 +959,12 @@ func (s *LoginScene) keyChgPw(key int) {
 		s.chgFocus = (s.chgFocus + 1) % len(s.chgFields)
 		s.cursorBlink = time.Now()
 	case keyEnter, keyKPEnter:
-		s.submitChgPw()
+		// Enter 逐字段校验并导航 (IntroScn.pas:701-704)
+		if !s.validateChgField(s.chgFocus) {
+			return
+		}
+		s.chgFocus = (s.chgFocus + 1) % len(s.chgFields)
+		s.cursorBlink = time.Now()
 	case keyEscape:
 		s.mode = modeLogin // ChgpwCancel (IntroScn.pas:1094-1097)
 		s.pressedButton = -1
@@ -1105,6 +1145,7 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 			i := s.pressedButton
 			s.pressedButton = -1
 			if hitTest(fx, fy, buttons[i]) {
+				gSound.PlaySound(sRockButtonClick) // FState.pas:2376-2384
 				if i == 0 {
 					s.submitChgPw()
 				} else {
@@ -1121,10 +1162,9 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 	wx, wy := s.srvWindowOrigin()
 	count := len(s.servers)
-	bw, bh := s.getPrguseSize(srvBtnImg)
 	closeArea := loginArea{wx + srvCloseDX, wy + srvCloseDY, srvCloseW, srvCloseH}
 	btnArea := func(i int) loginArea {
-		return loginArea{wx + 65, wy + srvButtonTop(i, count), float32(bw), float32(bh)}
+		return loginArea{wx + 65, wy + srvButtonTop(i, count), srvBtnDispW, srvBtnDispH}
 	}
 
 	switch action {
@@ -1187,6 +1227,7 @@ func (s *LoginScene) handleButton(index int) {
 
 // handleRegButton 分发注册窗口按钮：确定/取消/关闭。
 func (s *LoginScene) handleRegButton(index int) {
+	gSound.PlaySound(sRockButtonClick) // FState.pas:2376-2384
 	if index == 0 {
 		s.submitRegister()
 		return
@@ -1213,6 +1254,53 @@ func (s *LoginScene) submitLogin() {
 	id := strings.ToLower(s.userID) // m_sLoginId := LowerCase (IntroScn.pas:534,548)
 	log.Logf(log.LevelInfo, "LoginScene", "submit login: %s", id)
 	s.loginFunc(id, pw)
+}
+
+// validateRegField 逐字段校验注册输入 (IntroScn.pas:634-707)。
+// 返回 true 表示当前字段合法，可以导航到下一字段。
+func (s *LoginScene) validateRegField(idx int) bool {
+	switch idx {
+	case 0: // 账号 (NewIdCheckNewId, :569-579)
+		s.regFields[0] = strings.TrimSpace(s.regFields[0])
+		if len(s.regFields[0]) < 3 {
+			s.ShowMessage("输入账号的长度必须至少3位.")
+			return false
+		}
+	case 1: // 密码 (:648-654)
+		if len(s.regFields[1]) < 4 {
+			s.ShowMessage("密码长度必须至少 4位.")
+			return false
+		}
+	case 2: // 确认密码 (:656-663)
+		if s.regFields[1] != s.regFields[2] {
+			s.ShowMessage("两次输入的密码不一致，请重新输入.")
+			return false
+		}
+	case 5: // 生日 (NewIdCheckBirthDay, :609-632)
+		if !validBirthDay(s.regFields[5]) {
+			s.regFocus = 5
+			return false
+		}
+	default: // 姓名字段：Trim + 非空 (:664-674)
+		s.regFields[idx] = strings.TrimSpace(s.regFields[idx])
+		if s.regFields[idx] == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// validateChgField 逐字段校验修改密码输入 (IntroScn.pas:701-704)。
+func (s *LoginScene) validateChgField(idx int) bool {
+	if s.chgFields[idx] == "" {
+		return false
+	}
+	if idx == 3 && s.chgFields[2] != s.chgFields[3] {
+		s.ShowMessage("两次确认不一致确认.")
+		s.chgFocus = 2
+		return false
+	}
+	return true
 }
 
 // submitRegister 校验所有字段 (CheckUserEntrys, IntroScn.pas:976-1029)
@@ -1287,6 +1375,7 @@ func (s *LoginScene) submitRegister() {
 	ua.SetMobilePhone(s.regFields[11])
 
 	log.Logf(log.LevelInfo, "LoginScene", "submit register: %s", ue.Account())
+	s.regCache = s.regFields // 缓存以便失败重试 (IntroScn.pas:1058-1061)
 	s.connecting = true
 	s.registerFunc(ue, ua)
 	s.mode = modeLogin // NewAccountClose (:1068,1072-1076)
@@ -1379,10 +1468,12 @@ func (s *LoginScene) RegistrationDone() {
 	s.ShowMessage("您的账号已经注册成功.\\请牢记您的账号和密码.\\请不要以任何原因将账号和密码告诉任何人.")
 }
 
-// RegistrationFailed 处理 SM_NEWID_FAIL：返回注册模式并保留已填字段
+// RegistrationFailed 处理 SM_NEWID_FAIL：返回注册模式并恢复已填字段
 // (NewIdRetry, IntroScn.pas:936-952)。
 func (s *LoginScene) RegistrationFailed(msg string) {
 	s.mode = modeRegister
+	s.regFields = s.regCache // 预填缓存的注册数据
+	s.regFocus = 0
 	s.ShowMessage(msg)
 }
 
