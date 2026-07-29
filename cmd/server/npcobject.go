@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/rand"
 	"sync"
 	"time"
 
@@ -209,5 +210,17 @@ func (o *NpcObject) RefillGoods(itemDB *ItemDB) {
 		} else if current > cfg.MaxCount {
 			stock.Items = stock.Items[:cfg.MaxCount]
 		}
+	}
+}
+
+func (o *NpcObject) idleAnimate() {
+	if rand.Intn(2) != 0 {
+		return
+	}
+	if rand.Intn(2) == 0 {
+		o.Dir = rand.Intn(8)
+		o.SendRefMsg(RM_TURN, o.CurrX, o.CurrY, o.Dir, "")
+	} else {
+		o.SendRefMsg(RM_HIT, o.CurrX, o.CurrY, o.Dir, "")
 	}
 }

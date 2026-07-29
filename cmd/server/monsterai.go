@@ -95,7 +95,7 @@ func (o *MonsterObject) runBaseAI(server *netserver.TCPServer, target *PlayObjec
 	case dist <= 1:
 		o.meleeAttack(server, target, now)
 	default:
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -136,7 +136,7 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 			o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 		}
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 		// 远距离低概率回潜
 		if rand.Intn(30) == 0 && dist > 4 {
 			o.FixedHide = true
@@ -158,7 +158,7 @@ func (o *MonsterObject) runExplodeAI(server *netserver.TCPServer, target *PlayOb
 		o.explode(server, target, now)
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 func (o *MonsterObject) explode(server *netserver.TCPServer, target *PlayObject, now int64) {
@@ -205,7 +205,7 @@ func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayO
 			return
 		}
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
@@ -214,7 +214,7 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 		return
 	}
 	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 		return
 	}
 	if dist <= 6 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) && now-o.HitTick > o.AttackSpeed {
@@ -227,7 +227,7 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 		return
 	}
 	if dist > 6 || !o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -263,7 +263,7 @@ func (o *MonsterObject) runCloneAI(server *netserver.TCPServer, e *UserEngine, t
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 
 	if e == nil || o.envir == nil {
@@ -310,7 +310,7 @@ func (o *MonsterObject) runPoisonAI(server *netserver.TCPServer, target *PlayObj
 		o.FocusTick = now
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runGuardAI — Delphi TArcherGuard (ObjMon2.pas:887-997)：固定炮台，永不移动。
@@ -409,7 +409,7 @@ func (o *MonsterObject) runDualAxeAI(server *netserver.TCPServer, target *PlayOb
 		}
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runSplitAI — TZilKinZombi (Race 96): 正常近战 + 死亡分裂
@@ -418,7 +418,7 @@ func (o *MonsterObject) runSplitAI(server *netserver.TCPServer, target *PlayObje
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -428,7 +428,7 @@ func (o *MonsterObject) runStoneAI(server *netserver.TCPServer, target *PlayObje
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -436,7 +436,7 @@ func (o *MonsterObject) runStoneAI(server *netserver.TCPServer, target *PlayObje
 // Delphi ObjMon.pas:1842-1881: 2格内闪电攻击，MC 伤害，吸血 damage/btGetBackHP
 func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
 	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 		return
 	}
 	if dist <= 2 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
@@ -466,7 +466,7 @@ func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObje
 		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runCriticalAI — TDoubleCriticalMonster (Race 130): 远程攻击，1/4 概率双倍伤害
@@ -496,7 +496,7 @@ func (o *MonsterObject) runCriticalAI(server *netserver.TCPServer, target *PlayO
 		}
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runFireballAI — TFireBallMonster (Race 215): 8格火球，MC 伤害
@@ -507,7 +507,7 @@ func (o *MonsterObject) runFireballAI(server *netserver.TCPServer, target *PlayO
 		return
 	}
 	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 		return
 	}
 	if dist <= 8 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
@@ -537,7 +537,7 @@ func (o *MonsterObject) runFireballAI(server *netserver.TCPServer, target *PlayO
 		}
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runSpitAI — TSpitSpider (Race 82): 2格锥形喷吐，可附带绿毒
@@ -577,7 +577,7 @@ func (o *MonsterObject) runSpitAI(server *netserver.TCPServer, target *PlayObjec
 		}
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runSpawnHiveAI — Delphi TBeeQueen/TSpiderHouseMonster (ObjMon2.pas:368/646)：
@@ -715,7 +715,7 @@ func (o *MonsterObject) runCowKingAI(server *netserver.TCPServer, target *PlayOb
 		return
 	}
 	if dist > 1 {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -748,7 +748,7 @@ func (o *MonsterObject) runLightningAI(server *netserver.TCPServer, target *Play
 		return
 	}
 	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 		return
 	}
 	if dist <= 8 && now-o.HitTick > o.AttackSpeed {
@@ -773,7 +773,7 @@ func (o *MonsterObject) runLightningAI(server *netserver.TCPServer, target *Play
 		o.FocusTick = now
 		return
 	}
-	o.chaseTarget(target, now)
+	o.chaseTarget(target.BaseObject, now)
 }
 
 // runFireAuraAI — TFireMonster: 火焰光环，十字形 9 格地图事件（20s, 10 dmg/tick）
@@ -791,7 +791,7 @@ func (o *MonsterObject) runFireAuraAI(server *netserver.TCPServer, target *PlayO
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -819,7 +819,7 @@ func (o *MonsterObject) runTransformAI(server *netserver.TCPServer, target *Play
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -829,7 +829,7 @@ func (o *MonsterObject) runLevelingSkeletonAI(server *netserver.TCPServer, targe
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 }
 
@@ -860,7 +860,7 @@ func (o *MonsterObject) runBoneKingAI(server *netserver.TCPServer, e *UserEngine
 	if dist <= 1 {
 		o.meleeAttack(server, target, now)
 	} else {
-		o.chaseTarget(target, now)
+		o.chaseTarget(target.BaseObject, now)
 	}
 	if e == nil || o.envir == nil {
 		return

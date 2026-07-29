@@ -878,11 +878,37 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	if exp <= 0 {
 		exp = 10
 	}
-	p.WAbil.Exp += uint32(exp)
+
+	if party := p.partyOf(); party != nil && len(party.Members) > 1 {
+		var recipients []*PlayObject
+		for _, id := range party.Members {
+			member := p.Engine.GetPlayer(id)
+			if member != nil && !member.Ghost && !member.Death && member.MapName == p.MapName {
+				recipients = append(recipients, member)
+			}
+		}
+		if len(recipients) > 1 {
+			share := exp / len(recipients)
+			if share < 1 {
+				share = 1
+			}
+			for _, member := range recipients {
+				member.addExp(server, share)
+			}
+		} else {
+			p.addExp(server, exp)
+		}
+	} else {
+		p.addExp(server, exp)
+	}
 
 	if len(p.SlaveIDs) > 0 {
 		p.gainSlaveExp()
 	}
+}
+
+func (p *PlayObject) addExp(server *netserver.TCPServer, exp int) {
+	p.WAbil.Exp += uint32(exp)
 
 	expMsg := protocol.MakeDefaultMsg(protocol.SMWinExp, int32(exp), 0, 0, 0)
 	server.Send(p.Session.ID, expMsg, "")
@@ -892,7 +918,6 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	if p.WAbil.Exp >= maxExp {
 		p.WAbil.Exp -= maxExp
 		p.WAbil.Level++
-		// 属性增长现在由 RecalcAbilitys 中的职业公式计算。
 		p.RecalcAbilitys()
 		p.WAbil.HP = p.WAbil.MaxHP
 		p.WAbil.MP = p.WAbil.MaxMP
@@ -900,13 +925,11 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 		levelMsg := protocol.MakeDefaultMsg(protocol.SMLevelUp, int32(p.WAbil.Level), 0, 0, 0)
 		server.Send(p.Session.ID, levelMsg, "")
 
-		// 可分配的属性点（Delphi 中每级调用 GetBonusPoint）。
 		p.BonusPoint += 3
 
 		log.Logf(log.LevelInfo, "Combat", "%s leveled up to %d", p.Name, p.WAbil.Level)
 		leveledUp = true
 	}
-	// 同步客户端的经验/负重/等级信息。
 	p.SendAbility(server)
 	p.sendHealthSpell(server)
 	if leveledUp {

@@ -69,6 +69,15 @@ func (e *UserEngine) GetPlayer(id int32) *PlayObject {
 	return e.PlayObjectList[id]
 }
 
+func (e *UserEngine) GetMonster(id int32) *MonsterObject {
+	for _, mon := range e.Monsters {
+		if mon.ID == id && !mon.Ghost {
+			return mon
+		}
+	}
+	return nil
+}
+
 func (e *UserEngine) ProcessHumans(server *netserver.TCPServer) {
 	e.mu.RLock()
 	players := make([]*PlayObject, 0, len(e.PlayObjectList))
@@ -136,6 +145,7 @@ func (e *UserEngine) ProcessNpcs() {
 		if npc.IsMerchant && len(npc.RefillConfig) > 0 {
 			npc.RefillGoods(e.ItemDB)
 		}
+		npc.idleAnimate()
 	}
 }
 

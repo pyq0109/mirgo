@@ -720,11 +720,6 @@ func (a *Actor) Shift(dir, step, cur, max int) {
 		a.ShiftX = -float64(dx) * unx / fMax * (fMax - fCur)
 		a.ShiftY = -float64(dy) * uny / fMax * (fMax - fCur)
 	}
-
-	if dx != 0 && dy != 0 {
-		a.ShiftX *= 0.7071
-		a.ShiftY *= 0.7071
-	}
 }
 
 // roundEven 实现 Delphi 的银行家舍入：恰好 .5 时舍入到最近的偶数
@@ -969,8 +964,13 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 
 	// D2 Layer 7: 魔法盾泡泡（STATE_BUBBLEDEFENCEUP = 0x00020000）
 	if a.State&0x00020000 != 0 && resources.Magic != nil {
-		bubbleBase := 1570 // Delphi MAGICBASE + bubble offset
-		frame := bubbleBase + (a.EffectFrame % 10)
+		var bubbleBase int
+		if a.CurrentAction == protocol.SMStruck {
+			bubbleBase = 3900 // MAGBUBBLESTRUCKBASE
+		} else {
+			bubbleBase = 3890 // MAGBUBBLEBASE
+		}
+		frame := bubbleBase + (a.EffectFrame % 3)
 		if frame >= 0 && frame < resources.Magic.Count {
 			if img := resources.Magic.GetImage(frame); img != nil && img.RGBA != nil {
 				if tex := resources.GetTexture(resources.Magic, frame); tex != 0 {
@@ -999,16 +999,27 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 	}
 
 	// D2 Layer 9: 攻击特效（方向性火花）
-	if a.HitEffectNumber > 0 && resources.Magic != nil {
-		hitBase := 1450 + a.HitEffectNumber*10 // Delphi HITEFFECTBASE
-		hitIdx := hitBase + a.Dir
-		if hitIdx >= 0 && hitIdx < resources.Magic.Count {
-			if img := resources.Magic.GetImage(hitIdx); img != nil && img.RGBA != nil {
-				if tex := resources.GetTexture(resources.Magic, hitIdx); tex != 0 {
-					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-					glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
-						float32(img.Width), float32(img.Height), proj)
-					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	if a.HitEffectNumber > 0 {
+		hitEffectBase := []int{800, 1410, 1700, 3480, 3390, 40, 220, 740}
+		mag := a.HitEffectNumber - 1
+		if mag >= 0 && mag < len(hitEffectBase) {
+			var wilFile *wil.File
+			if mag >= 5 {
+				wilFile = resources.Magic2
+			} else {
+				wilFile = resources.Magic
+			}
+			if wilFile != nil {
+				hitIdx := hitEffectBase[mag] + a.Dir*10 + (a.CurrentFrame - a.StartFrame)
+				if hitIdx >= 0 && hitIdx < wilFile.Count {
+					if img := wilFile.GetImage(hitIdx); img != nil && img.RGBA != nil {
+						if tex := resources.GetTexture(wilFile, hitIdx); tex != 0 {
+							gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+							glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+								float32(img.Width), float32(img.Height), proj)
+							gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+						}
+					}
 				}
 			}
 		}
@@ -1016,7 +1027,7 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 
 	// D2 Layer 10: 武器光效
 	if a.WeaponEffect > 0 && resources.Magic != nil {
-		wpEffIdx := 1700 + a.Dir*10 + (a.EffectFrame % 10) // Delphi WPEFFECTBASE
+		wpEffIdx := 3750 + a.Dir*10 + (a.EffectFrame % 5) // WPEFFECTBASE, MAXWPEFFECTFRAME=5
 		if wpEffIdx >= 0 && wpEffIdx < resources.Magic.Count {
 			if img := resources.Magic.GetImage(wpEffIdx); img != nil && img.RGBA != nil {
 				if tex := resources.GetTexture(resources.Magic, wpEffIdx); tex != 0 {
@@ -1127,25 +1138,97 @@ func GetMonOffset(appr int) int {
 	case 6:
 		return npos * 440
 	case 13:
-		offsets := []int{0, 360, 440, 550, 700, 830, 950, 1060, 1170}
-		if npos < len(offsets) {
-			return offsets[npos]
+		switch npos {
+		case 0:
+			return 0
+		case 1:
+			return 360
+		case 2:
+			return 440
+		case 3:
+			return 550
+		default:
+			return npos * 360
 		}
-		return npos * 360
 	case 14, 15, 16:
 		return npos * 360
 	case 17:
-		offsets := []int{0, 360, 920}
+		if npos == 2 {
+			return 920
+		}
+		return npos * 350
+	case 18:
+		offsets := []int{0, 520, 950}
 		if npos < len(offsets) {
 			return offsets[npos]
 		}
-		return npos * 360
-	case 18, 19, 20, 21, 22, 23, 24, 25, 26, 27:
-		return npos * 360
+		return 0
+	case 19:
+		offsets := []int{0, 370, 810, 1250, 1630, 2010, 2390}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 20:
+		offsets := []int{0, 360, 720, 1080, 1440, 1800, 2350, 3060}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 21:
+		offsets := []int{0, 460, 820, 1180, 1540, 1900, 2440, 2570, 2700}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 22:
+		offsets := []int{0, 430, 1290, 1810}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 23:
+		offsets := []int{0, 440, 820, 1360, 1420, 1450, 1560, 1670, 2270, 2700}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 24:
+		offsets := []int{0, 350, 700, 1050, 1650, 3100, 3450, 3880, 4230, 4580}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 25:
+		offsets := []int{0, 350, 700, 1050, 1400, 1750, 2180, 2530, 3000, 3810}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 26:
+		offsets := []int{0, 370, 720, 1080, 1430, 1780, 2290, 2720, 3150, 4000}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
+	case 27:
+		offsets := []int{0, 350, 700, 1210, 1720, 2170, 2250, 2720}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
 	case 80:
-		return npos * 600
+		offsets := []int{0, 80, 300, 301, 302, 320, 321, 322, 321}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
 	case 90:
-		return npos * 360
+		offsets := []int{80, 168, 184, 200}
+		if npos < len(offsets) {
+			return offsets[npos]
+		}
+		return 0
 	default:
 		return npos * 280
 	}
@@ -1179,6 +1262,40 @@ func GetNpcOffset(appr int) int {
 	default:
 		if appr >= 54 && appr <= 57 {
 			return (appr-54)*60 + 3070
+		}
+		switch appr {
+		case 58:
+			return 3270
+		case 59:
+			return 3290
+		case 60:
+			return 3330
+		case 61, 62, 63, 64:
+			return 3350
+		case 65:
+			return 3430
+		case 66:
+			return 3450
+		case 67:
+			return 3500
+		case 68:
+			return 3570
+		case 75:
+			return 3730
+		case 76:
+			return 3810
+		case 81:
+			return 4070
+		case 82:
+			return 4110
+		case 83:
+			return 4150
+		}
+		if appr >= 69 && appr <= 74 {
+			return (appr-69)*20 + 3610
+		}
+		if appr >= 77 && appr <= 80 {
+			return (appr-77)*20 + 3850
 		}
 		return 0
 	}

@@ -111,6 +111,10 @@ type MonsterObject struct {
 	// 不死属性（Delphi m_btLifeAttrib）
 	LifeAttrib byte
 
+	// 疯狂/厌恶模式（Delphi m_boCrazyMode/m_boNastyMode）
+	CrazyMode bool // 攻击一切对象
+	NastyMode bool // 攻击所有非NPC对象
+
 	// 运行时缓存（Run 期间有效）
 	engine *UserEngine
 }
@@ -344,7 +348,11 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 	if o.TargetID != 0 {
 		target := userEngine.GetPlayer(o.TargetID)
 		if target == nil || target.Death || target.Ghost {
-			o.TargetID = 0
+			if monTarget := userEngine.GetMonster(o.TargetID); monTarget != nil && !monTarget.Death {
+				o.attackMonsterTarget(server, monTarget, now)
+			} else {
+				o.TargetID = 0
+			}
 			return
 		}
 		dx := abs(target.CurrX - o.CurrX)
@@ -359,7 +367,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
-				o.chaseTarget(target, now)
+				o.chaseTarget(target.BaseObject, now)
 			}
 		case AIRanged:
 			if dist <= 1 {
@@ -380,7 +388,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 					o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 				}
 			} else {
-				o.chaseTarget(target, now)
+				o.chaseTarget(target.BaseObject, now)
 			}
 		case AIFlee:
 			// Delphi TChickenDeer (ObjMon.pas:542-598)：计算远离方向 5 格目标点，跑到位
@@ -437,13 +445,13 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.FocusTick = now
 				o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 			} else if dist > 6 {
-				o.chaseTarget(target, now)
+				o.chaseTarget(target.BaseObject, now)
 			}
 		case AISummoner:
 			if dist <= 1 {
 				o.magicMeleeAttack(server, target, now)
 			} else {
-				o.chaseTarget(target, now)
+				o.chaseTarget(target.BaseObject, now)
 			}
 			const maxMinions = 3
 			if o.slaveName != "" && now-o.lastSummonTick > 10000 {
@@ -474,7 +482,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
 			} else {
-				o.chaseTarget(target, now)
+				o.chaseTarget(target.BaseObject, now)
 			}
 		default:
 			o.runExtendedAI(server, userEngine, target, dist, now)
@@ -672,7 +680,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	}
 }
 
-func (o *MonsterObject) chaseTarget(target *PlayObject, now int64) {
+func (o *MonsterObject) chaseTarget(target *BaseObject, now int64) {
 	if o.StickMode || o.StatusTimeArr[POISON_DONTMOVE] > 0 {
 		return
 	}
@@ -795,6 +803,29 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 	}
 	if best != nil {
 		o.TargetID = best.ID
+		return
+	}
+
+	if o.CrazyMode || o.NastyMode {
+		var bestMon *MonsterObject
+		bestMonDist := 999999
+		for _, obj := range objs {
+			m, ok := obj.(*MonsterObject)
+			if !ok || m.Ghost || m.Death || m.ID == o.ID {
+				continue
+			}
+			if m.MasterID == o.ID || o.MasterID == m.ID {
+				continue
+			}
+			d := abs(m.CurrX-o.CurrX) + abs(m.CurrY-o.CurrY)
+			if d < bestMonDist {
+				bestMonDist = d
+				bestMon = m
+			}
+		}
+		if bestMon != nil {
+			o.TargetID = bestMon.ID
+		}
 	}
 }
 
@@ -996,4 +1027,43 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+func (o *MonsterObject) attackMonsterTarget(server *netserver.TCPServer, target *MonsterObject, now int64) {
+	dx := abs(target.CurrX - o.CurrX)
+	dy := abs(target.CurrY - o.CurrY)
+	dist := dx
+	if dy > dist {
+		dist = dy
+	}
+
+	if dist <= 1 {
+		if now-o.HitTick > o.AttackSpeed {
+			o.HitTick = now
+			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
+			spd := target.SpeedPoint
+			if spd < 1 {
+				spd = 1
+			}
+			if rand.Intn(spd) < o.HitPoint {
+				damage := o.calcMonsterDamage(target.BaseObject)
+				if int(target.WAbil.HP) <= damage {
+					target.WAbil.HP = 0
+				} else {
+					target.WAbil.HP -= uint16(damage)
+				}
+				target.LastHiterID = o.ID
+				target.LastHiterTick = now
+				if target.WAbil.HP == 0 {
+					target.Death = true
+					target.DeathTick = now
+					o.envir.broadcastDeathMsg(target.BaseObject, target.ID, target.CurrX, target.CurrY, target.Dir, true)
+				}
+			}
+			o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+			o.FocusTick = now
+		}
+	} else {
+		o.chaseTarget(target.BaseObject, now)
+	}
 }
