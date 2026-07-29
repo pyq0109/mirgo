@@ -54,22 +54,28 @@ const (
 	doorFrameTime  = 300 * time.Millisecond
 )
 
-// 登录输入框 (IntroScn.pas:499-512)。
-var inputFields = []loginArea{
-	{loginOX + 255, loginOY + 511, 112, 19}, // 账号
-	{loginOX + 495, loginOY + 511, 112, 19}, // 密码
+// 登录面板 Prguse[60] (296×254)，居中绘制。
+const loginPanelImg = 60
+
+// 登录面板内输入框偏移（相对于面板左上角，像素扫描 Prguse[60] 精确值）。
+var loginFieldOffsets = []loginArea{
+	{96, 85, 140, 17},  // 账号 (black y=85..101, x=96..235)
+	{96, 117, 141, 17}, // 密码 (black y=117..133, x=96..236)
 }
 
-// 底部按钮 (FState.pas:763-774)。仅绘制按下态按钮；
-// 常态面板已烘焙在 ChrSel.wil[22] 背景中。
-var buttonAreas = []loginArea{
-	{loginOX + 90, loginOY + 558, 70, 20},  // 确定 [62]
-	{loginOX + 268, loginOY + 558, 70, 20}, // 修改密码 [53]
-	{loginOX + 447, loginOY + 558, 70, 20}, // 新建账号 [61]
-	{loginOX + 613, loginOY + 558, 70, 20}, // 关闭 [64]
+// 登录面板内按钮偏移（相对于面板左上角）。
+// 按钮视觉已烘焙在 Prguse[60] 中，仅用碰撞区域。
+// 顺序：0=提交, 1=修改密码, 2=新用户, 3=关闭。
+var loginBtnOffsets = []loginArea{
+	{175, 148, 65, 28},  // 提交
+	{135, 195, 110, 28}, // 修改密码
+	{30, 195, 95, 28},   // 新用户
+	{268, 10, 18, 18},   // 关闭 (X)
 }
 
-var buttonImages = []int{62, 53, 61, 64}
+// 保留旧变量名供 buttonArea/buttonImages 引用（不再绘制图片）。
+var buttonAreas = []loginArea{} // 运行时由 loginBtnAreas() 填充
+var buttonImages = []int{0, 0, 0, 0}
 
 // 注册窗口输入框 (IntroScn.pas:279-410)，基准 nx=800/2-320=80,
 // ny=600/2-238=62。顺序：账号、密码、确认密码、姓名、身份证、生日、
@@ -81,49 +87,52 @@ type fieldDef struct {
 	password   bool // 输入时拒绝 '~', ''', ' ' (IntroScn.pas:640-641)
 }
 
+// 注册窗口基准偏移 = Prguse[63] 窗口左上角 (800×600 居中)。
+// 字段偏移量按十周年版 Prguse[63] 实际图片测量。
 const (
 	regNX = 80
-	regNY = 62
+	regNY = 64
 )
 
+// 注册窗口输入框——像素扫描 Prguse[63] 精确值。
+// 左列窄 x=161 w=117，宽 x=161 w=164/166，高均 16。
 var regFieldDefs = []fieldDef{
-	{regNX + 86, regNY + 91, 104, 13, 10, false, false},   // 账号
-	{regNX + 86, regNY + 118, 104, 13, 10, true, true},    // 密码
-	{regNX + 86, regNY + 149, 104, 12, 10, true, true},    // 确认密码
-	{regNX + 86, regNY + 190, 105, 13, 20, false, false},  // 真实姓名
-	{regNX + 86, regNY + 207, 105, 13, 14, false, false},  // 身份证号
-	{regNX + 86, regNY + 217, 105, 13, 10, false, false},  // 生日
-	{regNX + 263, regNY + 118, 124, 13, 20, false, false}, // 问题1
-	{regNX + 263, regNY + 149, 124, 12, 12, false, false}, // 答案1
-	{regNX + 263, regNY + 190, 124, 13, 20, false, false}, // 问题2
-	{regNX + 263, regNY + 218, 124, 13, 12, false, false}, // 答案2
-	{regNX + 263, regNY + 285, 124, 13, 14, false, false}, // 电话
-	{regNX + 263, regNY + 315, 124, 12, 13, false, false}, // 手机
-	{regNX + 263, regNY + 368, 124, 13, 40, false, false}, // 邮箱
+	{regNX + 161, regNY + 116, 117, 16, 10, false, false}, // 账号
+	{regNX + 161, regNY + 137, 117, 16, 10, true, true},   // 密码
+	{regNX + 161, regNY + 158, 117, 16, 10, true, true},   // 确认密码
+	{regNX + 161, regNY + 187, 117, 16, 20, false, false}, // 真实姓名
+	{regNX + 161, regNY + 208, 117, 16, 14, false, false}, // 身份证号
+	{regNX + 161, regNY + 229, 117, 16, 10, false, false}, // 生日
+	{regNX + 161, regNY + 256, 164, 16, 20, false, false}, // 问题1
+	{regNX + 161, regNY + 276, 164, 16, 12, false, false}, // 答案1
+	{regNX + 161, regNY + 297, 164, 16, 20, false, false}, // 问题2
+	{regNX + 161, regNY + 317, 164, 16, 12, false, false}, // 答案2
+	{regNX + 161, regNY + 347, 117, 16, 14, false, false}, // 电话
+	{regNX + 161, regNY + 368, 117, 16, 13, false, false}, // 手机
+	{regNX + 161, regNY + 388, 166, 16, 40, false, false}, // 邮箱
 }
 
-// 注册窗口按钮 (FState.pas:868-876)：确定 [51]、取消 [52]、关闭 [83]。
-// 坐标为绝对屏幕坐标——DParent 是 DBackground(0,0) 而非 DNewAccount。
+// 注册窗口按钮——按十周年版 Prguse[63] 实际图片测量。
 var regButtonAreas = []loginArea{
-	{loginOX + 305, loginOY + 530, 70, 20},
-	{loginOX + 445, loginOY + 530, 70, 20},
-	{loginOX + 587, loginOY + 33, 20, 20},
+	{regNX + 138, regNY + 418, 82, 30}, // 提交
+	{regNX + 438, regNY + 418, 82, 30}, // 取消
+	{regNX + 608, regNY + 8, 20, 20},   // 关闭 (X)
 }
 
 var regButtonImages = []int{51, 52, 83}
 
-// 修改密码窗口输入框 (IntroScn.pas:412-480)，基准 nx=800/2-210=190,
-// ny=600/2-150=150。顺序：账号、旧密码、新密码、确认密码。
+// 修改密码窗口输入框——按十周年版 Prguse[50] 实际图片测量。
+// 基准 = Prguse[50] 窗口左上角 (800×600 居中)。
 const (
 	chgNX = 190
 	chgNY = 150
 )
 
 var chgFieldDefs = []fieldDef{
-	{chgNX + 191, chgNY + 92, 104, 13, 10, false, false},
-	{chgNX + 191, chgNY + 119, 104, 13, 10, true, false},
-	{chgNX + 191, chgNY + 145, 104, 13, 10, true, true},
-	{chgNX + 191, chgNY + 172, 104, 13, 10, true, true},
+	{chgNX + 175, chgNY + 75, 195, 22, 10, false, false},
+	{chgNX + 175, chgNY + 108, 195, 22, 10, true, false},
+	{chgNX + 175, chgNY + 141, 195, 22, 10, true, true},
+	{chgNX + 175, chgNY + 174, 195, 22, 10, true, true},
 }
 
 // 修改密码按钮，相对于居中的 [50] 窗口
@@ -136,12 +145,11 @@ type serverInfo struct {
 	Status int
 }
 
-// 选服对话框：Prguse[256] 背景，[79] 按钮（按下态 [80]），
-// 关闭 [83] (FState.pas:810-847 英文版)。中文版 [160-166]
-// 的图片在当前资源包中是 1×1 占位图。
+// 选服对话框：Prguse[256] 背景，[286] 按钮（按下态 [287]），
+// 关闭 [83]。
 const (
 	srvDlgImg   = 256
-	srvBtnImg   = 79
+	srvBtnImg   = 286
 	srvCloseImg = 83
 	srvCloseDX  = float32(245)
 	srvCloseDY  = float32(31)
@@ -313,13 +321,18 @@ func (s *LoginScene) logComponentLayout() {
 
 	switch s.mode {
 	case modeLogin:
+		px, py := s.loginPanelOrigin()
+		pw, ph := s.getPrguseSize(loginPanelImg)
+		log.Logf(log.LevelInfo, "LoginScene", "  panel      Prguse[%d]       pos=(%.0f,%.0f) size=(%d,%d)", loginPanelImg, px, py, pw, ph)
 		fieldNames := [2]string{"ID", "Password"}
-		for i, a := range inputFields {
+		for i := range loginFieldOffsets {
+			a := s.loginInputArea(i)
 			log.Logf(log.LevelInfo, "LoginScene", "  input      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", fieldNames[i], a.X, a.Y, a.W, a.H)
 		}
 		btnNames := [4]string{"OK", "ChangePW", "NewAccount", "Close"}
-		for i, a := range buttonAreas {
-			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f) img=Prguse[%d]", btnNames[i], a.X, a.Y, a.W, a.H, buttonImages[i])
+		for i := range loginBtnOffsets {
+			a := s.loginBtnArea(i)
+			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", btnNames[i], a.X, a.Y, a.W, a.H)
 		}
 
 	case modeRegister:
@@ -344,7 +357,7 @@ func (s *LoginScene) logComponentLayout() {
 			log.Logf(log.LevelInfo, "LoginScene", "  input      %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", chgNames[i], def.x, def.y, def.w, def.h)
 		}
 		chgBtnNames := [2]string{"Ok", "Cancel"}
-		for i, off := range []loginArea{{wx + 81, wy + 141, 0, 0}, {wx + 160, wy + 141, 0, 0}} {
+		for i, off := range []loginArea{{wx + 155, wy + 248, 0, 0}, {wx + 248, wy + 248, 0, 0}} {
 			bw, bh := s.getPrguseSize(chgButtonImages[i])
 			log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", chgBtnNames[i], off.X, off.Y, bw, bh, chgButtonImages[i])
 		}
@@ -355,12 +368,12 @@ func (s *LoginScene) logComponentLayout() {
 		log.Logf(log.LevelInfo, "LoginScene", "  window     Prguse[%d]      pos=(%.0f,%.0f) size=(%d,%d)", srvDlgImg, wx, wy, ww, wh)
 		cw, ch := s.getPrguseSize(srvCloseImg)
 		log.Logf(log.LevelInfo, "LoginScene", "  button     %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", "Close", wx+srvCloseDX, wy+srvCloseDY, cw, ch, srvCloseImg)
-		bw, bh := s.getPrguseSize(srvBtnImg)
+		bxOff := s.srvBtnX()
 		count := len(s.servers)
 		for i := 0; i < count && i < 6; i++ {
-			bx := wx + 65
-			by := wy + srvButtonTop(i, count)
-			log.Logf(log.LevelInfo, "LoginScene", "  server btn %-12s pos=(%.0f,%.0f) size=(%d,%d) img=Prguse[%d]", s.servers[i].Name, bx, by, bw, bh, srvBtnImg)
+			bx := wx + bxOff
+			by := wy + srvBtnY(i, count)
+			log.Logf(log.LevelInfo, "LoginScene", "  server btn %-12s pos=(%.0f,%.0f) size=(%.0f,%.0f)", s.servers[i].Name, bx, by, srvBtnDispW, srvBtnDispH)
 		}
 	}
 }
@@ -478,6 +491,7 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 		case modeServerSelect:
 			s.renderServerSelect(gl, proj)
 		default:
+			s.renderLoginPanel(gl, proj)
 			s.renderButtons(gl, proj, ox, oy)
 			s.renderInputFields(gl, proj, ox, oy)
 		}
@@ -493,47 +507,67 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 	}
 }
 
-// renderButtons 绘制底部四个登录按钮。Delphi 原版将常态面板烘焙在
-// ChrSel[22] 中，仅在按下时叠加绘制 (DLoginNewDirectPaint,
-// FState.pas:2342-2354)。由于当前资源包的 ChrSel[22] 没有按钮面板，
-// 所以始终绘制 Prguse 图片。按下态在同一位置绘制（无偏移, FState.pas:2351）。
+// loginPanelOrigin 返回 Prguse[60] 登录面板居中后的左上角坐标。
+func (s *LoginScene) loginPanelOrigin() (float32, float32) {
+	w, h := s.getPrguseSize(loginPanelImg)
+	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2
+}
+
+// loginInputArea 返回第 i 个登录输入框的绝对碰撞矩形。
+func (s *LoginScene) loginInputArea(i int) loginArea {
+	px, py := s.loginPanelOrigin()
+	o := loginFieldOffsets[i]
+	return loginArea{px + o.X, py + o.Y, o.W, o.H}
+}
+
+// loginBtnArea 返回第 i 个登录按钮的绝对碰撞矩形。
+func (s *LoginScene) loginBtnArea(i int) loginArea {
+	px, py := s.loginPanelOrigin()
+	o := loginBtnOffsets[i]
+	return loginArea{px + o.X, py + o.Y, o.W, o.H}
+}
+
+// renderLoginPanel 绘制 Prguse[60] 登录面板（居中）。
+func (s *LoginScene) renderLoginPanel(gl *engine.GLState, proj [16]float32) {
+	px, py := s.loginPanelOrigin()
+	if tex, err := s.getPrguseTexture(loginPanelImg); err == nil {
+		w, h := s.getPrguseSize(loginPanelImg)
+		s.traceDraw("login-panel", "Prguse", loginPanelImg, px, py, float32(w), float32(h))
+		gl.DrawQuad(tex, px, py, float32(w), float32(h), proj)
+	}
+}
+
+// renderButtons 在登录面板上绘制按下态暗色叠加。
+// 按钮视觉已烘焙在 Prguse[60] 中，不再绘制独立按钮图片。
 func (s *LoginScene) renderButtons(gl *engine.GLState, proj [16]float32, ox, oy float32) {
-	for i, idx := range buttonImages {
-		a := s.buttonArea(i)
-		if tex, err := s.getPrguseTexture(idx); err == nil {
-			w, h := s.getPrguseSize(idx)
-			s.traceDraw("btn", "Prguse", idx, a.X, a.Y, float32(w), float32(h))
-			gl.DrawQuad(tex, a.X, a.Y, float32(w), float32(h), proj)
-		}
+	if s.pressedButton >= 0 && s.pressedButton < len(loginBtnOffsets) {
+		a := s.loginBtnArea(s.pressedButton)
+		gl.DrawQuadColor(a.X, a.Y, a.W, a.H, 0, 0, 0, 0.3, proj)
 	}
 }
 
 // renderInputFields 渲染账号/密码文本和闪烁光标。
-// 标签已烘焙在背景中；Delphi 的原生 TEdit 是黑底白字
+// 标签已烘焙在 Prguse[60] 面板中；Delphi 的原生 TEdit 是黑底白字
 // (IntroScn.pas:255-274)。
 func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox, oy float32) {
 	if s.text == nil {
 		return
 	}
-	// 提交后等待服务器响应期间隐藏输入框
-	// (IntroScn.pas:551-554)。
 	if s.waitingResponse {
 		return
 	}
 
-	idX, idY := ox+255, oy+511
-	passX, passY := ox+495, oy+511
+	idArea := s.loginInputArea(0)
+	passArea := s.loginInputArea(1)
 	masked := strings.Repeat("*", len(s.password))
 
-	// TEdit Color=clBlack：白色文字下方的不透明黑色底框
-	// (IntroScn.pas:258,270)。
-	s.traceDraw("field", "quad", -1, idX, idY, 112, 19)
-	gl.DrawQuadColor(idX, idY, 112, 19, 0, 0, 0, 1, proj)
-	s.traceDraw("field", "quad", -1, passX, passY, 112, 19)
-	gl.DrawQuadColor(passX, passY, 112, 19, 0, 0, 0, 1, proj)
-
-	s.textSmall.DrawText(s.userID, idX, idY, 1.0, 1.0, 1.0, 1.0, proj)
-	s.textSmall.DrawText(masked, passX, passY, 1.0, 1.0, 1.0, 1.0, proj)
+	// 黑色输入区域已烘焙在 Prguse[60] 面板中，不再额外绘制。
+	// 仅在面板的黑色区域上叠加白色文字和光标，垂直居中。
+	lh := float32(s.textSmall.LineHeight())
+	idTextY := idArea.Y + (idArea.H-lh)/2
+	passTextY := passArea.Y + (passArea.H-lh)/2
+	s.textSmall.DrawText(s.userID, idArea.X+2, idTextY, 1.0, 1.0, 1.0, 1.0, proj)
+	s.textSmall.DrawText(masked, passArea.X+2, passTextY, 1.0, 1.0, 1.0, 1.0, proj)
 
 	if time.Since(s.cursorBlink) > 500*time.Millisecond {
 		s.cursorBlink = time.Now()
@@ -541,14 +575,13 @@ func (s *LoginScene) renderInputFields(gl *engine.GLState, proj [16]float32, ox,
 	if time.Since(s.cursorBlink) < 250*time.Millisecond && s.focusedField >= 0 {
 		var cx, cy float32
 		if s.focusedField == 0 {
-			cx = idX + float32(s.textSmall.MeasureText(s.userID))
-			cy = idY
+			cx = idArea.X + 2 + float32(s.textSmall.MeasureText(s.userID))
+			cy = idTextY
 		} else {
-			cx = passX + float32(s.textSmall.MeasureText(masked))
-			cy = passY
+			cx = passArea.X + 2 + float32(s.textSmall.MeasureText(masked))
+			cy = passTextY
 		}
-		// 1px 白色竖线，模拟原生 TEdit 光标 (IntroScn.pas:255-274)。
-		gl.DrawQuadColor(cx, cy, 1, 19, 1, 1, 1, 1, proj)
+		gl.DrawQuadColor(cx, cy, 1, lh, 1, 1, 1, 1, proj)
 	}
 }
 
@@ -581,14 +614,10 @@ func (s *LoginScene) renderRegisterWindow(gl *engine.GLState, proj [16]float32, 
 	s.renderFieldGroup(gl, proj, regFieldDefs[:], s.regFields[:], s.regFocus)
 
 	if s.text != nil {
-		// 标题 NewAccountTitle 位于 (362,121)，白色+黑色描边，粗体
-		// (FState.pas:2669)。
-		log.Logf(log.LevelTrace, "Render", "login title pos=(%.0f,%.0f)", float32(362), float32(121))
-		s.text.DrawTextBoldOutline("创建新账号", 362, 121, 1, 1, 1, 1, 0, 0, 0, 1, proj)
-		// 各输入框帮助文本 NAHelps，clSilver 色，随焦点切换
-		// (IntroScn.pas:709-786; FState.pas:2664-2668, 507,124+i*14)。
+		// 标题 "新 的 帐 户" 已烘焙在 Prguse[63] 中，不再绘制。
+		// 帮助文本绘制在右侧黑色区域内。
 		if s.regFocus >= 0 && s.regFocus < len(regHelps) {
-			s.textSmall.DrawText(regHelps[s.regFocus], 507, 124, 0.75, 0.75, 0.75, 1, proj)
+			s.textSmall.DrawText(regHelps[s.regFocus], wx+390, wy+90, 0.75, 0.75, 0.75, 1, proj)
 		}
 	}
 
@@ -608,7 +637,8 @@ func (s *LoginScene) renderChgPwWindow(gl *engine.GLState, proj [16]float32, ox,
 	}
 
 	// 按钮先绘制，输入框后绘制——Delphi TEdit 是原生控件，始终在最上层。
-	for i, off := range []loginArea{{wx + 81, wy + 141, 0, 0}, {wx + 160, wy + 141, 0, 0}} {
+	// 按钮坐标按十周年版 Prguse[50] 实际图片测量。
+	for i, off := range []loginArea{{wx + 155, wy + 248, 0, 0}, {wx + 248, wy + 248, 0, 0}} {
 		idx := chgButtonImages[i]
 		if tex, err := s.getPrguseTexture(idx); err == nil {
 			w, h := s.getPrguseSize(idx)
@@ -627,15 +657,33 @@ func (s *LoginScene) srvWindowOrigin() (float32, float32) {
 	return loginOX + float32(800-w)/2, loginOY + float32(600-h)/2
 }
 
-// 选服按钮显示尺寸——Prguse[79] 原始 36×27 太小，用固定矩形做可点击区域。
+// 选服按钮显示尺寸——绘制石板矩形样式 (参考 Image 3)。
 const (
 	srvBtnDispW = float32(180)
 	srvBtnDispH = float32(35)
 )
 
-// renderServerSelect 渲染 DSelServerDlg：对话框 [256]，最多六个服务器
-// 按钮（Prguse[79] 纹理 + 黑底矩形），关闭 [83]
-// (FState.pas:810-847, 2220-2280)。
+// srvBtnX 返回选服按钮在面板内的 X 偏移（水平居中）。
+func (s *LoginScene) srvBtnX() float32 {
+	_, _, pw, _ := s.windowOrigin(srvDlgImg)
+	return (float32(pw) - srvBtnDispW) / 2
+}
+
+// srvBtnY 返回第 i 个选服按钮在面板内的 Y 偏移。
+func srvBtnY(i, count int) float32 {
+	// 按钮区域垂直居中：4 个按钮 × 35 + 3 间距 × 7 = 161，面板高 450
+	// 起始 y ≈ (450 - 161) / 2 ≈ 145；按 count 微调
+	firstY := float32(130)
+	if count <= 2 {
+		firstY = 180
+	} else if count == 3 {
+		firstY = 155
+	}
+	return firstY + float32(i)*42
+}
+
+// renderServerSelect 渲染 DSelServerDlg：对话框 [256]，石板按钮样式，
+// 关闭 [83] (参考 Image 3)。
 func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 	wx, wy := s.srvWindowOrigin()
 	if tex, err := s.getPrguseTexture(srvDlgImg); err == nil {
@@ -644,36 +692,29 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 		gl.DrawQuad(tex, wx, wy, float32(w), float32(h), proj)
 	}
 
+	// 关闭按钮 (1×1 占位图跳过)
 	if tex, err := s.getPrguseTexture(srvCloseImg); err == nil {
 		cw, ch := s.getPrguseSize(srvCloseImg)
 		if cw > 1 && ch > 1 {
-			s.traceDraw("srv-close", "Prguse", srvCloseImg, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch))
 			gl.DrawQuad(tex, wx+srvCloseDX, wy+srvCloseDY, float32(cw), float32(ch), proj)
 		}
 	}
 
+	bxOff := s.srvBtnX()
 	count := len(s.servers)
 	for i := 0; i < count && i < 6; i++ {
-		bx := wx + 65
-		by := wy + srvButtonTop(i, count)
-		// 黑底矩形作为按钮背景
-		if s.pressedButton == i {
-			gl.DrawQuadColor(bx, by, srvBtnDispW, srvBtnDispH, 0.15, 0.15, 0.15, 1, proj)
-		} else {
-			gl.DrawQuadColor(bx, by, srvBtnDispW, srvBtnDispH, 0, 0, 0, 1, proj)
-		}
-		// Prguse[79] 纹理叠加（如果尺寸有效）
+		bx := wx + bxOff
+		by := wy + srvBtnY(i, count)
+
+		// Prguse[286] 正常态 / [287] 按下态，拉伸到按钮显示尺寸。
 		idx := srvBtnImg
 		if s.pressedButton == i {
 			idx = srvBtnImg + 1
 		}
 		if tex, err := s.getPrguseTexture(idx); err == nil {
-			iw, ih := s.getPrguseSize(idx)
-			if iw > 1 && ih > 1 {
-				s.traceDraw("srv-btn", "Prguse", idx, bx, by, float32(iw), float32(ih))
-				gl.DrawQuad(tex, bx, by, float32(iw), float32(ih), proj)
-			}
+			gl.DrawQuad(tex, bx, by, srvBtnDispW, srvBtnDispH, proj)
 		}
+
 		if s.textSrv != nil {
 			name, r, g, b := serverDisplayName(s.servers[i])
 			tw := float32(s.textSrv.MeasureText(name))
@@ -681,32 +722,31 @@ func (s *LoginScene) renderServerSelect(gl *engine.GLState, proj [16]float32) {
 			tx := bx + (srvBtnDispW-tw)/2
 			ty := by + (srvBtnDispH-th)/2
 			if s.pressedButton == i {
-				tx += 2
-				ty += 2
+				tx += 1
+				ty += 1
 			}
-			log.Logf(log.LevelTrace, "Render", "login server button text %q pos=(%.0f,%.0f)", name, tx, ty)
 			s.textSrv.DrawTextBoldOutline(name, tx, ty, r, g, b, 1, 0, 0, 0, 1, proj)
 		}
 	}
 }
 
-// renderFieldGroup 绘制黑底白字输入框 (Delphi TEdit:
-// Color=clBlack, Font.Color=clWhite, IntroScn.pas:255-274)，
+// renderFieldGroup 绘制白字输入框文字 (Delphi TEdit:
+// Color=clBlack, Font.Color=clWhite, IntroScn.pas:255-274)。
+// 黑色背景已烘焙在面板图片中，不再额外绘制。
 // 并在焦点输入框上绘制闪烁光标。
 func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs []fieldDef, values []string, focus int) {
-	for _, def := range defs {
-		s.traceDraw("field", "quad", -1, def.x, def.y, def.w, def.h)
-		gl.DrawQuadColor(def.x, def.y, def.w, def.h, 0, 0, 0, 1, proj)
-	}
 	if s.textSmall == nil {
 		return
 	}
+	lh := float32(s.textSmall.LineHeight())
 	for i, def := range defs {
 		text := values[i]
 		if def.masked {
 			text = strings.Repeat("*", len(text))
 		}
-		s.textSmall.DrawText(text, def.x+2, def.y, 1.0, 1.0, 1.0, 1.0, proj)
+		ty := def.y + (def.h-lh)/2
+		s.traceDraw("field", "text", -1, def.x, ty, def.w, def.h)
+		s.textSmall.DrawText(text, def.x+2, ty, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 
 	if time.Since(s.cursorBlink) > 500*time.Millisecond {
@@ -718,8 +758,9 @@ func (s *LoginScene) renderFieldGroup(gl *engine.GLState, proj [16]float32, defs
 		if def.masked {
 			text = strings.Repeat("*", len(text))
 		}
+		ty := def.y + (def.h-lh)/2
 		cx := def.x + 2 + float32(s.textSmall.MeasureText(text))
-		gl.DrawQuadColor(cx, def.y, 1, def.h, 1, 1, 1, 1, proj)
+		gl.DrawQuadColor(cx, ty, 1, lh, 1, 1, 1, 1, proj)
 	}
 }
 
@@ -1021,14 +1062,9 @@ func (s *LoginScene) OnMouse(x, y float64, button int, action int, mods int) {
 	}
 }
 
-// buttonArea 返回底部第 i 个按钮的碰撞矩形；尺寸取自按钮图片
-// (TDControl.SetImgIndex, DWinCtl.pas:607-621)。
+// buttonArea 返回第 i 个登录按钮的碰撞矩形（面板内）。
 func (s *LoginScene) buttonArea(i int) loginArea {
-	a := buttonAreas[i]
-	if w, h := s.getPrguseSize(buttonImages[i]); w > 0 && h > 0 {
-		a.W, a.H = float32(w), float32(h)
-	}
-	return a
+	return s.loginBtnArea(i)
 }
 
 // regButtonArea 返回注册窗口第 i 个按钮的碰撞矩形。
@@ -1044,19 +1080,21 @@ func (s *LoginScene) mouseLogin(fx, fy float32, action int) {
 	switch action {
 	case mousePress:
 		fieldNames := [2]string{"ID", "Password"}
-		for i, field := range inputFields {
-			if hitTest(fx, fy, field) {
+		for i := range loginFieldOffsets {
+			a := s.loginInputArea(i)
+			if hitTest(fx, fy, a) {
 				s.focusedField = i
 				s.cursorBlink = time.Now()
-				log.Logf(log.LevelInfo, "LoginScene", "click input %s pos=(%.0f,%.0f)", fieldNames[i], field.X, field.Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click input %s pos=(%.0f,%.0f)", fieldNames[i], a.X, a.Y)
 				return
 			}
 		}
 		btnNames := [4]string{"OK", "ChangePW", "NewAccount", "Close"}
-		for i := range buttonAreas {
-			if hitTest(fx, fy, s.buttonArea(i)) {
+		for i := range loginBtnOffsets {
+			a := s.loginBtnArea(i)
+			if hitTest(fx, fy, a) {
 				s.pressedButton = i
-				log.Logf(log.LevelInfo, "LoginScene", "click button %s pos=(%.0f,%.0f)", btnNames[i], buttonAreas[i].X, buttonAreas[i].Y)
+				log.Logf(log.LevelInfo, "LoginScene", "click button %s pos=(%.0f,%.0f)", btnNames[i], a.X, a.Y)
 				return
 			}
 		}
@@ -1117,7 +1155,7 @@ func (s *LoginScene) mouseGroup(fx, fy float32, action int, fields, buttons []lo
 func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 	wx, wy, _, _ := s.windowOrigin(50)
 	buttons := make([]loginArea, 2)
-	for i, off := range []loginArea{{wx + 81, wy + 141, 0, 0}, {wx + 160, wy + 141, 0, 0}} {
+	for i, off := range []loginArea{{wx + 155, wy + 248, 0, 0}, {wx + 248, wy + 248, 0, 0}} {
 		w, h := s.getPrguseSize(chgButtonImages[i])
 		buttons[i] = loginArea{off.X, off.Y, float32(w), float32(h)}
 	}
@@ -1162,9 +1200,10 @@ func (s *LoginScene) mouseChgPw(fx, fy float32, action int) {
 func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 	wx, wy := s.srvWindowOrigin()
 	count := len(s.servers)
+	bxOff := s.srvBtnX()
 	closeArea := loginArea{wx + srvCloseDX, wy + srvCloseDY, srvCloseW, srvCloseH}
 	btnArea := func(i int) loginArea {
-		return loginArea{wx + 65, wy + srvButtonTop(i, count), srvBtnDispW, srvBtnDispH}
+		return loginArea{wx + bxOff, wy + srvBtnY(i, count), srvBtnDispW, srvBtnDispH}
 	}
 
 	switch action {
@@ -1172,7 +1211,8 @@ func (s *LoginScene) mouseServerSelect(fx, fy float32, action int) {
 		for i := 0; i < count && i < 6; i++ {
 			if hitTest(fx, fy, btnArea(i)) {
 				s.pressedButton = i
-				log.Logf(log.LevelInfo, "LoginScene", "click server button %s pos=(%.0f,%.0f)", s.servers[i].Name, wx+65, wy+srvButtonTop(i, count))
+				a := btnArea(i)
+				log.Logf(log.LevelInfo, "LoginScene", "click server button %s pos=(%.0f,%.0f)", s.servers[i].Name, a.X, a.Y)
 				return
 			}
 		}
