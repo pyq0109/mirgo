@@ -213,7 +213,6 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 		o.meleeAttack(server, target, now)
 		return
 	}
-	// Delphi: 封魔状态下降级为追击
 	if o.StatusTimeArr[POISON_LOCKSPELL] > 0 {
 		o.chaseTarget(target, now)
 		return
@@ -221,16 +220,43 @@ func (o *MonsterObject) runMagicCastAI(server *netserver.TCPServer, target *Play
 	if dist <= 6 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) && now-o.HitTick > o.AttackSpeed {
 		o.HitTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-		damage := o.calcMonsterDamage(target.BaseObject)
-		damage = damage * 3 / 2
-		o.applyMonsterDamageToPlayer(server, target, damage, now)
 		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
+		damage := o.calcMagicCastDamage(target.BaseObject)
+		o.applyMonsterDamageToPlayer(server, target, damage, now)
 		o.FocusTick = now
 		return
 	}
 	if dist > 6 || !o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		o.chaseTarget(target, now)
 	}
+}
+
+// calcMagicCastDamage uses the monster's MagID to look up power from magic_db;
+// falls back to MC-based damage if no magic is configured.
+func (o *MonsterObject) calcMagicCastDamage(target *BaseObject) int {
+	if o.MagID > 0 && o.engine != nil && o.engine.MagicDB != nil {
+		if def := o.engine.MagicDB.GetByID(o.MagID); def != nil {
+			power := def.Power
+			if def.MaxPower > def.Power {
+				power = def.Power + rand.Intn(def.MaxPower-def.Power+1)
+			}
+			if power < 1 {
+				power = 1
+			}
+			loMAC := int(target.WAbil.MAC & 0xFFFF)
+			hiMAC := int(target.WAbil.MAC >> 16)
+			antiMagic := loMAC
+			if hiMAC > loMAC {
+				antiMagic = loMAC + rand.Intn(hiMAC-loMAC+1)
+			}
+			damage := power - antiMagic
+			if damage < 1 {
+				damage = 1
+			}
+			return damage
+		}
+	}
+	return o.calcMonsterMagicDamage(target)
 }
 
 func (o *MonsterObject) runCloneAI(server *netserver.TCPServer, e *UserEngine, target *PlayObject, dist int, now int64) {
@@ -298,6 +324,7 @@ func (o *MonsterObject) runGuardAI(server *netserver.TCPServer, now int64) {
 	if vr <= 0 {
 		vr = 12
 	}
+	vr += o.CoolEye
 	var best *PlayObject
 	bestDist := 999999
 	for _, obj := range o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr) {
@@ -305,7 +332,7 @@ func (o *MonsterObject) runGuardAI(server *netserver.TCPServer, now int64) {
 		if !ok || p.Ghost || p.Death {
 			continue
 		}
-		if p.Hidden && rand.Intn(100) >= o.CoolEye {
+		if p.Hidden && o.CoolEye <= int(p.WAbil.Level) && rand.Intn(100) >= o.CoolEye {
 			continue
 		}
 		isLastHiter := p.ID == o.LastHiterID && now-o.LastHiterTick < 30000

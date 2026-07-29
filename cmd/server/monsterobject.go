@@ -47,6 +47,9 @@ type MonsterObject struct {
 
 	ViewRange int
 	CoolEye   int
+	MagID     int
+
+	slaveName string
 
 	lastThinkTick int64
 
@@ -437,14 +440,27 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.chaseTarget(target, now)
 			}
 		case AISummoner:
-			// Delphi TScultureKingMonster (ObjMon.pas:1444)：魔法近战 + 危险等级召唤。
-			// dangerLevel 初始 5；HP 跌破 dangerLevel/5 对应血量档时召唤一批祖玛随从，
-			// 满血时重置危险等级。
 			if dist <= 1 {
 				o.magicMeleeAttack(server, target, now)
 			} else {
 				o.chaseTarget(target, now)
 			}
+			const maxMinions = 3
+			if o.slaveName != "" && now-o.lastSummonTick > 10000 {
+				live := userEngine.countLiveChildren(o.ID)
+				if live < maxMinions {
+					o.lastSummonTick = now
+					for i := live; i < maxMinions; i++ {
+						x := o.CurrX + rand.Intn(5) - 2
+						y := o.CurrY + rand.Intn(5) - 2
+						if child := userEngine.SpawnMonsterByName(o.MapName, x, y, o.slaveName, now); child != nil {
+							child.MasterID = o.ID
+							child.TargetID = o.TargetID
+						}
+					}
+				}
+			}
+			// Delphi TScultureKingMonster danger level mechanic
 			if o.dangerLevel > 0 && o.MaxHP > 0 &&
 				int64(o.dangerLevel) > int64(o.WAbil.HP)*5/int64(o.MaxHP) {
 				o.dangerLevel--
@@ -754,6 +770,7 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 	if vr <= 0 {
 		vr = 5
 	}
+	vr += o.CoolEye
 	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr)
 	var best *PlayObject
 	bestDist := 999999
@@ -762,7 +779,8 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 		if !ok || p.Ghost || p.Death {
 			continue
 		}
-		if p.Hidden && rand.Intn(100) >= o.CoolEye {
+		// CoolEye > player level: always detect invisible; otherwise probabilistic
+		if p.Hidden && o.CoolEye <= int(p.WAbil.Level) && rand.Intn(100) >= o.CoolEye {
 			continue
 		}
 		d := abs(p.CurrX-o.CurrX) + abs(p.CurrY-o.CurrY)
@@ -894,16 +912,16 @@ func (o *MonsterObject) searchTargetAsSlave(now int64, userEngine *UserEngine) {
 	if vr <= 0 {
 		vr = 5
 	}
+	vr += o.CoolEye
 	for _, obj := range o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr) {
 		p, ok := obj.(*PlayObject)
 		if !ok || p.Ghost || p.Death {
 			continue
 		}
 		if p.LastHiterID == master.ID && now-p.LastHiterTick < 5000 {
-			continue // 这是主人正在打的，不是打主人的
+			continue
 		}
-		// 检查该玩家是否在打主人（简化：玩家的 LastHiter 是主人不算）
-		if p.Hidden && rand.Intn(100) >= o.CoolEye {
+		if p.Hidden && o.CoolEye <= int(p.WAbil.Level) && rand.Intn(100) >= o.CoolEye {
 			continue
 		}
 		if IsSafeZone(o.envir, p.CurrX, p.CurrY) {

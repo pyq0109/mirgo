@@ -179,6 +179,9 @@ type PlayScene struct {
 
 	targetX, targetY int
 
+	autoPath    [][2]int
+	autoPathIdx int
+
 	showMinimap bool
 	deathGray   bool
 	focusActor  *Actor
@@ -407,6 +410,7 @@ func (s *PlayScene) LoadMap(mapName string) error {
 		return fmt.Errorf("load map %s: %w", mapName, err)
 	}
 	s.mapData = m
+	s.clearAutoPath()
 	if s.cam == nil {
 		// 地图渲染区域为 800×445（Delphi MAPSURFACEHEIGHT, Share.pas:31）；
 		// 底部 155px 属于 HUD 栏。
@@ -504,7 +508,11 @@ func (s *PlayScene) Update(dt float64) {
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
-	if s.targetX >= 0 && s.State.MySelf != nil && moveTick && s.sendMove != nil && !s.State.MySelf.Death {
+	if len(s.autoPath) > 0 && s.State.MySelf != nil && moveTick && s.sendMove != nil && !s.State.MySelf.Death {
+		s.stepAutoPath()
+	}
+
+	if s.targetX >= 0 && len(s.autoPath) == 0 && s.State.MySelf != nil && moveTick && s.sendMove != nil && !s.State.MySelf.Death {
 		my := s.State.MySelf
 		if my.CurrX == s.targetX && my.CurrY == s.targetY {
 			s.targetX = -1
@@ -535,6 +543,88 @@ func (s *PlayScene) Update(dt float64) {
 			}
 		}
 	}
+}
+
+func (s *PlayScene) startAutoPath(tx, ty int) {
+	s.targetX, s.targetY = -1, -1
+	s.autoPathIdx = 0
+	if my := s.State.MySelf; my != nil && (my.CurrX != tx || my.CurrY != ty) {
+		s.autoPath = findPath(s.CanWalk, my.CurrX, my.CurrY, tx, ty)
+		return
+	}
+	s.autoPath = nil
+}
+
+func (s *PlayScene) clearAutoPath() {
+	s.autoPath = nil
+	s.autoPathIdx = 0
+}
+
+func (s *PlayScene) stepAutoPath() {
+	my := s.State.MySelf
+	dest := s.autoPath[len(s.autoPath)-1]
+	for s.autoPathIdx < len(s.autoPath) &&
+		my.CurrX == s.autoPath[s.autoPathIdx][0] && my.CurrY == s.autoPath[s.autoPathIdx][1] {
+		s.autoPathIdx++
+	}
+	if s.autoPathIdx >= len(s.autoPath) {
+		s.clearAutoPath()
+		return
+	}
+	if !my.IsIdle() || !s.ServerAcceptNextAction() {
+		return
+	}
+	s.autoPath = s.repairAutoPath(dest, my)
+	if s.autoPath == nil {
+		return
+	}
+	wp := s.autoPath[s.autoPathIdx]
+	dir := dirToward(my.CurrX, my.CurrY, wp[0], wp[1])
+	dx, dy := dirOffset(dir)
+
+	run := 1
+	remaining := len(s.autoPath) - s.autoPathIdx
+	if remaining >= 3 && s.collinearAhead(s.autoPathIdx, dx, dy) && s.CanWalk(my.CurrX+dx*2, my.CurrY+dy*2) {
+		run = 2
+		if my.OnHorse && remaining >= 4 && s.collinearAhead(s.autoPathIdx+1, dx, dy) && s.CanWalk(my.CurrX+dx*3, my.CurrY+dy*3) {
+			run = 3
+		}
+	}
+	switch run {
+	case 3:
+		my.UpdateMsg(protocol.CMHorseRun, my.CurrX+dx*3, my.CurrY+dy*3, dir, 0, 0)
+		s.sendMove(protocol.CMHorseRun, dir)
+	case 2:
+		my.UpdateMsg(protocol.CMRun, my.CurrX+dx*2, my.CurrY+dy*2, dir, 0, 0)
+		s.sendMove(protocol.CMRun, dir)
+	default:
+		my.UpdateMsg(protocol.CMWalk, my.CurrX+dx, my.CurrY+dy, dir, 0, 0)
+		s.sendMove(protocol.CMWalk, dir)
+	}
+	s.autoPathIdx += run
+	s.ActionLock = true
+	s.ActionLockTime = time.Now().UnixMilli()
+}
+
+// repairAutoPath 在偏离路径（+FAIL 回滚）或下一格被占（其他角色
+// 走入）时从当前位置重新寻路；无可行路径返回 nil。
+func (s *PlayScene) repairAutoPath(dest [2]int, my *Actor) [][2]int {
+	wp := s.autoPath[s.autoPathIdx]
+	if absInt(wp[0]-my.CurrX) <= 1 && absInt(wp[1]-my.CurrY) <= 1 && s.CanWalk(wp[0], wp[1]) {
+		return s.autoPath
+	}
+	path := findPath(s.CanWalk, my.CurrX, my.CurrY, dest[0], dest[1])
+	s.autoPathIdx = 0
+	return path
+}
+
+func (s *PlayScene) collinearAhead(idx, dx, dy int) bool {
+	if idx+1 >= len(s.autoPath) {
+		return false
+	}
+	prev := s.autoPath[idx]
+	next := s.autoPath[idx+1]
+	return next[0]-prev[0] == dx && next[1]-prev[1] == dy
 }
 
 func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
@@ -1391,6 +1481,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		wx, wy := s.cam.ScreenToWorld(x, y)
 		tx, ty := s.cam.WorldToTile(wx, wy)
 		log.Logf(log.LevelDebug, "Mouse", "play right-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
+		s.clearAutoPath()
 		my := s.State.MySelf
 		if absInt(my.CurrX-tx) <= 2 && absInt(my.CurrY-ty) <= 2 {
 			dir := dirToward(my.CurrX, my.CurrY, tx, ty)
@@ -1447,6 +1538,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 				continue
 			}
 			if a.CurrX == tx && a.CurrY == ty && !a.Death {
+				s.clearAutoPath()
 				if a.Type == ActorNPC {
 					if s.sendNpcClick != nil {
 						s.sendNpcClick(int(a.RecogID))
@@ -1458,7 +1550,16 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 				dy := a.CurrY - my.CurrY
 				if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
 					now := time.Now().UnixMilli()
-					if now-s.lastHitTick < 1400 {
+					cooldown := int64(1400 - s.State.Speed*100)
+					if cooldown < 500 {
+						cooldown = 500
+					} else if cooldown > 2800 {
+						cooldown = 2800
+					}
+					if s.State.Weight > s.State.MaxWeight {
+						cooldown *= 2
+					}
+					if now-s.lastHitTick < cooldown {
 						return
 					}
 					s.lastHitTick = now
@@ -1476,11 +1577,14 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		if s.sendPickup != nil {
 			for _, gi := range s.groundItems {
 				if gi.X == tx && gi.Y == ty {
+					s.clearAutoPath()
 					s.sendPickup()
 					return
 				}
 			}
 		}
+
+		s.startAutoPath(tx, ty)
 	}
 }
 

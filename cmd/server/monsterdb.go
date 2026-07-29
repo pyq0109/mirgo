@@ -29,6 +29,8 @@ type MonsterDef struct {
 	CoolEye   int    `json:"coolEye"`
 	WalkStep  int    `json:"walkStep"`
 	WalkWait  int    `json:"walkWait"`
+	Slave     string `json:"slave"`
+	MagID     int    `json:"magId"`
 }
 
 type MonsterDB struct {

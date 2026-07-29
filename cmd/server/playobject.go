@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
@@ -41,6 +42,10 @@ type PlayObject struct {
 	FireHitTick int64
 	TwinHitTick int64
 
+	SkillPower int
+	SkillLng   int
+	SkillWid   int
+
 	PkPoint         int
 	LastPkDecayTick int64
 	OnHorse         bool
@@ -57,6 +62,13 @@ type PlayObject struct {
 	AttackMode   byte
 	AllowGroup   bool // 是否接受组队邀请（CMGroupMode）
 
+	MasterName       string
+	ApprenticeNames  []string
+	MasterRecallTick int64
+
+	DearName       string // 配偶名字（Delphi m_sDearName）
+	DearRecallTick int64  // 夫妻传送冷却
+
 	// 计算后的战斗属性（Delphi m_btHitPoint/m_btSpeedPoint，ObjBase.pas:1241-1242）。
 	HitPoint   int
 	SpeedPoint int
@@ -71,10 +83,17 @@ type PlayObject struct {
 	HasAngry       bool
 	HasMagicShield bool
 	HasMuscle      bool
+	HasRecallSuite bool
+
+	SlaveIDs   []int32 // 当前宠物 ID 列表
+	SlaveLevel int     // 宠物等级（1-7，Delphi m_btSlaveExpLevel）
 
 	ScriptVars  [10]int
 	ScriptVarsD [10]int  // 动态变量 D0-D9
 	ScriptVarsM [100]int // 持久变量 M0-M99
+
+	StrScriptVars map[string]string
+	nameLists     map[string][]string
 
 	// NPC 脚本导航状态（Delphi m_nScriptGotoCount/m_sScriptGoBackLable/m_sScriptCurrLable）
 	ScriptGotoCount int
@@ -103,6 +122,8 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 		WalkSpeed:     1400,
 		RunSpeed:      1400,
 		WalkTick:      time.Now().UnixMilli(),
+		StrScriptVars: make(map[string]string),
+		nameLists:     make(map[string][]string),
 	}
 }
 
@@ -502,6 +523,10 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		multiplier = 1.1
 	case protocol.CMFireHit:
 		multiplier = 2.5
+		if p.SkillPower > 0 {
+			multiplier += float64(p.SkillPower) / 100.0
+			p.SkillPower = 0
+		}
 	default:
 		multiplier = 1.0
 	}
@@ -614,7 +639,7 @@ func (p *PlayObject) calcDamage(target *BaseObject) int {
 }
 
 func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject, damage int, dir int) {
-	if tp := p.envir.getPlayerByBase(target); tp != nil && tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 {
+	if tp := p.envir.getPlayerByBase(target); tp != nil && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
 		absorbed := damage / 2
 		mp := int(tp.WAbil.MP)
 		if mp < absorbed {
@@ -630,24 +655,6 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 
 	hp := int(target.WAbil.HP)
 	hp -= damage
-
-	if p.HasFlame {
-		bonus := damage / 10
-		if bonus > 0 {
-			hp -= bonus
-		}
-	}
-
-	if p.HasAngry {
-		drain := damage / 5
-		if drain > 0 {
-			newHP := int(p.WAbil.HP) + drain
-			if newHP > int(p.WAbil.MaxHP) {
-				newHP = int(p.WAbil.MaxHP)
-			}
-			p.WAbil.HP = uint16(newHP)
-		}
-	}
 
 	if p.HasParalysis && rand.Intn(20) == 0 {
 		if tp := p.envir.getPlayerByBase(target); tp != nil {
@@ -768,6 +775,10 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	}
 	p.WAbil.Exp += uint32(exp)
 
+	if len(p.SlaveIDs) > 0 {
+		p.gainSlaveExp()
+	}
+
 	expMsg := protocol.MakeDefaultMsg(protocol.SMWinExp, int32(exp), 0, 0, 0)
 	server.Send(p.Session.ID, expMsg, "")
 
@@ -860,6 +871,9 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 
 func (p *PlayObject) DropDeathItems(server *netserver.TCPServer) {
 	if p.envir == nil {
+		return
+	}
+	if p.HasAngry {
 		return
 	}
 	var remaining []*protocol.UserItem
@@ -1354,4 +1368,94 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 
 	log.Logf(log.LevelInfo, "PlayObject", "%s entered map %s (position %d,%d)", p.Name, p.MapName, p.CurrX, p.CurrY)
 	return true
+}
+
+const MaxSlaveCount = 2
+
+func (p *PlayObject) addSlave(id int32) bool {
+	p.cleanSlaveList()
+	if len(p.SlaveIDs) >= MaxSlaveCount {
+		return false
+	}
+	p.SlaveIDs = append(p.SlaveIDs, id)
+	return true
+}
+
+func (p *PlayObject) removeSlave(id int32) {
+	for i, sid := range p.SlaveIDs {
+		if sid == id {
+			p.SlaveIDs = append(p.SlaveIDs[:i], p.SlaveIDs[i+1:]...)
+			return
+		}
+	}
+}
+
+func (p *PlayObject) cleanSlaveList() {
+	if p.Engine == nil {
+		return
+	}
+	var alive []int32
+	for _, sid := range p.SlaveIDs {
+		for _, mon := range p.Engine.Monsters {
+			if mon.ID == sid && !mon.Death && mon.PlayerMasterID == p.ID {
+				alive = append(alive, sid)
+				break
+			}
+		}
+	}
+	p.SlaveIDs = alive
+}
+
+func (p *PlayObject) gainSlaveExp() {
+	if p.SlaveLevel < 7 {
+		p.SlaveLevel++
+		for _, mon := range p.Engine.Monsters {
+			if mon.PlayerMasterID == p.ID && !mon.Death {
+				mon.WAbil.Level = p.WAbil.Level + uint16(p.SlaveLevel)
+				bonus := p.SlaveLevel * 3
+				mon.WAbil.DC += uint32(bonus)
+				mon.WAbil.MaxHP += uint16(bonus * 10)
+				if mon.WAbil.HP < mon.WAbil.MaxHP {
+					mon.WAbil.HP = mon.WAbil.MaxHP
+				}
+			}
+		}
+	}
+}
+
+func (p *PlayObject) toggleSlaveRelax(server *netserver.TCPServer) {
+	relax := true
+	for _, mon := range p.Engine.Monsters {
+		if mon.PlayerMasterID == p.ID && !mon.Death {
+			relax = !mon.SlaveRelax
+			break
+		}
+	}
+	for _, mon := range p.Engine.Monsters {
+		if mon.PlayerMasterID == p.ID && !mon.Death {
+			mon.SlaveRelax = relax
+		}
+	}
+	if relax {
+		p.sysMsg(server, "宠物休息")
+	} else {
+		p.sysMsg(server, "宠物攻击")
+	}
+}
+
+func (p *PlayObject) recallSlaves(server *netserver.TCPServer) {
+	count := 0
+	for _, mon := range p.Engine.Monsters {
+		if mon.PlayerMasterID == p.ID && !mon.Death {
+			mon.WAbil.HP = 0
+			mon.Death = true
+			mon.DeathTick = time.Now().UnixMilli()
+			if mon.envir != nil {
+				mon.envir.broadcastRefMsg(mon.BaseObject, RM_DEATH, mon.ID, mon.CurrX, mon.CurrY, mon.Dir)
+			}
+			count++
+		}
+	}
+	p.SlaveIDs = nil
+	p.sysMsg(server, "召回了 "+strconv.Itoa(count)+" 个宠物")
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
+	"github.com/pyq0109/mirgo/internal/storage"
 )
 
 const (
@@ -93,6 +94,42 @@ func (g *Guild) GetRank(name string) string {
 		return r
 	}
 	return "成员"
+}
+
+// SaveGuilds 将内存中全部行会持久化到 SQLite。
+func (ue *UserEngine) SaveGuilds() {
+	for _, g := range ue.Guilds {
+		members := make([]storage.GuildMember, 0, len(g.Members))
+		for _, name := range g.Members {
+			members = append(members, storage.GuildMember{Name: name, Rank: g.GetRank(name)})
+		}
+		if err := ue.db.SaveGuild(g.Name, g.Leader, g.Notice, members); err != nil {
+			log.Logf(log.LevelError, "Guild", "failed to save guild %s: %v", g.Name, err)
+		}
+	}
+}
+
+// LoadGuilds 在启动时从 SQLite 恢复全部行会到内存。
+func (ue *UserEngine) LoadGuilds() {
+	records, err := ue.db.LoadGuilds()
+	if err != nil {
+		log.Logf(log.LevelError, "Guild", "failed to load guilds: %v", err)
+		return
+	}
+	for _, rec := range records {
+		g := &Guild{
+			Name:   rec.Name,
+			Leader: rec.Master,
+			Notice: rec.Notice,
+			Ranks:  make(map[string]string, len(rec.Members)),
+		}
+		for _, m := range rec.Members {
+			g.Members = append(g.Members, m.Name)
+			g.Ranks[m.Name] = m.Rank
+		}
+		ue.Guilds = append(ue.Guilds, g)
+	}
+	log.Logf(log.LevelInfo, "Guild", "loaded %d guilds from database", len(ue.Guilds))
 }
 
 // HandleOpenGuildDlg 响应 CMOpenGuildDlg，返回行会概览
@@ -197,6 +234,7 @@ func (p *PlayObject) HandleBuildGuild(msg SendMessage, server *netserver.TCPServ
 		Ranks:   map[string]string{p.Name: "掌门人"},
 	}
 	p.Engine.Guilds = append(p.Engine.Guilds, guild)
+	p.Engine.SaveGuilds()
 	p.GuildName = guildName
 	p.GuildRank = "掌门人"
 	resp := protocol.MakeDefaultMsg(protocol.SMBuildGuildOK, 0, 0, 0, 0)

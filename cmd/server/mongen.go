@@ -361,6 +361,8 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 	mon.WAbil.SC = uint32(def.SC) | uint32(def.SC)<<16
 	mon.ViewRange = def.ViewRange
 	mon.CoolEye = def.CoolEye
+	mon.MagID = def.MagID
+	mon.slaveName = def.Slave
 	if def.WalkStep > 0 {
 		mon.WalkStep = def.WalkStep
 	}

@@ -17,6 +17,11 @@ type PlayerMagic struct {
 	TrainPoint int  `json:"trainPoint"`
 }
 
+var amuletSkills = map[int]int{
+	6: 1, 13: 1, 16: 1, 17: 1, 18: 1, 19: 1,
+	20: 1, 29: 1, 30: 1, 32: 1, 34: 1, 48: 1,
+}
+
 func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanCast() {
 		p.sendMagicFail(server)
@@ -48,6 +53,13 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 		return
 	}
 
+	if def.Job == 2 {
+		if need := amuletSkills[magID]; need > 0 && !p.checkAmulet(need) {
+			p.sendMagicFail(server)
+			return
+		}
+	}
+
 	p.WAbil.MP -= uint16(def.Spell)
 	p.sendHealthSpell(server)
 
@@ -65,6 +77,9 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 		p.castMageSpell(server, magID, power, targetX, targetY)
 	case 2:
 		p.castTaoistSpell(server, magID, power, targetX, targetY)
+		if need := amuletSkills[magID]; need > 0 {
+			p.useAmulet(need)
+		}
 	}
 
 	p.trainSkill(magID)
@@ -115,6 +130,45 @@ func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power,
 						damage := power / 3
 						p.applyDamage(server, mon.BaseObject, damage, p.Dir)
 					}
+				}
+			}
+		}
+	case 35: // Wind Tebo: push facing target
+		dx, dy := dirToOffset(p.Dir)
+		obj := p.envir.GetMovingObject(p.CurrX+dx, p.CurrY+dy)
+		if obj != nil {
+			if mon, ok := obj.(*MonsterObject); ok && !mon.Death {
+				if int(p.WAbil.Level) > int(mon.WAbil.Level) && rand.Intn(20) < 12 {
+					pushX := mon.CurrX + dx*2
+					pushY := mon.CurrY + dy*2
+					if p.envir.CanWalk(pushX, pushY) {
+						p.envir.RemoveObject(mon.CurrX, mon.CurrY, OS_MOVINGOBJECT, mon)
+						mon.CurrX, mon.CurrY = pushX, pushY
+						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, mon)
+						mon.SendRefMsg(RM_WALK, mon.Dir, pushX, pushY, "")
+					}
+				}
+			}
+		}
+	case 39: // Group DeDing: AoE physical around target
+		radius := 1
+		objs := p.envir.GetRangeObjects(tx, ty, radius)
+		for _, obj := range objs {
+			switch t := obj.(type) {
+			case *MonsterObject:
+				if !t.Death && !t.Ghost {
+					damage := power
+					if rand.Intn(int(t.SpeedPoint)+1) >= p.HitPoint {
+						damage = 0
+					}
+					if damage > 0 {
+						p.applyDamage(server, t.BaseObject, damage, p.Dir)
+					}
+				}
+			case *PlayObject:
+				if !t.Ghost && !t.Death && t.ID != p.ID {
+					damage := power
+					p.applyDamage(server, t.BaseObject, damage, p.Dir)
 				}
 			}
 		}
@@ -187,6 +241,46 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 			p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 			p.VisibleActors = make(map[int32]*VisibleEntry)
 		}
+	case 45: // Flame Disruptor: single target with MAC check
+		target := p.findAttackTarget(tx, ty)
+		if target != nil {
+			antiMagic := int(target.WAbil.MAC & 0xFFFF)
+			if rand.Intn(10) >= antiMagic {
+				damage := power
+				if mon, ok := p.envir.GetMovingObject(tx, ty).(*MonsterObject); ok && mon.LifeAttrib == LA_UNDEAD {
+					damage = damage * 3 / 2
+				}
+				p.applyDamage(server, target, damage, p.Dir)
+			}
+		}
+	case 46: // Mirroring: spawn a clone monster that fights for the player
+		cloneX := p.CurrX + 1
+		cloneY := p.CurrY
+		if !p.envir.CanWalk(cloneX, cloneY) {
+			cloneX = p.CurrX - 1
+		}
+		if p.envir.CanWalk(cloneX, cloneY) {
+			p.cleanSlaveList()
+			if len(p.SlaveIDs) < MaxSlaveCount {
+				cloneHP := int(p.WAbil.MaxHP) / 2
+				clone := NewMonsterObject(p.Name+"(影)", p.Engine.nextMonsterID, 19, 11, 160, cloneHP, 400, 1000, 0)
+				p.Engine.nextMonsterID++
+				clone.MapName = p.MapName
+				clone.CurrX = cloneX
+				clone.CurrY = cloneY
+				clone.envir = p.envir
+				clone.WAbil.Level = p.WAbil.Level
+				clone.WAbil.DC = p.WAbil.DC / 2
+				clone.WAbil.MaxHP = uint16(cloneHP)
+				clone.WAbil.HP = uint16(cloneHP)
+				clone.initAITimers(time.Now().UnixMilli())
+				clone.PlayerMasterID = p.ID
+				p.envir.AddObject(cloneX, cloneY, OS_MOVINGOBJECT, clone)
+				p.Engine.Monsters = append(p.Engine.Monsters, clone)
+				clone.SendRefMsg(RM_TURN, clone.Dir, cloneX, cloneY, clone.Name)
+				p.addSlave(clone.ID)
+			}
+		}
 	}
 	p.sendMagicFire(server, magID, tx, ty)
 }
@@ -246,6 +340,11 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			}
 		}
 	case 17, 30:
+		p.cleanSlaveList()
+		if len(p.SlaveIDs) >= MaxSlaveCount {
+			p.sendMagicFail(server)
+			return
+		}
 		petX := p.CurrX + 1
 		petY := p.CurrY
 		if !p.envir.CanWalk(petX, petY) {
@@ -272,6 +371,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			p.envir.AddObject(petX, petY, OS_MOVINGOBJECT, pet)
 			p.Engine.Monsters = append(p.Engine.Monsters, pet)
 			pet.SendRefMsg(RM_TURN, pet.Dir, petX, petY, petName)
+			p.addSlave(pet.ID)
 		}
 	case 18:
 		p.MakePoison(STATE_TRANSPARENT, 300)
@@ -290,6 +390,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 					mon.TargetID = 0
 					mon.LastHiterID = 0
 					mon.PlayerMasterID = p.ID
+					p.addSlave(mon.ID)
 					log.Logf(log.LevelInfo, "Magic", "%s tamed %s", p.Name, mon.Name)
 				}
 			}
@@ -323,6 +424,65 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 					t.MakePoison(POISON_DECHEALTH, 80)
 				}
 			}
+		}
+	case 28: // Show HP: reveal target's health bar
+		target := p.findAttackTarget(tx, ty)
+		if target != nil {
+			if tp := p.envir.getPlayerByBase(target); tp != nil {
+				msg := protocol.MakeDefaultMsg(protocol.SMOpenHealth, tp.ID, uint16(tp.WAbil.HP), uint16(tp.WAbil.MaxHP), 0)
+				server.Send(p.Session.ID, msg, protocol.EncodeString(tp.Name))
+			} else if mon := p.envir.getMonsterByBase(target); mon != nil {
+				msg := protocol.MakeDefaultMsg(protocol.SMOpenHealth, mon.ID, uint16(mon.WAbil.HP), uint16(mon.WAbil.MaxHP), 0)
+				server.Send(p.Session.ID, msg, protocol.EncodeString(mon.Name))
+			}
+		}
+	case 36: // MabMabe: damage + paralysis chance
+		target := p.findAttackTarget(tx, ty)
+		if target != nil {
+			damage := power
+			p.applyDamage(server, target, damage, p.Dir)
+			skillLvl := 0
+			if m := p.findMagic(36); m != nil {
+				skillLvl = m.Level
+			}
+			if rand.Intn(10) < 3+skillLvl {
+				if tp := p.envir.getPlayerByBase(target); tp != nil {
+					tp.MakePoison(POISON_STONE, 30)
+				} else {
+					target.StatusTimeArr[POISON_STONE] = 30
+				}
+			}
+		}
+	case 41: // Summon Angel
+		p.cleanSlaveList()
+		if len(p.SlaveIDs) >= MaxSlaveCount {
+			p.sendMagicFail(server)
+			return
+		}
+		petX := p.CurrX + 1
+		petY := p.CurrY
+		if !p.envir.CanWalk(petX, petY) {
+			petX = p.CurrX - 1
+		}
+		if p.envir.CanWalk(petX, petY) {
+			petHP := 80 + int(p.WAbil.Level)*8
+			pet := NewMonsterObject("天使", p.Engine.nextMonsterID, 19, 11, 160, petHP, 400, 1000, 0)
+			p.Engine.nextMonsterID++
+			pet.MapName = p.MapName
+			pet.CurrX = petX
+			pet.CurrY = petY
+			pet.envir = p.envir
+			pet.WAbil.Level = p.WAbil.Level
+			pet.WAbil.DC = uint32(8 + int(p.WAbil.Level))
+			pet.WAbil.MAC = uint32(3 + int(p.WAbil.Level)/3)
+			pet.WAbil.MaxHP = uint16(petHP)
+			pet.WAbil.HP = uint16(petHP)
+			pet.initAITimers(time.Now().UnixMilli())
+			pet.PlayerMasterID = p.ID
+			p.envir.AddObject(petX, petY, OS_MOVINGOBJECT, pet)
+			p.Engine.Monsters = append(p.Engine.Monsters, pet)
+			pet.SendRefMsg(RM_TURN, pet.Dir, petX, petY, "天使")
+			p.addSlave(pet.ID)
 		}
 	}
 	p.sendMagicFire(server, magID, tx, ty)
@@ -549,6 +709,49 @@ func (p *PlayObject) trainSkill(magID int) {
 				log.Logf(log.LevelInfo, "Magic", "%s skill %d leveled up to %d", p.Name, magID, pm.Level)
 			}
 			return
+		}
+	}
+}
+
+func (p *PlayObject) checkAmulet(count int) bool {
+	if p.ItemDB == nil {
+		return false
+	}
+	total := 0
+	for _, item := range p.ItemList {
+		if item == nil {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(item.WIndex))
+		if def != nil && def.StdMode == 25 {
+			total += int(item.Dura)
+		}
+	}
+	return total >= count
+}
+
+func (p *PlayObject) useAmulet(count int) {
+	if p.ItemDB == nil {
+		return
+	}
+	remaining := count
+	for i := len(p.ItemList) - 1; i >= 0 && remaining > 0; i-- {
+		item := p.ItemList[i]
+		if item == nil {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(item.WIndex))
+		if def == nil || def.StdMode != 25 {
+			continue
+		}
+		use := int(item.Dura)
+		if use > remaining {
+			use = remaining
+		}
+		item.Dura -= uint16(use)
+		remaining -= use
+		if item.Dura == 0 {
+			p.ItemList = append(p.ItemList[:i], p.ItemList[i+1:]...)
 		}
 	}
 }

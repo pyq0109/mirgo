@@ -435,6 +435,12 @@ func (p *PlayObject) RecalcAbilitys() {
 		p.Luck = luck
 
 		p.checkSetBonuses()
+
+		if p.HasMuscle {
+			p.WAbil.MaxWeight *= 2
+			p.WAbil.MaxWearWeight *= 2
+			p.WAbil.MaxHandWeight *= 2
+		}
 	}
 
 	if p.WAbil.HP > p.WAbil.MaxHP {
@@ -574,6 +580,38 @@ func (p *PlayObject) CheckSpecialItemEffects() {
 			p.HasProbe = true
 		}
 	}
+
+	p.applyRingSkills()
+}
+
+// applyRingSkills 按 Delphi AddItemSkill/DelItemSkill 逻辑：
+// 火焰戒指(115)授予火球术(MagID 1)，恢复戒指(116)授予治愈术(MagID 2)。
+func (p *PlayObject) applyRingSkills() {
+	const skillFireBall = 1
+	const skillHealing = 2
+
+	if p.HasFlame {
+		p.learnMagic(skillFireBall, 1, 0)
+	} else {
+		p.removeMagicIfNoTrain(skillFireBall)
+	}
+
+	if p.HasRecovery {
+		p.learnMagic(skillHealing, 1, 0)
+	} else {
+		p.removeMagicIfNoTrain(skillHealing)
+	}
+}
+
+// removeMagicIfNoTrain 仅移除训练点为0的技能（戒指授予的技能），
+// 避免误删玩家自行学习的同名技能。
+func (p *PlayObject) removeMagicIfNoTrain(magID int) {
+	for i, pm := range p.LearnedMagics {
+		if pm.MagID == magID && pm.TrainPoint == 0 && pm.Level <= 1 {
+			p.LearnedMagics = append(p.LearnedMagics[:i], p.LearnedMagics[i+1:]...)
+			return
+		}
+	}
 }
 
 func (p *PlayObject) checkSetBonuses() {
@@ -587,22 +625,77 @@ func (p *PlayObject) checkSetBonuses() {
 			continue
 		}
 		name := def.Name
-		for _, setName := range []string{"记忆", "魔血", "虹魔", "精神"} {
+		for _, setName := range []string{"记忆", "魔血", "虹魔", "精神", "力量", "神秘", "技巧", "灵魂", "鬼灵", "祈祷", "诅咒", "平凡", "清心", "道不", "五行"} {
 			if strings.Contains(name, setName) {
 				nameCounts[setName]++
 			}
 		}
 	}
 
-	if nameCounts["记忆"] >= 4 {
-		p.WAbil.AC += 2 | 2<<16
-		p.WAbil.MAC += 2 | 2<<16
-	}
+	// 记忆套(4件)：允许行会传送（Delphi m_boRecallSuite → @recall 命令）
+	p.HasRecallSuite = nameCounts["记忆"] >= 4
+
+	// 魔血套(3件)：MP 转 HP（Delphi m_nMoXieSuite=50）
 	if nameCounts["魔血"] >= 3 {
-		p.WAbil.MaxHP += 50
+		convert := 50
+		if p.WAbil.MaxMP <= uint16(convert) {
+			convert = int(p.WAbil.MaxMP) - 1
+		}
+		if convert > 0 {
+			p.WAbil.MaxMP -= uint16(convert)
+			p.WAbil.MaxHP = uint16(min(65535, int(p.WAbil.MaxHP)+convert))
+		}
 	}
+
+	// 虹魔套(3件)：命中 +2（Delphi m_AddAbil.wHitPoint += 2）
 	if nameCounts["虹魔"] >= 3 {
-		p.WAbil.DC += 5 | 5<<16
+		p.HitPoint += 2
+	}
+
+	// 精神套(4件)：DC +2/+5，攻速 +2（Delphi m_bopirit）
+	if nameCounts["精神"] >= 4 {
+		p.WAbil.DC += 2 | 7<<16
+		p.SpeedPoint += 2
+	}
+
+	// 力量套(3件)：DC +1/+3，攻速 +1（Delphi m_boSmashSet）
+	if nameCounts["力量"] >= 3 {
+		p.WAbil.DC += 1 | 4<<16
+		p.SpeedPoint++
+	}
+
+	// 神秘套(3件)：负重 +5/+20，MC +1/+2（Delphi m_boHwanDevilSet）
+	if nameCounts["神秘"] >= 3 {
+		p.WAbil.MaxHandWeight += 5
+		p.WAbil.MaxWeight += 20
+		p.WAbil.MC += 1 | 3<<16
+	}
+
+	// 技巧套(3件)：SC +1/+2（Delphi m_boPuritySet）
+	if nameCounts["技巧"] >= 3 {
+		p.WAbil.SC += 1 | 3<<16
+	}
+
+	// 平凡套(2件)：HP +50（Delphi m_boMundaneSet）
+	if nameCounts["平凡"] >= 2 {
+		p.WAbil.MaxHP = uint16(min(65535, int(p.WAbil.MaxHP)+50))
+	}
+
+	// 清心套(2件)：MP +50（Delphi m_boNokChiSet）
+	if nameCounts["清心"] >= 2 {
+		p.WAbil.MaxMP = uint16(min(65535, int(p.WAbil.MaxMP)+50))
+	}
+
+	// 道不套(2件)：HP +30, MP +30（Delphi m_boTaoBuSet）
+	if nameCounts["道不"] >= 2 {
+		p.WAbil.MaxHP = uint16(min(65535, int(p.WAbil.MaxHP)+30))
+		p.WAbil.MaxMP = uint16(min(65535, int(p.WAbil.MaxMP)+30))
+	}
+
+	// 五行套(3件)：HP +30%，命中 +2（Delphi m_boFiveStringSet）
+	if nameCounts["五行"] >= 3 {
+		p.WAbil.MaxHP = uint16(min(65535, int(p.WAbil.MaxHP)*130/100))
+		p.HitPoint += 2
 	}
 }
 

@@ -15,11 +15,48 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 		return false
 	}
 
+	command := strings.ToLower(parts[0])
+
+	// 戒指/套装命令（不需要GM权限）
+	switch command {
+	case "move":
+		if p.HasTeleport && len(parts) >= 3 {
+			return p.ringTeleport(server, parts[1], parts[2])
+		}
+	case "search":
+		if p.HasProbe && len(parts) >= 2 {
+			return p.ringSearch(server, parts[1])
+		}
+	case "recall":
+		if p.HasRecallSuite {
+			return p.ringRecall(server)
+		}
+	case "slave":
+		if len(parts) >= 2 {
+			switch strings.ToLower(parts[1]) {
+			case "relax":
+				p.toggleSlaveRelax(server)
+			case "recall":
+				p.recallSlaves(server)
+			default:
+				p.sysMsg(server, "用法: @slave relax|recall")
+			}
+		} else {
+			p.cleanSlaveList()
+			p.sysMsg(server, "宠物: "+strconv.Itoa(len(p.SlaveIDs))+"/"+strconv.Itoa(MaxSlaveCount)+" 等级: "+strconv.Itoa(p.SlaveLevel))
+		}
+		return true
+	case "dearrecall":
+		p.DearRecall(server)
+		return true
+	case "masterrecall":
+		p.MasterRecall(server)
+		return true
+	}
+
 	if p.Permission < 10 {
 		return false
 	}
-
-	command := strings.ToLower(parts[0])
 
 	switch command {
 	case "make":
@@ -129,4 +166,80 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 func (p *PlayObject) sysMsg(server *netserver.TCPServer, text string) {
 	msg := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
 	server.Send(p.Session.ID, msg, protocol.EncodeString(text))
+}
+
+var lastTeleportTick int64
+
+func (p *PlayObject) ringTeleport(server *netserver.TCPServer, sx, sy string) bool {
+	now := time.Now().UnixMilli()
+	if now-lastTeleportTick < 10000 {
+		p.sysMsg(server, "传送戒指冷却中")
+		return true
+	}
+	x, err1 := strconv.Atoi(sx)
+	y, err2 := strconv.Atoi(sy)
+	if err1 != nil || err2 != nil || x < 0 || y < 0 {
+		p.sysMsg(server, "格式: @move X Y")
+		return true
+	}
+	if p.envir != nil && p.envir.CanWalk(x, y) {
+		lastTeleportTick = now
+		p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+		p.envir.broadcastRefMsg(p.BaseObject, RM_DISAPPEAR, p.ID, p.CurrX, p.CurrY, p.Dir)
+		p.CurrX, p.CurrY = x, y
+		p.envir.AddObject(x, y, OS_MOVINGOBJECT, p)
+		p.envir.broadcastRefMsg(p.BaseObject, RM_LOGON, p.ID, x, y, p.Dir)
+		p.sysMsg(server, "已传送")
+	} else {
+		p.sysMsg(server, "目标位置不可达")
+	}
+	return true
+}
+
+func (p *PlayObject) ringSearch(server *netserver.TCPServer, name string) bool {
+	if p.Engine == nil {
+		return true
+	}
+	p.Engine.mu.Lock()
+	var found *PlayObject
+	for _, pl := range p.Engine.PlayObjectList {
+		if pl.Name == name {
+			found = pl
+			break
+		}
+	}
+	p.Engine.mu.Unlock()
+	if found != nil {
+		p.sysMsg(server, found.Name+" 位于 "+found.MapName+" "+strconv.Itoa(found.CurrX)+":"+strconv.Itoa(found.CurrY))
+	} else {
+		p.sysMsg(server, name+" 不在线")
+	}
+	return true
+}
+
+func (p *PlayObject) ringRecall(server *netserver.TCPServer) bool {
+	if p.GuildName == "" || p.Engine == nil {
+		p.sysMsg(server, "需要行会")
+		return true
+	}
+	p.Engine.mu.Lock()
+	count := 0
+	for _, pl := range p.Engine.PlayObjectList {
+		if pl.GuildName == p.GuildName && pl.Name != p.Name && pl.envir != nil {
+			if p.envir != nil && p.envir.CanWalk(p.CurrX+count%3-1, p.CurrY+count/3-1) {
+				pl.envir.RemoveObject(pl.CurrX, pl.CurrY, OS_MOVINGOBJECT, pl)
+				pl.envir.broadcastRefMsg(pl.BaseObject, RM_DISAPPEAR, pl.ID, pl.CurrX, pl.CurrY, pl.Dir)
+				pl.CurrX = p.CurrX + count%3 - 1
+				pl.CurrY = p.CurrY + count/3 - 1
+				pl.MapName = p.MapName
+				pl.envir = p.envir
+				pl.envir.AddObject(pl.CurrX, pl.CurrY, OS_MOVINGOBJECT, pl)
+				pl.envir.broadcastRefMsg(pl.BaseObject, RM_LOGON, pl.ID, pl.CurrX, pl.CurrY, pl.Dir)
+				count++
+			}
+		}
+	}
+	p.Engine.mu.Unlock()
+	p.sysMsg(server, "召集了 "+strconv.Itoa(count)+" 名行会成员")
+	return true
 }

@@ -101,6 +101,7 @@ func main() {
 	userEngine.monGenPath = monGenPath
 	userEngine.npcConfigDir = npcConfigDir
 	userEngine.InitWorld(mapMgr)
+	userEngine.LoadGuilds()
 	server := netserver.NewTCPServer(listenAddr)
 
 	server.SetConnectHandler(func(session *netserver.Session) {
@@ -128,6 +129,32 @@ func main() {
 
 	// Fix 5: 处理 **runlogin 原始消息
 	server.SetRawMessageHandler(func(session *netserver.Session, raw string) bool {
+		if strings.HasPrefix(raw, "+PWR/") || strings.HasPrefix(raw, "+LNG/") || strings.HasPrefix(raw, "+WID/") {
+			if session.State != netserver.StateInGame {
+				return true
+			}
+			player := userEngine.GetPlayer(int32(session.CharacterID))
+			if player == nil {
+				return true
+			}
+			parts := strings.SplitN(raw, "/", 2)
+			if len(parts) != 2 {
+				return true
+			}
+			var val int
+			fmt.Sscanf(parts[1], "%d", &val)
+			switch parts[0] {
+			case "+PWR":
+				player.SkillPower = val
+			case "+LNG":
+				player.SkillLng = val
+			case "+WID":
+				player.SkillWid = val
+			}
+			log.Logf(log.LevelDebug, "Server", "%s skill param %s=%d", player.Name, parts[0], val)
+			return true
+		}
+
 		// 格式: **loginID/charName/cert/version/code
 		if !strings.HasPrefix(raw, "**") {
 			return false
@@ -223,12 +250,18 @@ func main() {
 
 		if metaJSON, err := db.LoadCharacterMeta(charData.ID); err == nil && metaJSON != nil {
 			var meta struct {
-				PkPoint int             `json:"pkPoint"`
-				Magics  []PlayerMagic   `json:"magics"`
-				Storage []savedUserItem `json:"storage"`
+				PkPoint         int             `json:"pkPoint"`
+				Magics          []PlayerMagic   `json:"magics"`
+				Storage         []savedUserItem `json:"storage"`
+				DearName        string          `json:"dearName"`
+				MasterName      string          `json:"masterName"`
+				ApprenticeNames []string        `json:"apprenticeNames"`
 			}
 			if json.Unmarshal(metaJSON, &meta) == nil {
 				player.PkPoint = meta.PkPoint
+				player.DearName = meta.DearName
+				player.MasterName = meta.MasterName
+				player.ApprenticeNames = meta.ApprenticeNames
 				for i := range meta.Magics {
 					player.LearnedMagics = append(player.LearnedMagics, &meta.Magics[i])
 				}
@@ -329,10 +362,14 @@ func main() {
 				userEngine.ProcessNpcs()
 				userEngine.SaveAllPlayers(db)
 			}
+			if tickCount%600 == 0 {
+				userEngine.SaveGuilds()
+			}
 		case sig := <-sigChan:
 			fmt.Println()
 			log.Logf(log.LevelInfo, "Server", "received signal: %v", sig)
 			log.Logf(log.LevelInfo, "Server", "shutting down...")
+			userEngine.SaveGuilds()
 			server.Stop()
 			log.Logf(log.LevelInfo, "Server", "server stopped")
 			return
@@ -785,13 +822,19 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 	savePlayerItems(db, player)
 
 	type charMeta struct {
-		PkPoint int             `json:"pkPoint"`
-		Magics  []PlayerMagic   `json:"magics"`
-		Storage []savedUserItem `json:"storage"`
+		PkPoint         int             `json:"pkPoint"`
+		Magics          []PlayerMagic   `json:"magics"`
+		Storage         []savedUserItem `json:"storage"`
+		DearName        string          `json:"dearName"`
+		MasterName      string          `json:"masterName"`
+		ApprenticeNames []string        `json:"apprenticeNames"`
 	}
 	meta := charMeta{
-		PkPoint: player.PkPoint,
-		Magics:  make([]PlayerMagic, 0, len(player.LearnedMagics)),
+		PkPoint:         player.PkPoint,
+		Magics:          make([]PlayerMagic, 0, len(player.LearnedMagics)),
+		DearName:        player.DearName,
+		MasterName:      player.MasterName,
+		ApprenticeNames: player.ApprenticeNames,
 	}
 	for _, pm := range player.LearnedMagics {
 		if pm != nil {

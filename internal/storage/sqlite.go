@@ -3,12 +3,24 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// guildsSchema 以行会名为主键存储行会数据，成员列表序列化为 JSON blob
+//（成员名+职位合并存储，对应内存中的 Members + Ranks）。
+const guildsSchema = `CREATE TABLE IF NOT EXISTS guilds (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT UNIQUE NOT NULL,
+			master TEXT NOT NULL,
+			notice TEXT NOT NULL DEFAULT '',
+			members BLOB,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`
 
 // Database 在 sql.DB 之上封装了游戏相关的操作。
 type Database struct {
@@ -61,13 +73,7 @@ func (d *Database) initialize() error {
 			gold INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY (account_id) REFERENCES accounts(id)
 		)`,
-		`CREATE TABLE IF NOT EXISTS guilds (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT UNIQUE NOT NULL,
-			leader_id INTEGER NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (leader_id) REFERENCES characters(id)
-		)`,
+		guildsSchema,
 		`CREATE TABLE IF NOT EXISTS character_items (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			character_id INTEGER NOT NULL,
@@ -85,6 +91,49 @@ func (d *Database) initialize() error {
 		}
 	}
 
+	return d.migrateGuilds()
+}
+
+// migrateGuilds 将早期以 leader_id（角色 ID 外键）定义、从未写入数据的
+// guilds 表重建为按行会名存储的新结构。新库无此表时由 initialize 创建，
+// 此处不做任何操作。
+func (d *Database) migrateGuilds() error {
+	rows, err := d.db.Query(`PRAGMA table_info(guilds)`)
+	if err != nil {
+		return fmt.Errorf("migrateGuilds: %w", err)
+	}
+	defer rows.Close()
+
+	hasMaster := false
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("migrateGuilds: %w", err)
+		}
+		if name == "master" {
+			hasMaster = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("migrateGuilds: %w", err)
+	}
+	if hasMaster {
+		return nil
+	}
+
+	if _, err := d.db.Exec(`DROP TABLE guilds`); err != nil {
+		return fmt.Errorf("migrateGuilds: drop legacy table: %w", err)
+	}
+	if _, err := d.db.Exec(guildsSchema); err != nil {
+		return fmt.Errorf("migrateGuilds: recreate table: %w", err)
+	}
 	return nil
 }
 
@@ -237,6 +286,66 @@ func (d *Database) LoadCharacterMeta(charID int64) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+// 行会操作
+
+// GuildMember 是行会成员及其职位。
+type GuildMember struct {
+	Name string `json:"name"`
+	Rank string `json:"rank"`
+}
+
+// GuildRecord 是从数据库加载的行会数据。
+type GuildRecord struct {
+	Name    string
+	Master  string
+	Notice  string
+	Members []GuildMember
+}
+
+// SaveGuild 按行会名 upsert 一条行会记录，成员列表序列化为 JSON。
+func (d *Database) SaveGuild(name, master, notice string, members []GuildMember) error {
+	membersJSON, err := json.Marshal(members)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(
+		`INSERT OR REPLACE INTO guilds (name, master, notice, members) VALUES (?, ?, ?, ?)`,
+		name, master, notice, membersJSON,
+	)
+	return err
+}
+
+// LoadGuilds 返回数据库中全部行会。
+func (d *Database) LoadGuilds() ([]GuildRecord, error) {
+	rows, err := d.db.Query(`SELECT name, master, notice, members FROM guilds`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var guilds []GuildRecord
+	for rows.Next() {
+		var g GuildRecord
+		var membersJSON []byte
+		if err := rows.Scan(&g.Name, &g.Master, &g.Notice, &membersJSON); err != nil {
+			return nil, err
+		}
+		if len(membersJSON) > 0 {
+			if err := json.Unmarshal(membersJSON, &g.Members); err != nil {
+				return nil, err
+			}
+		}
+		guilds = append(guilds, g)
+	}
+	return guilds, rows.Err()
+}
+
+// DeleteGuild 按名字删除一个行会。
+func (d *Database) DeleteGuild(name string) error {
+	_, err := d.db.Exec(`DELETE FROM guilds WHERE name = ?`, name)
+	return err
 }
 
 // CharacterInfo 是角色数据的摘要。

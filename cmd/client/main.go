@@ -626,6 +626,7 @@ func (h *NetHandler) handleControlMsg(payload string) {
 		if h.playScene.moveFailCount >= 3 {
 			h.playScene.targetX = -1
 			h.playScene.targetY = -1
+			h.playScene.clearAutoPath()
 			h.playScene.moveFailCount = 0
 		}
 		if h.playScene.State.MySelf != nil {
@@ -893,6 +894,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		if h.playScene.moveFailCount >= 3 {
 			h.playScene.targetX = -1
 			h.playScene.targetY = -1
+			h.playScene.clearAutoPath()
 			h.playScene.moveFailCount = 0
 		}
 		if h.playScene.State.MySelf != nil {
@@ -1242,16 +1244,34 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		fy := float64(msg.Tag)*engine.TileHeight + engine.TileHeight/2
 		effType := int(msg.Series & 0xFF)
 		effNum := int(msg.Series >> 8)
-		// 魔法爆炸/飞行音效（Delphi magiceff.pas:797/1344 回取施法者
-		// m_nMagicExplosionSound；此处按 magID 直接计算）
 		if magID := int(msg.Recog); magID > 0 {
 			gSound.PlaySound(10000 + magID*10 + 2)
 		}
-		switch effType {
-		case 2:
+		var sx, sy float64
+		if my := h.playScene.State.MySelf; my != nil {
+			sx = float64(my.CurrX)*engine.TileWidth + engine.TileWidth/2
+			sy = float64(my.CurrY)*engine.TileHeight + engine.TileHeight/2
+		} else {
+			sx, sy = fx, fy
+		}
+		switch MagicEffectType(effType) {
+		case EffFly:
+			h.playScene.effects.AddFly(sx, sy, fx, fy, effNum, 6, 50)
+		case EffGround:
 			h.playScene.effects.AddGround(fx, fy, effNum, 10, 50)
+		case EffFlyAxe:
+			h.playScene.effects.AddFlyAxe(sx, sy, fx, fy, 447, 3, 50)
+		case EffFireGun:
+			h.playScene.effects.AddFireGun(sx, sy, fx, fy, 930, 6, 50)
+		case EffLightning:
+			h.playScene.effects.AddLightning(fx, fy, 970, 10, 80)
+		case EffIce:
+			h.playScene.effects.AddIce(fx, fy, 10, 6, 80)
+		case EffFlyArrow:
+			h.playScene.effects.AddFlyArrow(sx, sy, fx, fy, 447, 1, 50)
+		case EffReady:
+			h.playScene.effects.AddReady(sx, sy, effNum, 10, 50)
 		default:
-			// fly(1) 在此消息中不携带起始坐标；降级为爆炸效果
 			h.playScene.effects.AddExplosion(fx, fy, effNum, 10, 50)
 		}
 
@@ -1801,6 +1821,16 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 	playScene.SetSendSpell(func(magID int, x, y int) {
 		spellMsg := protocol.MakeDefaultMsg(protocol.CMSpell, 0, uint16(magID), uint16(x), uint16(y))
 		handler.Send(spellMsg, "")
+		if magID == 26 {
+			pwr := 100
+			for i := range playScene.State.Magics {
+				if int(playScene.State.Magics[i].MagID) == 26 {
+					pwr = 100 + int(playScene.State.Magics[i].Level)*50
+					break
+				}
+			}
+			handler.SendRawString(fmt.Sprintf("+PWR/%d", pwr))
+		}
 	})
 
 	playScene.SetSendNpcClick(func(npcID int) {

@@ -227,11 +227,12 @@ func (s *TCPServer) readLoop(session *Session) {
 					continue
 				}
 
-				// 检查是否为原始消息（如 **login）
+				// 检查是否为原始消息（如 **login、+PWR/100）
 				handled := false
 				if s.onRawMessage != nil {
 					decoded := protocol.DecodeString(payload)
-					if len(decoded) >= 2 && decoded[0] == '*' && decoded[1] == '*' {
+					if (len(decoded) >= 2 && decoded[0] == '*' && decoded[1] == '*') ||
+						(len(decoded) >= 1 && decoded[0] == '+') {
 						log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] RAW %q", session.ID, decoded)
 						handled = s.onRawMessage(session, decoded)
 					}

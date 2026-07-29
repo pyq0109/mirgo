@@ -342,8 +342,14 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		return strings.EqualFold(p.MapName, parts[1])
 	case "HASGUILD":
 		return p.GuildName != ""
+	case "CHECKMARRY":
+		return p.IsMarried()
 	case "ISGUILDMASTER":
 		return p.GuildName != "" && p.GuildRank == "master"
+	case "CHECKMASTER":
+		return p.HasMaster()
+	case "HAVEMASTER":
+		return p.IsMaster()
 	case "CHECKGROUPCOUNT":
 		val, op := parseConditionValue(parts)
 		count := 1
@@ -451,6 +457,93 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		return p.evalVarCondition(parts, ">")
 	case "SMALL":
 		return p.evalVarCondition(parts, "<")
+	case "CHECKDURA":
+		if len(parts) < 3 {
+			return true
+		}
+		itemName := parts[1]
+		val, _ := strconv.Atoi(parts[2])
+		if p.ItemDB == nil {
+			return false
+		}
+		def := p.ItemDB.GetByName(itemName)
+		if def == nil {
+			return false
+		}
+		for _, item := range p.ItemList {
+			if item != nil && int(item.WIndex) == def.Idx {
+				return int(item.Dura) >= val
+			}
+		}
+		return false
+	case "CHECKDURAMAX":
+		if len(parts) < 3 {
+			return true
+		}
+		itemName := parts[1]
+		val, _ := strconv.Atoi(parts[2])
+		if p.ItemDB == nil {
+			return false
+		}
+		def := p.ItemDB.GetByName(itemName)
+		if def == nil {
+			return false
+		}
+		for _, item := range p.ItemList {
+			if item != nil && int(item.WIndex) == def.Idx {
+				return int(item.DuraMax) >= val
+			}
+		}
+		return false
+	case "CHECKGAMEGOLD":
+		val, op := parseConditionValue(parts)
+		return compareOp(p.Gold, op, val)
+	case "CHECKGAMEPOINT":
+		return true
+	case "CHECKCREDITPOINT":
+		return true
+	case "CHECKSLAVECOUNT":
+		val, op := parseConditionValue(parts)
+		p.cleanSlaveList()
+		return compareOp(len(p.SlaveIDs), op, val)
+	case "CHECKSLAVELEVEL":
+		val, op := parseConditionValue(parts)
+		return compareOp(p.SlaveLevel, op, val)
+	case "CHECKSLAVENAME":
+		if len(parts) < 2 {
+			return false
+		}
+		name := parts[1]
+		for _, mon := range p.Engine.Monsters {
+			if mon.PlayerMasterID == p.ID && !mon.Death && mon.Name == name {
+				return true
+			}
+		}
+		return false
+	case "CHECKPOSELEVEL":
+		val, op := parseConditionValue(parts)
+		if pose := p.getFacingPlayer(); pose != nil {
+			return compareOp(int(pose.WAbil.Level), op, val)
+		}
+		return false
+	case "CHECKPOSEGENDER":
+		if len(parts) < 2 || p.getFacingPlayer() == nil {
+			return false
+		}
+		pose := p.getFacingPlayer()
+		switch strings.ToLower(parts[1]) {
+		case "man", "男", "0":
+			return pose.Gender == 0
+		case "woman", "女", "1":
+			return pose.Gender == 1
+		}
+		return false
+	case "CHECKPOSEDIR":
+		if len(parts) < 2 || p.getFacingPlayer() == nil {
+			return false
+		}
+		dir, _ := strconv.Atoi(parts[1])
+		return p.getFacingPlayer().Dir == dir
 	default:
 		return true
 	}
@@ -893,16 +986,158 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.LearnedMagics = nil
 		p.SendMyMagicFull(server)
 	case "GAMEPOINT":
-		// 游戏点数（暂不实现，仅日志）
 	case "CHANGENAMECOLOR":
-		// 名字颜色（暂不实现）
 	case "TIMERECALL":
 	case "BREAKTIMERECALL":
 	case "GROUPRECALL":
+		if p.Engine != nil {
+			for _, pl := range p.Engine.PlayObjectList {
+				if pl.ID != p.ID && pl.AllowGroup && pl.envir != nil {
+					p.summonPlayerTo(pl, server)
+				}
+			}
+		}
 	case "GUILDRECALL":
+		if p.GuildName != "" && p.Engine != nil {
+			for _, pl := range p.Engine.PlayObjectList {
+				if pl.GuildName == p.GuildName && pl.ID != p.ID && pl.envir != nil {
+					p.summonPlayerTo(pl, server)
+				}
+			}
+		}
 	case "GROUPMOVEMAP":
+		if len(parts) < 2 || p.MapMgr == nil {
+			return
+		}
+		mapName := parts[1]
+		newEnvir := p.MapMgr.FindMap(mapName)
+		if newEnvir != nil {
+			p.EnterAnotherMap(server, newEnvir, newEnvir.Width/2, newEnvir.Height/2)
+		}
 	case "ADDNAMELIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.addNameList(parts[1], parts[2])
 	case "DELNAMELIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.delNameList(parts[1], parts[2])
+	case "OFFLINESENDMSG":
+		if len(parts) < 3 {
+			return
+		}
+		p.sysMsg(server, "["+parts[1]+"] "+strings.Join(parts[2:], " "))
+	case "MOVEX":
+		if len(parts) < 4 {
+			return
+		}
+		mapName := parts[1]
+		x, _ := strconv.Atoi(parts[2])
+		y, _ := strconv.Atoi(parts[3])
+		if p.MapMgr != nil {
+			if newEnvir := p.MapMgr.FindMap(mapName); newEnvir != nil {
+				p.EnterAnotherMap(server, newEnvir, x, y)
+			}
+		}
+	case "EXCHGTAKEON":
+		if len(parts) < 3 {
+			return
+		}
+		itemName := parts[1]
+		slot, _ := strconv.Atoi(parts[2])
+		if p.ItemDB != nil && slot >= 0 && slot <= 12 {
+			def := p.ItemDB.GetByName(itemName)
+			if def != nil {
+				for i, item := range p.ItemList {
+					if item != nil && int(item.WIndex) == def.Idx {
+						old := p.UseItems[slot]
+						p.ItemList = append(p.ItemList[:i], p.ItemList[i+1:]...)
+						p.UseItems[slot] = item
+						if old != nil {
+							p.ItemList = append(p.ItemList, old)
+						}
+						p.RecalcAbilitys()
+						p.SendBagItemsFull(server)
+						p.SendUseItemsFull(server)
+						break
+					}
+				}
+			}
+		}
+	case "BREAKWEAPON":
+		if p.UseItems[protocol.UWeapon] != nil {
+			p.UseItems[protocol.UWeapon] = nil
+			p.RecalcAbilitys()
+			p.SendUseItemsFull(server)
+			p.sysMsg(server, "武器已破碎")
+		}
+	case "DELAYCALL":
+	case "NPCPAGE":
+	case "CALC":
+		if len(parts) < 4 {
+			return
+		}
+		v1 := p.getScriptVar(parts[1])
+		v2, _ := strconv.Atoi(parts[3])
+		op := parts[2]
+		var result int
+		switch op {
+		case "+":
+			result = v1 + v2
+		case "-":
+			result = v1 - v2
+		case "*":
+			result = v1 * v2
+		case "/":
+			if v2 != 0 {
+				result = v1 / v2
+			}
+		}
+		if len(parts) >= 5 {
+			p.setScriptVar(parts[4], result)
+		} else {
+			p.ScriptVars[9] = result
+		}
+	case "SAVEVAR":
+		if len(parts) < 3 {
+			return
+		}
+		globalScriptVars.mu.Lock()
+		globalScriptVars.StrVars[parts[1]] = parts[2]
+		globalScriptVars.mu.Unlock()
+	case "LOADVAR":
+		if len(parts) < 2 {
+			return
+		}
+		globalScriptVars.mu.RLock()
+		val := globalScriptVars.StrVars[parts[1]]
+		globalScriptVars.mu.RUnlock()
+		p.StrScriptVars[parts[1]] = val
+	case "CLEARNAMELIST":
+		if len(parts) < 2 {
+			return
+		}
+		p.nameLists[parts[1]] = nil
+	case "MARRY":
+		if partner := p.getFacingPlayer(); partner != nil {
+			p.Marry(server, partner.Name)
+		} else {
+			p.sysMsg(server, "面前没有玩家")
+		}
+	case "UNMARRY", "DELMARRY":
+		p.Divorce(server)
+	case "MASTER":
+		if len(parts) >= 2 {
+			p.TakeMaster(server, parts[1])
+		} else if target := p.getFacingPlayer(); target != nil {
+			p.TakeMaster(server, target.Name)
+		} else {
+			p.sysMsg(server, "面前没有玩家")
+		}
+	case "UNMASTER":
+		p.LeaveMaster(server)
 	default:
 		_ = parts
 	}
@@ -1124,6 +1359,61 @@ func (p *PlayObject) setScriptVar(name string, val int) {
 	case 'M':
 		if idx >= 0 && idx < 100 {
 			p.ScriptVarsM[idx] = val
+		}
+	}
+}
+
+func (p *PlayObject) getFacingPlayer() *PlayObject {
+	if p.envir == nil {
+		return nil
+	}
+	dx, dy := dirToOffset(p.Dir)
+	obj := p.envir.GetMovingObject(p.CurrX+dx, p.CurrY+dy)
+	if obj == nil {
+		return nil
+	}
+	if pl, ok := obj.(*PlayObject); ok && !pl.Ghost {
+		return pl
+	}
+	return nil
+}
+
+func (p *PlayObject) summonPlayerTo(target *PlayObject, server *netserver.TCPServer) {
+	if p.envir == nil || target.envir == nil {
+		return
+	}
+	dx, dy := dirToOffset(p.Dir)
+	tx, ty := p.CurrX+dx, p.CurrY+dy
+	if !p.envir.CanWalk(tx, ty) {
+		tx, ty = p.CurrX, p.CurrY
+	}
+	target.envir.RemoveObject(target.CurrX, target.CurrY, OS_MOVINGOBJECT, target)
+	target.envir.broadcastRefMsg(target.BaseObject, RM_DISAPPEAR, target.ID, target.CurrX, target.CurrY, target.Dir)
+	target.MapName = p.MapName
+	target.CurrX, target.CurrY = tx, ty
+	target.envir = p.envir
+	target.envir.AddObject(tx, ty, OS_MOVINGOBJECT, target)
+	target.envir.broadcastRefMsg(target.BaseObject, RM_LOGON, target.ID, tx, ty, target.Dir)
+}
+
+func (p *PlayObject) addNameList(listName, name string) {
+	if p.nameLists == nil {
+		p.nameLists = make(map[string][]string)
+	}
+	for _, n := range p.nameLists[listName] {
+		if n == name {
+			return
+		}
+	}
+	p.nameLists[listName] = append(p.nameLists[listName], name)
+}
+
+func (p *PlayObject) delNameList(listName, name string) {
+	list := p.nameLists[listName]
+	for i, n := range list {
+		if n == name {
+			p.nameLists[listName] = append(list[:i], list[i+1:]...)
+			return
 		}
 	}
 }
