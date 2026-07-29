@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/protocol"
@@ -21,9 +22,6 @@ const (
 	StateInGame
 )
 
-// maxRecvBuf 限制单连接累计接收数据量；超过该值的对端会被断开。
-const maxRecvBuf = 64 * 1024
-
 // Session 表示一个已连接的客户端。
 type Session struct {
 	ID            int64
@@ -33,6 +31,7 @@ type Session struct {
 	CharacterID   int64
 	Certification int32
 	SendChan      chan []byte
+	closeOnce     sync.Once // 保护 Conn.Close + close(SendChan) 只执行一次
 }
 
 // MessageHandler 处理来自客户端的消息。body 是 6Bit 解码后的 body
@@ -149,7 +148,7 @@ func (s *TCPServer) acceptLoop() {
 			ID:       sessionID,
 			Conn:     conn,
 			State:    StateConnected,
-			SendChan: make(chan []byte, 100),
+			SendChan: make(chan []byte, 256),
 		}
 
 		s.mu.Lock()
@@ -173,7 +172,7 @@ func (s *TCPServer) readLoop(session *Session) {
 	defer s.removeSession(session)
 
 	buf := make([]byte, 4096)
-	var recvBuf []byte // 跨多次 Read 累积字节，避免被 TCP 拆分的帧丢失
+	var scanner protocol.FrameScanner
 	for {
 		n, err := session.Conn.Read(buf)
 		if err != nil {
@@ -186,72 +185,49 @@ func (s *TCPServer) readLoop(session *Session) {
 			}
 		}
 
-		// 解析消息帧：#<code><payload>!
-		// 一次 Read() 可能到达多个帧，一个帧也可能跨多次调用。
 		if n > 0 {
-			recvBuf = append(recvBuf, buf[:n]...)
-			if len(recvBuf) > maxRecvBuf {
+			payloads, overflow := scanner.Feed(buf[:n], true, nil)
+			if overflow {
 				log.Logf(log.LevelWarn, "Server", "来自 %d 的接收缓冲区溢出，断开连接", session.ID)
 				return
 			}
-			data := recvBuf
-			// 处理所有完整帧，把末尾不完整的帧留到下次 Read。
-			for len(data) > 2 {
-				// 找到第一个帧的结尾
-				if data[0] != '#' {
-					data = data[1:] // 容忍噪声/错位，在下一个 '#' 处重新同步
-					continue
-				}
-				endIdx := -1
-				for i := 1; i < len(data); i++ {
-					if data[i] == '!' {
-						endIdx = i
-						break
-					}
-				}
-				if endIdx < 0 {
-					break // 帧不完整；等待更多数据
-				}
-
-				frame := data[1:endIdx] // # 和 ! 之间的内容
-				data = data[endIdx+1:]   // 跳过 !
-
-				// 如果存在 code 数字则跳过
-				payloadStart := 0
-				if len(frame) > 0 && frame[0] >= '0' && frame[0] <= '9' {
-					payloadStart = 1
-				}
-				payload := string(frame[payloadStart:])
-
-				if len(payload) == 0 {
-					continue
-				}
-
-				// 检查是否为原始消息（如 **login、+PWR/100）
-				handled := false
-				if s.onRawMessage != nil {
-					decoded := protocol.DecodeString(payload)
-					if (len(decoded) >= 2 && decoded[0] == '*' && decoded[1] == '*') ||
-						(len(decoded) >= 1 && decoded[0] == '+') {
-						log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] RAW %q", session.ID, decoded)
-						handled = s.onRawMessage(session, decoded)
-					}
-				}
-
-				if !handled && s.onMessage != nil && len(payload) >= protocol.DefBlockSize {
-					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
-					body, rawBody := "", ""
-					if len(payload) > protocol.DefBlockSize {
-						rawBody = payload[protocol.DefBlockSize:]
-						body = protocol.DecodeString(rawBody)
-					}
-					log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
-						session.ID, protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
-					s.onMessage(session, msg, body, rawBody)
-				}
+			for _, payload := range payloads {
+				s.dispatchPayload(session, payload)
 			}
-			// 压缩：保留末尾不完整的帧，丢弃已消费的前缀。
-			recvBuf = recvBuf[:copy(recvBuf, data)]
+		}
+	}
+}
+
+// dispatchPayload 处理一帧 payload。
+// 先尝试标准消息解析（通过 IsClientIdent 验证 Ident），
+// 仅在 Ident 不被识别时才尝试 raw 消息检测，
+// 避免 Recog 字段恰好解码为 '+'/'*' 开头时的误路由。
+func (s *TCPServer) dispatchPayload(session *Session, payload string) {
+	// 先尝试标准消息
+	if len(payload) >= protocol.DefBlockSize {
+		msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
+		if protocol.IsClientIdent(msg.Ident) {
+			body, rawBody := "", ""
+			if len(payload) > protocol.DefBlockSize {
+				rawBody = payload[protocol.DefBlockSize:]
+				body = protocol.DecodeString(rawBody)
+			}
+			log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
+				session.ID, protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
+			if s.onMessage != nil {
+				s.onMessage(session, msg, body, rawBody)
+			}
+			return
+		}
+	}
+
+	// 非标准消息 → 尝试 raw 检测（**runlogin、+PWR/n 等）
+	if s.onRawMessage != nil {
+		decoded := protocol.DecodeString(payload)
+		if (len(decoded) >= 2 && decoded[0] == '*' && decoded[1] == '*') ||
+			(len(decoded) >= 1 && decoded[0] == '+') {
+			log.Logf(log.LevelInfo, "Server", "<<< RECV [%d] RAW %q", session.ID, decoded)
+			s.onRawMessage(session, decoded)
 		}
 	}
 }
@@ -278,11 +254,20 @@ func (s *TCPServer) writeLoop(session *Session) {
 
 func (s *TCPServer) removeSession(session *Session) {
 	s.mu.Lock()
-	delete(s.sessions, session.ID)
+	_, exists := s.sessions[session.ID]
+	if exists {
+		delete(s.sessions, session.ID)
+	}
 	s.mu.Unlock()
 
-	session.Conn.Close()
-	close(session.SendChan)
+	if !exists {
+		return // 已被另一路径移除
+	}
+
+	session.closeOnce.Do(func() {
+		session.Conn.Close()
+		close(session.SendChan)
+	})
 
 	log.Logf(log.LevelInfo, "Server", "客户端已断开：%d", session.ID)
 
@@ -291,7 +276,7 @@ func (s *TCPServer) removeSession(session *Session) {
 	}
 }
 
-// Send 向指定会话发送一条消息。
+// Send 向指定会话发送一条消息。body 必须已由调用方编码。
 func (s *TCPServer) Send(sessionID int64, msg protocol.DefaultMessage, body string) error {
 	log.Logf(log.LevelInfo, "Server", ">>> SEND [%d] %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
 		sessionID, protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
@@ -315,6 +300,7 @@ func (s *TCPServer) Send(sessionID int64, msg protocol.DefaultMessage, body stri
 	case session.SendChan <- []byte(frame):
 		return nil
 	default:
+		log.Logf(log.LevelWarn, "Server", "发送缓冲区满，丢弃 %s（session %d）", protocol.MsgName(msg.Ident), sessionID)
 		return fmt.Errorf("send buffer full for session %d", sessionID)
 	}
 }
@@ -326,6 +312,8 @@ func (s *TCPServer) GetSession(id int64) *Session {
 	return s.sessions[id]
 }
 
+// SendRaw 发送原始字节（如 #+GOOD!、#+FAIL!）。
+// 使用带超时的阻塞发送，因为 ACK 消息不可丢弃。
 func (s *TCPServer) SendRaw(sessionID int64, raw string) error {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionID]
@@ -336,7 +324,8 @@ func (s *TCPServer) SendRaw(sessionID int64, raw string) error {
 	select {
 	case session.SendChan <- []byte(raw):
 		return nil
-	default:
+	case <-time.After(time.Second):
+		log.Logf(log.LevelWarn, "Server", "发送缓冲区满（1s 超时），丢弃 RAW %q（session %d）", raw, sessionID)
 		return fmt.Errorf("send buffer full for session %d", sessionID)
 	}
 }

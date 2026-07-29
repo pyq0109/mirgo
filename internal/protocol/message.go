@@ -12,64 +12,6 @@ type DefaultMessage struct {
 	Series uint16 // 参数 3
 }
 
-// MsgHeader 是 RunGate <-> M2Server 通信的二进制帧头。
-// 大小：16 字节
-type MsgHeader struct {
-	DwCode         uint32 // 魔数：0xAA55AA55
-	NSocket        int32  // 客户端 socket 标识
-	WGSocketIdx    uint16 // 网关 socket 索引
-	WIdent         uint16 // 消息类型（GM_*）
-	WUserListIndex uint16 // 用户列表索引
-	NLength        int32  // 负载长度
-}
-
-// RunGateCode 是 RunGate 协议的魔数
-const RunGateCode = 0xAA55AA55
-
-// GM_* - 网关消息类型（RunGate <-> M2Server）
-const (
-	GMOpen           = 1  // 新客户端连接
-	GMClose          = 2  // 客户端断开
-	GMCheckServer    = 3  // 服务端保活
-	GMCheckClient    = 4  // 客户端保活
-	GMData           = 5  // 游戏数据消息
-	GMServerUserIndex = 6 // 分配服务端用户索引
-	GMReceiveOK      = 7  // 流控确认
-	GMTest           = 20 // 测试/基准消息
-)
-
-// CharDesc 描述角色外观，用于移动/动作消息。
-// 大小：8 字节
-type CharDesc struct {
-	Feature int32 // 外观编码
-	Status  int32 // 状态标志/增益
-}
-
-// MessageBodyW 是 Word 大小的扩展消息体。
-// 大小：8 字节
-type MessageBodyW struct {
-	Param1 uint16
-	Param2 uint16
-	Tag1   uint16
-	Tag2   uint16
-}
-
-// MessageBodyWL 是 DWord 大小的扩展消息体。
-// 大小：16 字节
-type MessageBodyWL struct {
-	LParam1 int32
-	LParam2 int32
-	LTag1   int32
-	LTag2   int32
-}
-
-// ShortMessage 是紧凑的消息格式。
-// 大小：4 字节
-type ShortMessage struct {
-	Ident uint16
-	WMsg  uint16
-}
-
 // ============================================================================
 // CM_* - 客户端到服务端的消息 ID
 // ============================================================================
@@ -171,6 +113,38 @@ const (
 	CMCrsHit   = 3036
 	CMTwinHit  = 3038
 )
+
+// IsClientIdent 判断 ident 是否为已知的客户端消息 (CM_*)。
+// 服务端帧扫描器用它区分标准消息与 raw 消息（**runlogin、+PWR 等），
+// 避免 Recog 字段恰好解码为 '+'/'*' 开头时的误路由。
+func IsClientIdent(ident uint16) bool {
+	switch ident {
+	case CMQueryUsername, CMQueryBagItems, CMQueryUserState,
+		CMQueryChr, CMNewChr, CMDelChr, CMSelChr, CMSelectServer,
+		CMDropItem, CMPickup, CMOpenDoor, CMTakeOnItem, CMTakeOffItem,
+		CMEat, CMButch, CMMagicKeyChange, CMClickNPC,
+		CMMerchantDlgSelect, CMMerchantQuerySellPrice,
+		CMUserSellItem, CMUserBuyItem, CMUserGetDetailItem,
+		CMDropGold, CMLoginNoticeOK, CMGroupMode, CMCreateGroup,
+		CMAddGroupMember, CMDelGroupMember, CMUserRepairItem,
+		CMMerchantQueryRepairCost, CMDealTry, CMDealAddItem,
+		CMDealDelItem, CMDealCancel, CMDealChgGold, CMDealEnd,
+		CMUserStorageItem, CMUserTakeBackStorageItem, CMWantMinimap,
+		CMUserMakeDrugItem, CMOpenGuildDlg, CMGuildHome,
+		CMGuildMemberList, CMGuildAddMember, CMGuildDelMember,
+		CMGuildUpdateNotice, CMGuildUpdateRankInfo, CMAdjustBonus,
+		CMGuildAlly, CMGuildBreakAlly, CMChangeAttackMode,
+		CMGuildWar, CMMineDig, CMWhisper, CMLogout, CMExitGame,
+		CMAddFriend, CMDelFriend, CMQueryFriends,
+		CMProtocol, CMIDPassword, CMAddNewUser, CMChangePassword, CMUpdateUser,
+		CMThrow, CMTurn, CMWalk, CMSitdown, CMRun,
+		CMHit, CMHeavyHit, CMBigHit, CMSpell, CMPowerHit,
+		CMLongHit, CMWideHit, CMFireHit, CMSay, CMHorseRun,
+		CMCrsHit, CMTwinHit:
+		return true
+	}
+	return false
+}
 
 // ============================================================================
 // SM_* - 服务端到客户端的消息 ID
@@ -923,46 +897,12 @@ const (
 )
 
 // ============================================================================
-// SS_* - 服务端到服务端（跨服）消息 ID
-// ============================================================================
-const (
-	SSOpenSession    = 100
-	SSCloseSession   = 101
-	SSSoftOutSession = 102
-	SSServerInfo     = 103
-	SSKeepAlive      = 104
-	SSKickUser       = 111
-	SSServerLoad     = 113
-)
-
-// ============================================================================
-// DB_* - 数据库消息 ID
-// ============================================================================
-const (
-	DBRFail         = 2000
-	DBLoadHumanRcd  = 100
-	DBSaveHumanRcd  = 101
-	DBSaveHumanRcdEx = 102
-	DBRLoadHumanRcd = 1100
-	DBRSaveHumanRcd = 1102
-)
-
-// ============================================================================
 // 控制消息前缀（不经 6Bit 编码）
 // ============================================================================
 const (
-	CtrlGood  = "+GOOD"  // 操作确认
-	CtrlFail  = "+FAIL"  // 操作失败
-	CtrlPwr   = "+PWR"   // 启用 PowerHit
-	CtrlLng   = "+LNG"   // 启用 LongHit
-	CtrlULng  = "+ULNG"  // 禁用 LongHit
-	CtrlWid   = "+WID"   // 启用 WideHit
-	CtrlUWid  = "+UWID"  // 禁用 WideHit
-	CtrlCrs   = "+CRS"   // 启用 CrsHit
-	CtrlUCrs  = "+UCRS"  // 禁用 CrsHit
-	CtrlTwn   = "+TWN"   // 启用 TwnHit
-	CtrlUTwn  = "+UTWN"  // 禁用 TwnHit
-	CtrlFir   = "+FIR"   // 启用 FireHit
-	CtrlUFir  = "+UFIR"  // 禁用 FireHit
-	CtrlDig   = "=DIG"   // 设置挖掘标志
+	CtrlGood = "+GOOD" // 操作确认
+	CtrlFail = "+FAIL" // 操作失败
+	CtrlPwr  = "+PWR"  // 启用 PowerHit
+	CtrlLng  = "+LNG"  // 启用 LongHit
+	CtrlWid  = "+WID"  // 启用 WideHit
 )

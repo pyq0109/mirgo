@@ -376,6 +376,9 @@ type NetHandler struct {
 	queueMu sync.Mutex
 	queue   []netEvent
 
+	// ReadLoop 异常退出时向此 channel 发送错误，Pump 检查并触发断线处理。
+	errCh chan error
+
 	// 回调（由 main 设置）
 	onReconnect func(addr string, loginID string, certification int)
 	onFail      func() // 登录失败时调用，在 main 中重置 handler
@@ -391,6 +394,17 @@ func (h *NetHandler) enqueue(e netEvent) {
 // Pump 消费入站队列并在调用方（主）线程上分发。
 // 每帧在场景更新前调用一次。
 func (h *NetHandler) Pump() {
+	// 检查 ReadLoop 是否异常退出
+	select {
+	case err := <-h.errCh:
+		log.Logf(log.LevelError, "Client", "connection lost: %v", err)
+		if h.onFail != nil {
+			h.onFail()
+		}
+		return
+	default:
+	}
+
 	h.queueMu.Lock()
 	events := h.queue
 	h.queue = nil
@@ -528,6 +542,7 @@ func (h *NetHandler) Reconnect(addr string) error {
 
 	h.conn = conn
 	h.done = make(chan struct{})
+	h.errCh = make(chan error, 1)
 	h.code = 0
 
 	// 启动新的读循环
@@ -540,7 +555,7 @@ func (h *NetHandler) Reconnect(addr string) error {
 func (h *NetHandler) ReadLoop() {
 	log.Logf(log.LevelInfo, "Client", "ReadLoop started")
 	buf := make([]byte, 4096)
-	var recvBuf []byte // 跨 Read 调用累积字节；100ms 超时经常拆分帧
+	var scanner protocol.FrameScanner
 	for {
 		select {
 		case <-h.done:
@@ -555,7 +570,6 @@ func (h *NetHandler) ReadLoop() {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
-			// 检查是否是主动关闭
 			select {
 			case <-h.done:
 				log.Logf(log.LevelInfo, "Client", "ReadLoop stopped (closed)")
@@ -563,41 +577,25 @@ func (h *NetHandler) ReadLoop() {
 			default:
 			}
 			log.Logf(log.LevelError, "Client", "ReadLoop error: %v", err)
+			h.signalError(fmt.Errorf("read: %w", err))
 			return
 		}
 
-		// 解析所有完整帧；跨读取累积，因为帧可能跨越 100ms 超时边界。
 		if n > 0 {
-			recvBuf = append(recvBuf, buf[:n]...)
-			if len(recvBuf) > 64*1024 {
+			payloads, overflow := scanner.Feed(buf[:n], false, func() {
+				// Delphi 协议：剥离 '*' 并回显
+				h.conn.Write([]byte{'*'})
+			})
+			if overflow {
 				log.Logf(log.LevelError, "Client", "receive buffer overflow, disconnecting")
+				h.signalError(fmt.Errorf("receive buffer overflow"))
 				return
 			}
-			data := recvBuf
-			for len(data) > 2 {
-				if data[0] != '#' {
-					data = data[1:] // 容忍噪声/错位，在下一个 '#' 处重新同步
-					continue
-				}
-				endIdx := -1
-				for i := 1; i < len(data); i++ {
-					if data[i] == '!' {
-						endIdx = i
-						break
-					}
-				}
-				if endIdx < 0 {
-					break // 不完整帧；等待更多数据
-				}
-
-				payload := string(data[1:endIdx])
-				data = data[endIdx+1:]
-
+			for _, payload := range payloads {
 				if len(payload) > 0 && payload[0] == '+' {
 					h.enqueue(netEvent{isCtrl: true, ctrl: payload})
 					continue
 				}
-
 				if len(payload) >= protocol.DefBlockSize {
 					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
 					body := ""
@@ -607,9 +605,15 @@ func (h *NetHandler) ReadLoop() {
 					h.enqueue(netEvent{msg: msg, body: body})
 				}
 			}
-			// 压缩：保留尾部不完整帧，丢弃已消费的前缀。
-			recvBuf = recvBuf[:copy(recvBuf, data)]
 		}
+	}
+}
+
+// signalError 向主线程报告 ReadLoop 异常退出（非阻塞，最多保留一个错误）。
+func (h *NetHandler) signalError(err error) {
+	select {
+	case h.errCh <- err:
+	default:
 	}
 }
 
@@ -1902,6 +1906,7 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 		noticeScene:    noticeScene,
 		sceneMgr:       sceneMgr,
 		done:           make(chan struct{}),
+		errCh:          make(chan error, 1),
 	}
 
 	// 发送协议版本
