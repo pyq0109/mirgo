@@ -29,6 +29,7 @@ type PlayObject struct {
 	VisibleActors  map[int32]*VisibleEntry
 	knownItems     map[int32]bool
 	lastVisionTick int64
+	visionInterval int64 // Delphi: Random(2000)+2000 = 2~4s
 	lastRegenTick  int64
 	deathTick      int64
 	skeletonSent   bool
@@ -124,16 +125,17 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 		account = session.AccountName
 	}
 	return &PlayObject{
-		BaseObject:    base,
-		Session:       session,
-		AccountName:   account,
-		VisibleActors: make(map[int32]*VisibleEntry),
-		knownItems:    make(map[int32]bool),
-		WalkSpeed:     1400,
-		RunSpeed:      1400,
-		WalkTick:      time.Now().UnixMilli(),
-		StrScriptVars: make(map[string]string),
-		nameLists:     make(map[string][]string),
+		BaseObject:     base,
+		Session:        session,
+		AccountName:    account,
+		VisibleActors:  make(map[int32]*VisibleEntry),
+		knownItems:     make(map[int32]bool),
+		WalkSpeed:      1400,
+		RunSpeed:       1400,
+		WalkTick:       time.Now().UnixMilli(),
+		visionInterval: 2000 + rand.Int63n(2000),
+		StrScriptVars:  make(map[string]string),
+		nameLists:      make(map[string][]string),
 	}
 }
 
@@ -165,7 +167,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 
 	p.Regenerate(server, now)
 
-	if now-p.lastVisionTick >= 1000 {
+	if now-p.lastVisionTick >= p.visionInterval {
 		p.lastVisionTick = now
 		p.SearchViewRange(server)
 	}
@@ -335,7 +337,6 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	p.TurnTo(dir)
-	p.SendRefMsg(RM_TURN, dir, p.CurrX, p.CurrY, p.Name)
 	server.SendRaw(p.Session.ID, "#+GOOD!")
 }
 
@@ -1134,11 +1135,10 @@ func (p *PlayObject) sendMovementToClient(server *netserver.TCPServer, smIdent u
 		return
 	}
 	obj := p.envir.getObjectByID(msg.SourceID)
-	src := objectBase(obj)
-	if src == nil {
+	if obj == nil {
 		return
 	}
-	resp := protocol.MakeDefaultMsg(smIdent, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
+	resp := protocol.MakeDefaultMsg(smIdent, msg.SourceID, uint16(msg.Param2), uint16(msg.Param3), uint16(msg.Param1))
 	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 	server.Send(p.Session.ID, resp, body)
 }
@@ -1152,7 +1152,7 @@ func (p *PlayObject) sendTurnToClient(server *netserver.TCPServer, msg SendMessa
 	if src == nil {
 		return
 	}
-	resp := protocol.MakeDefaultMsg(protocol.SMTurn, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
+	resp := protocol.MakeDefaultMsg(protocol.SMTurn, msg.SourceID, uint16(msg.Param2), uint16(msg.Param3), uint16(msg.Param1))
 	body := protocol.EncodeBuffer(p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj)))
 	if src.Name != "" {
 		body += protocol.EncodeString(src.Name)

@@ -302,9 +302,33 @@ func (e *Environment) GetMovingObject(x, y int) interface{} {
 	return nil
 }
 
-// GetRangeObjects 返回指定半径内的所有对象。
+// hasBlockingObject 检查目标格是否有阻挡移动的对象。
+// Delphi: MoveToMovingObject (Envir.pas:287) — 非 ghost、非死亡、非潜地/石化的移动对象阻挡通行。
+func (e *Environment) hasBlockingObject(x, y int, self interface{}) bool {
+	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
+		return false
+	}
+	idx := y*e.Width + x
+	for _, o := range e.Cells[idx].ObjList {
+		if o.Type != OS_MOVINGOBJECT || o.Obj == self {
+			continue
+		}
+		base := objectBase(o.Obj)
+		if base == nil || base.Ghost || base.Death {
+			continue
+		}
+		if mon, ok := o.Obj.(*MonsterObject); ok && (mon.FixedHide || mon.StoneMode) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// GetRangeObjects 返回指定半径内的所有对象（按指针去重）。
 func (e *Environment) GetRangeObjects(x, y, radius int) []interface{} {
 	var result []interface{}
+	seen := make(map[interface{}]bool)
 	for dy := -radius; dy <= radius; dy++ {
 		for dx := -radius; dx <= radius; dx++ {
 			cx, cy := x+dx, y+dy
@@ -313,7 +337,10 @@ func (e *Environment) GetRangeObjects(x, y, radius int) []interface{} {
 			}
 			idx := cy*e.Width + cx
 			for _, o := range e.Cells[idx].ObjList {
-				result = append(result, o.Obj)
+				if !seen[o.Obj] {
+					seen[o.Obj] = true
+					result = append(result, o.Obj)
+				}
 			}
 		}
 	}

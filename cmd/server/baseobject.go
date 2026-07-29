@@ -144,11 +144,13 @@ func (o *BaseObject) SendRefMsg(ident, param1, param2, param3 int, msg string) {
 		return
 	}
 	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, viewRange)
+	sent := make(map[int32]bool)
 	for _, obj := range objs {
 		if p, ok := obj.(*PlayObject); ok {
-			if p.ID == o.ID || p.Ghost {
+			if p.ID == o.ID || p.Ghost || sent[p.ID] {
 				continue
 			}
+			sent[p.ID] = true
 			p.msgMu.Lock()
 			p.msgList = append(p.msgList, SendMessage{
 				Ident:    ident,
@@ -163,7 +165,8 @@ func (o *BaseObject) SendRefMsg(ident, param1, param2, param3 int, msg string) {
 	}
 }
 
-// WalkTo 将对象向指定方向移动。
+// WalkTo 将对象向指定方向移动（含地形+移动对象碰撞检测）。
+// Delphi: WalkTo → MoveToMovingObject (Envir.pas:287)
 func (o *BaseObject) WalkTo(dir int) bool {
 	if o.envir == nil {
 		return false
@@ -176,24 +179,23 @@ func (o *BaseObject) WalkTo(dir int) bool {
 	if !o.envir.CanWalk(newX, newY) {
 		return false
 	}
+	if o.envir.hasBlockingObject(newX, newY, o) {
+		return false
+	}
 
-	// 从旧位置移除
 	o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
-
-	// 更新位置
 	o.CurrX = newX
 	o.CurrY = newY
 	o.Dir = dir
-
-	// 添加到新位置
 	o.envir.AddObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
 
 	return true
 }
 
-// TurnTo 改变对象的朝向。
+// TurnTo 改变对象的朝向并广播（Delphi ObjBase.pas:20395-20398）。
 func (o *BaseObject) TurnTo(dir int) {
 	o.Dir = dir
+	o.SendRefMsg(RM_TURN, dir, o.CurrX, o.CurrY, "")
 }
 
 // dirToOffset 将方向转换为 dx、dy 偏移量。

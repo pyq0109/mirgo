@@ -44,6 +44,7 @@ type MonsterObject struct {
 	WalkWait       int64
 
 	lastRegenTick int64
+	runTick       int64 // Delphi m_dwRunTick：Run 节流（250ms）
 
 	ViewRange int
 	CoolEye   int
@@ -324,7 +325,10 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			for _, obj := range objs {
 				if obj != o {
 					if _, isMon := obj.(*MonsterObject); isMon {
-						o.WalkTo(rand.Intn(8))
+						dir := rand.Intn(8)
+						if o.WalkTo(dir) {
+							o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
+						}
 						break
 					}
 				}

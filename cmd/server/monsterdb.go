@@ -27,6 +27,7 @@ type MonsterDef struct {
 	Hit       int    `json:"hit"`
 	ViewRange int    `json:"viewRange"`
 	CoolEye   int    `json:"coolEye"`
+	WalkSpeed int    `json:"walkSpeed"`
 	WalkStep  int    `json:"walkStep"`
 	WalkWait  int    `json:"walkWait"`
 	Slave     string `json:"slave"`

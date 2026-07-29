@@ -257,6 +257,10 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 			}
 			continue
 		}
+		if now-m.runTick < 250 {
+			continue
+		}
+		m.runTick = now
 		m.Run(server, now, e)
 	}
 
@@ -342,13 +346,16 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 // initMonsterFromDef — Delphi MonInitialize (UsrEngn.pas:2578)：
 // 从数据库定义加载完整属性，设置 AI 计时器与特殊 Race 初始状态。
 func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now int64) {
-	if def.Speed > 0 {
-		mon.WalkSpeed = int64(2000 - def.Speed*100)
-		if mon.WalkSpeed < 200 {
-			mon.WalkSpeed = 200
-		}
-		mon.AttackSpeed = mon.WalkSpeed + 900
+	// Delphi: m_nWalkSpeed 从 DB wWalkSpeed 列读取，默认 1400，min 200
+	if def.WalkSpeed > 0 {
+		mon.WalkSpeed = int64(def.WalkSpeed)
+	} else {
+		mon.WalkSpeed = 1400
 	}
+	if mon.WalkSpeed < 200 {
+		mon.WalkSpeed = 200
+	}
+	mon.AttackSpeed = mon.WalkSpeed + 900
 	mon.HitPoint = def.Hit
 	mon.SpeedPoint = def.Speed
 	mon.WAbil.Level = uint16(def.Lvl)
