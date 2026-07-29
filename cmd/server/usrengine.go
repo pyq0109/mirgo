@@ -33,6 +33,7 @@ type UserEngine struct {
 	MagicDB *MagicDB
 	Parties map[int32]*Party
 	Guilds  []*Guild
+	Castle  *CastleObject
 }
 
 func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {

@@ -86,9 +86,11 @@ type Actor struct {
 
 	HitEffectNumber int
 
-	UseMagic    bool
-	SpellFrame  int
-	CurEffFrame int
+	UseMagic       bool
+	SpellFrame     int
+	CurEffFrame    int
+	EffectFrame    int  // 特效动画帧计数器（魔法盾/武器光效循环）
+	SpellConfirmed bool // F4: 服务端确认施法（SMMagicFire 到达后置 true）
 
 	Effect  int
 	OnHorse bool
@@ -118,6 +120,16 @@ type Actor struct {
 	BoRunSound          bool
 	HiterCode           int32
 	MapRef              *mapformat.MapData
+
+	WeaponEffect    int   // weapon glow effect number (0=none)
+	EffectNumber    int   // spell effect WIL index for casting animation
+	ScrollHideState int   // 0=normal, 1=hiding, 2=hidden, 3=showing
+	ScrollHideFrame int   // teleport animation frame (0-10)
+	ScrollHideTick  int64 // animation start time (ms)
+	Highlighted     bool  // targeted actor highlight
+	RushBounce      bool  // RushKung bounce-back animation flag
+	RushBounceDir   int   // bounce direction
+	Overweight      bool  // F3: 超重标志（移动减速）
 }
 
 func NewActor(recogID int32, x, y, dir int) *Actor {
@@ -305,9 +317,16 @@ func (a *Actor) calcHumanFrame() {
 	case protocol.SMRun:
 		action = HA.ActRun
 		a.MoveStep = 2
+		// F3: 超重时跑步降为步行速度
+		if a.Overweight {
+			a.MoveStep = 1
+		}
 	case protocol.SMHorseRun:
 		action = HA.ActRun
 		a.MoveStep = 3
+		if a.Overweight {
+			a.MoveStep = 1
+		}
 	case protocol.SMRush:
 		if a.RushDir == 0 {
 			a.RushDir = 1
@@ -540,10 +559,17 @@ func (a *Actor) Run(now int64) {
 		if now-a.LastFrameTick >= int64(ft) {
 			a.LastFrameTick = now
 			if a.CurrentFrame < a.EndFrame {
-				a.CurrentFrame++
-				a.RunActSound(a.CurrentFrame - a.StartFrame)
+				// F4: 施法动画在 SpellFrame 处暂停，等待服务端确认
+				if a.UseMagic && !a.SpellConfirmed && a.CurrentFrame-a.StartFrame >= a.SpellFrame-2 {
+					// 保持在施法帧，不前进
+				} else {
+					a.CurrentFrame++
+					a.RunActSound(a.CurrentFrame - a.StartFrame)
+				}
 			} else {
 				a.CurrentAction = 0
+				a.UseMagic = false
+				a.SpellConfirmed = false
 			}
 		}
 		return
@@ -565,6 +591,11 @@ func (a *Actor) Run(now int64) {
 }
 
 func (a *Actor) DefaultMotion(now int64) {
+	// D2: 特效动画帧递增（魔法盾/武器光效/施法循环）
+	if now-a.DefFrameTime > 100 {
+		a.EffectFrame++
+	}
+
 	if a.Death {
 		a.CurrentFrame = a.getEndFrame()
 		a.Shift(a.Dir, 0, 0, 1)
@@ -797,6 +828,32 @@ func (a *Actor) Draw(gl *engine.GLState, resources *engine.ResourceManager, scre
 	}
 }
 
+// stateTransparentBit 标记处于隐身/透明状态的演员，渲染时整体半透明。
+// 与混合位(0x00800000)及高位着色位(0x04000000+)互不冲突。
+const stateTransparentBit int32 = 0x00010000
+
+// stateAlpha 返回状态对应的整体不透明度：隐身状态 0.3，其余 1.0。
+func stateAlpha(state int32) float32 {
+	if state&stateTransparentBit != 0 {
+		return 0.3
+	}
+	return 1.0
+}
+
+// drawTintedQuad 统一处理各图层的着色与隐身透明度：
+// 着色或半透明时用 DrawQuadTint，否则走普通 DrawQuad。
+func drawTintedQuad(gl *engine.GLState, tex uint32, x, y, w, h float32, tr, tg, tb float32, useTint bool, alpha float32, proj [16]float32) {
+	if useTint || alpha < 1.0 {
+		r, g, b := float32(1), float32(1), float32(1)
+		if useTint {
+			r, g, b = tr, tg, tb
+		}
+		gl.DrawQuadTint(tex, x, y, w, h, r, g, b, alpha, proj)
+		return
+	}
+	gl.DrawQuad(tex, x, y, w, h, proj)
+}
+
 func getStateTint(state int32) (float32, float32, float32, bool) {
 	switch {
 	case state < 0: // $80000000 ceGreen
@@ -837,11 +894,8 @@ func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceMana
 	if blend {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 	}
-	if tr, tg, tb, tinted := getStateTint(a.State); tinted {
-		glState.DrawQuadTint(tex, drawX, drawY, w, h, tr, tg, tb, 1.0, proj)
-	} else {
-		glState.DrawQuad(tex, drawX, drawY, w, h, proj)
-	}
+	tr, tg, tb, tinted := getStateTint(a.State)
+	drawTintedQuad(glState, tex, drawX, drawY, w, h, tr, tg, tb, tinted, stateAlpha(a.State), proj)
 	if blend {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
@@ -859,12 +913,16 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 	}
 
+	// 状态着色与隐身透明度对全部图层（身体/头发/武器/翅膀）一致生效。
+	tintR, tintG, tintB, useTint := getStateTint(a.State)
+	alpha := stateAlpha(a.State)
+
 	if a.Effect > 0 && a.wingBehind() {
-		a.drawWingLayer(glState, resources, screenX, screenY, proj)
+		a.drawWingLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
 	}
 
 	if wpord == 0 && a.Weapon >= 2 {
-		a.drawWeaponLayer(glState, resources, screenX, screenY, proj)
+		a.drawWeaponLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
 	}
 
 	bodyIdx := HumanFrame*a.Dress + a.CurrentFrame
@@ -877,11 +935,7 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 				h := float32(img.Height)
 				bx := screenX + float32(img.HotX)
 				by := screenY + float32(img.HotY)
-				if tr, tg, tb, tinted := getStateTint(a.State); tinted {
-					glState.DrawQuadTint(tex, bx, by, w, h, tr, tg, tb, 1.0, proj)
-				} else {
-					glState.DrawQuad(tex, bx, by, w, h, proj)
-				}
+				drawTintedQuad(glState, tex, bx, by, w, h, tintR, tintG, tintB, useTint, alpha, proj)
 			}
 		}
 	}
@@ -894,17 +948,86 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 			if tex != 0 {
 				w := float32(img.Width)
 				h := float32(img.Height)
-				glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, proj)
+				hx := screenX + float32(img.HotX)
+				hy := screenY + float32(img.HotY)
+				drawTintedQuad(glState, tex, hx, hy, w, h, tintR, tintG, tintB, useTint, alpha, proj)
 			}
 		}
 	}
 
 	if wpord == 1 && a.Weapon >= 2 {
-		a.drawWeaponLayer(glState, resources, screenX, screenY, proj)
+		a.drawWeaponLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
 	}
 
 	if a.Effect > 0 && !a.wingBehind() {
-		a.drawWingLayer(glState, resources, screenX, screenY, proj)
+		a.drawWingLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
+	}
+
+	// D2 Layer 7: 魔法盾泡泡（STATE_BUBBLEDEFENCEUP = 0x00020000）
+	if a.State&0x00020000 != 0 && resources.Magic != nil {
+		bubbleBase := 1570 // Delphi MAGICBASE + bubble offset
+		frame := bubbleBase + (a.EffectFrame % 10)
+		if frame >= 0 && frame < resources.Magic.Count {
+			if img := resources.Magic.GetImage(frame); img != nil && img.RGBA != nil {
+				if tex := resources.GetTexture(resources.Magic, frame); tex != 0 {
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+					glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+						float32(img.Width), float32(img.Height), proj)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+				}
+			}
+		}
+	}
+
+	// D2 Layer 8: 施法特效
+	if a.EffectNumber > 0 && resources.Magic != nil {
+		spellIdx := a.EffectNumber*10 + (a.EffectFrame % 10)
+		if spellIdx >= 0 && spellIdx < resources.Magic.Count {
+			if img := resources.Magic.GetImage(spellIdx); img != nil && img.RGBA != nil {
+				if tex := resources.GetTexture(resources.Magic, spellIdx); tex != 0 {
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+					glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+						float32(img.Width), float32(img.Height), proj)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+				}
+			}
+		}
+	}
+
+	// D2 Layer 9: 攻击特效（方向性火花）
+	if a.HitEffectNumber > 0 && resources.Magic != nil {
+		hitBase := 1450 + a.HitEffectNumber*10 // Delphi HITEFFECTBASE
+		hitIdx := hitBase + a.Dir
+		if hitIdx >= 0 && hitIdx < resources.Magic.Count {
+			if img := resources.Magic.GetImage(hitIdx); img != nil && img.RGBA != nil {
+				if tex := resources.GetTexture(resources.Magic, hitIdx); tex != 0 {
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+					glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+						float32(img.Width), float32(img.Height), proj)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+				}
+			}
+		}
+	}
+
+	// D2 Layer 10: 武器光效
+	if a.WeaponEffect > 0 && resources.Magic != nil {
+		wpEffIdx := 1700 + a.Dir*10 + (a.EffectFrame % 10) // Delphi WPEFFECTBASE
+		if wpEffIdx >= 0 && wpEffIdx < resources.Magic.Count {
+			if img := resources.Magic.GetImage(wpEffIdx); img != nil && img.RGBA != nil {
+				if tex := resources.GetTexture(resources.Magic, wpEffIdx); tex != 0 {
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+					glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+						float32(img.Width), float32(img.Height), proj)
+					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+				}
+			}
+		}
+	}
+
+	// D4: 传送动画（垂直缩放）
+	if a.ScrollHideState == 1 || a.ScrollHideState == 3 {
+		a.updateScrollHide()
 	}
 
 	if blend {
@@ -912,7 +1035,7 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 	}
 }
 
-func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, tintR, tintG, tintB float32, useTint bool, alpha float32, proj [16]float32) {
 	weaponIdx := HumanFrame*a.Weapon + a.CurrentFrame
 	if resources.Weapon == nil || weaponIdx < 0 || weaponIdx >= resources.Weapon.Count {
 		return
@@ -927,10 +1050,10 @@ func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceMa
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	gl.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, proj)
+	drawTintedQuad(gl, tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, tintR, tintG, tintB, useTint, alpha, proj)
 }
 
-func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, tintR, tintG, tintB float32, useTint bool, alpha float32, proj [16]float32) {
 	if resources.HumEffect == nil {
 		return
 	}
@@ -948,7 +1071,7 @@ func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceMana
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	gl.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, proj)
+	drawTintedQuad(gl, tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, tintR, tintG, tintB, useTint, alpha, proj)
 }
 
 func getWilFile(resources *engine.ResourceManager, actorType ActorType, appr int) *wil.File {
@@ -1075,4 +1198,42 @@ func (a *Actor) Say(text string) {
 		start = end
 	}
 	a.SayLineCount = line
+}
+
+// updateScrollHide 推进传送动画帧（D4）。
+// State 1=隐藏中（收缩），3=显示中（展开）。每 30ms 一帧，共 10 帧。
+func (a *Actor) updateScrollHide() {
+	now := time.Now().UnixMilli()
+	elapsed := now - a.ScrollHideTick
+	frame := int(elapsed / 30)
+	if frame > 10 {
+		frame = 10
+	}
+	switch a.ScrollHideState {
+	case 1: // 隐藏中
+		a.ScrollHideFrame = 10 - frame
+		if frame >= 10 {
+			a.ScrollHideState = 2 // 完全隐藏
+		}
+	case 3: // 显示中
+		a.ScrollHideFrame = frame
+		if frame >= 10 {
+			a.ScrollHideState = 0 // 恢复正常
+			a.ScrollHideFrame = 10
+		}
+	}
+}
+
+// ScrollHideScale 返回传送动画的 Y 缩放因子（0.0~1.0）。
+func (a *Actor) ScrollHideScale() float32 {
+	switch a.ScrollHideState {
+	case 1:
+		return float32(a.ScrollHideFrame) / 10.0
+	case 2:
+		return 0.0
+	case 3:
+		return float32(a.ScrollHideFrame) / 10.0
+	default:
+		return 1.0
+	}
 }

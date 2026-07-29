@@ -1240,6 +1240,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMMagicFire:
 		log.Logf(log.LevelDebug, "Client", "magic fire: magID=%d x=%d y=%d series=%d", msg.Recog, msg.Param, msg.Tag, msg.Series)
+		// F4: 确认施法，释放动画暂停
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.SpellConfirmed = true
+		}
 		fx := float64(msg.Param)*engine.TileWidth + engine.TileWidth/2
 		fy := float64(msg.Tag)*engine.TileHeight + engine.TileHeight/2
 		effType := int(msg.Series & 0xFF)
@@ -1276,7 +1280,11 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMMagicFireFail:
-		log.Logf(log.LevelDebug, "Client", "magic fire failed")
+		// F4: 施法失败，取消动画暂停
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.SpellConfirmed = true // 释放暂停让动画自然结束
+			actor.UseMagic = false
+		}
 
 	case protocol.SMShowEvent:
 		h.playScene.events.AddEvent(&MapEvent{
@@ -1344,7 +1352,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMWeightChanged:
 		h.playScene.State.Weight = int(msg.Recog)
 		h.playScene.State.MaxWeight = int(msg.Param)
-		log.Logf(log.LevelDebug, "Client", "weight changed: %d/%d", msg.Recog, msg.Param)
+		// F3: 更新超重标志
+		if h.playScene.State.MySelf != nil {
+			h.playScene.State.MySelf.Overweight = int(msg.Recog) > int(msg.Param) && int(msg.Param) > 0
+		}
 
 	case protocol.SMAdjustBonus:
 		h.playScene.State.BonusPoint = int(msg.Recog)
@@ -1654,11 +1665,21 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMSpaceMoveHide:
-		log.Logf(log.LevelDebug, "Client", "teleport hide: %d", msg.Recog)
+		// D4: 传送隐藏动画（垂直收缩）
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.ScrollHideState = 1
+			actor.ScrollHideFrame = 0
+			actor.ScrollHideTick = time.Now().UnixMilli()
+		}
 		gSound.PlaySound(sSpacemoveOut)
 
 	case protocol.SMSpaceMoveShow:
-		log.Logf(log.LevelDebug, "Client", "teleport show: %d", msg.Recog)
+		// D4: 传送显示动画（从地面展开）
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.ScrollHideState = 3
+			actor.ScrollHideFrame = 10
+			actor.ScrollHideTick = time.Now().UnixMilli()
+		}
 		gSound.PlaySound(sSpacemoveIn)
 
 	case protocol.SMOpenHealth:
@@ -1674,7 +1695,11 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelDebug, "Client", "Butch")
 
 	case protocol.SMReadMinimapOK:
-		log.Logf(log.LevelDebug, "Client", "received minimap data")
+		// Recog 携带 Mmap.wil 中本地图的小地图图像索引。
+		if h.playScene != nil {
+			h.playScene.State.MinimapIndex = int(msg.Recog)
+		}
+		log.Logf(log.LevelDebug, "Client", "received minimap data: index=%d", msg.Recog)
 
 	case protocol.SMMonsterSay:
 		log.Logf(log.LevelDebug, "Client", "monster says: %s", body)

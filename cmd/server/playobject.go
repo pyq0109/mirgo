@@ -37,6 +37,8 @@ type PlayObject struct {
 	WalkSpeed      int64
 	RunSpeed       int64
 	OverSpeedCount int
+	LastSpeedViolationTick int64 // 上次超速违规时间（用于衰减）
+	LastActionTick int64         // 上次动作时间（全局动作间隔）
 
 	HitTick     int64
 	FireHitTick int64
@@ -51,6 +53,7 @@ type PlayObject struct {
 	OnHorse         bool
 	HorseType       byte
 	Permission      byte
+	ShutupTick      int64 // 禁言到期时间
 
 	LastHiterID   int32 // 最后攻击者 ID（供奴隶目标选择）
 	LastHiterTick int64
@@ -87,6 +90,11 @@ type PlayObject struct {
 
 	SlaveIDs   []int32 // 当前宠物 ID 列表
 	SlaveLevel int     // 宠物等级（1-7，Delphi m_btSlaveExpLevel）
+
+	// E2: 任务位标志（3×1024 bits，Delphi m_QuestUnitOpen/m_QuestUnit/m_QuestFlag）
+	QuestUnitOpen [128]byte
+	QuestUnit     [128]byte
+	QuestFlag     [128]byte
 
 	ScriptVars  [10]int
 	ScriptVarsD [10]int  // 动态变量 D0-D9
@@ -328,6 +336,21 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
+	// F11: GM 穿墙（仅检查地形）
+	if p.Permission > 9 {
+		dx, dy := dirToOffset(dir)
+		nx, ny := p.CurrX+dx, p.CurrY+dy
+		if p.envir != nil && p.envir.CanWalkAdmin(nx, ny) {
+			p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+			p.CurrX, p.CurrY = nx, ny
+			p.Dir = dir
+			p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+			p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
+			server.SendRaw(p.Session.ID, "#+GOOD!")
+			p.CheckMapRoute(server)
+			return
+		}
+	}
 	if p.WalkTo(dir) {
 		p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
 		server.SendRaw(p.Session.ID, "#+GOOD!")
@@ -339,6 +362,11 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
+		return
+	}
+	// F10: 仅步行模式
+	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -359,10 +387,18 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	dx, dy := dirToOffset(dir)
 	x1, y1 := p.CurrX+dx, p.CurrY+dy
 	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
-	ignore := p.runIgnoreEntities()
-	if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) {
-		p.sendMoveFail(server)
-		return
+	// F11: GM 穿墙
+	if p.Permission > 9 {
+		if p.envir == nil || !p.envir.CanWalkAdmin(x2, y2) {
+			p.sendMoveFail(server)
+			return
+		}
+	} else {
+		ignore := p.runIgnoreEntities()
+		if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) {
+			p.sendMoveFail(server)
+			return
+		}
 	}
 	p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.CurrX, p.CurrY = x2, y2
@@ -375,6 +411,11 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
+		return
+	}
+	// F10: 仅步行模式
+	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -399,10 +440,18 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	x1, y1 := p.CurrX+dx, p.CurrY+dy
 	x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
 	x3, y3 := p.CurrX+dx*3, p.CurrY+dy*3
-	ignore := p.runIgnoreEntities()
-	if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) || !p.envir.CanWalkEx(x3, y3, ignore) {
-		p.sendMoveFail(server)
-		return
+	// F11: GM 穿墙
+	if p.Permission > 9 {
+		if p.envir == nil || !p.envir.CanWalkAdmin(x3, y3) {
+			p.sendMoveFail(server)
+			return
+		}
+	} else {
+		ignore := p.runIgnoreEntities()
+		if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) || !p.envir.CanWalkEx(x3, y3, ignore) {
+			p.sendMoveFail(server)
+			return
+		}
 	}
 	p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.CurrX, p.CurrY = x3, y3
@@ -421,8 +470,14 @@ func (p *PlayObject) runIgnoreEntities() bool {
 // checkMoveSpeed 校验移动间隔并记录超速违规。
 // 返回 true 表示允许移动，false 表示拒绝（速度过快）。
 func (p *PlayObject) checkMoveSpeed(now, interval int64, server *netserver.TCPServer) bool {
+	// E5: 超速计数衰减 — 10秒无违规则 -1
+	if p.OverSpeedCount > 0 && now-p.LastSpeedViolationTick > 10000 {
+		p.OverSpeedCount--
+		p.LastSpeedViolationTick = now
+	}
 	if now-p.WalkTick < interval {
 		p.OverSpeedCount++
+		p.LastSpeedViolationTick = now
 		cfg := p.Engine.Config
 		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
 			log.Logf(log.LevelWarn, "Server", "speed-hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
@@ -455,13 +510,23 @@ func hitSkillMagID(ident int) (int, bool) {
 
 func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	now := time.Now().UnixMilli()
-	baseSpeed := int64(1400)
-	if now-p.HitTick < baseSpeed {
+	// E5: 攻击速度验证（配置驱动）
+	hitInterval := p.Engine.Config.GetHitIntervalTime()
+	if now-p.HitTick < hitInterval {
+		p.OverSpeedCount++
+		p.LastSpeedViolationTick = now
 		return
 	}
 
 	if magID, ok := hitSkillMagID(msg.Ident); ok && p.findMagic(magID) == nil {
 		msg.Ident = protocol.CMHit
+	}
+
+	// E3: 攻击时处理武器升级结果
+	p.CheckWeaponUpgradeStatus(server)
+	// 武器破碎后无法攻击
+	if p.UseItems[protocol.UWeapon] == nil && msg.Ident != protocol.CMHit {
+		return
 	}
 
 	switch msg.Ident {

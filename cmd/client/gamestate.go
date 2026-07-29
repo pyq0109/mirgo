@@ -60,6 +60,10 @@ type GameState struct {
 	MapTitle   string
 	LightLevel int
 
+	// MinimapIndex 是 Mmap.wil 中当前地图的小地图图像索引，
+	// 由服务端 SMReadMinimapOK (Recog 字段) 下发。
+	MinimapIndex int
+
 	// ServerName 是所选服务器的显示名称，绘制在选角场景顶部居中位置
 	// （IntroScn:1539-1545, g_sServerName）。
 	// 当前未赋值：SMSelectServerOK 仅携带 addr/port/cert，

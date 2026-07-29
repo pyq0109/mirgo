@@ -110,6 +110,41 @@ func (mm *Minimap) Render(cam *engine.Camera2D, mapW, mapH int) {
 	gl.Viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3])
 }
 
+// DrawActorDots 在小地图（屏幕右上 120×120 区域）上叠加周边角色雷达：
+// 以自身为中心，±50 格范围内的角色按类型着色绘制为 2×2 点。
+// 自身白色、玩家绿色、怪物红色、NPC 黄色。proj 为 UI 正交投影。
+func (mm *Minimap) DrawActorDots(gl *engine.GLState, actors []*Actor, selfX, selfY int, proj [16]float32) {
+	const radarRange = 50
+	const radarSize = 120.0
+	scale := float32(radarSize / (radarRange * 2)) // 120/100 = 1.2
+	// 小地图绘制在屏幕右上角 (ScreenWidth-120, 0)，点坐标相应偏移以叠加其上。
+	originX := float32(ScreenWidth) - radarSize
+	for _, a := range actors {
+		if a == nil {
+			continue
+		}
+		dx := a.CurrX - selfX
+		dy := a.CurrY - selfY
+		if dx < -radarRange || dx > radarRange || dy < -radarRange || dy > radarRange {
+			continue
+		}
+		dotX := originX + float32(dx+radarRange)*scale
+		dotY := float32(dy+radarRange) * scale
+		var r, g, b float32
+		switch {
+		case a.IsSelf:
+			r, g, b = 1, 1, 1
+		case a.Type == ActorMonster:
+			r, g, b = 1, 0, 0
+		case a.Type == ActorNPC:
+			r, g, b = 1, 1, 0
+		default:
+			r, g, b = 0, 1, 0
+		}
+		gl.DrawQuadColor(dotX, dotY, 2, 2, r, g, b, 1, proj)
+	}
+}
+
 // GetTexture 返回 FBO 纹理。
 func (mm *Minimap) GetTexture() uint32 {
 	return mm.fboTex

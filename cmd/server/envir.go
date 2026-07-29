@@ -63,6 +63,7 @@ type Environment struct {
 	Doors       []Door
 	GroundItems []*GroundItem
 	Events      []*MapEvent
+	MineEvents  []*MineEvent
 	eventIDSeq  int32
 
 	rawMap *mapformat.MapData
@@ -125,6 +126,10 @@ func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 			return false
 		}
 	}
+	// 圣幕事件阻挡移动
+	if e.HasHolyCurtainAt(x, y) {
+		return false
+	}
 	if ignoreEntities {
 		return true
 	}
@@ -140,6 +145,14 @@ func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 		}
 	}
 	return true
+}
+
+// CanWalkAdmin GM 穿墙模式：仅检查地形，跳过实体/门/事件碰撞。
+func (e *Environment) CanWalkAdmin(x, y int) bool {
+	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
+		return false
+	}
+	return e.Cells[y*e.Width+x].Flag == 0
 }
 
 // CanSafeWalk 检查可通行性并排除危险地形（Delphi CanSafeWalk：lava 等）。

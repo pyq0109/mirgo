@@ -779,6 +779,10 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 		if !ok || p.Ghost || p.Death {
 			continue
 		}
+		// F11: GM 不可被攻击
+		if p.Permission > 9 {
+			continue
+		}
 		// CoolEye > player level: always detect invisible; otherwise probabilistic
 		if p.Hidden && o.CoolEye <= int(p.WAbil.Level) && rand.Intn(100) >= o.CoolEye {
 			continue

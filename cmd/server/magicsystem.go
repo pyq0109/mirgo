@@ -100,15 +100,87 @@ func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power,
 		p.doSpellDamageAt(server, power, p.CurrX+dx*2, p.CurrY+dy*2)
 	case 25, 26:
 		p.doSpellDamageToAdjacent(server, power*2)
-	case 27:
+	case 27: // 冲撞（RushKung）— F2: 含目标推动/伤害/回弹
 		dx, dy := dirToOffset(p.Dir)
-		rushX := p.CurrX + dx*3
-		rushY := p.CurrY + dy*3
-		if p.envir != nil && p.envir.CanWalk(rushX, rushY) {
+		if p.envir == nil {
+			break
+		}
+		// 检测路径上的目标（1-3格）
+		var target interface{}
+		var targetDist int
+		for dist := 1; dist <= 3; dist++ {
+			tx, ty := p.CurrX+dx*dist, p.CurrY+dy*dist
+			obj := p.envir.GetMovingObject(tx, ty)
+			if obj != nil {
+				target = obj
+				targetDist = dist
+				break
+			}
+		}
+		if target == nil {
+			// 无目标：直接冲3格
+			rushDist := 3
+			for d := 3; d >= 1; d-- {
+				if p.envir.CanWalk(p.CurrX+dx*d, p.CurrY+dy*d) {
+					rushDist = d
+					break
+				}
+			}
+			rushX := p.CurrX + dx*rushDist
+			rushY := p.CurrY + dy*rushDist
 			p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 			p.CurrX, p.CurrY = rushX, rushY
 			p.envir.AddObject(rushX, rushY, OS_MOVINGOBJECT, p)
-			p.SendRefMsg(RM_WALK, p.Dir, p.CurrX, p.CurrY, "")
+			p.SendRefMsg(RM_RUSHKUNG, p.Dir, p.CurrX, p.CurrY, "")
+		} else {
+			// 有目标：尝试推动目标
+			pushX := p.CurrX + dx*(targetDist+1)
+			pushY := p.CurrY + dy*(targetDist+1)
+			pushed := false
+			if p.envir.CanWalk(pushX, pushY) {
+				// 推动目标
+				switch t := target.(type) {
+				case *MonsterObject:
+					if !t.Death {
+						p.envir.RemoveObject(t.CurrX, t.CurrY, OS_MOVINGOBJECT, t)
+						t.CurrX, t.CurrY = pushX, pushY
+						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, t)
+						p.envir.broadcastRefMsg(t.BaseObject, RM_WALK, t.ID, pushX, pushY, p.Dir)
+						// 伤害
+						dmg := rand.Intn(power+1) + power/2
+						t.WAbil.HP -= uint16(min(int(t.WAbil.HP), dmg))
+						pushed = true
+					}
+				case *PlayObject:
+					if !t.Ghost && !t.Death && p.CanAttackTarget(t.BaseObject) {
+						p.envir.RemoveObject(t.CurrX, t.CurrY, OS_MOVINGOBJECT, t)
+						t.CurrX, t.CurrY = pushX, pushY
+						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, t)
+						p.envir.broadcastRefMsg(t.BaseObject, RM_WALK, t.ID, pushX, pushY, p.Dir)
+						pushed = true
+					}
+				}
+			}
+			if pushed {
+				// 冲到目标位置
+				rushX := p.CurrX + dx*targetDist
+				rushY := p.CurrY + dy*targetDist
+				p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+				p.CurrX, p.CurrY = rushX, rushY
+				p.envir.AddObject(rushX, rushY, OS_MOVINGOBJECT, p)
+				p.SendRefMsg(RM_RUSHKUNG, p.Dir, p.CurrX, p.CurrY, "")
+			} else {
+				// 被阻挡：回弹1格
+				backX := p.CurrX - dx
+				backY := p.CurrY - dy
+				if p.envir.CanWalk(backX, backY) {
+					p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+					p.CurrX, p.CurrY = backX, backY
+					p.envir.AddObject(backX, backY, OS_MOVINGOBJECT, p)
+				}
+				// 回弹消息（Param=8 表示碰撞回弹）
+				p.SendRefMsg(RM_RUSHKUNG, 8, p.CurrX, p.CurrY, "")
+			}
 		}
 	case 37:
 		for dy2 := -1; dy2 <= 1; dy2++ {

@@ -727,11 +727,12 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 
 	if s.deathGray {
-		log.Logf(log.LevelTrace, "Render", "play death grayscale viewport=(%.0f,%.0f,%.0f,%.0f)",
-			s.cam.X, s.cam.Y, float64(s.cam.ViewW)/s.cam.Zoom, float64(s.cam.ViewH)/s.cam.Zoom)
+		// F6: 死亡灰度效果 — 使用 multiply blend 实现更自然的去饱和
+		gl.BlendFunc(gl.DST_COLOR, gl.ZERO)
 		s.gl.DrawQuadColor(float32(s.cam.X), float32(s.cam.Y),
 			float32(float64(s.cam.ViewW)/s.cam.Zoom), float32(float64(s.cam.ViewH)/s.cam.Zoom),
-			0.3, 0.3, 0.3, 0.4, proj)
+			0.45, 0.45, 0.45, 1.0, proj)
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
 
 	if s.lighting != nil && !s.deathGray {
@@ -747,13 +748,14 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 	if s.showMinimap {
 		mmapDrawn := false
-		if s.resources.Mmap != nil && s.resources.Mmap.Count > 0 {
-			mmImg := s.resources.Mmap.GetImage(0)
+		mmIdx := s.State.MinimapIndex
+		if s.resources.Mmap != nil && mmIdx >= 0 && mmIdx < s.resources.Mmap.Count {
+			mmImg := s.resources.Mmap.GetImage(mmIdx)
 			if mmImg != nil && mmImg.RGBA != nil {
-				mmTex := s.resources.GetTexture(s.resources.Mmap, 0)
+				mmTex := s.resources.GetTexture(s.resources.Mmap, mmIdx)
 				if mmTex != 0 {
 					// Delphi: (SCREENWIDTH-120, 0), 120×120（PlayScn.pas:791-842）。
-					log.Logf(log.LevelTrace, "Render", "play minimap Mmap[0] pos=(%d,0) size=(120,120)", ScreenWidth-120)
+					log.Logf(log.LevelTrace, "Render", "play minimap Mmap[%d] pos=(%d,0) size=(120,120)", mmIdx, ScreenWidth-120)
 					s.gl.DrawQuad(mmTex, ScreenWidth-120, 0, 120, 120, uiProj)
 					mmapDrawn = true
 				}
@@ -761,6 +763,10 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 		if !mmapDrawn && s.minimap != nil {
 			glState.DrawQuad(s.minimap.GetTexture(), ScreenWidth-120, 0, 120, 120, uiProj)
+		}
+		// 在小地图上叠加周边角色雷达点（以自身为中心）。
+		if s.minimap != nil && s.State.MySelf != nil {
+			s.minimap.DrawActorDots(s.gl, s.State.Actors.All(), s.State.MySelf.CurrX, s.State.MySelf.CurrY, uiProj)
 		}
 	}
 	s.RenderUI(uiProj)

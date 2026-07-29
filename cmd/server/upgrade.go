@@ -12,6 +12,7 @@ const (
 	upgradeWeaponPrice    = 10000
 	upgradeGetBackTime    = 3600000 // 1小时（ms）
 	upgradeBlackIronName  = "黑铁矿"
+	upgradeMaxPoints      = 7 // 最大升级总点数
 )
 
 func (p *PlayObject) HandleUpgradeWeapon(npc *NpcObject, server *netserver.TCPServer) {
@@ -185,12 +186,11 @@ func (p *PlayObject) HandleGetBackupWeapon(npc *NpcObject, server *netserver.TCP
 			weapon.Dura = weapon.DuraMax
 		}
 	} else {
-		// 失败：降低耐久
-		if weapon.DuraMax > 1000 {
-			weapon.DuraMax -= 1000
-			if weapon.Dura > weapon.DuraMax {
-				weapon.Dura = weapon.DuraMax
-			}
+		// 失败：设置破碎编码（攻击时触发 CheckWeaponUpgradeStatus）
+		weapon.BtValue[10] = 1
+		// 诅咒概率 30%
+		if rand.Intn(100) < 30 && weapon.BtValue[12] < 7 {
+			weapon.BtValue[12]++
 		}
 	}
 
@@ -229,4 +229,64 @@ func (p *PlayObject) findBagItemByWIndex(wIdx uint16) int {
 		}
 	}
 	return -1
+}
+
+// CheckWeaponUpgradeStatus 攻击时处理武器升级结果（Delphi ObjBase.pas:18704-18772）。
+// BtValue[10] 编码：1=破碎, 10-13=DC+1..4, 20-23=MC+1..4, 30-33=SC+1..4
+func (p *PlayObject) CheckWeaponUpgradeStatus(server *netserver.TCPServer) {
+	weapon := p.UseItems[protocol.UWeapon]
+	if weapon == nil {
+		return
+	}
+	bt := weapon.BtValue[10]
+	if bt == 0 {
+		return
+	}
+	weapon.BtValue[10] = 0 // 消耗结果码
+
+	if bt == 1 {
+		// 武器破碎
+		p.UseItems[protocol.UWeapon] = nil
+		p.RecalcAbilitys()
+		p.SendUseItemsFull(server)
+		p.SendRefMsg(RM_BREAKWEAPON, 0, p.CurrX, p.CurrY, "")
+		p.sysMsg(server, "你的武器破碎了！")
+		return
+	}
+
+	// 解析属性和点数
+	var attrIdx int
+	var points byte
+	switch {
+	case bt >= 30 && bt <= 33:
+		attrIdx = 2 // SC
+		points = bt - 29
+	case bt >= 20 && bt <= 23:
+		attrIdx = 1 // MC
+		points = bt - 19
+	case bt >= 10 && bt <= 13:
+		attrIdx = 0 // DC
+		points = bt - 9
+	default:
+		return
+	}
+
+	// 检查总升级点数上限
+	totalUpgrades := int(weapon.BtValue[0]) + int(weapon.BtValue[1]) + int(weapon.BtValue[2])
+	if totalUpgrades+int(points) > upgradeMaxPoints {
+		// 超限：武器破碎
+		p.UseItems[protocol.UWeapon] = nil
+		p.RecalcAbilitys()
+		p.SendUseItemsFull(server)
+		p.SendRefMsg(RM_BREAKWEAPON, 0, p.CurrX, p.CurrY, "")
+		p.sysMsg(server, "升级过度，武器破碎了！")
+		return
+	}
+
+	// 应用升级加成
+	weapon.BtValue[attrIdx] += points
+	weapon.BtValue[11]++ // 升级等级计数器
+	p.RecalcAbilitys()
+	p.SendUseItemsFull(server)
+	p.sysMsg(server, "武器升级成功！")
 }

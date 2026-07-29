@@ -544,6 +544,28 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		}
 		dir, _ := strconv.Atoi(parts[1])
 		return p.getFacingPlayer().Dir == dir
+	// E2: 任务条件
+	case "CHECKOPENQUEST", "CHECKOPEN":
+		if len(parts) < 3 {
+			return false
+		}
+		idx, _ := strconv.Atoi(parts[1])
+		val, _ := strconv.Atoi(parts[2])
+		return questGetBit(&p.QuestUnitOpen, idx) == (val == 1)
+	case "CHECKQUEST", "CHECKUNIT":
+		if len(parts) < 3 {
+			return false
+		}
+		idx, _ := strconv.Atoi(parts[1])
+		val, _ := strconv.Atoi(parts[2])
+		return questGetBit(&p.QuestUnit, idx) == (val == 1)
+	case "CHECKFLAG":
+		if len(parts) < 3 {
+			return false
+		}
+		idx, _ := strconv.Atoi(parts[1])
+		val, _ := strconv.Atoi(parts[2])
+		return questGetBit(&p.QuestFlag, idx) == (val == 1)
 	default:
 		return true
 	}
@@ -1138,6 +1160,55 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "UNMASTER":
 		p.LeaveMaster(server)
+	// E2: 任务动作
+	case "SETOPENQUEST", "SETOPEN":
+		if len(parts) >= 3 {
+			idx, _ := strconv.Atoi(parts[1])
+			val, _ := strconv.Atoi(parts[2])
+			if val == 1 {
+				questSetBit(&p.QuestUnitOpen, idx)
+			} else {
+				questClearBit(&p.QuestUnitOpen, idx)
+			}
+		}
+	case "RESETOPENQUEST", "RESETOPEN":
+		if len(parts) >= 3 {
+			idx, _ := strconv.Atoi(parts[1])
+			count, _ := strconv.Atoi(parts[2])
+			questClearRange(&p.QuestUnitOpen, idx, count)
+		}
+	case "SETQUEST", "SETUNIT":
+		if len(parts) >= 3 {
+			idx, _ := strconv.Atoi(parts[1])
+			val, _ := strconv.Atoi(parts[2])
+			if val == 1 {
+				questSetBit(&p.QuestUnit, idx)
+			} else {
+				questClearBit(&p.QuestUnit, idx)
+			}
+		}
+	case "RESETQUEST", "RESETUNIT":
+		if len(parts) >= 3 {
+			idx, _ := strconv.Atoi(parts[1])
+			count, _ := strconv.Atoi(parts[2])
+			questClearRange(&p.QuestUnit, idx, count)
+		}
+	case "SETFLAG":
+		if len(parts) >= 3 {
+			idx, _ := strconv.Atoi(parts[1])
+			val, _ := strconv.Atoi(parts[2])
+			if val == 1 {
+				questSetBit(&p.QuestFlag, idx)
+			} else {
+				questClearBit(&p.QuestFlag, idx)
+			}
+		}
+	case "RESETFLAG":
+		if len(parts) >= 3 {
+			idx, _ := strconv.Atoi(parts[1])
+			count, _ := strconv.Atoi(parts[2])
+			questClearRange(&p.QuestFlag, idx, count)
+		}
 	default:
 		_ = parts
 	}

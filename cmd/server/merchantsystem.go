@@ -130,6 +130,20 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 		}
 	}
 
+	// 城堡 NPC 专用命令
+	if npc.Castle && p.Engine != nil && p.Engine.Castle != nil {
+		lower := strings.ToLower(tag)
+		switch {
+		case lower == "@castlegold" || lower == "@opendoor" || lower == "@closedoor" ||
+			lower == "@repairdoor" || lower == "@repairwall" ||
+			lower == "@hireguard" || lower == "@hirearcher" ||
+			lower == "@declarewar" ||
+			strings.HasPrefix(lower, "@withdraw") || strings.HasPrefix(lower, "@castletax"):
+			p.HandleCastleNpcSelect(tag, npc, server)
+			return
+		}
+	}
+
 	// 内置商人命令分发
 	switch strings.ToLower(tag) {
 	case "@buy", "@trading":

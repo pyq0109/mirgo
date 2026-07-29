@@ -83,6 +83,15 @@ func (d *Database) initialize() error {
 			UNIQUE(character_id, slot_type, slot_index),
 			FOREIGN KEY (character_id) REFERENCES characters(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS castle (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			owner_guild TEXT NOT NULL DEFAULT '',
+			gold INTEGER NOT NULL DEFAULT 0,
+			door_hp INTEGER NOT NULL DEFAULT 5000,
+			wall_hp INTEGER NOT NULL DEFAULT 10000,
+			war_state INTEGER NOT NULL DEFAULT 0,
+			tax_rate INTEGER NOT NULL DEFAULT 5
+		)`,
 	}
 
 	for _, q := range queries {
@@ -372,4 +381,34 @@ type Character struct {
 	MP        int
 	Exp       int64
 	Gold      int64
+}
+
+// CastleRecord 是城堡持久化数据。
+type CastleRecord struct {
+	OwnerGuild string
+	Gold       int64
+	DoorHP     int
+	WallHP     int
+	WarState   int
+	TaxRate    int
+}
+
+// SaveCastle 保存城堡状态（单行表，id=1）。
+func (d *Database) SaveCastle(r CastleRecord) error {
+	_, err := d.db.Exec(
+		`INSERT OR REPLACE INTO castle (id, owner_guild, gold, door_hp, wall_hp, war_state, tax_rate) VALUES (1, ?, ?, ?, ?, ?, ?)`,
+		r.OwnerGuild, r.Gold, r.DoorHP, r.WallHP, r.WarState, r.TaxRate,
+	)
+	return err
+}
+
+// LoadCastle 加载城堡状态。无数据时返回零值。
+func (d *Database) LoadCastle() (CastleRecord, error) {
+	var r CastleRecord
+	err := d.db.QueryRow(`SELECT owner_guild, gold, door_hp, wall_hp, war_state, tax_rate FROM castle WHERE id=1`).
+		Scan(&r.OwnerGuild, &r.Gold, &r.DoorHP, &r.WallHP, &r.WarState, &r.TaxRate)
+	if err == sql.ErrNoRows {
+		return CastleRecord{}, nil
+	}
+	return r, err
 }

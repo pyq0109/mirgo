@@ -399,6 +399,28 @@ func (p *PlayObject) RecalcAbilitys() {
 			p.WAbil.DC += uint32(def.DC) | uint32(def.DCMax)<<16
 			p.WAbil.MC += uint32(def.MC) | uint32(def.MCMax)<<16
 			p.WAbil.SC += uint32(def.SC) | uint32(def.SCMax)<<16
+			// E3: 武器升级加成（BtValue[0]=DC, [1]=MC, [2]=SC 升级点数）
+			if i == protocol.UWeapon {
+				item := p.UseItems[i]
+				if item.BtValue[0] > 0 {
+					p.WAbil.DC += uint32(item.BtValue[0]) | uint32(item.BtValue[0])<<16
+				}
+				if item.BtValue[1] > 0 {
+					p.WAbil.MC += uint32(item.BtValue[1]) | uint32(item.BtValue[1])<<16
+				}
+				if item.BtValue[2] > 0 {
+					p.WAbil.SC += uint32(item.BtValue[2]) | uint32(item.BtValue[2])<<16
+				}
+				// E3: 诅咒惩罚（BtValue[12]，每级 -5% 攻击）
+				if item.BtValue[12] > 0 {
+					penalty := int(item.BtValue[12]) * 5 // 百分比
+					dcMin := int(p.WAbil.DC & 0xFFFF)
+					dcMax := int(p.WAbil.DC >> 16)
+					dcMin = dcMin * (100 - penalty) / 100
+					dcMax = dcMax * (100 - penalty) / 100
+					p.WAbil.DC = uint32(dcMin) | uint32(dcMax)<<16
+				}
+			}
 		}
 
 		var wearWeight, handWeight uint16

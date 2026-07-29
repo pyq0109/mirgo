@@ -102,6 +102,15 @@ func main() {
 	userEngine.npcConfigDir = npcConfigDir
 	userEngine.InitWorld(mapMgr)
 	userEngine.LoadGuilds()
+
+	castleCfg, err := LoadCastleConfig(*configDir)
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "failed to load castle config: %v (using defaults)", err)
+		castleCfg = DefaultCastleConfig()
+	}
+	userEngine.Castle = NewCastleObject(*castleCfg)
+	log.Logf(log.LevelInfo, "Server", "castle: %s (map=%s, owner=%s)", castleCfg.Name, castleCfg.MapName, userEngine.Castle.GetOwnerGuild())
+
 	server := netserver.NewTCPServer(listenAddr)
 
 	server.SetConnectHandler(func(session *netserver.Session) {
@@ -256,12 +265,24 @@ func main() {
 				DearName        string          `json:"dearName"`
 				MasterName      string          `json:"masterName"`
 				ApprenticeNames []string        `json:"apprenticeNames"`
+				QuestUnitOpen   []byte          `json:"questUnitOpen,omitempty"`
+				QuestUnit       []byte          `json:"questUnit,omitempty"`
+				QuestFlag       []byte          `json:"questFlag,omitempty"`
 			}
 			if json.Unmarshal(metaJSON, &meta) == nil {
 				player.PkPoint = meta.PkPoint
 				player.DearName = meta.DearName
 				player.MasterName = meta.MasterName
 				player.ApprenticeNames = meta.ApprenticeNames
+				if len(meta.QuestUnitOpen) == 128 {
+					copy(player.QuestUnitOpen[:], meta.QuestUnitOpen)
+				}
+				if len(meta.QuestUnit) == 128 {
+					copy(player.QuestUnit[:], meta.QuestUnit)
+				}
+				if len(meta.QuestFlag) == 128 {
+					copy(player.QuestFlag[:], meta.QuestFlag)
+				}
 				for i := range meta.Magics {
 					player.LearnedMagics = append(player.LearnedMagics, &meta.Magics[i])
 				}
@@ -358,6 +379,9 @@ func main() {
 			userEngine.ProcessMonsters(server, now)
 			userEngine.ProcessDoors(now)
 			userEngine.ProcessEvents(server, now)
+			if userEngine.Castle != nil {
+				userEngine.Castle.ProcessCastleTick(userEngine, server, now)
+			}
 			if tickCount%300 == 0 {
 				userEngine.ProcessNpcs()
 				userEngine.SaveAllPlayers(db)
@@ -828,6 +852,9 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		DearName        string          `json:"dearName"`
 		MasterName      string          `json:"masterName"`
 		ApprenticeNames []string        `json:"apprenticeNames"`
+		QuestUnitOpen   []byte          `json:"questUnitOpen,omitempty"`
+		QuestUnit       []byte          `json:"questUnit,omitempty"`
+		QuestFlag       []byte          `json:"questFlag,omitempty"`
 	}
 	meta := charMeta{
 		PkPoint:         player.PkPoint,
@@ -835,6 +862,9 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		DearName:        player.DearName,
 		MasterName:      player.MasterName,
 		ApprenticeNames: player.ApprenticeNames,
+		QuestUnitOpen:   player.QuestUnitOpen[:],
+		QuestUnit:       player.QuestUnit[:],
+		QuestFlag:       player.QuestFlag[:],
 	}
 	for _, pm := range player.LearnedMagics {
 		if pm != nil {

@@ -107,6 +107,7 @@ func NewActorFromMessage(msg protocol.DefaultMessage, body string) *Actor {
 			actor.Dress = int(dress)
 			actor.Weapon = int(weapon)
 			actor.Hair = int(hair)
+			actor.Sex = int(hair) % 2
 			raceImg := byte(feature & 0xFF)
 			if raceImg == 0 {
 				actor.Type = ActorHuman

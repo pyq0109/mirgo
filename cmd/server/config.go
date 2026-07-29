@@ -41,6 +41,9 @@ type ServerConfig struct {
 		SpeedHackMax    int            `json:"speedHackMax"`
 		ZenLimit        int            `json:"zenLimit"`   // 单 tick 刷怪时间预算(ms)，默认 50
 		MonGenRate      int            `json:"monGenRate"` // 刷怪批次比率，默认 10
+		WalkOnly        bool           `json:"walkOnly"`        // 禁止跑步（仅步行模式）
+		HitIntervalTime int64          `json:"hitIntervalTime"` // 攻击最小间隔(ms)，默认 1400
+		ActionInterval  int64          `json:"actionInterval"`  // 全局动作最小间隔(ms)，默认 350
 	} `json:"game"`
 	Commands struct {
 		Names       map[string]string `json:"names"`
@@ -202,6 +205,20 @@ func (c *ServerConfig) GetMonGenRate() int {
 		return c.Game.MonGenRate
 	}
 	return 10
+}
+
+func (c *ServerConfig) GetHitIntervalTime() int64 {
+	if c.Game.HitIntervalTime > 0 {
+		return c.Game.HitIntervalTime
+	}
+	return 1400
+}
+
+func (c *ServerConfig) GetActionInterval() int64 {
+	if c.Game.ActionInterval > 0 {
+		return c.Game.ActionInterval
+	}
+	return 350
 }
 
 // GetServerHostPort 以 host/port 形式返回服务端地址。
