@@ -1051,8 +1051,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.AddChatMessage(body)
 
 	case protocol.SMMerchantSay:
-		log.Logf(log.LevelInfo, "Client", "NPC says: %s", body)
-		h.playScene.parseNpcDialog(body)
+		npcName, dialogText := body, ""
+		if idx := strings.IndexByte(body, '/'); idx >= 0 {
+			npcName, dialogText = body[:idx], body[idx+1:]
+		}
+		h.playScene.State.NpcDialogName = npcName
+		h.playScene.parseNpcDialog(dialogText)
 		h.playScene.State.ShowNpcDialog = true
 
 	case protocol.SMDayChanging:
@@ -1285,6 +1289,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		if actor != nil {
 			if raw := []byte(body); len(raw) >= 12 {
 				actor.MagicSerial = int(binary.LittleEndian.Uint32(raw[8:12]))
+				// body[12] = 魔法 Effect 号（Delphi TUseMagicInfo.EffectNumber），驱动施法身特效。
+				if len(raw) >= 13 {
+					actor.EffectNumber = int(raw[12])
+				}
 			}
 			actor.SendMsg(protocol.SMSpell, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 		}
@@ -1322,10 +1330,18 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			h.playScene.effects.AddLightning(fx, fy, 970, 10, 80)
 		case EffIce:
 			h.playScene.effects.AddIce(fx, fy, 10, 6, 80)
+		case EffBujaukExplo:
+			h.playScene.effects.AddBujaukExplo(fx, fy, 10, 80)
+		case EffBujaukGround:
+			h.playScene.effects.AddBujaukGround(fx, fy, 10, 80)
 		case EffFlyArrow:
-			h.playScene.effects.AddFlyArrow(sx, sy, fx, fy, 447, 1, 50)
+			h.playScene.effects.AddFlyArrow(sx, sy, fx, fy, 2607, 1, 50)
 		case EffReady:
 			h.playScene.effects.AddReady(sx, sy, effNum, 10, 50)
+		case EffThunder2:
+			h.playScene.effects.AddThunder2(fx, fy, 6, 80)
+		case EffFlyBug:
+			h.playScene.effects.AddFlyBug(sx, sy, fx, fy, 3, 50)
 		default:
 			h.playScene.effects.AddExplosion(fx, fy, effNum, 10, 50)
 		}
@@ -1474,13 +1490,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			count := int(binary.LittleEndian.Uint16(raw[0:2]))
 			h.playScene.State.ShopGoods = make([]ShopItem, 0, count)
 			for i := 0; i < count; i++ {
-				off := 2 + i*4
-				if off+4 > len(raw) {
+				off := 2 + i*6
+				if off+6 > len(raw) {
 					break
 				}
 				itemIdx := binary.LittleEndian.Uint16(raw[off : off+2])
 				price := int(binary.LittleEndian.Uint16(raw[off+2 : off+4]))
-				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price})
+				stock := int(binary.LittleEndian.Uint16(raw[off+4 : off+6]))
+				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price, Stock: stock})
 			}
 		}
 
@@ -1671,6 +1688,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMDlgMsg:
 		h.playScene.AddChatMessage(body)
+
+	case protocol.SMMenuOK:
+		// MESSAGEBOX 模态弹窗 (Delphi SM_MENU_OK 767, ClMain.pas:4917-4921)
+		ShowConfirm(h.playScene, body, []ModalResult{MrOk}, DlgNormal, nil)
 
 	case protocol.SMDealTryFail:
 		log.Logf(log.LevelInfo, "Client", "trade request failed")

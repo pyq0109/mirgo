@@ -31,10 +31,13 @@ type npcClickPoint struct {
 // <显示文本/链接值>, 行以 '\' 分隔; FState:4830-4870)。
 func (s *PlayScene) parseNpcDialog(body string) {
 	s.npcLines = nil
+	s.npcLineCentered = nil
 	s.npcClicks = nil
 	s.npcSelectTag = ""
+	s.npcScrollOffset = 0
 	for _, line := range strings.Split(body, "\\") {
 		var segs []npcSegment
+		centered := false
 		rest := line
 		for {
 			lt := strings.IndexByte(rest, '<')
@@ -54,8 +57,12 @@ func (s *PlayScene) parseNpcDialog(body string) {
 			}
 			tag := rest[lt+1 : lt+gt]
 			rest = rest[lt+gt+1:]
-			if tag == "C" || tag == "/C" {
-				continue // 居中标记 (该 Delphi 版本中也未使用)
+			if tag == "C" {
+				centered = true
+				continue
+			}
+			if tag == "/C" {
+				continue
 			}
 			if tag == "" {
 				// 空标签隐藏商店窗口 (FState:4847-4850)。
@@ -70,6 +77,7 @@ func (s *PlayScene) parseNpcDialog(body string) {
 			segs = append(segs, npcSegment{text: display, tag: link})
 		}
 		s.npcLines = append(s.npcLines, segs)
+		s.npcLineCentered = append(s.npcLineCentered, centered)
 	}
 }
 
@@ -261,9 +269,37 @@ func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 	// 实时区域用于命中检测)。
 	s.npcClicks = s.npcClicks[:0]
 	ax, ay := c.AbsX(), c.AbsY()
-	for i, segs := range s.npcLines {
+	// NPC 名字 (Delphi FState:4810 MerchantName)
+	if s.State.NpcDialogName != "" {
+		s.text.DrawTextOutline(s.State.NpcDialogName, float32(ax+npcTextX), float32(ay+10),
+			1, 1, 0, 1, 0, 0, 0, 1, proj)
+	}
+	// 滚动窗口：计算最大可见行数
+	maxVisible := (c.Height - npcTextY - 10) / npcLineH
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	start := s.npcScrollOffset
+	end := start + maxVisible
+	if end > len(s.npcLines) {
+		end = len(s.npcLines)
+	}
+	for i := start; i < end; i++ {
+		segs := s.npcLines[i]
+		row := i - start
+		y := npcTextY + row*npcLineH
+		// 居中行：计算总宽度后偏移
 		x := npcTextX
-		y := npcTextY + i*npcLineH
+		if i < len(s.npcLineCentered) && s.npcLineCentered[i] {
+			totalW := 0
+			for _, seg := range segs {
+				totalW += s.text.MeasureText(seg.text)
+			}
+			x = (c.Width - totalW) / 2
+			if x < npcTextX {
+				x = npcTextX
+			}
+		}
 		for _, seg := range segs {
 			w := s.text.MeasureText(seg.text)
 			if seg.tag != "" {
@@ -383,7 +419,11 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 			s.text.DrawText(dura, float32(ax+170), float32(y), 1, 1, 1, 1, proj)
 		} else {
 			s.text.DrawText(strconv.Itoa(g.Price)+" 金币", float32(ax+170), float32(y), 1, 1, 1, 1, proj)
-			s.text.DrawText("-", float32(ax+265), float32(y), 1, 1, 1, 1, proj)
+			stockStr := strconv.Itoa(g.Stock)
+			if g.Stock <= 0 {
+				stockStr = "∞"
+			}
+			s.text.DrawText(stockStr, float32(ax+265), float32(y), 1, 1, 1, 1, proj)
 		}
 	}
 }

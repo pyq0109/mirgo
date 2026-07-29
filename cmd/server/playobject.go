@@ -119,6 +119,15 @@ type PlayObject struct {
 	ScriptGoBackLabel string
 	ScriptCurrLabel   string
 	CurrentNpc        *NpcObject
+
+	// 标签安全白名单（Delphi m_CanJmpScriptLableList, ObjBase.pas:25372）
+	CanJmpLabels []string
+
+	// TIMERECALL 定时传送回调 (Delphi ObjNpc.pas:7800-7807)
+	TimeRecall     bool
+	TimeRecallTick int64
+	RecallMap      string
+	RecallX, RecallY int
 }
 
 type VisibleEntry struct {
@@ -174,6 +183,16 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	}
 
 	p.Regenerate(server, now)
+
+	// TIMERECALL 到期检查
+	if p.TimeRecall && now >= p.TimeRecallTick {
+		p.TimeRecall = false
+		if p.MapMgr != nil {
+			if env := p.MapMgr.FindMap(p.RecallMap); env != nil {
+				p.EnterAnotherMap(server, env, p.RecallX, p.RecallY)
+			}
+		}
+	}
 
 	if now-p.lastVisionTick >= p.visionInterval {
 		p.lastVisionTick = now

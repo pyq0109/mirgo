@@ -89,13 +89,18 @@ type Actor struct {
 	UseMagic       bool
 	SpellFrame     int
 	CurEffFrame    int
-	EffectFrame    int  // 特效动画帧计数器（魔法盾/武器光效循环）
+	EffectFrame     int   // 特效动画帧计数器（魔法盾/武器光效循环）
+	EffectFrameTick int64 // 特效帧推进计时
 	SpellConfirmed bool // F4: 服务端确认施法（SMMagicFire 到达后置 true）
 
-	Effect  int
-	OnHorse bool
-	State   int32
-	IsSelf  bool
+	Effect        int
+	OnHorse       bool
+	State         int32
+	IsSelf        bool
+	RedrawPass    bool  // Phase C 覆盖重绘标记（自身翅膀仅在此 pass 绘制）
+	WingFrame     int   // 翅膀/特效动画帧（Delphi m_nFrame）
+	WingFrameTick int64 // 翅膀帧推进计时（Delphi m_dwFrameTick）
+	HairOffset    int   // 头发 WIL 偏移（-1=无头发层）
 
 	SayingArr    [5]string
 	SayTime      int64
@@ -568,12 +573,17 @@ func (a *Actor) Run(now int64) {
 					// 保持在施法帧，不前进
 				} else {
 					a.CurrentFrame++
+					// 施法身特效帧随动画推进（对应 Delphi m_nCurEffFrame，Actor.pas:2531-2542）
+					if a.UseMagic && a.CurEffFrame < a.SpellFrame-1 {
+						a.CurEffFrame++
+					}
 					a.RunActSound(a.CurrentFrame - a.StartFrame)
 				}
 			} else {
 				a.CurrentAction = 0
 				a.UseMagic = false
 				a.SpellConfirmed = false
+				a.CurEffFrame = 0
 			}
 		}
 		return
@@ -596,7 +606,8 @@ func (a *Actor) Run(now int64) {
 
 func (a *Actor) DefaultMotion(now int64) {
 	// D2: 特效动画帧递增（魔法盾/武器光效/施法循环）
-	if now-a.DefFrameTime > 100 {
+	if now-a.EffectFrameTick > 100 {
+		a.EffectFrameTick = now
 		a.EffectFrame++
 	}
 
@@ -622,6 +633,26 @@ func (a *Actor) DefaultMotion(now int64) {
 		}
 		a.Shift(a.Dir, 0, 0, 1)
 		return
+	}
+
+	// 翅膀/特效帧推进（Delphi Actor.pas:3435-3460 DefaultMotion）
+	// 必须在 WarMode 分支之前，战斗姿态下翅膀仍需动画。
+	if a.Effect == 50 && a.CurrentFrame <= 536 {
+		if now-a.WingFrameTick >= 100 {
+			a.WingFrameTick = now
+			a.WingFrame++
+			if a.WingFrame >= 20 {
+				a.WingFrame = 0
+			}
+		}
+	} else if a.Effect != 0 && a.CurrentFrame < 64 {
+		if now-a.WingFrameTick >= 150 {
+			a.WingFrameTick = now
+			a.WingFrame++
+			if a.WingFrame >= 8 {
+				a.WingFrame = 0
+			}
+		}
 	}
 
 	if a.WarMode {
@@ -759,14 +790,21 @@ func (a *Actor) getHumanBodyImage(resources *engine.ResourceManager) *wil.Image 
 	if idx < 0 || idx >= resources.Hum.Count {
 		return nil
 	}
-	return resources.Hum.GetImage(idx)
+	img := resources.Hum.GetImage(idx)
+	if img == nil || img.RGBA == nil {
+		idx = a.CurrentFrame
+		if idx >= 0 && idx < resources.Hum.Count {
+			img = resources.Hum.GetImage(idx)
+		}
+	}
+	return img
 }
 
 func (a *Actor) getHumanHairImage(resources *engine.ResourceManager) *wil.Image {
-	if resources.Hair == nil || a.Hair == 0 {
+	if resources.Hair == nil || a.HairOffset < 0 {
 		return nil
 	}
-	idx := HumanFrame*a.Hair + a.CurrentFrame
+	idx := a.HairOffset + a.CurrentFrame
 	if idx < 0 || idx >= resources.Hair.Count {
 		return nil
 	}
@@ -872,6 +910,10 @@ func getStateTint(state int32) (float32, float32, float32, bool) {
 }
 
 func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+	scale := a.ScrollHideScale()
+	if scale <= 0 {
+		return
+	}
 	img := a.GetBodyImage(resources)
 	if img == nil || img.RGBA == nil {
 		return
@@ -888,6 +930,10 @@ func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceMana
 	h := float32(img.Height)
 	drawX := screenX + float32(img.HotX)
 	drawY := screenY + float32(img.HotY)
+	if scale < 1.0 {
+		drawY = drawY + h*(1-scale)
+		h *= scale
+	}
 
 	blend := a.State&0x00800000 != 0
 	if blend {
@@ -905,6 +951,14 @@ func (a *Actor) wingBehind() bool {
 }
 
 func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+	if a.ScrollHideState == 1 || a.ScrollHideState == 3 {
+		a.updateScrollHide()
+	}
+	scrollScale := a.ScrollHideScale()
+	if scrollScale <= 0 {
+		return
+	}
+
 	wpord := getWordOrder(a.Sex, a.CurrentFrame)
 
 	blend := a.State&0x00800000 != 0
@@ -916,17 +970,24 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 	tintR, tintG, tintB, useTint := getStateTint(a.State)
 	alpha := stateAlpha(a.State)
 
-	if a.Effect > 0 && a.wingBehind() {
-		a.drawWingLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
+	if a.Effect > 0 && a.wingBehind() && (!a.IsSelf || a.RedrawPass) {
+		a.drawWingLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, scrollScale, proj)
 	}
 
 	if wpord == 0 && a.Weapon >= 2 {
-		a.drawWeaponLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
+		a.drawWeaponLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, scrollScale, proj)
 	}
 
 	bodyIdx := HumanFrame*a.Dress + a.CurrentFrame
 	if resources.Hum != nil && bodyIdx >= 0 && bodyIdx < resources.Hum.Count {
 		img := resources.Hum.GetImage(bodyIdx)
+		if img == nil || img.RGBA == nil {
+			// Delphi Actor.pas:3704-3705: 取图失败回退 Dress=0
+			bodyIdx = a.CurrentFrame
+			if bodyIdx >= 0 && bodyIdx < resources.Hum.Count {
+				img = resources.Hum.GetImage(bodyIdx)
+			}
+		}
 		if img != nil && img.RGBA != nil {
 			tex := resources.GetTexture(resources.Hum, bodyIdx)
 			if tex != 0 {
@@ -934,32 +995,49 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 				h := float32(img.Height)
 				bx := screenX + float32(img.HotX)
 				by := screenY + float32(img.HotY)
+				by, h = applyScale(by, h, scrollScale)
 				drawTintedQuad(glState, tex, bx, by, w, h, tintR, tintG, tintB, useTint, alpha, proj)
 			}
 		}
 	}
 
-	hairIdx := HumanFrame*a.Hair + a.CurrentFrame
-	if a.Hair > 0 && resources.Hair != nil && hairIdx >= 0 && hairIdx < resources.Hair.Count {
-		img := resources.Hair.GetImage(hairIdx)
-		if img != nil && img.RGBA != nil {
-			tex := resources.GetTexture(resources.Hair, hairIdx)
-			if tex != 0 {
-				w := float32(img.Width)
-				h := float32(img.Height)
-				hx := screenX + float32(img.HotX)
-				hy := screenY + float32(img.HotY)
-				drawTintedQuad(glState, tex, hx, hy, w, h, tintR, tintG, tintB, useTint, alpha, proj)
+	// 头发偏移（Delphi Actor.pas:3162-3167）
+	a.HairOffset = -1
+	if a.Hair > 0 && resources.Hair != nil {
+		haircount := resources.Hair.Count / HumanFrame / 2
+		h := a.Hair
+		if haircount > 0 && h > haircount-1 {
+			h = haircount - 1
+		}
+		h = h * 2
+		if h > 1 {
+			a.HairOffset = HumanFrame * (h + a.Sex)
+		}
+	}
+	if a.HairOffset >= 0 && resources.Hair != nil {
+		hairIdx := a.HairOffset + a.CurrentFrame
+		if hairIdx >= 0 && hairIdx < resources.Hair.Count {
+			img := resources.Hair.GetImage(hairIdx)
+			if img != nil && img.RGBA != nil {
+				tex := resources.GetTexture(resources.Hair, hairIdx)
+				if tex != 0 {
+					w := float32(img.Width)
+					h := float32(img.Height)
+					hx := screenX + float32(img.HotX)
+					hy := screenY + float32(img.HotY)
+					hy, h = applyScale(hy, h, scrollScale)
+					drawTintedQuad(glState, tex, hx, hy, w, h, tintR, tintG, tintB, useTint, alpha, proj)
+				}
 			}
 		}
 	}
 
 	if wpord == 1 && a.Weapon >= 2 {
-		a.drawWeaponLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
+		a.drawWeaponLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, scrollScale, proj)
 	}
 
-	if a.Effect > 0 && !a.wingBehind() {
-		a.drawWingLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, proj)
+	if a.Effect > 0 && !a.wingBehind() && (!a.IsSelf || a.RedrawPass) {
+		a.drawWingLayer(glState, resources, screenX, screenY, tintR, tintG, tintB, useTint, alpha, scrollScale, proj)
 	}
 
 	// D2 Layer 7: 魔法盾泡泡（STATE_BUBBLEDEFENCEUP = 0x00020000）
@@ -983,16 +1061,19 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 		}
 	}
 
-	// D2 Layer 8: 施法特效
-	if a.EffectNumber > 0 && resources.Magic != nil {
-		spellIdx := a.EffectNumber*10 + (a.EffectFrame % 10)
-		if spellIdx >= 0 && spellIdx < resources.Magic.Count {
-			if img := resources.Magic.GetImage(spellIdx); img != nil && img.RGBA != nil {
-				if tex := resources.GetTexture(resources.Magic, spellIdx); tex != 0 {
-					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-					glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
-						float32(img.Width), float32(img.Height), proj)
-					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	// D2 Layer 8: 施法身特效（对应 Delphi Actor.pas:3899-3911，GetEffectBase 路由 + CurEffFrame）
+	if a.UseMagic && a.EffectNumber > 0 && a.CurEffFrame >= 0 && a.CurEffFrame < a.SpellFrame {
+		f, base := getEffectBase(resources, a.EffectNumber-1, 0)
+		if f != nil {
+			spellIdx := base + a.CurEffFrame
+			if spellIdx >= 0 && spellIdx < f.Count {
+				if img := f.GetImage(spellIdx); img != nil && img.RGBA != nil {
+					if tex := resources.GetTexture(f, spellIdx); tex != 0 {
+						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+						glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+							float32(img.Width), float32(img.Height), proj)
+						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+					}
 				}
 			}
 		}
@@ -1040,17 +1121,19 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 		}
 	}
 
-	// D4: 传送动画（垂直缩放）
-	if a.ScrollHideState == 1 || a.ScrollHideState == 3 {
-		a.updateScrollHide()
-	}
-
 	if blend {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
 }
 
-func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, tintR, tintG, tintB float32, useTint bool, alpha float32, proj [16]float32) {
+func applyScale(y, h, scale float32) (float32, float32) {
+	if scale >= 1.0 {
+		return y, h
+	}
+	return y + h*(1-scale), h * scale
+}
+
+func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, tintR, tintG, tintB float32, useTint bool, alpha, scale float32, proj [16]float32) {
 	weaponIdx := HumanFrame*a.Weapon + a.CurrentFrame
 	if resources.Weapon == nil || weaponIdx < 0 || weaponIdx >= resources.Weapon.Count {
 		return
@@ -1065,28 +1148,50 @@ func (a *Actor) drawWeaponLayer(gl *engine.GLState, resources *engine.ResourceMa
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	drawTintedQuad(gl, tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, tintR, tintG, tintB, useTint, alpha, proj)
+	wy := screenY + float32(img.HotY)
+	wy, h = applyScale(wy, h, scale)
+	drawTintedQuad(gl, tex, screenX+float32(img.HotX), wy, w, h, tintR, tintG, tintB, useTint, alpha, proj)
 }
 
-func (a *Actor) drawWingLayer(gl *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, tintR, tintG, tintB float32, useTint bool, alpha float32, proj [16]float32) {
-	if resources.HumEffect == nil {
+func (a *Actor) drawWingLayer(glState *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, tintR, tintG, tintB float32, useTint bool, alpha, scale float32, proj [16]float32) {
+	var wilFile *wil.File
+	var wingIdx int
+
+	if a.Effect == 50 {
+		if a.CurrentFrame > 536 {
+			return
+		}
+		wilFile = resources.Effect
+		wingIdx = 352 + a.WingFrame
+	} else {
+		wilFile = resources.HumEffect
+		offset := (a.Effect - 1) * HumanFrame
+		if a.CurrentFrame < 64 {
+			wingIdx = offset + a.Dir*8 + a.WingFrame
+		} else {
+			wingIdx = offset + a.CurrentFrame
+		}
+	}
+
+	if wilFile == nil || wingIdx < 0 || wingIdx >= wilFile.Count {
 		return
 	}
-	wingIdx := (a.Effect-1)*HumanFrame + a.CurrentFrame
-	if wingIdx < 0 || wingIdx >= resources.HumEffect.Count {
-		return
-	}
-	img := resources.HumEffect.GetImage(wingIdx)
+	img := wilFile.GetImage(wingIdx)
 	if img == nil || img.RGBA == nil {
 		return
 	}
-	tex := resources.GetTexture(resources.HumEffect, wingIdx)
+	tex := resources.GetTexture(wilFile, wingIdx)
 	if tex == 0 {
 		return
 	}
 	w := float32(img.Width)
 	h := float32(img.Height)
-	drawTintedQuad(gl, tex, screenX+float32(img.HotX), screenY+float32(img.HotY), w, h, tintR, tintG, tintB, useTint, alpha, proj)
+	wy := screenY + float32(img.HotY)
+	wy, h = applyScale(wy, h, scale)
+	// Delphi Actor.pas:3767-3880: 翅膀始终使用加法混合（DrawBlend）
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+	drawTintedQuad(glState, tex, screenX+float32(img.HotX), wy, w, h, tintR, tintG, tintB, useTint, alpha, proj)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 }
 
 func getWilFile(resources *engine.ResourceManager, actorType ActorType, appr int) *wil.File {

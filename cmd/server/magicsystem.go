@@ -766,9 +766,18 @@ func (p *PlayObject) sendSpellToClient(server *netserver.TCPServer, msg SendMess
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMSpell, src.ID, uint16(src.CurrX), uint16(src.CurrY), uint16(src.Dir))
 	desc := p.encodeCharDesc(objectFeature(obj), objectFeatureEx(obj))
+	magID := msg.Param1
 	magIDBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(magIDBytes, uint32(msg.Param1))
-	body := protocol.EncodeBuffer(append(desc, magIDBytes...))
+	binary.LittleEndian.PutUint32(magIDBytes, uint32(magID))
+	// 追加魔法 Effect 号（对应 Delphi TUseMagicInfo.EffectNumber），供客户端施法身特效路由。
+	eff := byte(0)
+	if p.MagicDB != nil {
+		if def := p.MagicDB.GetByID(magID); def != nil {
+			eff = byte(def.Effect)
+		}
+	}
+	raw := append(append(desc, magIDBytes...), eff)
+	body := protocol.EncodeBuffer(raw)
 	server.Send(p.Session.ID, resp, body)
 }
 

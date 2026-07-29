@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type ScriptSection struct {
 	SayText    []string
 	ElseSay    []string
 	ElseAct    []string
+	ExtJmp     bool // [@label] TRUE — 允许外部跳转访问 (Delphi boExtJmp)
 }
 
 type ScriptGoods struct {
@@ -84,15 +86,19 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 		if strings.HasPrefix(line, "[") {
 			inHeader = false
 			label := strings.TrimSuffix(strings.TrimPrefix(line, "["), "]")
-			// 处理 [@label] TRUE 格式
+			extJmp := false
+			// 处理 [@label] TRUE 格式 (Delphi boExtJmp, LocalDB.pas:3176-3180)
 			if idx := strings.IndexByte(label, ' '); idx > 0 {
+				if strings.EqualFold(strings.TrimSpace(label[idx+1:]), "TRUE") {
+					extJmp = true
+				}
 				label = label[:idx]
 			}
 			if strings.HasPrefix(label, "@") {
 				label = label[1:]
 			}
 			currentLabel = label
-			currentSection = &ScriptSection{}
+			currentSection = &ScriptSection{ExtJmp: extJmp}
 			script.Labels[currentLabel] = currentSection
 			mode = ""
 			continue
@@ -125,6 +131,12 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 		case upper == "#ELSEACT" || upper == "#ELACT":
 			mode = "ELSEACT"
 			continue
+		case strings.HasPrefix(upper, "#CALL"):
+			// #CALL [file] @label — 外部脚本包含 (Delphi LocalDB.pas:1714-1734)
+			if currentSection != nil {
+				processCallDirective(line, path, script, currentSection)
+			}
+			continue
 		}
 
 		switch mode {
@@ -144,6 +156,123 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 	}
 
 	return script, nil
+}
+
+// processCallDirective 处理 #CALL [file] @label 指令。
+// 将外部脚本段落合并到当前脚本，并在当前 section 添加 GOTO。
+func processCallDirective(line, scriptPath string, script *NpcScript, current *ScriptSection) {
+	// 格式: #CALL [QuestDiary/file.txt] @label
+	rest := strings.TrimSpace(line[5:]) // 去掉 "#CALL"
+	lb := strings.IndexByte(rest, '[')
+	rb := strings.IndexByte(rest, ']')
+	if lb < 0 || rb < 0 || rb <= lb {
+		return
+	}
+	file := rest[lb+1 : rb]
+	labelPart := strings.TrimSpace(rest[rb+1:])
+	label := strings.TrimPrefix(labelPart, "@")
+	if file == "" || label == "" {
+		return
+	}
+	// 安全检查：禁止路径遍历
+	if strings.Contains(file, "..") || strings.ContainsAny(file, "/\\") && !strings.Contains(file, "/") {
+		return
+	}
+	dir := filepath.Dir(scriptPath)
+	extPath := filepath.Join(dir, filepath.FromSlash(file))
+	lines, err := loadCallSection(extPath, label)
+	if err != nil {
+		return
+	}
+	// 将外部段落解析为新的 ScriptSection
+	extSection := parseCallLines(lines)
+	if _, exists := script.Labels[label]; !exists {
+		script.Labels[label] = extSection
+	}
+	// 当前 section 添加 GOTO 动作
+	current.Actions = append(current.Actions, "GOTO @"+label)
+}
+
+// loadCallSection 从外部文件中提取 [@label] 到 } 之间的行。
+func loadCallSection(path, label string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var lines []string
+	found := false
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !found {
+			// 查找 [@label] 或 [label]
+			if strings.HasPrefix(line, "[") {
+				l := strings.TrimSuffix(strings.TrimPrefix(line, "["), "]")
+				if idx := strings.IndexByte(l, ' '); idx > 0 {
+					l = l[:idx]
+				}
+				l = strings.TrimPrefix(l, "@")
+				if strings.EqualFold(l, label) {
+					found = true
+				}
+			}
+			continue
+		}
+		if line == "}" {
+			break
+		}
+		lines = append(lines, line)
+	}
+	if !found {
+		return nil, os.ErrNotExist
+	}
+	return lines, nil
+}
+
+// parseCallLines 将 #CALL 提取的行解析为 ScriptSection。
+func parseCallLines(lines []string) *ScriptSection {
+	sec := &ScriptSection{}
+	mode := ""
+	for _, line := range lines {
+		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		upper := strings.ToUpper(line)
+		switch {
+		case upper == "#IF":
+			mode = "IF"
+			continue
+		case upper == "#ACT":
+			mode = "ACT"
+			continue
+		case upper == "#SAY":
+			mode = "SAY"
+			continue
+		case upper == "#ELSESAY" || upper == "#ELSE":
+			mode = "ELSESAY"
+			continue
+		case upper == "#ELSEACT" || upper == "#ELACT":
+			mode = "ELSEACT"
+			continue
+		}
+		switch mode {
+		case "IF":
+			sec.Conditions = append(sec.Conditions, line)
+		case "ACT":
+			sec.Actions = append(sec.Actions, line)
+		case "SAY":
+			sec.SayText = append(sec.SayText, line)
+		case "ELSESAY":
+			sec.ElseSay = append(sec.ElseSay, line)
+		case "ELSEACT":
+			sec.ElseAct = append(sec.ElseAct, line)
+		default:
+			sec.SayText = append(sec.SayText, line)
+		}
+	}
+	return sec
 }
 
 func parseMerchantHeader(line string, script *NpcScript) {
@@ -217,17 +346,50 @@ func (s *NpcScript) Execute(label string, p *PlayObject, npc *NpcObject, server 
 		s.execActions(section.Actions, p, npc, server)
 		if len(section.SayText) > 0 {
 			text := strings.Join(section.SayText, "\\")
-			resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
-			server.Send(p.Session.ID, resp, protocol.EncodeString(text))
+			s.sendMerchantSay(text, p, npc, server)
 		}
 	} else {
 		s.execActions(section.ElseAct, p, npc, server)
 		if len(section.ElseSay) > 0 {
 			text := strings.Join(section.ElseSay, "\\")
-			resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
-			server.Send(p.Session.ID, resp, protocol.EncodeString(text))
+			s.sendMerchantSay(text, p, npc, server)
 		}
 	}
+}
+
+// sendMerchantSay 发送 NPC 对话文本（变量替换 + NPCName/text 格式 + 标签白名单提取）。
+// Delphi: ObjNpc.pas:8428-8451 SendMerChantSayMsg + GetScriptLabel。
+func (s *NpcScript) sendMerchantSay(text string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
+	text = s.replaceVars(text, p)
+	p.CanJmpLabels = extractDialogLabels(text)
+	body := npc.Name + "/" + text
+	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(body))
+}
+
+// extractDialogLabels 从对话文本中提取所有 <显示文本/@label> 的 label 部分。
+// Delphi: ObjBase.pas:25372-25399 GetScriptLabel。
+func extractDialogLabels(text string) []string {
+	var labels []string
+	for _, line := range strings.Split(text, "\\") {
+		rest := line
+		for {
+			lt := strings.IndexByte(rest, '<')
+			if lt < 0 {
+				break
+			}
+			gt := strings.IndexByte(rest[lt:], '>')
+			if gt < 0 {
+				break
+			}
+			tag := rest[lt+1 : lt+gt]
+			rest = rest[lt+gt+1:]
+			if slash := strings.IndexByte(tag, '/'); slash >= 0 {
+				labels = append(labels, strings.TrimPrefix(tag[slash+1:], "@"))
+			}
+		}
+	}
+	return labels
 }
 
 func (s *NpcScript) evalConditions(conditions []string, p *PlayObject) bool {
@@ -375,7 +537,23 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 			return true
 		}
 		slot := strings.ToUpper(strings.Trim(parts[1], "[]"))
-		return p.hasEquipmentInSlot(slot)
+		if !p.hasEquipmentInSlot(slot) {
+			return false
+		}
+		// 可选第3参数：检查装备物品名 (Delphi ObjNpc.pas:7080-7085)
+		if len(parts) >= 3 {
+			name := strings.Trim(parts[2], "\"")
+			slotIdx := p.slotNameToIndex(slot)
+			if slotIdx >= 0 && slotIdx < len(p.UseItems) {
+				item := p.UseItems[slotIdx]
+				if item != nil && p.ItemDB != nil {
+					def := p.ItemDB.GetByIdx(int(item.WIndex))
+					return def != nil && def.Name == name
+				}
+				return false
+			}
+		}
+		return true
 	case "DAYTIME":
 		if len(parts) < 2 {
 			return true
@@ -649,13 +827,28 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 		p.takeItem(itemName, count)
 		p.SendBagItemsFull(server)
-	case "SENDMSG", "MESSAGEBOX":
+	case "SENDMSG":
+		// SENDMSG <type> <text> — 10种广播频道 (Delphi ObjNpc.pas:3364-3386)
+		if len(parts) < 3 {
+			return
+		}
+		msgType, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return
+		}
+		text := strings.Join(parts[2:], " ")
+		text = strings.ReplaceAll(text, "%s", p.Name)
+		text = strings.ReplaceAll(text, "%d", npc.Name)
+		text = s.replaceVars(text, p)
+		s.sendMsgByType(msgType, text, p, npc, server)
+	case "MESSAGEBOX":
+		// Delphi: RM_MENU_OK → SM_MENU_OK(767) 模态弹窗 (ObjNpc.pas:3904-3908)
 		if len(parts) < 2 {
 			return
 		}
 		text := strings.Join(parts[1:], " ")
 		text = s.replaceVars(text, p)
-		msg := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
+		msg := protocol.MakeDefaultMsg(protocol.SMMenuOK, 0, 0, 0, 0)
 		server.Send(p.Session.ID, msg, protocol.EncodeString(text))
 	case "CHANGELEVEL":
 		if len(parts) < 2 {
@@ -836,13 +1029,19 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			p.Job = 2
 		}
 	case "LINEMSG":
-		if len(parts) < 2 {
+		// LINEMSG 与 SENDMSG 共享处理 (Delphi ActionOfLineMsg)
+		if len(parts) < 3 {
 			return
 		}
-		text := strings.Join(parts[1:], " ")
+		msgType, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return
+		}
+		text := strings.Join(parts[2:], " ")
+		text = strings.ReplaceAll(text, "%s", p.Name)
+		text = strings.ReplaceAll(text, "%d", npc.Name)
 		text = s.replaceVars(text, p)
-		msg := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
-		server.Send(p.Session.ID, msg, protocol.EncodeString(text))
+		s.sendMsgByType(msgType, text, p, npc, server)
 	case "MONGEN":
 		if len(parts) < 2 {
 			return
@@ -1010,7 +1209,18 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	case "GAMEPOINT":
 	case "CHANGENAMECOLOR":
 	case "TIMERECALL":
+		// TIMERECALL <minutes> — 定时传送回当前位置 (Delphi ObjNpc.pas:7800-7807)
+		if len(parts) >= 2 && p.envir != nil {
+			minutes, _ := strconv.Atoi(parts[1])
+			if minutes > 0 {
+				p.TimeRecall = true
+				p.TimeRecallTick = time.Now().UnixMilli() + int64(minutes)*60000
+				p.RecallMap = p.envir.Name
+				p.RecallX, p.RecallY = p.CurrX, p.CurrY
+			}
+		}
 	case "BREAKTIMERECALL":
+		p.TimeRecall = false
 	case "GROUPRECALL":
 		if p.Engine != nil {
 			for _, pl := range p.Engine.PlayObjectList {
@@ -1028,13 +1238,26 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			}
 		}
 	case "GROUPMOVEMAP":
+		// 移动全队到目标地图 (Delphi ObjNpc.pas:8275-8305)
 		if len(parts) < 2 || p.MapMgr == nil {
 			return
 		}
 		mapName := parts[1]
 		newEnvir := p.MapMgr.FindMap(mapName)
-		if newEnvir != nil {
-			p.EnterAnotherMap(server, newEnvir, newEnvir.Width/2, newEnvir.Height/2)
+		if newEnvir == nil {
+			return
+		}
+		tx, ty := newEnvir.Width/2, newEnvir.Height/2
+		p.EnterAnotherMap(server, newEnvir, tx, ty)
+		if party := p.partyOf(); party != nil && p.Engine != nil {
+			for _, id := range party.Members {
+				if id == p.ID {
+					continue
+				}
+				if pl := p.Engine.GetPlayer(id); pl != nil && !pl.Ghost {
+					pl.EnterAnotherMap(server, newEnvir, tx, ty)
+				}
+			}
 		}
 	case "ADDNAMELIST":
 		if len(parts) < 3 {
@@ -1250,6 +1473,16 @@ func (s *NpcScript) replaceVars(text string, p *PlayObject) string {
 	text = strings.ReplaceAll(text, "<$ARMRING_R>", p.getEquipName(protocol.UArmRingR))
 	text = strings.ReplaceAll(text, "<$ARMRING_L>", p.getEquipName(protocol.UArmRingL))
 
+	// 补充变量 (Delphi ObjNpc.pas:6060-6480)
+	text = strings.ReplaceAll(text, "<$GAMEGOLD>", strconv.Itoa(p.Gold))
+	text = strings.ReplaceAll(text, "<$GAMEPOINT>", "0")
+	text = strings.ReplaceAll(text, "<$CREDITPOINT>", "0")
+	text = strings.ReplaceAll(text, "<$HUNGER>", "100")
+	text = strings.ReplaceAll(text, "<$HW>", strconv.Itoa(p.getEquipWeight(protocol.UWeapon)))
+	text = strings.ReplaceAll(text, "<$BW>", strconv.Itoa(p.getEquipWeight(protocol.UDress)))
+	text = strings.ReplaceAll(text, "<$WW>", strconv.Itoa(p.getTotalEquipWeight()))
+	text = strings.ReplaceAll(text, "<$JOB>", jobName(p.Job))
+
 	// 兼容无尖括号格式
 	text = strings.ReplaceAll(text, "$USERNAME", p.Name)
 	text = strings.ReplaceAll(text, "$LEVEL", strconv.Itoa(int(p.WAbil.Level)))
@@ -1258,11 +1491,111 @@ func (s *NpcScript) replaceVars(text string, p *PlayObject) string {
 	text = strings.ReplaceAll(text, "$MP", strconv.Itoa(int(p.WAbil.MP)))
 	text = strings.ReplaceAll(text, "$MAXMP", strconv.Itoa(int(p.WAbil.MaxMP)))
 	text = strings.ReplaceAll(text, "$GOLDCOUNT", strconv.Itoa(p.Gold))
+	text = strings.ReplaceAll(text, "$GAMEGOLD", strconv.Itoa(p.Gold))
 	text = strings.ReplaceAll(text, "$PKPOINT", strconv.Itoa(p.PkPoint))
 	text = strings.ReplaceAll(text, "$GUILDNAME", p.GuildName)
 	text = strings.ReplaceAll(text, "$SERVERNAME", "MirGo")
 
 	return text
+}
+
+func (p *PlayObject) getEquipWeight(slot int) int {
+	item := p.UseItems[slot]
+	if item == nil || p.ItemDB == nil {
+		return 0
+	}
+	def := p.ItemDB.GetByIdx(int(item.WIndex))
+	if def == nil {
+		return 0
+	}
+	return int(def.Weight)
+}
+
+func (p *PlayObject) getTotalEquipWeight() int {
+	total := 0
+	for i := 0; i < len(p.UseItems); i++ {
+		total += p.getEquipWeight(i)
+	}
+	return total
+}
+
+// sendMsgByType 按频道类型发送消息 (Delphi ObjNpc.pas:3364-3386)。
+func (s *NpcScript) sendMsgByType(msgType int, text string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
+	sysMsg := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
+	body := protocol.EncodeString(text)
+	switch msgType {
+	case 0: // 全服广播
+		if p.Engine != nil {
+			for _, pl := range p.Engine.allPlayers() {
+				if !pl.Ghost {
+					server.Send(pl.Session.ID, sysMsg, body)
+				}
+			}
+		}
+	case 1: // 全服广播 (*) 前缀
+		text = "(*) " + text
+		body = protocol.EncodeString(text)
+		if p.Engine != nil {
+			for _, pl := range p.Engine.allPlayers() {
+				if !pl.Ghost {
+					server.Send(pl.Session.ID, sysMsg, body)
+				}
+			}
+		}
+	case 2: // 全服广播 [NPC名] 前缀
+		text = "[" + npc.Name + "] " + text
+		body = protocol.EncodeString(text)
+		if p.Engine != nil {
+			for _, pl := range p.Engine.allPlayers() {
+				if !pl.Ghost {
+					server.Send(pl.Session.ID, sysMsg, body)
+				}
+			}
+		}
+	case 3: // 全服广播 [玩家名] 前缀
+		text = "[" + p.Name + "] " + text
+		body = protocol.EncodeString(text)
+		if p.Engine != nil {
+			for _, pl := range p.Engine.allPlayers() {
+				if !pl.Ghost {
+					server.Send(pl.Session.ID, sysMsg, body)
+				}
+			}
+		}
+	case 4: // 地图本地消息
+		if p.Engine != nil && p.envir != nil {
+			for _, pl := range p.Engine.allPlayers() {
+				if !pl.Ghost && pl.envir != nil && pl.envir.Name == p.envir.Name {
+					server.Send(pl.Session.ID, sysMsg, body)
+				}
+			}
+		}
+	case 5, 6, 7: // 个人消息（红/绿/蓝 — 当前统一为系统消息）
+		server.Send(p.Session.ID, sysMsg, body)
+	case 8: // 组队消息
+		if party := p.partyOf(); party != nil && p.Engine != nil {
+			for _, id := range party.Members {
+				if pl := p.Engine.GetPlayer(id); pl != nil && !pl.Ghost {
+					server.Send(pl.Session.ID, sysMsg, body)
+				}
+			}
+		} else {
+			server.Send(p.Session.ID, sysMsg, body)
+		}
+	case 9: // 行会消息
+		if p.Engine != nil && p.GuildName != "" {
+			guild := p.Engine.FindGuild(p.GuildName)
+			if guild != nil {
+				for _, name := range guild.Members {
+					if pl := p.Engine.GetPlayerByName(name); pl != nil && !pl.Ghost {
+						server.Send(pl.Session.ID, sysMsg, body)
+					}
+				}
+			}
+		}
+	default:
+		server.Send(p.Session.ID, sysMsg, body)
+	}
 }
 
 func jobName(job byte) string {
@@ -1337,9 +1670,23 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 		return
 	}
 
-	dialog := npc.Name + ": 欢迎光临！"
+	body := npc.Name + "/" + "欢迎光临！"
 	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
-	server.Send(p.Session.ID, resp, protocol.EncodeString(dialog))
+	server.Send(p.Session.ID, resp, protocol.EncodeString(body))
+}
+
+// labelIsCanJmp 检查标签是否在玩家可见白名单中。
+// Delphi: ObjBase.pas:25401-25430 LableIsCanJmp。
+func (p *PlayObject) labelIsCanJmp(label string) bool {
+	if strings.EqualFold(label, "main") {
+		return true
+	}
+	for _, l := range p.CanJmpLabels {
+		if strings.EqualFold(l, label) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *PlayObject) hasEquipmentInSlot(slot string) bool {
@@ -1364,6 +1711,30 @@ func (p *PlayObject) hasEquipmentInSlot(slot string) bool {
 		return false
 	}
 	return p.UseItems[idx] != nil
+}
+
+func (p *PlayObject) slotNameToIndex(slot string) int {
+	slotMap := map[string]int{
+		"DRESS":     protocol.UDress,
+		"WEAPON":    protocol.UWeapon,
+		"RIGHTHAND": protocol.URightHand,
+		"NECKLACE":  protocol.UNecklace,
+		"HELMET":    protocol.UHelmet,
+		"ARMRINGL":  protocol.UArmRingL,
+		"ARMRINGR":  protocol.UArmRingR,
+		"ARMRING":   protocol.UArmRingL,
+		"RINGL":     protocol.URingL,
+		"RINGR":     protocol.URingR,
+		"RING":      protocol.URingL,
+		"BUJUK":     protocol.UBujuk,
+		"BELT":      protocol.UBelt,
+		"BOOTS":     protocol.UBoots,
+	}
+	idx, ok := slotMap[slot]
+	if !ok {
+		return -1
+	}
+	return idx
 }
 
 func (p *PlayObject) evalVarCondition(parts []string, defaultOp string) bool {

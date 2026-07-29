@@ -165,9 +165,11 @@ type PlayScene struct {
 	// NPC 对话 + 商店状态（uinpc.go）。
 	hudNpc, hudMenu, hudSell *UIControl
 	npcLines                 [][]npcSegment
+	npcLineCentered          []bool // 每行是否居中 (<C> 标签)
 	npcClicks                []npcClickPoint
 	npcSelectTag             string
 	npcLastClickTick         int64
+	npcScrollOffset          int // 对话文本滚动偏移
 	menuTop                  int
 	menuIndex                int
 	lastBuyTick              int64
@@ -861,7 +863,9 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		wx := float32(float64(my.Rx*engine.TileWidth) + my.ShiftX)
 		wy := float32(float64(my.Ry*engine.TileHeight) + my.ShiftY)
 		log.Logf(log.LevelTrace, "Render", "play self redraw pos=(%.0f,%.0f) dir=%d", wx, wy, my.Dir)
+		my.RedrawPass = true
 		my.Draw(s.gl, s.resources, wx, wy, proj)
+		my.RedrawPass = false
 	}
 
 	if s.focusActor != nil && s.focusActor != s.State.MySelf && !s.focusActor.Death {
@@ -1674,6 +1678,26 @@ func dirToward(fromX, fromY, toX, toY int) int {
 }
 
 func (s *PlayScene) OnScroll(offX, offY float64) {
+	// NPC 对话框滚动
+	if s.State.ShowNpcDialog && s.hudNpc != nil {
+		ax, ay := s.hudNpc.AbsX(), s.hudNpc.AbsY()
+		if int(s.mouseX) >= ax && int(s.mouseX) <= ax+s.hudNpc.Width &&
+			int(s.mouseY) >= ay && int(s.mouseY) <= ay+s.hudNpc.Height {
+			maxVisible := (s.hudNpc.Height - npcTextY - 10) / npcLineH
+			maxScroll := len(s.npcLines) - maxVisible
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			s.npcScrollOffset -= int(offY)
+			if s.npcScrollOffset < 0 {
+				s.npcScrollOffset = 0
+			}
+			if s.npcScrollOffset > maxScroll {
+				s.npcScrollOffset = maxScroll
+			}
+			return
+		}
+	}
 	// 滚轮在聊天板上滚动聊天记录；其他区域缩放视角
 	// （Delphi 从 PlayScn 滚动 ChatBoardTop）。
 	if s.mouseX >= chatBoardX && s.mouseX <= chatBoardX+474 &&

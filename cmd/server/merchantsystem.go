@@ -121,11 +121,13 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 		}
 	}
 
-	// 先尝试脚本标签跳转
+	// 先尝试脚本标签跳转（带安全校验, Delphi ObjBase.pas:25401-25430）
 	label := strings.TrimPrefix(tag, "@")
 	if script := npc.GetScript(); script != nil {
-		if _, exists := script.Labels[label]; exists {
-			script.Execute(label, p, npc, server)
+		if section, exists := script.Labels[label]; exists {
+			if p.labelIsCanJmp(label) || section.ExtJmp {
+				script.Execute(label, p, npc, server)
+			}
 			return
 		}
 	}
@@ -207,6 +209,7 @@ func (p *PlayObject) sendGoodsListFromStock(server *netserver.TCPServer, npc *Np
 	type goodsEntry struct {
 		idx   uint16
 		price uint16
+		stock uint16
 	}
 	var entries []goodsEntry
 
@@ -227,18 +230,19 @@ func (p *PlayObject) sendGoodsListFromStock(server *netserver.TCPServer, npc *Np
 		if price <= 0 {
 			price = 1
 		}
-		entries = append(entries, goodsEntry{idx: uint16(def.Idx), price: uint16(price)})
+		entries = append(entries, goodsEntry{idx: uint16(def.Idx), price: uint16(price), stock: uint16(len(stock.Items))})
 	}
 	npc.mu.RUnlock()
 
-	buf := make([]byte, 0, 2+len(entries)*4)
+	buf := make([]byte, 0, 2+len(entries)*6)
 	count := make([]byte, 2)
 	binary.LittleEndian.PutUint16(count, uint16(len(entries)))
 	buf = append(buf, count...)
 	for _, e := range entries {
-		entry := make([]byte, 4)
+		entry := make([]byte, 6)
 		binary.LittleEndian.PutUint16(entry[0:2], e.idx)
 		binary.LittleEndian.PutUint16(entry[2:4], e.price)
+		binary.LittleEndian.PutUint16(entry[4:6], e.stock)
 		buf = append(buf, entry...)
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(len(entries)), 0, 0)

@@ -108,6 +108,7 @@ type GameState struct {
 
 	Magics        []LearnedMagic
 	ShowNpcDialog bool
+	NpcDialogName string // 当前对话 NPC 名字 (Delphi MerchantName)
 
 	InDeal          bool
 	DealPartner     string
@@ -150,6 +151,7 @@ type GameState struct {
 type ShopItem struct {
 	ItemIdx uint16
 	Price   int
+	Stock   int
 	Name    string
 }
 
