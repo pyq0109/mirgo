@@ -96,9 +96,17 @@ func (s *PlayScene) buildHUD() {
 		{"DBotGuild", ImgBotGuild, 279, "行会(G)", func() { s.toggleGuild() }},
 		{"DBotGroup", ImgBotGroup, 309, "组队(S)", func() { s.State.ShowGroupDlg = !s.State.ShowGroupDlg }},
 		{"DBotPlusAbil", ImgBotPlusAbil, 339, "技能点(N)", func() { s.State.ShowPlusAbil = !s.State.ShowPlusAbil }},
-		{"DBotFriend", ImgBotFriend, 369, "好友(V)", func() { s.AddChatMessage("好友: 尚未实现") }},
-		{"DBotLogout", ImgBotLogout, 530, "选择人物\\Alt-X", func() { s.AddChatMessage("登出: 尚未实现") }},
-		{"DBotExit", ImgBotExit, 560, "退出游戏\\Alt-Q", func() { s.AddChatMessage("退出: 尚未实现") }},
+		{"DBotFriend", ImgBotFriend, 369, "好友(V)", func() { s.State.ShowFriend = !s.State.ShowFriend }},
+		{"DBotLogout", ImgBotLogout, 530, "选择人物\\Alt-X", func() {
+			if s.sendLogout != nil {
+				s.sendLogout()
+			}
+		}},
+		{"DBotExit", ImgBotExit, 560, "退出游戏\\Alt-Q", func() {
+			if s.sendExit != nil {
+				s.sendExit()
+			}
+		}},
 	}
 	for _, d := range botDefs {
 		btn := NewUIControl(d.name, KindButton)

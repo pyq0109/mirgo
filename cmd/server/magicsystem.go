@@ -403,6 +403,14 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			}
 			p.applyDamage(server, target, damage, p.Dir)
 		}
+	case 14: // 圣光结界：在目标位置创建圣幕，伤害亡灵
+		if p.envir != nil {
+			damage := power / 2
+			if damage < 10 {
+				damage = 10
+			}
+			p.envir.AddHolyCurtainEvent(server, tx, ty, damage, 8000, p.ID)
+		}
 	case 16:
 		objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, 3)
 		for _, obj := range objs {

@@ -132,6 +132,14 @@ const (
 	CMGuildAlly          = 1044
 	CMGuildBreakAlly     = 1045
 	CMChangeAttackMode   = 1046
+	CMGuildWar           = 1047
+	CMMineDig            = 1048
+	CMWhisper            = 1049
+	CMLogout             = 1050
+	CMExitGame           = 1051
+	CMAddFriend          = 1052
+	CMDelFriend          = 1053
+	CMQueryFriends       = 1054
 )
 
 // 登录/账号
@@ -897,6 +905,15 @@ const (
 	SMBreakWeapon    = 1102
 	SMChangeFace     = 1104
 	SMVersionFail    = 1106
+	SMLogoutOK       = 1107
+	SMExitOK         = 1108
+	SMFriendList     = 1109
+	SMAddFriendOK    = 1110
+	SMAddFriendFail  = 1111
+	SMDelFriendOK    = 1112
+	SMDelFriendFail  = 1113
+	SMFriendOnline   = 1114
+	SMFriendOffline  = 1115
 )
 
 // 物品/怪物更新（1500+）

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,7 @@ func (m *MapManager) LoadAllMaps() error {
 		}
 
 		env := NewEnvironment(mapName, mapData)
+		env.InitMineEvents()
 		m.maps[mapName] = env
 		loaded++
 	}
@@ -116,8 +118,40 @@ func (m *MapManager) GetLoadedCount() int {
 	return len(m.maps)
 }
 
-// InitRoutes 初始化已加载地图之间的传送路线。
-func (m *MapManager) InitRoutes() {
+// ProcessMineRegen 对所有地图执行矿石再生检查。
+func (m *MapManager) ProcessMineRegen(now int64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, env := range m.maps {
+		env.ProcessMineRegen(now)
+	}
+}
+
+// InitRoutes 从配置文件加载地图传送路线，文件不存在时使用默认路线。
+func (m *MapManager) InitRoutes(configDir string) {
+	routesPath := filepath.Join(configDir, "maps", "map_routes.jsonc")
+	if data, err := os.ReadFile(routesPath); err == nil {
+		clean := stripJSONCComments(string(data))
+		var raw struct {
+			Routes []struct {
+				SrcMap string `json:"srcMap"`
+				SrcX   int    `json:"srcX"`
+				SrcY   int    `json:"srcY"`
+				DstMap string `json:"dstMap"`
+				DstX   int    `json:"dstX"`
+				DstY   int    `json:"dstY"`
+			} `json:"routes"`
+		}
+		if err := json.Unmarshal([]byte(clean), &raw); err == nil && len(raw.Routes) > 0 {
+			for _, r := range raw.Routes {
+				m.AddRoute(r.SrcMap, r.SrcX, r.SrcY, r.DstMap, r.DstX, r.DstY)
+			}
+			log.Logf(log.LevelInfo, "MapManager", "loaded %d map routes from %s", len(raw.Routes), routesPath)
+			return
+		}
+		log.Logf(log.LevelWarn, "MapManager", "failed to parse %s, using defaults", routesPath)
+	}
+	// 默认路线
 	if m.FindMap("0") != nil && m.FindMap("3") != nil {
 		m.AddRoute("0", 289, 618, "3", 330, 330)
 		m.AddRoute("3", 330, 331, "0", 289, 619)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -11,6 +12,11 @@ import (
 func (p *PlayObject) HandleSay(msg SendMessage, server *netserver.TCPServer) {
 	text := msg.Msg
 	if text == "" {
+		return
+	}
+
+	if p.ShutupTick > 0 && time.Now().UnixMilli() < p.ShutupTick {
+		p.sysMsg(server, "你已被禁言")
 		return
 	}
 
@@ -24,6 +30,13 @@ func (p *PlayObject) HandleSay(msg SendMessage, server *netserver.TCPServer) {
 			gmsg := msg
 			gmsg.Msg = guildText
 			p.HandleGuildMessage(gmsg, server)
+		}
+		return
+	}
+
+	if strings.HasPrefix(text, "!") {
+		if cryText := text[1:]; cryText != "" {
+			p.HandleCry(cryText, server)
 		}
 		return
 	}
@@ -43,6 +56,51 @@ func (p *PlayObject) HandleSay(msg SendMessage, server *netserver.TCPServer) {
 		server.Send(other.Session.ID, hearMsg, body)
 	}
 	log.Logf(log.LevelInfo, "Chat", "%s: %s", p.Name, text)
+}
+
+// HandleCry 喊话：广播到同地图所有玩家。
+func (p *PlayObject) HandleCry(text string, server *netserver.TCPServer) {
+	if p.Engine == nil {
+		return
+	}
+	cryMsg := protocol.MakeDefaultMsg(protocol.SMCry, p.ID, 0, 0, 0)
+	body := protocol.EncodeString(p.Name + "/" + text)
+	p.Engine.mu.RLock()
+	for _, other := range p.Engine.PlayObjectList {
+		if other.Ghost || other.envir != p.envir {
+			continue
+		}
+		server.Send(other.Session.ID, cryMsg, body)
+	}
+	p.Engine.mu.RUnlock()
+	log.Logf(log.LevelInfo, "Chat", "%s cries: %s", p.Name, text)
+}
+
+// HandleWhisper 私聊：body 格式为 "目标名/消息内容"。
+func (p *PlayObject) HandleWhisper(msg SendMessage, server *netserver.TCPServer) {
+	body := msg.Msg
+	slashIdx := strings.IndexByte(body, '/')
+	if slashIdx <= 0 || slashIdx >= len(body)-1 {
+		return
+	}
+	targetName := body[:slashIdx]
+	text := body[slashIdx+1:]
+
+	if p.Engine == nil {
+		return
+	}
+	target := p.Engine.GetPlayerByName(targetName)
+	if target == nil || target.Ghost {
+		p.sysMsg(server, "对方不在线")
+		return
+	}
+
+	whisperMsg := protocol.MakeDefaultMsg(protocol.SMWhisper, p.ID, 0, 0, 0)
+	// 发给目标：显示发送者名字
+	server.Send(target.Session.ID, whisperMsg, protocol.EncodeString(p.Name+"/"+text))
+	// 发回给自己：显示目标名字
+	server.Send(p.Session.ID, whisperMsg, protocol.EncodeString(targetName+"/"+text))
+	log.Logf(log.LevelInfo, "Chat", "%s whispers to %s: %s", p.Name, targetName, text)
 }
 
 type Party struct {

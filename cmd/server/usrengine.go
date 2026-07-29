@@ -98,6 +98,10 @@ func (e *UserEngine) ProcessEvents(server *netserver.TCPServer, now int64) {
 	}
 }
 
+func (e *UserEngine) ProcessMineRegen(now int64) {
+	e.mapMgr.ProcessMineRegen(now)
+}
+
 func (e *UserEngine) GetPlayerCount() int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

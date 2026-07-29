@@ -393,6 +393,59 @@ func (c *CastleObject) IsDoorOpen() bool {
 	return c.DoorOpen
 }
 
+// DoorPosition 返回城门的地图坐标（皇宫入口前方）。
+func (c *CastleObject) DoorPosition() (int, int) {
+	return c.Config.PalaceX, c.Config.PalaceY + c.Config.PalaceRadius + 1
+}
+
+// WallPositions 返回城墙段的坐标列表（皇宫周围）。
+func (c *CastleObject) WallPositions() [][2]int {
+	r := c.Config.PalaceRadius
+	px, py := c.Config.PalaceX, c.Config.PalaceY
+	var walls [][2]int
+	for dx := -r; dx <= r; dx++ {
+		walls = append(walls, [2]int{px + dx, py - r})
+		walls = append(walls, [2]int{px + dx, py + r})
+	}
+	for dy := -r + 1; dy < r; dy++ {
+		walls = append(walls, [2]int{px - r, py + dy})
+		walls = append(walls, [2]int{px + r, py + dy})
+	}
+	return walls
+}
+
+// HandleStructureDamage 攻城战期间玩家攻击城门/城墙时调用。
+// 返回是否命中了建筑结构。
+func (c *CastleObject) HandleStructureDamage(x, y, damage int) bool {
+	if !c.IsAtWar() {
+		return false
+	}
+	doorX, doorY := c.DoorPosition()
+	if abs(x-doorX) <= 1 && abs(y-doorY) <= 1 {
+		destroyed := c.DamageDoor(damage)
+		if destroyed {
+			c.ToggleDoor(true)
+		}
+		return true
+	}
+	for _, w := range c.WallPositions() {
+		if abs(x-w[0]) <= 0 && abs(y-w[1]) <= 0 {
+			c.DamageWall(damage)
+			return true
+		}
+	}
+	return false
+}
+
+// IsBlockedByDoor 检查指定位置是否被关闭的城门阻挡。
+func (c *CastleObject) IsBlockedByDoor(x, y int) bool {
+	if c.IsDoorOpen() || c.DoorHP <= 0 {
+		return false
+	}
+	doorX, doorY := c.DoorPosition()
+	return abs(x-doorX) <= 1 && abs(y-doorY) <= 0
+}
+
 func (c *CastleObject) isAttackingGuildLocked(guildName string) bool {
 	for _, g := range c.AttackGuilds {
 		if g == guildName {

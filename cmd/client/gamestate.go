@@ -39,6 +39,11 @@ func (b *BagItem) Looks() uint16 {
 	return b.Idx
 }
 
+type FriendInfo struct {
+	Name   string
+	Online bool
+}
+
 type LearnedMagic struct {
 	MagID    uint16
 	Level    byte
@@ -98,6 +103,8 @@ type GameState struct {
 	StatePage    int  // 装备面板页码 0-3（FState StatePage）
 	ShowGroupDlg bool // 组队对话框（面板本身在 P9 实现）
 	ShowPlusAbil bool // 属性调整面板（P10）
+	ShowFriend   bool
+	Friends      []FriendInfo
 
 	Magics        []LearnedMagic
 	ShowNpcDialog bool

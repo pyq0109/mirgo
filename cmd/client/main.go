@@ -937,6 +937,57 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			h.onFail()
 		}
 
+	case protocol.SMLogoutOK:
+		log.Logf(log.LevelInfo, "Client", "logout OK, returning to char select")
+		h.sceneMgr.ChangeScene(engine.SceneSelectChr)
+
+	case protocol.SMExitOK:
+		log.Logf(log.LevelInfo, "Client", "exit OK, closing")
+		h.Close()
+		if h.onFail != nil {
+			h.onFail()
+		}
+
+	case protocol.SMFriendList:
+		h.parseFriendList(body)
+
+	case protocol.SMAddFriendOK:
+		name := protocol.DecodeString(body)
+		h.playScene.AddChatMessage("已添加好友: " + name)
+		if h.playScene.sendQueryFriends != nil {
+			h.playScene.sendQueryFriends()
+		}
+
+	case protocol.SMAddFriendFail:
+		h.playScene.AddChatMessage("添加好友失败")
+
+	case protocol.SMDelFriendOK:
+		name := protocol.DecodeString(body)
+		h.playScene.AddChatMessage("已删除好友: " + name)
+		if h.playScene.sendQueryFriends != nil {
+			h.playScene.sendQueryFriends()
+		}
+
+	case protocol.SMDelFriendFail:
+		h.playScene.AddChatMessage("删除好友失败")
+
+	case protocol.SMFriendOnline:
+		name := protocol.DecodeString(body)
+		for i := range h.playScene.State.Friends {
+			if h.playScene.State.Friends[i].Name == name {
+				h.playScene.State.Friends[i].Online = true
+			}
+		}
+		h.playScene.AddChatMessage(name + " 上线了")
+
+	case protocol.SMFriendOffline:
+		name := protocol.DecodeString(body)
+		for i := range h.playScene.State.Friends {
+			if h.playScene.State.Friends[i].Name == name {
+				h.playScene.State.Friends[i].Online = false
+			}
+		}
+
 	case protocol.SMCertificationFail:
 		log.Logf(log.LevelWarn, "Client", "certification failed")
 		if h.loginScene != nil {
@@ -1311,7 +1362,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		}
 
 	case protocol.SMChangeNameColor:
-		log.Logf(log.LevelDebug, "Client", "name color changed: %d", msg.Recog)
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.NameColor = int(msg.Param)
+		}
 
 	case protocol.SMCry:
 		log.Logf(log.LevelInfo, "Client", "cry: %s", body)
@@ -1683,16 +1736,25 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		gSound.PlaySound(sSpacemoveIn)
 
 	case protocol.SMOpenHealth:
-		log.Logf(log.LevelDebug, "Client", "health bar open: %d", msg.Recog)
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.ShowHP = true
+			actor.ShowHPVal = int(msg.Param)
+			actor.ShowMaxHPVal = int(msg.Tag)
+		}
 
 	case protocol.SMCloseHealth:
-		log.Logf(log.LevelDebug, "Client", "health bar close: %d", msg.Recog)
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.ShowHP = false
+		}
 
 	case protocol.SMBreakWeapon:
-		log.Logf(log.LevelInfo, "Client", "weapon broken!")
+		h.playScene.AddChatMessage("你的武器已损坏！")
+		if h.playScene.State.MySelf != nil {
+			h.playScene.addFloatingText(h.playScene.State.MySelf.CurrX, h.playScene.State.MySelf.CurrY, "武器损坏", 1.0, 0.2, 0.2)
+		}
 
 	case protocol.SMButch:
-		log.Logf(log.LevelDebug, "Client", "Butch")
+		h.playScene.AddChatMessage("屠宰成功")
 
 	case protocol.SMReadMinimapOK:
 		// Recog 携带 Mmap.wil 中本地图的小地图图像索引。
@@ -1702,7 +1764,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		log.Logf(log.LevelDebug, "Client", "received minimap data: index=%d", msg.Recog)
 
 	case protocol.SMMonsterSay:
-		log.Logf(log.LevelDebug, "Client", "monster says: %s", body)
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.Say(protocol.DecodeString(body))
+		}
 
 	default:
 		log.Logf(log.LevelDebug, "Client", "unhandled: %d", msg.Ident)
@@ -1838,6 +1902,11 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 		handler.Send(pickupMsg, "")
 	})
 
+	playScene.SetSendButch(func(targetID int32) {
+		butchMsg := protocol.MakeDefaultMsg(protocol.CMButch, targetID, 0, 0, 0)
+		handler.Send(butchMsg, "")
+	})
+
 	playScene.SetSendChat(func(text string) {
 		sayMsg := protocol.MakeDefaultMsg(protocol.CMSay, 0, 0, 0, 0)
 		handler.Send(sayMsg, text)
@@ -1876,6 +1945,31 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 
 	playScene.SetSendAttackMode(func(mode int) {
 		msg := protocol.MakeDefaultMsg(protocol.CMChangeAttackMode, 0, uint16(mode), 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendLogout(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMLogout, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendExit(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMExitGame, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendAddFriend(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMAddFriend, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+
+	playScene.SetSendDelFriend(func(name string) {
+		msg := protocol.MakeDefaultMsg(protocol.CMDelFriend, 0, 0, 0, 0)
+		handler.Send(msg, name)
+	})
+
+	playScene.SetSendQueryFriends(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMQueryFriends, 0, 0, 0, 0)
 		handler.Send(msg, "")
 	})
 
@@ -2086,4 +2180,21 @@ func (h *NetHandler) parseTradeItem(body string) *BagItem {
 	}
 	item.Def = h.playScene.State.ItemDefs[int(item.Idx)]
 	return item
+}
+
+func (h *NetHandler) parseFriendList(body string) {
+	text := protocol.DecodeString(body)
+	h.playScene.State.Friends = h.playScene.State.Friends[:0]
+	if text == "" {
+		return
+	}
+	for _, line := range strings.Split(text, "\n") {
+		parts := strings.SplitN(line, "/", 2)
+		if len(parts) == 2 {
+			h.playScene.State.Friends = append(h.playScene.State.Friends, FriendInfo{
+				Name:   parts[0],
+				Online: parts[1] == "1",
+			})
+		}
+	}
 }

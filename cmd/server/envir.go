@@ -67,6 +67,7 @@ type Environment struct {
 	eventIDSeq  int32
 
 	rawMap *mapformat.MapData
+	Castle *CastleObject // 沙巴克城堡引用（仅城堡地图非nil）
 }
 
 // NewEnvironment 从地图文件创建环境。
@@ -128,6 +129,10 @@ func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 	}
 	// 圣幕事件阻挡移动
 	if e.HasHolyCurtainAt(x, y) {
+		return false
+	}
+	// 城门阻挡（关闭且未毁坏时）
+	if e.Castle != nil && e.Castle.IsBlockedByDoor(x, y) {
 		return false
 	}
 	if ignoreEntities {

@@ -60,6 +60,7 @@ type PlayScene struct {
 	sendMove     func(ident int, dir int)
 	sendAttack   func(ident int, dir int)
 	sendPickup   func()
+	sendButch    func(targetID int32)
 	sendChat     func(text string)
 	sendSpell    func(magID int, x, y int)
 	sendNpcClick   func(npcID int)
@@ -99,7 +100,12 @@ type PlayScene struct {
 	sendAdjustBonus      func(remaining int, deltas [9]int) // CMAdjustBonus
 	sendQueryUserState   func(targetID int32)               // CMQueryUserState
 	sendAttackMode func(mode int)
-	lastMoveTick   int64
+	sendLogout     func()
+	sendExit       func()
+	sendAddFriend    func(name string)
+	sendDelFriend    func(name string)
+	sendQueryFriends func()
+	lastMoveTick     int64
 	lastAniTick    int64
 	text         *engine.TextRenderer
 
@@ -137,6 +143,8 @@ type PlayScene struct {
 
 	// 行会 + 组队面板（uiguild.go）。
 	hudGuild, hudGroup *UIControl
+	hudFriend          *UIControl
+	friendSelected     int
 	guildAdminBtns     []*UIControl
 	guildChatMode      bool
 	guildChats         []string // 行会聊天缓冲，上限 500 / 裁剪至 100（FState:6465-6475）
@@ -223,6 +231,7 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 	s.buildDealPanels()
 	s.buildGuildPanels()
 	s.buildAbilPanel()
+	s.buildFriendPanel()
 	return s
 }
 
@@ -274,6 +283,10 @@ func (s *PlayScene) SetSendAttack(fn func(ident int, dir int)) {
 
 func (s *PlayScene) SetSendPickup(fn func()) {
 	s.sendPickup = fn
+}
+
+func (s *PlayScene) SetSendButch(fn func(int32)) {
+	s.sendButch = fn
 }
 
 func (s *PlayScene) SetSendChat(fn func(string)) {
@@ -388,6 +401,26 @@ func (s *PlayScene) SetSendQueryUserState(fn func(targetID int32)) { s.sendQuery
 
 func (s *PlayScene) SetSendAttackMode(fn func(mode int)) {
 	s.sendAttackMode = fn
+}
+
+func (s *PlayScene) SetSendLogout(fn func()) {
+	s.sendLogout = fn
+}
+
+func (s *PlayScene) SetSendExit(fn func()) {
+	s.sendExit = fn
+}
+
+func (s *PlayScene) SetSendAddFriend(fn func(string)) {
+	s.sendAddFriend = fn
+}
+
+func (s *PlayScene) SetSendDelFriend(fn func(string)) {
+	s.sendDelFriend = fn
+}
+
+func (s *PlayScene) SetSendQueryFriends(fn func()) {
+	s.sendQueryFriends = fn
 }
 
 func (s *PlayScene) AddGroundItem(id int32, x, y, looks int, name string) {
@@ -909,11 +942,18 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 		nameW := float32(s.text.MeasureText(a.UserName))
 		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
 		log.Logf(log.LevelTrace, "Render", "play actor name '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
+		nr, ng, nb := 1.0, 1.0, 1.0
+		switch a.NameColor {
+		case 249: // 红名
+			nr, ng, nb = 1.0, 0.2, 0.2
+		case 251: // 黄名
+			nr, ng, nb = 1.0, 1.0, 0.2
+		}
 		s.text.DrawText(a.UserName, nameX-1, sayY, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX+1, sayY, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX, sayY-1, 0, 0, 0, 1.0, proj)
 		s.text.DrawText(a.UserName, nameX, sayY+1, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, sayY, 1.0, 1.0, 1.0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, sayY, float32(nr), float32(ng), float32(nb), 1.0, proj)
 	}
 
 	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
@@ -1302,8 +1342,11 @@ func (s *PlayScene) OnKey(key int, action int) {
 		case 83: // S — 组队对话框（ClMain:1629-1636）
 			s.State.ShowGroupDlg = !s.State.ShowGroupDlg
 			return
-		case 86: // V — 好友对话框（ClMain:1687-1690；服务端未实现）
-			s.AddChatMessage("好友: 尚未实现")
+		case 86: // V — 好友对话框
+			s.State.ShowFriend = !s.State.ShowFriend
+			if s.State.ShowFriend && s.sendQueryFriends != nil {
+				s.sendQueryFriends()
+			}
 			return
 		case 87: // W — 交易（ClMain:1663-1666）
 			s.tryDeal()
@@ -1543,6 +1586,12 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			if a.RecogID == my.RecogID {
 				continue
 			}
+			if a.CurrX == tx && a.CurrY == ty && a.Death && a.Type == ActorMonster {
+				if s.sendButch != nil {
+					s.sendButch(a.RecogID)
+				}
+				return
+			}
 			if a.CurrX == tx && a.CurrY == ty && !a.Death {
 				s.clearAutoPath()
 				if a.Type == ActorNPC {
@@ -1727,6 +1776,16 @@ func (s *PlayScene) renderHeldItem(proj [16]float32) {
 	if name != "" && s.text != nil {
 		s.text.DrawText(name, float32(s.mouseX)+9, float32(s.mouseY)+3, 1, 1, 0, 1, proj)
 	}
+}
+
+func (s *PlayScene) addFloatingText(tileX, tileY int, text string, r, g, b float32) {
+	s.floatingTexts = append(s.floatingTexts, FloatingText{
+		Text:      text,
+		X:         float32(tileX*48 + 24),
+		Y:         float32(tileY * 32),
+		Color:     [4]float32{r, g, b, 1.0},
+		StartTime: time.Now().UnixMilli(),
+	})
 }
 
 

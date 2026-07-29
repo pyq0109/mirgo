@@ -22,6 +22,22 @@ func (p *PlayObject) HandleChangeAttackMode(msg SendMessage, server *netserver.T
 }
 
 func (p *PlayObject) CanAttackTarget(target *BaseObject) bool {
+	// 攻城战期间：攻守双方可自由攻击
+	if p.Engine != nil && p.Engine.Castle != nil && p.Engine.Castle.IsAtWar() {
+		if tp := p.envir.getPlayerByBase(target); tp != nil {
+			castle := p.Engine.Castle
+			if castle.IsAttackingGuild(p.GuildName) && castle.IsDefendingGuild(tp.GuildName) {
+				return true
+			}
+			if castle.IsDefendingGuild(p.GuildName) && castle.IsAttackingGuild(tp.GuildName) {
+				return true
+			}
+			if castle.IsAttackingGuild(p.GuildName) && castle.IsAttackingGuild(tp.GuildName) && p.GuildName != tp.GuildName {
+				return true
+			}
+		}
+	}
+
 	switch p.AttackMode {
 	case AttackModePeace:
 		if mon := p.envir.getMonsterByBase(target); mon != nil {
