@@ -1197,6 +1197,19 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMItemHide:
 		h.playScene.RemoveGroundItem(msg.Recog)
 
+	case protocol.SMOpenDoorOK:
+		if h.playScene.mapData != nil {
+			h.playScene.mapData.OpenDoor(int(msg.Param), int(msg.Tag))
+		}
+
+	case protocol.SMOpenDoorLock:
+		h.playScene.AddChatMessage("[系统] 门已上锁")
+
+	case protocol.SMCloseDoor:
+		if h.playScene.mapData != nil {
+			h.playScene.mapData.CloseDoor(int(msg.Param), int(msg.Tag))
+		}
+
 	case protocol.SMDealMenu:
 		log.Logf(log.LevelInfo, "Client", "trade: partner=%s", body)
 		h.playScene.resetDeal()
@@ -1916,6 +1929,11 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 	playScene.SetSendMove(func(ident int, dir int) {
 		moveMsg := protocol.MakeDefaultMsg(uint16(ident), 0, uint16(dir), 0, 0)
 		handler.Send(moveMsg, "")
+	})
+
+	playScene.SetSendOpenDoor(func(doorID, x, y int) {
+		doorMsg := protocol.MakeDefaultMsg(protocol.CMOpenDoor, int32(doorID), uint16(x), uint16(y), 0)
+		handler.Send(doorMsg, "")
 	})
 
 	playScene.SetSendAttack(func(ident int, dir int) {

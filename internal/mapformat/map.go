@@ -168,6 +168,7 @@ func (m *MapData) OpenDoor(x, y int) {
 			c := &m.Cells[dy*m.Width+dx]
 			if c.DoorIndex&0x7F == doorID {
 				c.DoorOffset |= 0x80
+				m.CellInfos[dy*m.Width+dx].FrontDoorOffset = c.DoorOffset
 			}
 		}
 	}
@@ -193,6 +194,7 @@ func (m *MapData) CloseDoor(x, y int) {
 			c := &m.Cells[dy*m.Width+dx]
 			if c.DoorIndex&0x7F == doorID {
 				c.DoorOffset &= 0x7F
+				m.CellInfos[dy*m.Width+dx].FrontDoorOffset = c.DoorOffset
 			}
 		}
 	}

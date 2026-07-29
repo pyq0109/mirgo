@@ -58,6 +58,7 @@ type PlayScene struct {
 
 	State        *GameState
 	sendMove     func(ident int, dir int)
+	sendOpenDoor func(doorID, x, y int)
 	sendAttack   func(ident int, dir int)
 	sendPickup   func()
 	sendButch    func(targetID int32)
@@ -277,6 +278,10 @@ func (s *PlayScene) backgroundClick() bool {
 
 func (s *PlayScene) SetSendMove(fn func(ident int, dir int)) {
 	s.sendMove = fn
+}
+
+func (s *PlayScene) SetSendOpenDoor(fn func(doorID, x, y int)) {
+	s.sendOpenDoor = fn
 }
 
 func (s *PlayScene) SetSendAttack(fn func(ident int, dir int)) {
@@ -573,8 +578,10 @@ func (s *PlayScene) Update(dt float64) {
 				s.ActionLock = true
 				s.ActionLockTime = time.Now().UnixMilli()
 			} else {
-				s.targetX = -1
-				s.targetY = -1
+				if !s.tryOpenDoor(nx, ny) {
+					s.targetX = -1
+					s.targetY = -1
+				}
 			}
 		}
 	}
@@ -646,6 +653,9 @@ func (s *PlayScene) stepAutoPath() {
 func (s *PlayScene) repairAutoPath(dest [2]int, my *Actor) [][2]int {
 	wp := s.autoPath[s.autoPathIdx]
 	if absInt(wp[0]-my.CurrX) <= 1 && absInt(wp[1]-my.CurrY) <= 1 && s.CanWalk(wp[0], wp[1]) {
+		return s.autoPath
+	}
+	if absInt(wp[0]-my.CurrX) <= 1 && absInt(wp[1]-my.CurrY) <= 1 && s.tryOpenDoor(wp[0], wp[1]) {
 		return s.autoPath
 	}
 	path := findPath(s.CanWalk, my.CurrX, my.CurrY, dest[0], dest[1])
@@ -1182,6 +1192,18 @@ func (s *PlayScene) CanWalk(x, y int) bool {
 		}
 	}
 	return true
+}
+
+func (s *PlayScene) tryOpenDoor(x, y int) bool {
+	if s.mapData == nil || s.sendOpenDoor == nil {
+		return false
+	}
+	door := s.mapData.GetDoor(x, y)
+	if door > 0 && !s.mapData.IsDoorOpen(x, y) {
+		s.sendOpenDoor(door, x, y)
+		return true
+	}
+	return false
 }
 
 func (s *PlayScene) ServerAcceptNextAction() bool {
@@ -1750,6 +1772,11 @@ func (s *PlayScene) drawWilImage(f *wil.File, idx int, x, y float32, proj [16]fl
 func (s *PlayScene) RenderUI(proj [16]float32) {
 	if s.text == nil {
 		return
+	}
+
+	if s.State.MapTitle != "" && s.State.MySelf != nil {
+		title := fmt.Sprintf("%s %d:%d", s.State.MapTitle, s.State.MySelf.CurrX, s.State.MySelf.CurrY)
+		s.text.DrawText(title, 8, 580, 1, 1, 1, 1, proj)
 	}
 
 	// 底栏、HP/MP 球、按钮、腰带、聊天、背包、状态面板——全部由
