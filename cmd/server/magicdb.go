@@ -24,6 +24,7 @@ type MagicDef struct {
 type MagicDB struct {
 	Magics []MagicDef
 	byID   map[int]*MagicDef
+	byName map[string]*MagicDef
 }
 
 func LoadMagicDB(path string) (*MagicDB, error) {
@@ -51,10 +52,12 @@ func LoadMagicDB(path string) (*MagicDB, error) {
 	db := &MagicDB{
 		Magics: raw.Magics,
 		byID:   make(map[int]*MagicDef),
+		byName: make(map[string]*MagicDef),
 	}
 	for i := range db.Magics {
 		magic := &db.Magics[i]
 		db.byID[magic.MagID] = magic
+		db.byName[magic.MagName] = magic
 	}
 	log.Logf(log.LevelInfo, "MagicDB", "loaded %d magics from %s", len(db.Magics), path)
 	return db, nil
@@ -62,4 +65,8 @@ func LoadMagicDB(path string) (*MagicDB, error) {
 
 func (db *MagicDB) GetByID(id int) *MagicDef {
 	return db.byID[id]
+}
+
+func (db *MagicDB) GetByName(name string) *MagicDef {
+	return db.byName[name]
 }

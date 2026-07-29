@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 	"strconv"
 	"time"
@@ -90,6 +89,15 @@ type PlayObject struct {
 	HasMagicShield bool
 	HasMuscle      bool
 	HasRecallSuite bool
+
+	// 临时 Buff（StdMode 3, Shape 12 神水/精酿）。
+	BuffDC         int
+	BuffMC         int
+	BuffSC         int
+	BuffHP         int
+	BuffMP         int
+	BuffHitSpeed   int
+	BuffExpireTick int64
 
 	SlaveIDs   []int32 // 当前宠物 ID 列表
 	SlaveLevel int     // 宠物等级（1-7，Delphi m_btSlaveExpLevel）
@@ -1005,36 +1013,74 @@ func (p *PlayObject) DropDeathItems(server *netserver.TCPServer) {
 	if p.HasAngry {
 		return
 	}
+	now := time.Now().UnixMilli()
+
+	// Delphi DropUseItems (ObjBase.pas:15487): 红名 1/15，普通 1/30。
+	equipRate := 30
+	if p.PkPoint >= 200 {
+		equipRate = 15
+	}
+	equipChanged := false
+	for i := 0; i < 13; i++ {
+		if p.UseItems[i] == nil {
+			continue
+		}
+		if rand.Intn(equipRate) == 0 {
+			p.dropItemToGround(p.UseItems[i], server, now)
+			p.UseItems[i] = nil
+			equipChanged = true
+		}
+	}
+
 	var remaining []*protocol.UserItem
 	for _, item := range p.ItemList {
 		if rand.Intn(10) == 0 {
-			dropX := p.CurrX + rand.Intn(3) - 1
-			dropY := p.CurrY + rand.Intn(3) - 1
-			p.Engine.mu.Lock()
-			id := p.Engine.nextItemID
-			p.Engine.nextItemID++
-			p.Engine.mu.Unlock()
-			gi := &GroundItem{
-				ID:       id,
-				Name:     fmt.Sprintf("Item#%d", item.WIndex),
-				Looks:    0,
-				X:        dropX,
-				Y:        dropY,
-				DropTick: time.Now().UnixMilli(),
-			}
-			p.envir.AddGroundItem(gi)
-			resp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))
-			objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
-			for _, obj := range objs {
-				if other, ok := obj.(*PlayObject); ok && !other.Ghost {
-					server.Send(other.Session.ID, resp, protocol.EncodeString(gi.Name))
-				}
-			}
+			p.dropItemToGround(item, server, now)
 		} else {
 			remaining = append(remaining, item)
 		}
 	}
 	p.ItemList = remaining
+
+	if equipChanged {
+		p.RecalcAbilitys()
+		p.updateAppearance()
+		p.SendUseItemsFull(server)
+	}
+}
+
+func (p *PlayObject) dropItemToGround(item *protocol.UserItem, server *netserver.TCPServer, now int64) {
+	name := "Item"
+	looks := 0
+	if p.ItemDB != nil {
+		if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil {
+			name = def.Name
+			looks = int(def.Looks)
+		}
+	}
+	dropX := p.CurrX + rand.Intn(3) - 1
+	dropY := p.CurrY + rand.Intn(3) - 1
+	p.Engine.mu.Lock()
+	id := p.Engine.nextItemID
+	p.Engine.nextItemID++
+	p.Engine.mu.Unlock()
+	gi := &GroundItem{
+		ID:       id,
+		Name:     name,
+		Looks:    looks,
+		X:        dropX,
+		Y:        dropY,
+		DropTick: now,
+		UserItem: item,
+	}
+	p.envir.AddGroundItem(gi)
+	resp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))
+	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
+	for _, obj := range objs {
+		if other, ok := obj.(*PlayObject); ok && !other.Ghost {
+			server.Send(other.Session.ID, resp, protocol.EncodeString(gi.Name))
+		}
+	}
 }
 
 func (p *PlayObject) resurrect(server *netserver.TCPServer) {
@@ -1097,7 +1143,12 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 		log.Logf(log.LevelInfo, "PlayObject", "%s picked up %d gold (total: %d)", p.Name, item.Gold, p.Gold)
 	} else {
 		added := false
-		if p.ItemDB != nil {
+		if item.UserItem != nil {
+			if len(p.ItemList) < MaxBagItems {
+				p.ItemList = append(p.ItemList, item.UserItem)
+				added = true
+			}
+		} else if p.ItemDB != nil {
 			if def := p.ItemDB.GetByName(item.Name); def != nil {
 				added = p.GiveItem(def.Idx)
 			}

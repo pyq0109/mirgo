@@ -8,11 +8,11 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-func (m *MonsterObject) DropLoot(envir *Environment, nextItemID *int32, server *netserver.TCPServer) {
-	m.DropLootWithTable(envir, nextItemID, server, nil)
+func (m *MonsterObject) DropLoot(envir *Environment, nextItemID *int32, server *netserver.TCPServer, itemDB *ItemDB) {
+	m.DropLootWithTable(envir, nextItemID, server, nil, itemDB)
 }
 
-func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32, server *netserver.TCPServer, dt *DropTable) {
+func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32, server *netserver.TCPServer, dt *DropTable, itemDB *ItemDB) {
 	now := time.Now().UnixMilli()
 	var dropped []*GroundItem
 
@@ -38,7 +38,7 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 					envir.AddGroundItem(item)
 					dropped = append(dropped, item)
 				} else {
-					item := &GroundItem{
+					gi := &GroundItem{
 						ID:       *nextItemID,
 						Name:     entry.ItemName,
 						Looks:    0,
@@ -46,9 +46,19 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 						Y:        m.CurrY,
 						DropTick: now,
 					}
+					if itemDB != nil {
+						if def := itemDB.GetByName(entry.ItemName); def != nil {
+							gi.Looks = int(def.Looks)
+							ui := itemDB.CreateUserItem(def.Idx)
+							if ui != nil {
+								ui.MakeIndex = *nextItemID
+								gi.UserItem = ui
+							}
+						}
+					}
 					*nextItemID++
-					envir.AddGroundItem(item)
-					dropped = append(dropped, item)
+					envir.AddGroundItem(gi)
+					dropped = append(dropped, gi)
 				}
 			}
 		}
@@ -70,17 +80,27 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 		}
 
 		if rand.Intn(100) < 10 {
-			item := &GroundItem{
+			gi := &GroundItem{
 				ID:       *nextItemID,
-				Name:     "金创药(小)",
+				Name:     "金创药(小量)",
 				Looks:    0,
 				X:        m.CurrX,
 				Y:        m.CurrY,
 				DropTick: now,
 			}
+			if itemDB != nil {
+				if def := itemDB.GetByName("金创药(小量)"); def != nil {
+					gi.Looks = int(def.Looks)
+					ui := itemDB.CreateUserItem(def.Idx)
+					if ui != nil {
+						ui.MakeIndex = *nextItemID
+						gi.UserItem = ui
+					}
+				}
+			}
 			*nextItemID++
-			envir.AddGroundItem(item)
-			dropped = append(dropped, item)
+			envir.AddGroundItem(gi)
+			dropped = append(dropped, gi)
 		}
 	}
 

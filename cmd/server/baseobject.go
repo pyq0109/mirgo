@@ -65,6 +65,13 @@ type BaseObject struct {
 	Gold        int
 	UndeadBonus int // 不死系易伤加成（Delphi btUndead）
 
+	// 装备特殊属性（Delphi RecalcAbilitys / ApplyItemParameters）
+	AntiPoison    int
+	PoisonRecover int
+	HealthRecover int
+	SpellRecover  int
+	AntiMagic     int
+
 	// 状态
 	StatusTimeArr [12]int16
 	Death         bool

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -111,9 +113,11 @@ func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 
 	name := "Item"
+	looks := 0
 	if p.ItemDB != nil {
 		if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil {
 			name = def.Name
+			looks = int(def.Looks)
 		}
 	}
 
@@ -123,11 +127,13 @@ func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer
 	p.Engine.mu.Unlock()
 
 	gi := &GroundItem{
-		ID:    id,
-		Name:  name,
-		Looks: 0,
-		X:     p.CurrX,
-		Y:     p.CurrY + 1,
+		ID:       id,
+		Name:     name,
+		Looks:    looks,
+		X:        p.CurrX,
+		Y:        p.CurrY + 1,
+		DropTick: time.Now().UnixMilli(),
+		UserItem: item,
 	}
 	if p.envir != nil {
 		p.envir.AddGroundItem(gi)

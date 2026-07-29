@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/pyq0109/mirgo/internal/mapformat"
+	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
 // ObjectType 常量
@@ -44,6 +45,7 @@ type Door struct {
 }
 
 // GroundItem 表示地面上的一个物品。
+// Delphi: TMapItem (Grobal2.pas:1339) — UserItem 保留完整实例数据。
 type GroundItem struct {
 	ID       int32
 	Name     string
@@ -51,6 +53,7 @@ type GroundItem struct {
 	X, Y     int
 	DropTick int64
 	Gold     int
+	UserItem *protocol.UserItem
 }
 
 // Environment 表示一张地图。

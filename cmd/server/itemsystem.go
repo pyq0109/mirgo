@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/binary"
 	"math"
+	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -161,12 +163,38 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 		return
 	}
 
-	if def.NeedLevel > 0 && p.WAbil.Level < uint16(def.NeedLevel) {
+	// Delphi CheckTakeOnItems (ObjBase.pas:22970): 性别检查。
+	if def.StdMode == 10 && p.Gender != 0 {
+		p.sendTakeOnFail(server, 2)
+		return
+	}
+	if def.StdMode == 11 && p.Gender != 1 {
 		p.sendTakeOnFail(server, 2)
 		return
 	}
 
-	if def != nil {
+	// Delphi CheckTakeOnItems: Need 类型检查（0=等级 1=DC 2=MC 3=SC）。
+	if def.NeedLevel > 0 {
+		ok := false
+		switch def.Need {
+		case 0:
+			ok = p.WAbil.Level >= uint16(def.NeedLevel)
+		case 1:
+			ok = int(p.WAbil.DC>>16) >= int(def.NeedLevel)
+		case 2:
+			ok = int(p.WAbil.MC>>16) >= int(def.NeedLevel)
+		case 3:
+			ok = int(p.WAbil.SC>>16) >= int(def.NeedLevel)
+		default:
+			ok = p.WAbil.Level >= uint16(def.NeedLevel)
+		}
+		if !ok {
+			p.sendTakeOnFail(server, 2)
+			return
+		}
+	}
+
+	{
 		slot := getEquipSlot(def.StdMode)
 		if slot == protocol.UWeapon || slot == protocol.URightHand {
 			if p.WAbil.HandWeight+uint16(def.Weight) > p.WAbil.MaxHandWeight && p.WAbil.MaxHandWeight > 0 {
@@ -247,7 +275,6 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 }
 
 func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer) {
-	// Param1 = MakeIndex（实例ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		p.sendEatFail(server)
@@ -265,30 +292,41 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 		return
 	}
 
-	healed := false
-	if def.StdMode == 0 {
-		heal := int(def.AC)
-		if heal > 0 {
-			hp := int(p.WAbil.HP) + heal
+	used := false
+	switch def.StdMode {
+	case 0: // 药水（Delphi EatItems, ObjBase.pas:23324）：AC=HP, MAC=MP。
+		if def.AC > 0 {
+			hp := int(p.WAbil.HP) + int(def.AC)
 			if hp > int(p.WAbil.MaxHP) {
 				hp = int(p.WAbil.MaxHP)
 			}
 			p.WAbil.HP = uint16(hp)
-			healed = true
+			used = true
 		}
-	} else if def.StdMode == 1 {
-		heal := int(def.AC)
-		if heal > 0 {
-			mp := int(p.WAbil.MP) + heal
+		if def.MAC > 0 {
+			mp := int(p.WAbil.MP) + int(def.MAC)
 			if mp > int(p.WAbil.MaxMP) {
 				mp = int(p.WAbil.MaxMP)
 			}
 			p.WAbil.MP = uint16(mp)
-			healed = true
+			used = true
 		}
+	case 1, 2: // 食物/杂项。
+		if def.AC > 0 {
+			hp := int(p.WAbil.HP) + int(def.AC)
+			if hp > int(p.WAbil.MaxHP) {
+				hp = int(p.WAbil.MaxHP)
+			}
+			p.WAbil.HP = uint16(hp)
+			used = true
+		}
+	case 3: // 特殊消耗品，按 Shape 分发。
+		used = p.useSpecialItem(def, server)
+	case 4: // 技能书（Delphi ReadBook, ObjBase.pas:23443）。
+		used = p.readBook(def, server)
 	}
 
-	if !healed {
+	if !used {
 		p.sendEatFail(server)
 		return
 	}
@@ -304,6 +342,147 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 	p.sendWeightChanged(server)
 
 	log.Logf(log.LevelInfo, "Items", "%s used %s", p.Name, def.Name)
+}
+
+// useSpecialItem 处理 StdMode=3 的特殊消耗品（Delphi EatUseItems）。
+func (p *PlayObject) useSpecialItem(def *ItemDef, server *netserver.TCPServer) bool {
+	switch def.Shape {
+	case 1: // 地牢逃脱卷：传送至安全区。
+		return p.teleportToSafe(server)
+	case 2: // 随机传送卷：当前地图随机位置。
+		return p.teleportRandom(server)
+	case 3, 5: // 回城卷 / 行会回城卷。
+		return p.teleportToSafe(server)
+	case 4: // 祝福油：武器幸运 +1。
+		weapon := p.UseItems[protocol.UWeapon]
+		if weapon == nil {
+			p.sysMsg(server, "请先装备武器")
+			return false
+		}
+		if weapon.BtValue[7] >= 7 {
+			p.sysMsg(server, "幸运已达上限")
+			return false
+		}
+		weapon.BtValue[7]++
+		p.sendDuraChange(server, weapon)
+		p.RecalcAbilitys()
+		return true
+	case 9, 10: // 修复油 / 战神油：修复武器耐久。
+		weapon := p.UseItems[protocol.UWeapon]
+		if weapon == nil {
+			p.sysMsg(server, "请先装备武器")
+			return false
+		}
+		weapon.Dura = weapon.DuraMax
+		p.sendDuraChange(server, weapon)
+		return true
+	case 12: // 临时 Buff（神水/精酿）。
+		return p.applyBuff(def, server)
+	}
+	return false
+}
+
+// teleportToSafe 传送至安全区（回城卷/地牢逃脱卷）。
+func (p *PlayObject) teleportToSafe(server *netserver.TCPServer) bool {
+	safeMap, safeX, safeY := GetSafeZonePoint()
+	if p.MapMgr == nil {
+		return false
+	}
+	env := p.MapMgr.FindMap(safeMap)
+	if env == nil {
+		return false
+	}
+	if env.Name == p.MapName {
+		// 同地图内传送。
+		if p.envir != nil {
+			p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+			p.envir.broadcastRefMsg(p.BaseObject, RM_DISAPPEAR, p.ID, p.CurrX, p.CurrY, p.Dir)
+		}
+		p.CurrX, p.CurrY = safeX, safeY
+		p.envir.AddObject(safeX, safeY, OS_MOVINGOBJECT, p)
+		p.envir.broadcastRefMsg(p.BaseObject, RM_LOGON, p.ID, safeX, safeY, p.Dir)
+	} else {
+		p.EnterAnotherMap(server, env, safeX, safeY)
+	}
+	return true
+}
+
+// teleportRandom 当前地图随机传送。
+func (p *PlayObject) teleportRandom(server *netserver.TCPServer) bool {
+	if p.envir == nil {
+		return false
+	}
+	for tries := 0; tries < 50; tries++ {
+		x := rand.Intn(p.envir.Width)
+		y := rand.Intn(p.envir.Height)
+		if p.envir.CanWalk(x, y) {
+			p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+			p.envir.broadcastRefMsg(p.BaseObject, RM_DISAPPEAR, p.ID, p.CurrX, p.CurrY, p.Dir)
+			p.CurrX, p.CurrY = x, y
+			p.envir.AddObject(x, y, OS_MOVINGOBJECT, p)
+			p.envir.broadcastRefMsg(p.BaseObject, RM_LOGON, p.ID, x, y, p.Dir)
+			return true
+		}
+	}
+	return false
+}
+
+// applyBuff 应用临时 Buff（StdMode=3, Shape=12）。
+// 数据编码：DC/MC/SC=加成值, AC(ACMax=0)=HP, MAC(MACMax=0)=MP, ACMax=HitSpeed, MACMax=持续秒数。
+func (p *PlayObject) applyBuff(def *ItemDef, server *netserver.TCPServer) bool {
+	duration := int(def.MACMax)
+	if duration <= 0 {
+		return false
+	}
+	p.BuffDC = int(def.DC)
+	p.BuffMC = int(def.MC)
+	p.BuffSC = int(def.SC)
+	p.BuffHP = 0
+	p.BuffMP = 0
+	if def.ACMax == 0 {
+		p.BuffHP = int(def.AC)
+	}
+	if def.MACMax != 0 && def.MAC == 0 {
+		// MACMax is duration, MAC is MP bonus only when MACMax is not being used as duration.
+	}
+	p.BuffHitSpeed = int(def.ACMax)
+	p.BuffExpireTick = time.Now().UnixMilli() + int64(duration)*1000
+	p.RecalcAbilitys()
+	p.SendAbility(server)
+	return true
+}
+
+// readBook 学习技能书（StdMode=4, Delphi ReadBook ObjBase.pas:23443）。
+func (p *PlayObject) readBook(def *ItemDef, server *netserver.TCPServer) bool {
+	if p.MagicDB == nil {
+		return false
+	}
+	magic := p.MagicDB.GetByName(def.Name)
+	if magic == nil {
+		p.sysMsg(server, "这本技能书无法学习")
+		return false
+	}
+	if magic.Job >= 0 && magic.Job != int(p.Job) {
+		p.sysMsg(server, "职业不符，无法学习")
+		return false
+	}
+	if magic.NeedL1 > 0 && int(p.WAbil.Level) < magic.NeedL1 {
+		p.sysMsg(server, "等级不足，无法学习")
+		return false
+	}
+	for _, pm := range p.LearnedMagics {
+		if pm.MagID == magic.MagID {
+			p.sysMsg(server, "已经学会了这个技能")
+			return false
+		}
+	}
+	p.LearnedMagics = append(p.LearnedMagics, &PlayerMagic{
+		MagID: magic.MagID,
+		Level: 0,
+	})
+	p.SendMyMagicFull(server)
+	log.Logf(log.LevelInfo, "Items", "%s learned magic %s (ID=%d)", p.Name, def.Name, magic.MagID)
+	return true
 }
 
 // makeLong 按 Delphi MakeLong 的方式打包 lo/hi 属性区间（lo word | hi word<<16）。
@@ -386,22 +565,54 @@ func (p *PlayObject) RecalcAbilitys() {
 	p.WAbil.Weight = uint16(min(65535, bagWeight))
 
 	if p.ItemDB != nil {
+		// 重置特殊属性。
+		p.Luck = 0
+		p.HitSpeed = 0
+		p.AntiPoison = 0
+		p.PoisonRecover = 0
+		p.HealthRecover = 0
+		p.SpellRecover = 0
+		p.AntiMagic = 0
+
 		for i := 0; i < 13; i++ {
 			if p.UseItems[i] == nil {
 				continue
 			}
-			def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+			item := p.UseItems[i]
+			def := p.ItemDB.GetByIdx(int(item.WIndex))
 			if def == nil {
 				continue
 			}
+			// 基础五维。
 			p.WAbil.AC += uint32(def.AC) | uint32(def.ACMax)<<16
 			p.WAbil.MAC += uint32(def.MAC) | uint32(def.MACMax)<<16
 			p.WAbil.DC += uint32(def.DC) | uint32(def.DCMax)<<16
 			p.WAbil.MC += uint32(def.MC) | uint32(def.MCMax)<<16
 			p.WAbil.SC += uint32(def.SC) | uint32(def.SCMax)<<16
-			// E3: 武器升级加成（BtValue[0]=DC, [1]=MC, [2]=SC 升级点数）
-			if i == protocol.UWeapon {
-				item := p.UseItems[i]
+
+			// Delphi ApplyItemParameters (ItmUnit.pas:556): 按 StdMode 映射特殊属性。
+			switch {
+			case def.StdMode == 5 || def.StdMode == 6: // 武器
+				p.HitPoint += int(def.ACMax)
+				if def.MACMax > 10 {
+					p.HitSpeed += int(def.MACMax)
+				} else {
+					p.HitSpeed -= int(def.MACMax)
+				}
+				p.Luck += int(def.AC)
+				// BtValue[10]: 升级结果加成。
+				switch {
+				case item.BtValue[10] >= 10 && item.BtValue[10] <= 12:
+					v := uint32(item.BtValue[10] - 9)
+					p.WAbil.DC += v | v<<16
+				case item.BtValue[10] >= 20 && item.BtValue[10] <= 22:
+					v := uint32(item.BtValue[10] - 19)
+					p.WAbil.MC += v | v<<16
+				case item.BtValue[10] >= 30 && item.BtValue[10] <= 32:
+					v := uint32(item.BtValue[10] - 29)
+					p.WAbil.SC += v | v<<16
+				}
+				// BtValue[0..2]: 升级点数。
 				if item.BtValue[0] > 0 {
 					p.WAbil.DC += uint32(item.BtValue[0]) | uint32(item.BtValue[0])<<16
 				}
@@ -411,14 +622,58 @@ func (p *PlayObject) RecalcAbilitys() {
 				if item.BtValue[2] > 0 {
 					p.WAbil.SC += uint32(item.BtValue[2]) | uint32(item.BtValue[2])<<16
 				}
-				// E3: 诅咒惩罚（BtValue[12]，每级 -5% 攻击）
+				// BtValue[12]: 诅咒惩罚（每级 -5% DC）。
 				if item.BtValue[12] > 0 {
-					penalty := int(item.BtValue[12]) * 5 // 百分比
+					penalty := int(item.BtValue[12]) * 5
 					dcMin := int(p.WAbil.DC & 0xFFFF)
 					dcMax := int(p.WAbil.DC >> 16)
 					dcMin = dcMin * (100 - penalty) / 100
 					dcMax = dcMax * (100 - penalty) / 100
 					p.WAbil.DC = uint32(dcMin) | uint32(dcMax)<<16
+				}
+			case def.StdMode == 10 || def.StdMode == 11: // 衣服
+				if def.Source > 0 {
+					p.Luck += int(def.Source)
+				} else if def.Source < 0 {
+					p.Luck += int(def.Source)
+				}
+				// BtValue[0..4]: 随机加成 AC/MAC/DC/MC/SC。
+				p.WAbil.AC += uint32(item.BtValue[0]) | uint32(item.BtValue[0])<<16
+				p.WAbil.MAC += uint32(item.BtValue[1]) | uint32(item.BtValue[1])<<16
+				p.WAbil.DC += uint32(item.BtValue[2]) | uint32(item.BtValue[2])<<16
+				p.WAbil.MC += uint32(item.BtValue[3]) | uint32(item.BtValue[3])<<16
+				p.WAbil.SC += uint32(item.BtValue[4]) | uint32(item.BtValue[4])<<16
+			case def.StdMode == 19: // 项链（抗魔）
+				p.AntiMagic += int(def.ACMax)
+				p.Luck += int(def.MACMax)
+			case def.StdMode == 20 || def.StdMode == 24: // 项链（命中+敏捷）
+				p.HitPoint += int(def.ACMax)
+				p.SpeedPoint += int(def.MACMax)
+			case def.StdMode == 21 || def.StdMode == 54 || def.StdMode == 64: // 项链（恢复）
+				p.HealthRecover += int(def.ACMax)
+				p.SpellRecover += int(def.MACMax)
+				p.HitSpeed += int(def.AC)
+				p.HitSpeed -= int(def.MAC)
+			case def.StdMode == 22 || def.StdMode == 23: // 戒指（抗毒）
+				p.AntiPoison += int(def.ACMax)
+				p.PoisonRecover += int(def.MACMax)
+			case def.StdMode == 62: // 腰带（负重）
+				p.WAbil.MaxHandWeight += uint16(def.ACMax)
+				p.WAbil.MaxWeight += uint16(def.MAC)
+				p.WAbil.MaxWearWeight += uint16(def.MACMax)
+			case def.StdMode == 63: // 宝石（HP/MP）
+				p.WAbil.MaxHP += uint16(def.AC)
+				p.WAbil.MaxMP += uint16(def.ACMax)
+			}
+
+			// 饰品 BtValue[0..4] 随机加成（StdMode 15,19-26,51-54,62-64）。
+			if def.StdMode >= 15 && def.StdMode <= 26 || def.StdMode >= 51 && def.StdMode <= 64 {
+				if def.StdMode != 62 && def.StdMode != 63 {
+					p.WAbil.AC += uint32(item.BtValue[0]) | uint32(item.BtValue[0])<<16
+					p.WAbil.MAC += uint32(item.BtValue[1]) | uint32(item.BtValue[1])<<16
+					p.WAbil.DC += uint32(item.BtValue[2]) | uint32(item.BtValue[2])<<16
+					p.WAbil.MC += uint32(item.BtValue[3]) | uint32(item.BtValue[3])<<16
+					p.WAbil.SC += uint32(item.BtValue[4]) | uint32(item.BtValue[4])<<16
 				}
 			}
 		}
@@ -441,21 +696,6 @@ func (p *PlayObject) RecalcAbilitys() {
 		p.WAbil.WearWeight = wearWeight
 		p.WAbil.HandWeight = handWeight
 
-		var luck int
-		for i := 0; i < 13; i++ {
-			if p.UseItems[i] == nil {
-				continue
-			}
-			def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
-			if def == nil {
-				continue
-			}
-			if def.Source > 0 {
-				luck += int(def.Source)
-			}
-		}
-		p.Luck = luck
-
 		p.checkSetBonuses()
 
 		if p.HasMuscle {
@@ -463,6 +703,33 @@ func (p *PlayObject) RecalcAbilitys() {
 			p.WAbil.MaxWearWeight *= 2
 			p.WAbil.MaxHandWeight *= 2
 		}
+	}
+
+	// 临时 Buff 加成（StdMode 3, Shape 12 神水/精酿）。
+	if p.BuffExpireTick > 0 && time.Now().UnixMilli() < p.BuffExpireTick {
+		if p.BuffDC > 0 {
+			v := uint32(p.BuffDC)
+			p.WAbil.DC += v | v<<16
+		}
+		if p.BuffMC > 0 {
+			v := uint32(p.BuffMC)
+			p.WAbil.MC += v | v<<16
+		}
+		if p.BuffSC > 0 {
+			v := uint32(p.BuffSC)
+			p.WAbil.SC += v | v<<16
+		}
+		if p.BuffHP > 0 {
+			p.WAbil.MaxHP += uint16(p.BuffHP)
+		}
+		if p.BuffMP > 0 {
+			p.WAbil.MaxMP += uint16(p.BuffMP)
+		}
+		p.HitSpeed += p.BuffHitSpeed
+	} else if p.BuffExpireTick > 0 {
+		p.BuffExpireTick = 0
+		p.BuffDC, p.BuffMC, p.BuffSC = 0, 0, 0
+		p.BuffHP, p.BuffMP, p.BuffHitSpeed = 0, 0, 0
 	}
 
 	if p.WAbil.HP > p.WAbil.MaxHP {

@@ -239,7 +239,7 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 			if !m.LootDropped {
 				m.LootDropped = true
 				if m.envir != nil {
-					m.DropLootWithTable(m.envir, &e.nextItemID, server, e.DropTables)
+					m.DropLootWithTable(m.envir, &e.nextItemID, server, e.DropTables, e.ItemDB)
 				}
 				// Delphi TZilKinZombi: 死亡分裂
 				if m.AIBehavior == AISplit && m.envir != nil {
