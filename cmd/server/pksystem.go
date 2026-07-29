@@ -28,6 +28,14 @@ func (p *PlayObject) IncPkPoint(points int) {
 	}
 }
 
+// BroadcastNameColor 向视野内玩家广播名字颜色变化。
+func (p *PlayObject) BroadcastNameColor(server *netserver.TCPServer) {
+	color := p.NameColor()
+	p.SendRefMsg(RM_CHANGENAMECOLOR, color, p.CurrX, p.CurrY, "")
+	msg := protocol.MakeDefaultMsg(protocol.SMChangeNameColor, p.ID, uint16(color), 0, 0)
+	server.Send(p.Session.ID, msg, "")
+}
+
 func (p *PlayObject) DecayPkPoint(now int64) {
 	if now-p.LastPkDecayTick < pkDecayInterval {
 		return
@@ -57,6 +65,7 @@ func (p *PlayObject) OnPlayerKilled(server *netserver.TCPServer, victim *PlayObj
 		return
 	}
 	p.IncPkPoint(pkKillAddPoints)
+	p.BroadcastNameColor(server)
 
 	if victim.WAbil.Exp > 0 {
 		penalty := victim.WAbil.Exp / 20

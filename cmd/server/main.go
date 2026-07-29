@@ -53,7 +53,7 @@ func main() {
 		log.Logf(log.LevelError, "Server", "failed to load maps: %v", err)
 		os.Exit(1)
 	}
-	mapMgr.InitRoutes()
+	mapMgr.InitRoutes(*configDir)
 
 	var itemDB *ItemDB
 	itemDBPath := filepath.Join(*configDir, "items", "std_items.jsonc")
@@ -109,7 +109,12 @@ func main() {
 		castleCfg = DefaultCastleConfig()
 	}
 	userEngine.Castle = NewCastleObject(*castleCfg)
+	if castleEnv := mapMgr.FindMap(castleCfg.MapName); castleEnv != nil {
+		castleEnv.Castle = userEngine.Castle
+	}
 	log.Logf(log.LevelInfo, "Server", "castle: %s (map=%s, owner=%s)", castleCfg.Name, castleCfg.MapName, userEngine.Castle.GetOwnerGuild())
+
+	LoadDrugRecipes(*configDir)
 
 	server := netserver.NewTCPServer(listenAddr)
 
@@ -123,6 +128,7 @@ func main() {
 			player := userEngine.GetPlayer(int32(session.CharacterID))
 			if player != nil {
 				saveCharacterData(db, player)
+				player.NotifyFriendsOffline(server)
 				player.Ghost = true
 				player.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
 				if player.envir != nil {
@@ -265,6 +271,7 @@ func main() {
 				DearName        string          `json:"dearName"`
 				MasterName      string          `json:"masterName"`
 				ApprenticeNames []string        `json:"apprenticeNames"`
+				Friends         []string        `json:"friends,omitempty"`
 				QuestUnitOpen   []byte          `json:"questUnitOpen,omitempty"`
 				QuestUnit       []byte          `json:"questUnit,omitempty"`
 				QuestFlag       []byte          `json:"questFlag,omitempty"`
@@ -274,6 +281,7 @@ func main() {
 				player.DearName = meta.DearName
 				player.MasterName = meta.MasterName
 				player.ApprenticeNames = meta.ApprenticeNames
+				player.Friends = meta.Friends
 				if len(meta.QuestUnitOpen) == 128 {
 					copy(player.QuestUnitOpen[:], meta.QuestUnitOpen)
 				}
@@ -331,6 +339,8 @@ func main() {
 		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
 		server.Send(session.ID, noticeResp, protocol.EncodeString("Welcome to MIR2 Go Server!"))
 
+		player.NotifyFriendsOnline(server)
+
 		log.Logf(log.LevelInfo, "Server", "player %s entered game at %s(%d,%d)",
 			player.Name, player.MapName, player.CurrX, player.CurrY)
 
@@ -352,6 +362,17 @@ func main() {
 		case netserver.StateAuthenticated:
 			handleAuthenticatedMessage(server, session, msg, body, config, db, userEngine, mapMgr)
 		case netserver.StateInGame:
+			if msg.Ident == protocol.CMLogout || msg.Ident == protocol.CMExitGame {
+				player := userEngine.GetPlayer(int32(session.CharacterID))
+				if player != nil {
+					if msg.Ident == protocol.CMLogout {
+						userEngine.LogoutPlayer(server, db, player)
+					} else {
+						userEngine.ExitPlayer(server, db, player)
+					}
+				}
+				return
+			}
 			handleGameMessage(server, session, msg, body, userEngine)
 		}
 	})
@@ -379,6 +400,7 @@ func main() {
 			userEngine.ProcessMonsters(server, now)
 			userEngine.ProcessDoors(now)
 			userEngine.ProcessEvents(server, now)
+			userEngine.ProcessMineRegen(now)
 			if userEngine.Castle != nil {
 				userEngine.Castle.ProcessCastleTick(userEngine, server, now)
 			}
@@ -852,6 +874,7 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		DearName        string          `json:"dearName"`
 		MasterName      string          `json:"masterName"`
 		ApprenticeNames []string        `json:"apprenticeNames"`
+		Friends         []string        `json:"friends,omitempty"`
 		QuestUnitOpen   []byte          `json:"questUnitOpen,omitempty"`
 		QuestUnit       []byte          `json:"questUnit,omitempty"`
 		QuestFlag       []byte          `json:"questFlag,omitempty"`
@@ -862,6 +885,7 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		DearName:        player.DearName,
 		MasterName:      player.MasterName,
 		ApprenticeNames: player.ApprenticeNames,
+		Friends:         player.Friends,
 		QuestUnitOpen:   player.QuestUnitOpen[:],
 		QuestUnit:       player.QuestUnit[:],
 		QuestFlag:       player.QuestFlag[:],

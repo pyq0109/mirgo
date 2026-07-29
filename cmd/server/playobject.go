@@ -72,6 +72,8 @@ type PlayObject struct {
 	DearName       string // 配偶名字（Delphi m_sDearName）
 	DearRecallTick int64  // 夫妻传送冷却
 
+	Friends []string // 好友列表
+
 	// 计算后的战斗属性（Delphi m_btHitPoint/m_btSpeedPoint，ObjBase.pas:1241-1242）。
 	HitPoint   int
 	SpeedPoint int
@@ -200,6 +202,14 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleMagicKeyChange(msg, server)
 	case protocol.CMSay:
 		p.HandleSay(msg, server)
+	case protocol.CMWhisper:
+		p.HandleWhisper(msg, server)
+	case protocol.CMAddFriend:
+		p.HandleAddFriend(msg, server)
+	case protocol.CMDelFriend:
+		p.HandleDelFriend(msg, server)
+	case protocol.CMQueryFriends:
+		p.HandleQueryFriends(server)
 	case protocol.CMClickNPC:
 		p.HandleNpcClick(msg, server)
 	case protocol.CMCreateGroup:
@@ -244,10 +254,16 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleGuildBreakAlly(msg, server)
 	case protocol.CMGuildUpdateNotice:
 		p.HandleGuildUpdateNotice(msg, server)
+	case protocol.CMGuildWar:
+		p.HandleGuildWar(msg, server)
 	case protocol.CMHorseRun:
 		p.HandleHorseRun(msg, server)
 	case protocol.CMOpenDoor:
 		p.HandleOpenDoor(msg, server)
+	case protocol.CMMineDig:
+		p.HandleMineDig(server)
+	case protocol.CMButch:
+		p.HandleButch(msg, server)
 	case protocol.CMUserBuyItem:
 		p.HandleBuyItem(msg, server)
 	case protocol.CMUserSellItem:
@@ -304,6 +320,12 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.sendSpellToClient(server, msg)
 	case RM_FEATURECHANGED:
 		p.sendFeatureChangedToClient(server, msg)
+	case RM_BREAKWEAPON:
+		breakMsg := protocol.MakeDefaultMsg(protocol.SMBreakWeapon, msg.SourceID, 0, 0, 0)
+		server.Send(p.Session.ID, breakMsg, "")
+	case RM_CHANGENAMECOLOR:
+		colorMsg := protocol.MakeDefaultMsg(protocol.SMChangeNameColor, msg.SourceID, uint16(msg.Param1), 0, 0)
+		server.Send(p.Session.ID, colorMsg, "")
 	}
 }
 
@@ -616,6 +638,24 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		target = p.findAttackTarget(p.CurrX+dx*2, p.CurrY+dy*2)
 	}
 	if target == nil {
+		// 攻城战：攻击城门/城墙
+		if p.Engine != nil && p.Engine.Castle != nil && p.envir != nil && p.envir.Castle != nil {
+			attackX, attackY := p.CurrX+dx, p.CurrY+dy
+			loDC := int(p.WAbil.DC & 0xFFFF)
+			hiDC := int(p.WAbil.DC >> 16)
+			damage := loDC
+			if hiDC > loDC {
+				damage = loDC + rand.Intn(hiDC-loDC+1)
+			}
+			damage = int(float64(damage) * multiplier)
+			if damage < 1 {
+				damage = 1
+			}
+			if p.Engine.Castle.HandleStructureDamage(attackX, attackY, damage) {
+				p.SendRefMsg(RM_HIT, dir, attackX, attackY, "")
+				return
+			}
+		}
 		return
 	}
 
