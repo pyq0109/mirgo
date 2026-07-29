@@ -786,6 +786,7 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendBagItemsFull(server)
 		player.SendUseItemsFull(server)
 		player.SendMyMagicFull(server)
+		player.SendSpecialAttackFlags(server)
 		player.SendDayChanging(server)
 		player.SendMapDescription(server)
 		player.SendSubAbility(server)

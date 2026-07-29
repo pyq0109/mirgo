@@ -844,3 +844,38 @@ func (p *PlayObject) useAmulet(count int) {
 		}
 	}
 }
+
+// SendSpecialAttackFlags 根据已学魔法发送特殊攻击标记（ObjBase:8868-9200）。
+// MagID 映射：7=攻杀(+PWR) 12=刺杀(+LNG) 25=半月(+WID) 26=烈火(+FIR) 40=双龙(+TWN)
+func (p *PlayObject) SendSpecialAttackFlags(server *netserver.TCPServer) {
+	has := map[int]bool{}
+	for _, pm := range p.LearnedMagics {
+		has[pm.MagID] = true
+	}
+	send := func(tag string) {
+		server.SendRaw(p.Session.ID, "#+"+tag+"!")
+	}
+	if has[7] {
+		send("PWR")
+	}
+	if has[12] {
+		send("LNG")
+	} else {
+		send("ULNG")
+	}
+	if has[25] {
+		send("WID")
+	} else {
+		send("UWID")
+	}
+	if has[26] {
+		send("FIR")
+	} else {
+		send("UFIR")
+	}
+	if has[40] {
+		send("TWN")
+	} else {
+		send("UTWN")
+	}
+}

@@ -618,24 +618,53 @@ func (h *NetHandler) signalError(err error) {
 }
 
 func (h *NetHandler) handleControlMsg(payload string) {
+	ps := h.playScene
 	switch {
 	case strings.HasPrefix(payload, "+GOOD"):
 		log.Logf(log.LevelDebug, "Client", "<<< +GOOD")
-		h.playScene.ActionLock = false
-		h.playScene.moveFailCount = 0
+		ps.ActionLock = false
+		ps.moveFailCount = 0
 	case strings.HasPrefix(payload, "+FAIL"):
 		log.Logf(log.LevelDebug, "Client", "<<< +FAIL")
-		h.playScene.ActionLock = false
-		h.playScene.moveFailCount++
-		if h.playScene.moveFailCount >= 3 {
-			h.playScene.targetX = -1
-			h.playScene.targetY = -1
-			h.playScene.clearAutoPath()
-			h.playScene.moveFailCount = 0
+		ps.ActionLock = false
+		ps.moveFailCount++
+		if ps.moveFailCount >= 3 {
+			ps.targetX = -1
+			ps.targetY = -1
+			ps.clearAutoPath()
+			ps.moveFailCount = 0
 		}
-		if h.playScene.State.MySelf != nil {
-			h.playScene.State.MySelf.MoveFail()
+		if ps.State.MySelf != nil {
+			ps.State.MySelf.MoveFail()
 		}
+	// 特殊攻击标记（ClMain:3625-3640）
+	case strings.HasPrefix(payload, "+PWR"):
+		ps.canPowerHit = true
+	case strings.HasPrefix(payload, "+LNG"):
+		ps.canLongHit = true
+	case strings.HasPrefix(payload, "+ULNG"):
+		ps.canLongHit = false
+	case strings.HasPrefix(payload, "+WID"):
+		ps.canWideHit = true
+	case strings.HasPrefix(payload, "+UWID"):
+		ps.canWideHit = false
+	case strings.HasPrefix(payload, "+CRS"):
+		ps.canCrsHit = true
+	case strings.HasPrefix(payload, "+UCRS"):
+		ps.canCrsHit = false
+	case strings.HasPrefix(payload, "+TWN"):
+		ps.canTwnHit = true
+	case strings.HasPrefix(payload, "+UTWN"):
+		ps.canTwnHit = false
+	case strings.HasPrefix(payload, "+FIR"):
+		ps.canFireHit = true
+		ps.lastFireHitTick = time.Now().UnixMilli()
+	case strings.HasPrefix(payload, "+UFIR"):
+		ps.canFireHit = false
+	case strings.HasPrefix(payload, "+STN"):
+		ps.canStnHit = true
+	case strings.HasPrefix(payload, "+USTN"):
+		ps.canStnHit = false
 	}
 }
 

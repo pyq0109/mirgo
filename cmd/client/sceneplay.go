@@ -197,6 +197,31 @@ type PlayScene struct {
 	deathGray   bool
 	focusActor  *Actor
 
+	// Delphi 输入还原（ClMain.pas / MShare.pas）
+	targetCret         *Actor // 锁定攻击目标（g_TargetCret）
+	mouseDownTick      int64  // 鼠标按下时间（拖拽检测）
+	leftHeld           bool
+	rightHeld          bool
+	dupSelection       int   // 重叠选择循环（g_nDupSelection）
+	lastAttackTick     int64 // 攻击后 1 秒禁移（g_dwLastAttackTick）
+	lastMoveActionTick int64 // NPC 对话 1.5 秒静止（g_dwLastMoveTick）
+	autoDig            bool  // 自动挖矿（g_boAutoDig）
+	shiftDown          bool
+	altDown            bool
+	runReadyCount      int   // 跑步预备计数（g_nRunReadyCount）
+	lastSpellTick      int64 // 施法冷却（g_dwLatestSpellTick）
+	canPowerHit        bool  // +PWR 攻杀剑术（一次性）
+	canLongHit         bool  // +LNG 刺杀剑术
+	canWideHit         bool  // +WID 半月弯刀
+	canCrsHit          bool  // +CRS 十字斩
+	canTwnHit          bool  // +TWN 双龙斩
+	canFireHit         bool  // +FIR 烈火剑法（一次性）
+	canStnHit          bool  // +STN 石化攻击
+	attackSlow         bool  // 服务端强制攻击减速
+	lastFireHitTick    int64 // 烈火 10 秒冷却
+	hoverItemName      string
+	showAllItemNames   bool // Ctrl+Z 切换
+
 	effects *EffectManager
 	events  *EventManager
 }
@@ -577,11 +602,32 @@ func (s *PlayScene) Update(dt float64) {
 				}
 				s.ActionLock = true
 				s.ActionLockTime = time.Now().UnixMilli()
+				s.lastMoveActionTick = time.Now().UnixMilli()
 			} else {
 				if !s.tryOpenDoor(nx, ny) {
 					s.targetX = -1
 					s.targetY = -1
 				}
+			}
+		}
+	}
+
+	// 持续攻击（Delphi MouseTimerTimer, ClMain:2399-2448）
+	if s.targetCret != nil && moveTick && s.State.MySelf != nil && !s.State.MySelf.Death {
+		if s.targetCret.Death || s.State.Actors.Get(s.targetCret.RecogID) == nil {
+			s.targetCret = nil
+		} else if s.shouldAttack(s.targetCret) {
+			s.attackTarget(s.targetCret)
+		}
+	}
+
+	// 自动挖矿（ClMain:2432-2438）
+	if s.autoDig && moveTick && s.State.MySelf != nil && !s.State.MySelf.Death {
+		my := s.State.MySelf
+		if my.IsIdle() && s.ServerAcceptNextAction() && s.canNextHit() {
+			s.lastHitTick = time.Now().UnixMilli()
+			if s.sendAttack != nil {
+				s.sendAttack(protocol.CMHit+1, my.Dir)
 			}
 		}
 	}
@@ -646,6 +692,7 @@ func (s *PlayScene) stepAutoPath() {
 	s.autoPathIdx += run
 	s.ActionLock = true
 	s.ActionLockTime = time.Now().UnixMilli()
+	s.lastMoveActionTick = time.Now().UnixMilli()
 }
 
 // repairAutoPath 在偏离路径（+FAIL 回滚）或下一格被占（其他角色
@@ -1291,6 +1338,12 @@ func (s *PlayScene) OnChar(char rune) {
 	if s.ui.RouteChar(char) {
 		return
 	}
+	// 聊天前缀（ClMain:1765-1783）：@ ! / 打开聊天并预设前缀
+	if !s.chatMode && (char == '@' || char == '!' || char == '/') {
+		s.chatMode = true
+		s.chatInput = string(char)
+		return
+	}
 	// 聊天输入接受任何可打印字符，包括中文（游戏为中文环境）；
 	// 排除 127（DEL）。最大长度 70（PlayScn.pas:273）。
 	if s.chatMode && char >= 32 && char != 127 {
@@ -1308,6 +1361,15 @@ func (s *PlayScene) OnKey(key int, action int) {
 	// 跟踪 Ctrl 键用于加点面板 ×10 加速。
 	if key == 341 || key == 345 {
 		s.ctrlDown = action == 1
+		return
+	}
+	// 跟踪 Shift/Alt 键（Delphi 输入判定依赖）
+	if key == 340 || key == 344 { // Left/Right Shift
+		s.shiftDown = action == 1
+		return
+	}
+	if key == 342 || key == 346 { // Left/Right Alt
+		s.altDown = action == 1
 		return
 	}
 	if key == 256 && s.itemMove.Moving { // Esc 取消手持物品
@@ -1348,16 +1410,30 @@ func (s *PlayScene) OnKey(key int, action int) {
 			s.State.StatePage = 3
 			s.State.ShowEquip = true
 			return
-		case 71: // G — 行会（ClMain:1637-1661）
-			s.toggleGuild()
-			return
-		case 72: // H — 切换攻击模式（ClMain:1517-1525）
-			s.State.AttackMode = (s.State.AttackMode + 1) % 5
-			if s.sendAttackMode != nil {
-				s.sendAttackMode(s.State.AttackMode)
+		case 71: // G（ClMain:1637-1661）
+			if s.ctrlDown {
+				// Ctrl+G — 与 focusActor 组队（ClMain:1638-1643）
+				if s.focusActor != nil && s.focusActor.Type == ActorHuman && s.sendCreateGroup != nil {
+					s.sendCreateGroup(s.focusActor.UserName)
+				}
+			} else if s.altDown {
+				// Alt+G — 从组队移除 focusActor（ClMain:1645-1648）
+				if s.focusActor != nil && s.focusActor.Type == ActorHuman && s.sendDelGroupMember != nil {
+					s.sendDelGroupMember(s.focusActor.UserName)
+				}
+			} else {
+				s.toggleGuild()
 			}
-			modes := []string{"和平", "组队", "行会", "全体", "PK"}
-			s.AddChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
+			return
+		case 72: // Ctrl+H — 切换攻击模式（ClMain:1517-1525）
+			if s.ctrlDown {
+				s.State.AttackMode = (s.State.AttackMode + 1) % 5
+				if s.sendAttackMode != nil {
+					s.sendAttackMode(s.State.AttackMode)
+				}
+				modes := []string{"和平", "组队", "行会", "全体", "PK"}
+				s.AddChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
+			}
 			return
 		case 77: // M — 小地图（ClMain:1613-1628；三态循环见 B5）
 			s.showMinimap = !s.showMinimap
@@ -1377,9 +1453,30 @@ func (s *PlayScene) OnKey(key int, action int) {
 		case 87: // W — 交易（ClMain:1663-1666）
 			s.tryDeal()
 			return
-		case 90: // Z — 拾取物品（ClMain:1564-1573）
-			if s.sendPickup != nil {
-				s.sendPickup()
+		case 90: // Z（ClMain:1564-1573）
+			if s.ctrlDown {
+				// Ctrl+Z — 切换显示所有地面物品名（ClMain:1564-1567）
+				s.showAllItemNames = !s.showAllItemNames
+			} else {
+				// Z — 拾取物品
+				if s.sendPickup != nil {
+					s.sendPickup()
+				}
+			}
+			return
+		case 65: // Ctrl+A — 休息（ClMain:1522-1526）
+			if s.ctrlDown && s.sendChat != nil {
+				s.sendChat("@Rest")
+			}
+			return
+		case 88: // Alt+X — 登出（ClMain:1575-1593）
+			if s.altDown && s.sendLogout != nil {
+				s.sendLogout()
+			}
+			return
+		case 81: // Alt+Q — 退出游戏（ClMain:1594-1612）
+			if s.altDown && s.sendExit != nil {
+				s.sendExit()
 			}
 			return
 		case 265: // 上箭头 — 聊天向上翻一行（ClMain:1699-1706）
@@ -1416,20 +1513,23 @@ func (s *PlayScene) OnKey(key int, action int) {
 			return
 		}
 
-		// F1..F8 释放绑定在该键上的魔法（FState:3506-3545）。
+		// F1..F8 释放绑定在该键上的魔法，朝鼠标位置施法（ClMain:1268-1285）。
 		if !s.chatMode && key >= 290 && key <= 297 {
-			k := byte('1' + (key - 290))
-			for i := range s.State.Magics {
-				if s.State.Magics[i].Key != k {
-					continue
-				}
-				if s.sendSpell != nil {
-					if my := s.State.MySelf; my != nil {
-						dx, dy := dirOffset(my.Dir)
-						s.sendSpell(int(s.State.Magics[i].MagID), my.CurrX+dx, my.CurrY+dy)
+			now := time.Now().UnixMilli()
+			if now-s.lastSpellTick >= 500 {
+				k := byte('1' + (key - 290))
+				for i := range s.State.Magics {
+					if s.State.Magics[i].Key != k {
+						continue
 					}
+					if s.sendSpell != nil && s.cam != nil {
+						wx, wy := s.cam.ScreenToWorld(s.mouseX, s.mouseY)
+						tx, ty := s.cam.WorldToTile(wx, wy)
+						s.sendSpell(int(s.State.Magics[i].MagID), tx, ty)
+						s.lastSpellTick = now
+					}
+					break
 				}
-				break
 			}
 			return
 		}
@@ -1492,18 +1592,56 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 
 	// 基于格子的焦点检测（Delphi g_FocusCret, ClMain.pas:2085-2096）。
 	s.focusActor = nil
+	s.hoverItemName = ""
 	if y >= MapSurfaceH || s.cam == nil || s.State.MySelf == nil {
 		return
 	}
 	wx, wy := s.cam.ScreenToWorld(x, y)
 	tx, ty := s.cam.WorldToTile(wx, wy)
+
+	// 地面物品悬停提示（ClMain:2098-2107）
+	hoverItem := ""
+	for _, gi := range s.groundItems {
+		if gi.X == tx && gi.Y == ty {
+			hoverItem = gi.Name
+			s.tooltip.Show(int(x), int(y), gi.Name, [4]float32{1, 1, 0.8, 1}, true)
+			break
+		}
+	}
+	// 仅当之前有悬停物品且现在没有时清除（避免覆盖 UI 提示）
+	if s.hoverItemName != "" && hoverItem == "" {
+		s.tooltip.Clear()
+	}
+	s.hoverItemName = hoverItem
+
 	for _, a := range s.State.Actors.All() {
 		if a.RecogID == s.State.MySelf.RecogID || a.Death {
 			continue
 		}
 		if a.CurrX == tx && a.CurrY == ty {
 			s.focusActor = a
-			return
+			break
+		}
+	}
+
+	// 拖拽移动（ClMain:2115-2116）：按住 >300ms 重新触发移动
+	if s.leftHeld && time.Now().UnixMilli()-s.mouseDownTick > 300 {
+		if s.State.MySelf != nil && !s.State.MySelf.Death && s.sendMove != nil {
+			my := s.State.MySelf
+			if tx != my.CurrX || ty != my.CurrY {
+				s.targetCret = nil
+				s.startAutoPath(tx, ty)
+			}
+		}
+	}
+	if s.rightHeld && time.Now().UnixMilli()-s.mouseDownTick > 300 {
+		if s.State.MySelf != nil && !s.State.MySelf.Death && s.sendMove != nil {
+			my := s.State.MySelf
+			if absInt(my.CurrX-tx) > 2 || absInt(my.CurrY-ty) > 2 {
+				s.clearAutoPath()
+				s.targetX = tx
+				s.targetY = ty
+			}
 		}
 	}
 }
@@ -1519,12 +1657,31 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	s.mouseX, s.mouseY = x, y
 	ix, iy := int(x), int(y)
 
-	if action == 0 { // 松开
+	if action == 0 { // 松开（ClMain:2384-2389）
 		s.ui.RouteMouseUp(ix, iy, button)
+		if button == 0 {
+			s.leftHeld = false
+		}
+		if button == 1 {
+			s.rightHeld = false
+		}
+		// Delphi: 松开鼠标取消移动目标
+		s.targetX, s.targetY = -1, -1
+		s.clearAutoPath()
 		return
 	}
 	if action != 1 {
 		return
+	}
+
+	// 记录按下状态（ClMain:2120-2126）
+	s.mouseDownTick = time.Now().UnixMilli()
+	s.runReadyCount = 0
+	if button == 0 {
+		s.leftHeld = true
+	}
+	if button == 1 {
+		s.rightHeld = true
 	}
 
 	const (
@@ -1532,7 +1689,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		modCtrl  = 0x0002
 		modAlt   = 0x0004
 	)
-	_ = modAlt // 占位，暂未使用
 
 	// 右键（ClMain.pas:2200-2229）：Ctrl+右键 = 查看，否则移动。
 	if button == 1 {
@@ -1543,6 +1699,10 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		if mods&modCtrl != 0 {
 			s.tryInspect(x, y)
 			return
+		}
+		// 无修饰键右键：循环重叠选择（ClMain:2201）
+		if mods == 0 {
+			s.dupSelection++
 		}
 		if y >= MapSurfaceH {
 			return
@@ -1562,6 +1722,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			dir := dirToward(my.CurrX, my.CurrY, tx, ty)
 			my.UpdateMsg(protocol.CMTurn, my.CurrX, my.CurrY, dir, 0, 0)
 			s.sendMove(protocol.CMTurn, dir)
+			s.lastMoveActionTick = time.Now().UnixMilli()
 		} else {
 			s.targetX = tx
 			s.targetY = ty
@@ -1598,8 +1759,9 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	if s.State.MySelf.Death {
 		return
 	}
-	// 左键（ClMain.pas:2246-2275）：攻击 / NPC 对话 / 拾取。
+	// 左键（ClMain.pas:2246-2355）：完整决策树。
 	if button == 0 {
+		s.autoDig = false // 任何左键操作停止自动挖矿
 		if s.cam == nil || s.mapData == nil {
 			return
 		}
@@ -1608,65 +1770,253 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		log.Logf(log.LevelDebug, "Mouse", "play left-click world=(%.1f,%.1f) tile=(%d,%d)", wx, wy, tx, ty)
 
 		my := s.State.MySelf
-		for _, a := range s.State.Actors.All() {
-			if a.RecogID == my.RecogID {
-				continue
-			}
-			if a.CurrX == tx && a.CurrY == ty && a.Death && a.Type == ActorMonster {
-				if s.sendButch != nil {
-					s.sendButch(a.RecogID)
-				}
-				return
-			}
-			if a.CurrX == tx && a.CurrY == ty && !a.Death {
-				s.clearAutoPath()
-				if a.Type == ActorNPC {
-					if s.sendNpcClick != nil {
-						s.sendNpcClick(int(a.RecogID))
-					}
-					return
-				}
-				dir := dirToward(my.CurrX, my.CurrY, a.CurrX, a.CurrY)
-				dx := a.CurrX - my.CurrX
-				dy := a.CurrY - my.CurrY
-				if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
-					now := time.Now().UnixMilli()
-					cooldown := int64(1400 - s.State.Speed*100)
-					if cooldown < 500 {
-						cooldown = 500
-					} else if cooldown > 2800 {
-						cooldown = 2800
-					}
-					if s.State.Weight > s.State.MaxWeight {
-						cooldown *= 2
-					}
-					if now-s.lastHitTick < cooldown {
+		now := time.Now().UnixMilli()
+
+		// 1. 鹤嘴锄挖矿（ClMain:2252-2267）
+		if w := s.State.UseItems[1]; w != nil && !my.OnHorse {
+			if def := s.State.ItemDefs[int(w.WIndex)]; def != nil && def.Shape == 19 {
+				target := s.findTargetActor(tx, ty, true)
+				if target == nil {
+					tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
+					fdx, fdy := dirOffset(tdir)
+					nx, ny := my.CurrX+fdx, my.CurrY+fdy
+					if !s.CanWalk(nx, ny) || s.shiftDown {
+						if my.IsIdle() && s.ServerAcceptNextAction() && s.canNextHit() {
+							s.lastHitTick = now
+							if s.sendAttack != nil {
+								s.sendAttack(protocol.CMHit+1, tdir)
+							}
+						}
+						s.autoDig = true
 						return
 					}
-					s.lastHitTick = now
-					if s.sendAttack != nil {
-						s.sendAttack(protocol.CMHit, dir)
+				}
+			}
+		}
+
+		// 2. Alt+左键 → 屠宰（ClMain:2269-2283）
+		if s.altDown && !my.OnHorse {
+			tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
+			if my.IsIdle() && s.ServerAcceptNextAction() {
+				var corpse *Actor
+				for _, a := range s.State.Actors.All() {
+					if a.Death && a.Type == ActorMonster && a.Race != 0 &&
+						absInt(a.CurrX-tx) <= 1 && absInt(a.CurrY-ty) <= 1 {
+						corpse = a
+						break
 					}
-				} else {
-					my.UpdateMsg(protocol.CMTurn, my.CurrX, my.CurrY, dir, 0, 0)
-					s.sendMove(protocol.CMTurn, dir)
+				}
+				if corpse != nil && s.sendButch != nil {
+					s.sendButch(corpse.RecogID)
+				}
+				my.UpdateMsg(protocol.CMSitdown, my.CurrX, my.CurrY, tdir, 0, 0)
+				s.sendMove(protocol.CMSitdown, tdir)
+			}
+			return
+		}
+
+		// 3. 查找目标 Actor（ClMain:2248, liveonly=TRUE）
+		target := s.findTargetActor(tx, ty, true)
+
+		if target != nil || s.shiftDown {
+			// 攻击/交互路径
+			s.targetX, s.targetY = -1, -1
+			s.clearAutoPath()
+
+			if target != nil {
+				// NPC 对话（ClMain:2292-2298）：商人 + 静止 1.5 秒
+				if target.Type == ActorNPC || target.Race == 50 {
+					if now-s.lastMoveActionTick > 1500 && s.sendNpcClick != nil {
+						s.sendNpcClick(int(target.RecogID))
+					}
+					return
+				}
+
+				if !target.Death && !my.OnHorse {
+					s.targetCret = target
+					if s.shouldAttack(target) {
+						s.attackTarget(target)
+					}
 				}
 				return
 			}
-		}
 
-		if s.sendPickup != nil {
-			for _, gi := range s.groundItems {
-				if gi.X == tx && gi.Y == ty {
-					s.clearAutoPath()
-					s.sendPickup()
-					return
+			// Shift+无目标 → 空砍（ClMain:2316-2334）
+			tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
+			if my.IsIdle() && s.ServerAcceptNextAction() && s.canNextHit() {
+				s.lastHitTick = now
+				s.lastAttackTick = now
+				hitMsg := s.selectHitType()
+				if s.sendAttack != nil {
+					s.sendAttack(hitMsg, tdir)
 				}
 			}
+			return
 		}
 
+		// 4. 无目标无 Shift：拾取或移动（ClMain:2336-2353）
+		if tx == my.CurrX && ty == my.CurrY {
+			// 点击自己格子 → 拾取
+			if s.sendPickup != nil {
+				s.clearAutoPath()
+				s.sendPickup()
+			}
+			return
+		}
+
+		// 攻击后 1 秒内禁止移动（ClMain:2344）
+		if now-s.lastAttackTick < 1000 {
+			return
+		}
+
+		s.targetCret = nil
 		s.startAutoPath(tx, ty)
 	}
+}
+
+// findTargetActor 在指定格子查找目标 Actor（PlayScn:1785-1818）。
+// liveonly=true 时仅返回存活 Actor（左键用）；false 时也可返回死亡 Actor。
+// dupSelection 用于同格多 Actor 时循环选择。
+func (s *PlayScene) findTargetActor(tx, ty int, liveOnly bool) *Actor {
+	my := s.State.MySelf
+	var candidates []*Actor
+	for _, a := range s.State.Actors.All() {
+		if a.RecogID == my.RecogID {
+			continue
+		}
+		if a.CurrX != tx || a.CurrY != ty {
+			continue
+		}
+		if liveOnly && a.Death {
+			continue
+		}
+		candidates = append(candidates, a)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	idx := s.dupSelection % len(candidates)
+	return candidates[idx]
+}
+
+// shouldAttack 判断是否应攻击目标（ClMain:2300-2314）。
+func (s *PlayScene) shouldAttack(a *Actor) bool {
+	if a.Type == ActorMonster {
+		return true
+	}
+	if a.Type == ActorNPC {
+		return false
+	}
+	// 人类玩家
+	if a.Race == 0 { // RCC_USERHUMAN
+		if s.shiftDown {
+			return true
+		}
+		if a.NameColor == 1 { // 红名 = 敌人
+			return true
+		}
+		return false
+	}
+	if a.Race == 12 { // RCC_GUARD
+		return false
+	}
+	if a.Race == 50 { // RCC_MERCHANT
+		return false
+	}
+	// 召唤宠物：名字包含 "("
+	if len(a.UserName) > 0 && a.UserName[0] == '(' {
+		return false
+	}
+	return true
+}
+
+// attackTarget 攻击目标（ClMain:2128-2180）。
+// 相邻 → 发送攻击消息；不相邻 → 走向目标背后。
+func (s *PlayScene) attackTarget(a *Actor) {
+	my := s.State.MySelf
+	dir := dirToward(my.CurrX, my.CurrY, a.CurrX, a.CurrY)
+	dx := a.CurrX - my.CurrX
+	dy := a.CurrY - my.CurrY
+
+	if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 && !a.Death {
+		if !my.IsIdle() || !s.ServerAcceptNextAction() || !s.canNextHit() {
+			return
+		}
+		now := time.Now().UnixMilli()
+		s.lastHitTick = now
+		s.lastAttackTick = now
+		hitMsg := s.selectHitType()
+		if s.sendAttack != nil {
+			s.sendAttack(hitMsg, dir)
+		}
+	} else {
+		// 不相邻 → 走向目标背后（ClMain:2166-2179）
+		s.targetCret = a
+		backDir := (a.Dir + 4) % 8
+		bdx, bdy := dirOffset(backDir)
+		s.targetX = a.CurrX + bdx
+		s.targetY = a.CurrY + bdy
+		s.clearAutoPath()
+	}
+}
+
+// selectHitType 特殊攻击优先级链（ClMain:2136-2163）。
+func (s *PlayScene) selectHitType() int {
+	// 烈火剑法（一次性，10 秒冷却）
+	if s.canFireHit && s.State.MP >= 7 {
+		s.canFireHit = false
+		return protocol.CMFireHit
+	}
+	// 攻杀剑术（一次性）
+	if s.canPowerHit {
+		s.canPowerHit = false
+		return protocol.CMPowerHit
+	}
+	// 双龙斩
+	if s.canTwnHit && s.State.MP >= 10 {
+		s.canTwnHit = false
+		return protocol.CMTwinHit
+	}
+	// 半月弯刀
+	if s.canWideHit && s.State.MP >= 3 {
+		return protocol.CMWideHit
+	}
+	// 十字斩
+	if s.canCrsHit && s.State.MP >= 6 {
+		return protocol.CMCrsHit
+	}
+	// 刺杀剑术
+	if s.canLongHit {
+		return protocol.CMLongHit
+	}
+	// 普通攻击：StdMode=6 的武器用重击
+	if w := s.State.UseItems[1]; w != nil {
+		if def := s.State.ItemDefs[int(w.WIndex)]; def != nil && def.StdMode == 6 {
+			return protocol.CMHeavyHit
+		}
+	}
+	return protocol.CMHit
+}
+
+// canNextHit 攻击速度限制（ClMain:3415-3432）。
+func (s *PlayScene) canNextHit() bool {
+	now := time.Now().UnixMilli()
+	levelFast := s.State.Level * 14
+	if levelFast > 370 {
+		levelFast = 370
+	}
+	levelFast += s.State.Hit * 60
+	if levelFast > 800 {
+		levelFast = 800
+	}
+	nextHitTime := int64(1400 - levelFast)
+	if s.attackSlow {
+		nextHitTime += 1500
+	}
+	if s.State.Weight > s.State.MaxWeight {
+		nextHitTime *= 2
+	}
+	return now-s.lastHitTick >= nextHitTime
 }
 
 func dirToward(fromX, fromY, toX, toY int) int {

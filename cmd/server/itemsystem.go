@@ -481,6 +481,7 @@ func (p *PlayObject) readBook(def *ItemDef, server *netserver.TCPServer) bool {
 		Level: 0,
 	})
 	p.SendMyMagicFull(server)
+	p.SendSpecialAttackFlags(server)
 	log.Logf(log.LevelInfo, "Items", "%s learned magic %s (ID=%d)", p.Name, def.Name, magic.MagID)
 	return true
 }
