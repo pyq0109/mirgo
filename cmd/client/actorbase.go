@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/pyq0109/mirgo/internal/engine"
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/mapformat"
 	"github.com/pyq0109/mirgo/internal/protocol"
 	"github.com/pyq0109/mirgo/internal/wil"
@@ -891,6 +893,13 @@ func drawTintedQuad(gl *engine.GLState, tex uint32, x, y, w, h float32, tr, tg, 
 	gl.DrawQuad(tex, x, y, w, h, proj)
 }
 
+func fmtAlpha(a float32) string {
+	if a >= 1.0 {
+		return "1.0"
+	}
+	return fmt.Sprintf("%.2f", a)
+}
+
 func getStateTint(state int32) (float32, float32, float32, bool) {
 	switch {
 	case state < 0: // $80000000 ceGreen
@@ -922,7 +931,8 @@ func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceMana
 	if wilFile == nil {
 		return
 	}
-	tex := resources.GetTexture(wilFile, a.getTextureIndex())
+	texIdx := a.getTextureIndex()
+	tex := resources.GetTexture(wilFile, texIdx)
 	if tex == 0 {
 		return
 	}
@@ -933,6 +943,29 @@ func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceMana
 	if scale < 1.0 {
 		drawY = drawY + h*(1-scale)
 		h *= scale
+	}
+
+	if debugRenderFrame <= 2 {
+		// 统计 alpha 分布
+		transparent, opaqueBlack, opaqueOther := 0, 0, 0
+		if img.RGBA != nil {
+			for y := 0; y < img.Height; y++ {
+				for x := 0; x < img.Width; x++ {
+					off := (y*img.Width + x) * 4
+					al := img.RGBA.Pix[off+3]
+					if al == 0 {
+						transparent++
+					} else if img.RGBA.Pix[off+0] == 0 && img.RGBA.Pix[off+1] == 0 && img.RGBA.Pix[off+2] == 0 {
+						opaqueBlack++
+					} else {
+						opaqueOther++
+					}
+				}
+			}
+		}
+		log.Logf(log.LevelInfo, "Actor", "drawBody type=%d appr=%d texIdx=%d tex=%d pos=(%.0f,%.0f) drawAt=(%.0f,%.0f) size=(%.0f,%.0f) hot=(%d,%d) state=0x%08X alpha=%s transparent=%d opaqueBlack=%d opaqueOther=%d",
+			a.Type, a.Appearance, texIdx, tex, screenX, screenY, drawX, drawY, w, h, img.HotX, img.HotY, a.State,
+			fmtAlpha(stateAlpha(a.State)), transparent, opaqueBlack, opaqueOther)
 	}
 
 	blend := a.State&0x00800000 != 0
@@ -996,6 +1029,24 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 				bx := screenX + float32(img.HotX)
 				by := screenY + float32(img.HotY)
 				by, h = applyScale(by, h, scrollScale)
+				if debugRenderFrame <= 2 {
+					transparent, opaqueBlack, opaqueOther := 0, 0, 0
+					for yy := 0; yy < img.Height; yy++ {
+						for xx := 0; xx < img.Width; xx++ {
+							off := (yy*img.Width + xx) * 4
+							al := img.RGBA.Pix[off+3]
+							if al == 0 {
+								transparent++
+							} else if img.RGBA.Pix[off+0] == 0 && img.RGBA.Pix[off+1] == 0 && img.RGBA.Pix[off+2] == 0 {
+								opaqueBlack++
+							} else {
+								opaqueOther++
+							}
+						}
+					}
+					log.Logf(log.LevelInfo, "Actor", "drawHuman bodyIdx=%d tex=%d screenPos=(%.0f,%.0f) drawAt=(%.0f,%.0f) size=(%.0f,%.0f) hot=(%d,%d) blend=%v tint=%v alpha=%s T=%d B=%d O=%d",
+						bodyIdx, tex, screenX, screenY, bx, by, w, h, img.HotX, img.HotY, blend, useTint, fmtAlpha(alpha), transparent, opaqueBlack, opaqueOther)
+				}
 				drawTintedQuad(glState, tex, bx, by, w, h, tintR, tintG, tintB, useTint, alpha, proj)
 			}
 		}

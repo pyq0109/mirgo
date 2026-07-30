@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/wil"
@@ -456,7 +458,21 @@ func (m *UIManager) Paint(proj [16]float32) {
 
 func (m *UIManager) paintControl(c *UIControl, proj [16]float32) {
 	if !c.Visible {
+		if debugRenderFrame <= 2 {
+			log.Logf(log.LevelInfo, "UI", "paintControl SKIP(invisible) name=%s kind=%d", c.Name, c.Kind)
+		}
 		return
+	}
+
+	if debugRenderFrame <= 2 {
+		method := "none"
+		if c.OnDirectPaint != nil {
+			method = "OnDirectPaint"
+		} else if c.WLib != nil {
+			method = fmt.Sprintf("BlitImage[%d]", c.FaceIndex)
+		}
+		log.Logf(log.LevelInfo, "UI", "paintControl name=%s kind=%d vis=%v pos=(%d,%d) size=(%d,%d) method=%s children=%d",
+			c.Name, c.Kind, c.Visible, c.AbsX(), c.AbsY(), c.Width, c.Height, method, len(c.Children))
 	}
 
 	if c.Kind == KindGrid {

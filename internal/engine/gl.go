@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"fmt"
 	"image"
 	"unsafe"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
+	"github.com/pyq0109/mirgo/internal/log"
 )
 
 // GLState 保存用于渲染的 OpenGL 资源。
@@ -77,18 +79,45 @@ func NewGLState() (*GLState, error) {
 	}, nil
 }
 
+var uploadCount int
+
 // UploadTexture 将 *image.RGBA 上传为 OpenGL 纹理。
 func (s *GLState) UploadTexture(img *image.RGBA) uint32 {
 	var tex uint32
 	gl.GenTextures(1, &tex)
 	gl.BindTexture(gl.TEXTURE_2D, tex)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
-		int32(img.Bounds().Dx()), int32(img.Bounds().Dy()),
+	gl.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+	w := int32(img.Bounds().Dx())
+	h := int32(img.Bounds().Dy())
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8,
+		w, h,
 		0, gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&img.Pix[0]))
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	uploadCount++
+	if uploadCount <= 20 {
+		// 采样首行和末行的 alpha 值
+		iw := img.Bounds().Dx()
+		ih := img.Bounds().Dy()
+		firstAlphas := ""
+		for x := 0; x < iw && x < 8; x++ {
+			off := x * 4
+			firstAlphas += fmt.Sprintf("%d ", img.Pix[off+3])
+		}
+		lastAlphas := ""
+		if ih > 0 {
+			lastRow := (ih - 1) * iw * 4
+			for x := 0; x < iw && x < 8; x++ {
+				off := lastRow + x*4
+				lastAlphas += fmt.Sprintf("%d ", img.Pix[off+3])
+			}
+		}
+		stride := img.Stride
+		log.Logf(log.LevelInfo, "GL", "UploadTexture #%d tex=%d %dx%d stride=%d pixLen=%d firstRow_A=[%s] lastRow_A=[%s]",
+			uploadCount, tex, w, h, stride, len(img.Pix), firstAlphas, lastAlphas)
+	}
 	return tex
 }
 

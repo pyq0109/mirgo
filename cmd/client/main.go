@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/go-gl/glfw/v3.4/glfw"
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/log"
@@ -326,6 +327,8 @@ func main() {
 		globalFade.tick()
 	}, func() {
 		w, h := window.GetFramebufferSize()
+		gl.ClearColor(0, 0, 0, 1)
+		gl.Clear(gl.COLOR_BUFFER_BIT)
 		glState.SetViewport(0, 0, int32(w), int32(h))
 		proj := engine.OrthoProj(800, 600)
 		sceneMgr.Render(glState, proj)

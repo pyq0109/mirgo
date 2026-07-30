@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
+
+var texLogCount int
 
 // ResourceManager 管理 WIL 文件加载与纹理缓存。
 type ResourceManager struct {
@@ -188,10 +191,26 @@ func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 
 	img := f.GetImage(index)
 	if img == nil || img.RGBA == nil {
+		log.Logf(log.LevelWarn, "GL", "GetTexture MISS file=%s idx=%d img=%v rgba=%v", f.Title, index, img != nil, img != nil && img.RGBA != nil)
 		return 0
 	}
 
 	tex := rm.gl.UploadTexture(img.RGBA)
+	texLogCount++
+	if texLogCount <= 30 {
+		iw := img.Width
+		midRow := img.Height / 2
+		midSample := ""
+		if midRow < img.Height {
+			rowOff := midRow * iw * 4
+			for x := 0; x < iw && x < 8; x++ {
+				off := rowOff + x*4
+				midSample += fmt.Sprintf("(%d,%d,%d,%d) ", img.RGBA.Pix[off], img.RGBA.Pix[off+1], img.RGBA.Pix[off+2], img.RGBA.Pix[off+3])
+			}
+		}
+		log.Logf(log.LevelInfo, "GL", "GetTexture #%d file=%s idx=%d %dx%d tex=%d midRow_RGBA=[%s]",
+			texLogCount, f.Title, index, img.Width, img.Height, tex, midSample)
+	}
 
 	rm.mu.Lock()
 	rm.texCache[key] = tex

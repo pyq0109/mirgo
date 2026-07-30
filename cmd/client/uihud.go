@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"time"
+
+	"github.com/pyq0109/mirgo/internal/log"
 )
 
 // 底部 HUD — 移植自 DBottom + DBottomDirectPaint (FState.pas:1179-1189,
@@ -26,11 +28,18 @@ func (s *PlayScene) buildHUD() {
 	bottom.Left = 0
 	if prg != nil {
 		bottom.SetImgIndex(prg, ImgBottomBar)
+		if img := prg.GetImage(ImgBottomBar); img != nil {
+			log.Logf(log.LevelInfo, "UI", "DBottom: Prguse[%d] %dx%d RGBA=%v", ImgBottomBar, img.Width, img.Height, img.RGBA != nil)
+		} else {
+			log.Logf(log.LevelWarn, "UI", "DBottom: Prguse[%d] returned nil", ImgBottomBar)
+		}
 	} else {
 		bottom.Width, bottom.Height = ScreenWidth, BottomBarImageH
+		log.Logf(log.LevelWarn, "UI", "DBottom: Prguse is nil")
 	}
 	// 底部锚定: Top = SCREENHEIGHT - 图像高度 (FState:1184-1189).
 	bottom.Top = ScreenHeight - bottom.Height
+	log.Logf(log.LevelInfo, "UI", "DBottom: W=%d H=%d Top=%d", bottom.Width, bottom.Height, bottom.Top)
 	bottom.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintBottomBar(c.Top, proj) }
 	bottom.OnMouseDown = func(c *UIControl, button, x, y int) { s.bottomMouseDown(x, y) }
 	ui.Root.AddChild(bottom)
@@ -197,6 +206,9 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 	if prg != nil {
 		img := prg.GetImage(ImgBottomBar)
 		tex := prg != nil && img != nil && img.RGBA != nil
+		if debugRenderFrame <= 2 {
+			log.Logf(log.LevelInfo, "UI", "paintBottomBar: barY=%d barH=%.0f img=%v rgba=%v tex=%v", barY, barH, img != nil, img != nil && img.RGBA != nil, tex)
+		}
 		if tex {
 			t := s.resources.GetTexture(prg, ImgBottomBar)
 			w, h := float32(img.Width), float32(img.Height)

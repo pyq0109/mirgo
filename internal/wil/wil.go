@@ -14,6 +14,10 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 )
 
+func widthBytes(w int) int {
+	return (((w * 8) + 31) / 32) * 4
+}
+
 type Image struct {
 	Width  int
 	Height int
@@ -125,6 +129,10 @@ func Load(wilPath string) (*File, error) {
 		}
 	}
 
+	if wf.colorCount > 256 {
+		log.Logf(log.LevelDebug, "WIL", "%s: colorCount=%d (ignored, always 8-bit)", filepath.Base(wilPath), wf.colorCount)
+	}
+
 	if wf.Count <= 0 || wf.Count > 100000 {
 		f.Close()
 		return nil, fmt.Errorf("invalid image count: %d", wf.Count)
@@ -145,6 +153,7 @@ func Load(wilPath string) (*File, error) {
 		}
 	}
 	wf.Palette[0].A = 0
+	log.Logf(log.LevelInfo, "WIL", "%s palette[0] RGB=(%d,%d,%d)", filepath.Base(wilPath), wf.Palette[0].R, wf.Palette[0].G, wf.Palette[0].B)
 
 	wixPath := strings.TrimSuffix(wilPath, filepath.Ext(wilPath)) + ".wix"
 	if _, err := os.Stat(wixPath); err != nil {
@@ -177,6 +186,9 @@ func Load(wilPath string) (*File, error) {
 	return wf, nil
 }
 
+func (wf *File) BtVersion() int  { return wf.btVersion }
+func (wf *File) ColorCount() int { return wf.colorCount }
+
 func (wf *File) GetImage(idx int) *Image {
 	if idx < 0 || idx >= wf.Count {
 		return nil
@@ -196,10 +208,12 @@ func (wf *File) GetImage(idx int) *Image {
 
 func (wf *File) decodeImage(idx int) *Image {
 	if wf.file == nil {
+		log.Logf(log.LevelWarn, "WIL", "image %d: file closed", idx)
 		return &Image{}
 	}
 
 	if _, err := wf.file.Seek(int64(wf.offsets[idx]), io.SeekStart); err != nil {
+		log.Logf(log.LevelWarn, "WIL", "image %d: seek offset %d: %v", idx, wf.offsets[idx], err)
 		return &Image{}
 	}
 
@@ -210,6 +224,7 @@ func (wf *File) decodeImage(idx int) *Image {
 		HotY   int16
 	}
 	if err := binary.Read(wf.file, binary.LittleEndian, &info); err != nil {
+		log.Logf(log.LevelWarn, "WIL", "image %d: read header at offset %d: %v", idx, wf.offsets[idx], err)
 		return &Image{}
 	}
 
@@ -220,34 +235,23 @@ func (wf *File) decodeImage(idx int) *Image {
 
 	w, h := int(info.Width), int(info.Height)
 	if w <= 0 || h <= 0 || w > 4096 || h > 4096 {
+		log.Logf(log.LevelWarn, "WIL", "image %d: bad dimensions %dx%d", idx, w, h)
 		return &Image{Width: w, Height: h, HotX: info.HotX, HotY: info.HotY}
 	}
 
 	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
 
-	if wf.colorCount > 256 {
-		pixelBytes := make([]byte, w*h*2)
-		if _, err := io.ReadFull(wf.file, pixelBytes); err != nil {
-			return &Image{}
-		}
-		for j := 0; j < w*h; j++ {
-			c16 := uint16(pixelBytes[j*2]) | uint16(pixelBytes[j*2+1])<<8
-			off := j * 4
-			rgba.Pix[off+0] = uint8((c16 >> 11) << 3)
-			rgba.Pix[off+1] = uint8(((c16 >> 5) & 0x3F) << 2)
-			rgba.Pix[off+2] = uint8((c16 & 0x1F) << 3)
-			rgba.Pix[off+3] = 255
-			if c16 == 0 {
-				rgba.Pix[off+3] = 0
-			}
-		}
-	} else {
-		pixels := make([]byte, w*h)
-		if _, err := io.ReadFull(wf.file, pixels); err != nil {
-			return &Image{}
-		}
-		for j, pidx := range pixels {
-			off := j * 4
+	rowBytes := widthBytes(w)
+	raw := make([]byte, rowBytes*h)
+	if _, err := io.ReadFull(wf.file, raw); err != nil {
+		log.Logf(log.LevelWarn, "WIL", "image %d: read %d bytes failed: %v", idx, len(raw), err)
+		return &Image{}
+	}
+	for y := 0; y < h; y++ {
+		rowOff := y * rowBytes
+		for x := 0; x < w; x++ {
+			pidx := raw[rowOff+x]
+			off := (y*w + x) * 4
 			c := wf.Palette[pidx]
 			rgba.Pix[off+0] = c.R
 			rgba.Pix[off+1] = c.G

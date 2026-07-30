@@ -96,7 +96,7 @@ func NewUIControl(name string, kind UIKind) *UIControl {
 		Kind:       kind,
 		Width:      80,
 		Height:     24,
-		Visible:    false,
+		Visible:    true,
 		ClickSound: -1,
 	}
 	switch kind {

@@ -30,8 +30,9 @@ uniform bool u_use_tex;
 out vec4 frag_color;
 void main() {
     if (u_use_tex) {
-        frag_color = texture(u_tex, v_uv) * u_color;
-        if (frag_color.a < 0.01) discard;
+        vec4 t = texture(u_tex, v_uv);
+        if (t.a < 0.01) discard;
+        frag_color = vec4(t.rgb * u_color.rgb, t.a);
     } else {
         frag_color = u_color;
     }

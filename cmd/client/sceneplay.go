@@ -19,6 +19,8 @@ const (
 	frontCullMargin = 35 // Delphi LONGHEIGHT_IMAGE 常量（PlayScn.pas:17）
 )
 
+var debugRenderFrame int
+
 type GroundItemInfo struct {
 	ID    int32
 	X, Y  int
@@ -54,7 +56,8 @@ type PlayScene struct {
 	objectsLoaders map[int]*wil.File
 	objectsCaches  map[int]map[int]uint32
 
-	animCounter int
+	animCounter  int
+	renderFrame  int
 
 	State        *GameState
 	sendMove     func(ident int, dir int)
@@ -723,6 +726,9 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	if s.mapData == nil || s.cam == nil {
 		return
 	}
+	s.renderFrame++
+	debugRenderFrame = s.renderFrame
+	dbg := s.renderFrame <= 2
 
 	m := s.mapData
 	cam := s.cam
@@ -730,10 +736,26 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
+	if dbg {
+		var srcRGB, dstRGB, srcA, dstA int32
+		gl.GetIntegerv(gl.BLEND_SRC_RGB, &srcRGB)
+		gl.GetIntegerv(gl.BLEND_DST_RGB, &dstRGB)
+		gl.GetIntegerv(gl.BLEND_SRC_ALPHA, &srcA)
+		gl.GetIntegerv(gl.BLEND_DST_ALPHA, &dstA)
+		log.Logf(log.LevelInfo, "Render", "frame=%d BLEND factors: srcRGB=0x%04X dstRGB=0x%04X srcA=0x%04X dstA=0x%04X (expect src=0x0302 dst=0x0303)",
+			s.renderFrame, srcRGB, dstRGB, srcA, dstA)
+		log.Logf(log.LevelInfo, "Render", "frame=%d const check: SRC_ALPHA=0x%04X ONE_MINUS_SRC_ALPHA=0x%04X ONE=0x%04X ZERO=0x%04X",
+			s.renderFrame, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ZERO)
+	}
+
 	// 世界渲染到上方 445 逻辑行；底部 155px 是 HUD。
 	fbW, fbH := s.gl.ViewW, s.gl.ViewH
 	worldH := int32(float64(MapSurfaceH) * float64(fbH) / float64(ScreenHeight))
 	s.gl.SetViewport(0, fbH-worldH, fbW, worldH)
+	if dbg {
+		log.Logf(log.LevelInfo, "Render", "frame=%d fb=%dx%d worldH=%d viewport=(0,%d,%d,%d) blend=SRC_ALPHA,ONE_MINUS_SRC_ALPHA",
+			s.renderFrame, fbW, fbH, worldH, fbH-worldH, fbW, worldH)
+	}
 
 	left := float32(cam.X)
 	top := float32(cam.Y)
@@ -837,6 +859,9 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 
 	// UI 层使用完整的 800×600 逻辑视口。
 	s.gl.SetViewport(0, 0, fbW, fbH)
+	if dbg {
+		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, ScreenWidth, ScreenHeight)
+	}
 	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 	if s.showMinimap {
 		mmapDrawn := false
