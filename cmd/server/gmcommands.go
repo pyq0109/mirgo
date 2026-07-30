@@ -53,6 +53,29 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 	case "masterrecall":
 		p.MasterRecall(server)
 		return true
+	case "nomob":
+		now := time.Now().UnixMilli()
+		p.Engine.NoMonGen = !p.Engine.NoMonGen
+		if p.Engine.NoMonGen {
+			killed := 0
+			for _, m := range p.Engine.Monsters {
+				if !m.Death && !m.Ghost {
+					m.Death = true
+					m.DeathTick = now
+					if m.envir != nil {
+						m.envir.broadcastDeathMsg(m.BaseObject, m.ID, m.CurrX, m.CurrY, m.Dir, true)
+					}
+					killed++
+				}
+			}
+			for i := range p.Engine.MonGenList {
+				p.Engine.MonGenList[i].LiveList = nil
+			}
+			p.sysMsg(server, fmt.Sprintf("怪物生成已停止，已清除 %d 只", killed))
+		} else {
+			p.sysMsg(server, "怪物生成已恢复")
+		}
+		return true
 	}
 
 	if p.Permission < 10 {

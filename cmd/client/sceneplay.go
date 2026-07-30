@@ -41,14 +41,14 @@ type ChatMessage struct {
 }
 
 type PlayScene struct {
-	gl        *engine.GLState
-	resources *engine.ResourceManager
-	mapDir    string
-	cam       *engine.Camera2D
-	mapData   *mapformat.MapData
-	minimap      *Minimap
-	minimapDirty bool
-	lighting     *LightingSystem
+	gl            *engine.GLState
+	resources     *engine.ResourceManager
+	mapDir        string
+	cam           *engine.Camera2D
+	mapData       *mapformat.MapData
+	minimap       *Minimap
+	minimapDirty  bool
+	lighting      *LightingSystem
 	lightingDirty bool
 
 	texCache       map[int]uint32
@@ -56,62 +56,62 @@ type PlayScene struct {
 	objectsLoaders map[int]*wil.File
 	objectsCaches  map[int]map[int]uint32
 
-	animCounter  int
-	renderFrame  int
+	animCounter int
+	renderFrame int
 
-	State        *GameState
-	sendMove     func(ident int, dir int)
-	sendOpenDoor func(doorID, x, y int)
-	sendAttack   func(ident int, dir int)
-	sendPickup   func()
-	sendButch    func(targetID int32)
-	sendChat     func(text string)
-	sendSpell    func(magID int, x, y int)
-	sendNpcClick   func(npcID int)
-	sendDealCancel func()
-	sendUseItem    func(makeIndex int32) // CMEat，通过 MakeIndex 定位物品
-	sendBuyItem    func(itemIdx int)
-	sendSellItem   func(makeIndex int32) // CMUserSellItem，通过 MakeIndex 定位
-	sendDropItem   func(makeIndex int32) // CMDropItem，通过 MakeIndex 定位
-	sendDropGold   func(amount int)      // CMDropGold，数量放 Recog 字段
-	sendDealTry    func()                // CMDealTry
-	sendTakeOn     func(makeIndex int32, slot int) // CMTakeOnItem
-	sendTakeOff       func(slot int)               // CMTakeOffItem
-	sendMagicKey      func(magID, key int)         // CMMagicKeyChange
-	sendMerchantSelect func(npcID int32, tag string) // CMMerchantDlgSelect
-	sendQueryPrice    func(makeIndex int32)        // CMMerchantQuerySellPrice
-	sendQueryRepair   func(makeIndex int32)        // CMMerchantQueryRepairCost
-	sendRepairItem    func(makeIndex int32)        // CMUserRepairItem
-	sendStorageItem   func(makeIndex int32)        // CMUserStorageItem
-	sendTakeBackStorage func(makeIndex int32)      // CMUserTakeBackStorageItem
-	sendDealAdd       func(makeIndex int32)        // CMDealAddItem
-	sendDealDel       func(makeIndex int32)        // CMDealDelItem
-	sendDealChgGold   func(amount int)             // CMDealChgGold
-	sendDealEnd       func()                       // CMDealEnd
-	sendOpenGuild        func()                    // CMOpenGuildDlg
-	sendGuildMemberList  func()                    // CMGuildMemberList
-	sendGuildAdd         func(name string)         // CMGuildAddMember
-	sendGuildDel         func(name string)         // CMGuildDelMember
-	sendGuildUpdateNotice func(text string)        // CMGuildUpdateNotice
-	sendGuildUpdateRank  func(text string)         // CMGuildUpdateRankInfo
-	sendGuildAlly        func(name string)         // CMGuildAlly
-	sendGuildBreakAlly   func(name string)         // CMGuildBreakAlly
-	sendGuildHome        func()                    // CMGuildHome
-	sendGroupMode        func(allow int)           // CMGroupMode
-	sendCreateGroup      func(name string)         // CMCreateGroup
-	sendAddGroupMember   func(name string)         // CMAddGroupMember
-	sendDelGroupMember   func(name string)         // CMDelGroupMember
-	sendAdjustBonus      func(remaining int, deltas [9]int) // CMAdjustBonus
-	sendQueryUserState   func(targetID int32)               // CMQueryUserState
-	sendAttackMode func(mode int)
-	sendLogout     func()
-	sendExit       func()
-	sendAddFriend    func(name string)
-	sendDelFriend    func(name string)
-	sendQueryFriends func()
-	lastMoveTick     int64
-	lastAniTick    int64
-	text         *engine.TextRenderer
+	State                 *GameState
+	sendMove              func(ident int, dir int)
+	sendOpenDoor          func(doorID, x, y int)
+	sendAttack            func(ident int, dir int)
+	sendPickup            func()
+	sendButch             func(targetID int32)
+	sendChat              func(text string)
+	sendSpell             func(magID int, x, y int)
+	sendNpcClick          func(npcID int)
+	sendDealCancel        func()
+	sendUseItem           func(makeIndex int32) // CMEat，通过 MakeIndex 定位物品
+	sendBuyItem           func(itemIdx int)
+	sendSellItem          func(makeIndex int32)              // CMUserSellItem，通过 MakeIndex 定位
+	sendDropItem          func(makeIndex int32)              // CMDropItem，通过 MakeIndex 定位
+	sendDropGold          func(amount int)                   // CMDropGold，数量放 Recog 字段
+	sendDealTry           func()                             // CMDealTry
+	sendTakeOn            func(makeIndex int32, slot int)    // CMTakeOnItem
+	sendTakeOff           func(slot int)                     // CMTakeOffItem
+	sendMagicKey          func(magID, key int)               // CMMagicKeyChange
+	sendMerchantSelect    func(npcID int32, tag string)      // CMMerchantDlgSelect
+	sendQueryPrice        func(makeIndex int32)              // CMMerchantQuerySellPrice
+	sendQueryRepair       func(makeIndex int32)              // CMMerchantQueryRepairCost
+	sendRepairItem        func(makeIndex int32)              // CMUserRepairItem
+	sendStorageItem       func(makeIndex int32)              // CMUserStorageItem
+	sendTakeBackStorage   func(makeIndex int32)              // CMUserTakeBackStorageItem
+	sendDealAdd           func(makeIndex int32)              // CMDealAddItem
+	sendDealDel           func(makeIndex int32)              // CMDealDelItem
+	sendDealChgGold       func(amount int)                   // CMDealChgGold
+	sendDealEnd           func()                             // CMDealEnd
+	sendOpenGuild         func()                             // CMOpenGuildDlg
+	sendGuildMemberList   func()                             // CMGuildMemberList
+	sendGuildAdd          func(name string)                  // CMGuildAddMember
+	sendGuildDel          func(name string)                  // CMGuildDelMember
+	sendGuildUpdateNotice func(text string)                  // CMGuildUpdateNotice
+	sendGuildUpdateRank   func(text string)                  // CMGuildUpdateRankInfo
+	sendGuildAlly         func(name string)                  // CMGuildAlly
+	sendGuildBreakAlly    func(name string)                  // CMGuildBreakAlly
+	sendGuildHome         func()                             // CMGuildHome
+	sendGroupMode         func(allow int)                    // CMGroupMode
+	sendCreateGroup       func(name string)                  // CMCreateGroup
+	sendAddGroupMember    func(name string)                  // CMAddGroupMember
+	sendDelGroupMember    func(name string)                  // CMDelGroupMember
+	sendAdjustBonus       func(remaining int, deltas [9]int) // CMAdjustBonus
+	sendQueryUserState    func(targetID int32)               // CMQueryUserState
+	sendAttackMode        func(mode int)
+	sendLogout            func()
+	sendExit              func()
+	sendAddFriend         func(name string)
+	sendDelFriend         func(name string)
+	sendQueryFriends      func()
+	lastMoveTick          int64
+	lastAniTick           int64
+	text                  *engine.TextRenderer
 
 	groundItems   map[int32]*GroundItemInfo
 	floatingTexts []FloatingText
@@ -188,7 +188,7 @@ type PlayScene struct {
 	mouseX, mouseY float64
 	// 双击合成（GLFW 无原生双击事件）：Delphi 收 WM_LBUTTONDBLCLK；
 	// 这里检测两次左键按下间隔 <400ms 且距离 <4px。
-	lastPressTick        int64
+	lastPressTick          int64
 	lastPressX, lastPressY float64
 
 	targetX, targetY int
@@ -227,6 +227,9 @@ type PlayScene struct {
 
 	effects *EffectManager
 	events  *EventManager
+
+	debugConsole DebugConsole
+	textSmall    *engine.TextRenderer
 }
 
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
@@ -255,6 +258,7 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 			c.WantReturn = true
 		}
 	}
+	s.debugConsole.scene = s
 	s.buildHUD()
 	s.buildBag()
 	s.buildState()
@@ -416,19 +420,19 @@ func (s *PlayScene) SetSendDealEnd(fn func()) {
 	s.sendDealEnd = fn
 }
 
-func (s *PlayScene) SetSendOpenGuild(fn func())                          { s.sendOpenGuild = fn }
-func (s *PlayScene) SetSendGuildMemberList(fn func())                    { s.sendGuildMemberList = fn }
-func (s *PlayScene) SetSendGuildAdd(fn func(name string))                { s.sendGuildAdd = fn }
-func (s *PlayScene) SetSendGuildDel(fn func(name string))                { s.sendGuildDel = fn }
-func (s *PlayScene) SetSendGuildUpdateNotice(fn func(text string))       { s.sendGuildUpdateNotice = fn }
-func (s *PlayScene) SetSendGuildUpdateRank(fn func(text string))         { s.sendGuildUpdateRank = fn }
-func (s *PlayScene) SetSendGuildAlly(fn func(name string))               { s.sendGuildAlly = fn }
-func (s *PlayScene) SetSendGuildBreakAlly(fn func(name string))          { s.sendGuildBreakAlly = fn }
-func (s *PlayScene) SetSendGuildHome(fn func())                          { s.sendGuildHome = fn }
-func (s *PlayScene) SetSendGroupMode(fn func(allow int))                 { s.sendGroupMode = fn }
-func (s *PlayScene) SetSendCreateGroup(fn func(name string))             { s.sendCreateGroup = fn }
-func (s *PlayScene) SetSendAddGroupMember(fn func(name string))          { s.sendAddGroupMember = fn }
-func (s *PlayScene) SetSendDelGroupMember(fn func(name string))          { s.sendDelGroupMember = fn }
+func (s *PlayScene) SetSendOpenGuild(fn func())                    { s.sendOpenGuild = fn }
+func (s *PlayScene) SetSendGuildMemberList(fn func())              { s.sendGuildMemberList = fn }
+func (s *PlayScene) SetSendGuildAdd(fn func(name string))          { s.sendGuildAdd = fn }
+func (s *PlayScene) SetSendGuildDel(fn func(name string))          { s.sendGuildDel = fn }
+func (s *PlayScene) SetSendGuildUpdateNotice(fn func(text string)) { s.sendGuildUpdateNotice = fn }
+func (s *PlayScene) SetSendGuildUpdateRank(fn func(text string))   { s.sendGuildUpdateRank = fn }
+func (s *PlayScene) SetSendGuildAlly(fn func(name string))         { s.sendGuildAlly = fn }
+func (s *PlayScene) SetSendGuildBreakAlly(fn func(name string))    { s.sendGuildBreakAlly = fn }
+func (s *PlayScene) SetSendGuildHome(fn func())                    { s.sendGuildHome = fn }
+func (s *PlayScene) SetSendGroupMode(fn func(allow int))           { s.sendGroupMode = fn }
+func (s *PlayScene) SetSendCreateGroup(fn func(name string))       { s.sendCreateGroup = fn }
+func (s *PlayScene) SetSendAddGroupMember(fn func(name string))    { s.sendAddGroupMember = fn }
+func (s *PlayScene) SetSendDelGroupMember(fn func(name string))    { s.sendDelGroupMember = fn }
 func (s *PlayScene) SetSendAdjustBonus(fn func(remaining int, deltas [9]int)) {
 	s.sendAdjustBonus = fn
 }
@@ -469,6 +473,9 @@ func (s *PlayScene) RemoveGroundItem(id int32) {
 func (s *PlayScene) SetText(t *engine.TextRenderer) {
 	s.text = t
 	s.ui.SetText(t)
+	if small, err := t.WithSize(13); err == nil {
+		s.textSmall = small
+	}
 }
 
 func (s *PlayScene) LoadMap(mapName string) error {
@@ -752,6 +759,11 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	fbW, fbH := s.gl.ViewW, s.gl.ViewH
 	worldH := int32(float64(MapSurfaceH) * float64(fbH) / float64(ScreenHeight))
 	s.gl.SetViewport(0, fbH-worldH, fbW, worldH)
+	if s.debugConsole.WireMode > 0 {
+		s.gl.WireBounds = s.gl.WireBounds[:0]
+		s.gl.WireRecording = true
+		s.gl.WireRecord = false
+	}
 	if dbg {
 		log.Logf(log.LevelInfo, "Render", "frame=%d fb=%dx%d worldH=%d viewport=(0,%d,%d,%d) blend=SRC_ALPHA,ONE_MINUS_SRC_ALPHA",
 			s.renderFrame, fbW, fbH, worldH, fbH-worldH, fbW, worldH)
@@ -827,7 +839,11 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
+	if s.debugConsole.WireMode > 0 {
+		s.gl.WireRecord = true
+	}
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
+	s.gl.WireCategory = 3
 	s.effects.Render(s.gl, s.resources, proj)
 
 	for _, ft := range s.floatingTexts {
@@ -849,12 +865,25 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
 
-	if s.lighting != nil && !s.deathGray {
+	if s.lighting != nil && !s.deathGray && !s.debugConsole.DisableLight {
 		darkness := s.calcDarkness()
 		if darkness > 0.01 {
 			lights := s.collectLightSources()
 			s.lighting.Render(proj, s.cam.X, s.cam.Y, s.cam.ViewW, s.cam.ViewH, s.cam.Zoom, darkness, lights)
 		}
+	}
+
+	if s.debugConsole.WireMode > 0 {
+		s.gl.WireRecording = false
+		s.debugConsole.UpdateHover(s)
+		s.renderWireframes(proj)
+		s.renderHoverInfo(proj)
+	}
+	if s.debugConsole.ShowGrid {
+		s.renderDebugGrid(proj)
+	}
+	if s.debugConsole.ShowLabel {
+		s.renderDebugInfo(proj)
 	}
 
 	// UI 层使用完整的 800×600 逻辑视口。
@@ -887,11 +916,25 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 	s.RenderUI(uiProj)
+	if s.debugConsole.Visible {
+		txt := s.textSmall
+		if txt == nil {
+			txt = s.text
+		}
+		s.debugConsole.Render(s.gl, txt, uiProj)
+	} else if s.debugConsole.WireMode > 0 || s.debugConsole.ShowGrid || s.debugConsole.ShowLabel || s.debugConsole.ShowHUD || s.debugConsole.DisableLight || s.debugConsole.DisableHPBar {
+		txt := s.textSmall
+		if txt == nil {
+			txt = s.text
+		}
+		s.debugConsole.RenderStatusBar(s, s.gl, txt, uiProj)
+	}
 }
 
 func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, proj [16]float32) {
 	// 阶段 A：先绘制 48×32 地面层前景物件——它们始终在所有角色后面
 	// （PlayScn.pas:1064-1108）。
+	s.gl.WireCategory = 1
 	for y := fStartY; y <= fEndY; y++ {
 		for x := fStartX; x <= fEndX; x++ {
 			info := s.mapData.InfoAt(x, y)
@@ -905,6 +948,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 	actorIdx := 0
 
 	for y := fStartY; y <= fEndY; y++ {
+		s.gl.WireCategory = 1
 		for x := fStartX; x <= fEndX; x++ {
 			info := s.mapData.InfoAt(x, y)
 			s.drawFrontLarge(info, x, y, proj)
@@ -912,12 +956,14 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 
 		s.events.RenderRow(s.gl, s.resources, proj, y)
 
+		s.gl.WireCategory = 4
 		for _, gi := range s.groundItems {
 			if gi.Y == y && gi.X >= fStartX && gi.X <= fEndX {
 				s.drawGroundItemIcon(gi, proj)
 			}
 		}
 
+		s.gl.WireCategory = 2
 		for actorIdx < len(actors) && actors[actorIdx].Ry <= y {
 			a := actors[actorIdx]
 			worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
@@ -929,6 +975,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		}
 	}
 
+	s.gl.WireCategory = 2
 	for ; actorIdx < len(actors); actorIdx++ {
 		a := actors[actorIdx]
 		worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
@@ -1043,37 +1090,20 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 	}
 
 	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
-	if !a.Death && s.resources.Prguse2 != nil {
-		bgImg := s.resources.Prguse2.GetImage(0)
-		fillImg := s.resources.Prguse2.GetImage(1)
-		if bgImg != nil && bgImg.RGBA != nil && fillImg != nil {
-			bgTex := s.resources.GetTexture(s.resources.Prguse2, 0)
-			fillTex := s.resources.GetTexture(s.resources.Prguse2, 1)
-			hpBarW := float32(bgImg.Width)
-			hpBarH := float32(bgImg.Height)
-			hpBarX := worldX + float32(engine.TileWidth)/2 - hpBarW/2
-			hpBarY := sayY - 10
-			if bgTex != 0 {
-				log.Logf(log.LevelTrace, "Render", "play hp bar bg Prguse2[0] pos=(%.0f,%.0f) size=(%.0f,%.0f)", hpBarX, hpBarY, hpBarW, hpBarH)
-				s.gl.DrawQuad(bgTex, hpBarX, hpBarY, hpBarW, hpBarH, proj)
-			}
-			ratio := float32(1.0)
-			if s.State.MySelf != nil && a.RecogID == s.State.MySelf.RecogID && s.State.MaxHP > 0 {
-				ratio = float32(s.State.HP) / float32(s.State.MaxHP)
-			}
-			if fillTex != 0 && ratio > 0 {
-				fillW := hpBarW * ratio
-				s.gl.DrawQuad(fillTex, hpBarX, hpBarY, fillW, hpBarH, proj)
-			}
-		} else {
-			hpBarY := sayY - 10
-			s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
-			s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
-		}
-	} else if !a.Death {
+	// 注意：十周年版 Prguse2.wil 的 index 0/1 不是 HP 条图像（80x51 散布暗像素），
+	// 因此直接使用彩色矩形绘制，不使用 Prguse2 纹理。
+	if !a.Death && !s.debugConsole.DisableHPBar {
 		hpBarY := sayY - 10
 		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
-		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.8, 0.0, 0.0, 0.8, proj)
+		ratio := float32(1.0)
+		if s.State.MySelf != nil && a.RecogID == s.State.MySelf.RecogID && s.State.MaxHP > 0 {
+			ratio = float32(s.State.HP) / float32(s.State.MaxHP)
+		} else if a.ShowHP && a.ShowMaxHPVal > 0 {
+			ratio = float32(a.ShowHPVal) / float32(a.ShowMaxHPVal)
+		}
+		if ratio > 0 {
+			s.gl.DrawQuadColor(worldX+4, hpBarY, 40*ratio, 4, 0.8, 0.0, 0.0, 0.8, proj)
+		}
 	}
 }
 
@@ -1360,6 +1390,10 @@ func (s *PlayScene) collectLightSources() []LightSource {
 }
 
 func (s *PlayScene) OnChar(char rune) {
+	if s.debugConsole.Visible {
+		s.debugConsole.OnChar(char)
+		return
+	}
 	if s.ui.RouteChar(char) {
 		return
 	}
@@ -1379,6 +1413,17 @@ func (s *PlayScene) OnChar(char rune) {
 }
 
 func (s *PlayScene) OnKey(key int, action int) {
+	if key == 96 {
+		if action == 1 {
+			s.debugConsole.Visible = !s.debugConsole.Visible
+			s.debugConsole.ScrollOff = 0
+		}
+		return
+	}
+	if s.debugConsole.Visible {
+		s.debugConsole.OnKey(key, action)
+		return
+	}
 	// UI（模态框 / 聚焦的编辑控件）优先接收按键。
 	if s.ui.RouteKeyDown(key) {
 		return
@@ -1775,6 +1820,11 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		log.Logf(log.LevelDebug, "PlayScene", "mouse event consumed by UI pos=(%d,%d)", ix, iy)
 		return
 	}
+	if button == 0 && s.debugConsole.WireMode > 0 {
+		if s.debugConsole.ClickInspect(s, x, y) {
+			return
+		}
+	}
 	if y >= MapSurfaceH {
 		return
 	}
@@ -2112,13 +2162,6 @@ func (s *PlayScene) OnScroll(offX, offY float64) {
 		}
 		return
 	}
-	if s.cam != nil {
-		if offY > 0 {
-			s.cam.ZoomAt(1.1, s.mouseX, s.mouseY)
-		} else {
-			s.cam.ZoomAt(1/1.1, s.mouseX, s.mouseY)
-		}
-	}
 }
 
 func (s *PlayScene) AddChatMessage(text string) {
@@ -2213,5 +2256,3 @@ func (s *PlayScene) addFloatingText(tileX, tileY int, text string, r, g, b float
 		StartTime: time.Now().UnixMilli(),
 	})
 }
-
-

@@ -16,7 +16,7 @@ import (
 type SessionState int32
 
 const (
-	StateConnected         SessionState = iota
+	StateConnected SessionState = iota
 	StateAuthenticated
 	StateCharacterSelected
 	StateInGame
@@ -51,11 +51,11 @@ type DisconnectHandler func(session *Session)
 
 // TCPServer 管理 TCP 连接与消息路由。
 type TCPServer struct {
-	listener    net.Listener
-	sessions    map[int64]*Session
-	mu          sync.RWMutex
-	nextID      atomic.Int64
-	addr        string
+	listener net.Listener
+	sessions map[int64]*Session
+	mu       sync.RWMutex
+	nextID   atomic.Int64
+	addr     string
 
 	onConnect    ConnectHandler
 	onDisconnect DisconnectHandler

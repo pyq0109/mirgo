@@ -274,7 +274,7 @@ func main() {
 	})
 
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
-		log.Logf(log.LevelDebug, "Key", "key=%d action=%d mods=%d scene=%s",
+		log.Logf(log.LevelTrace, "Key", "key=%d action=%d mods=%d scene=%s",
 			int(key), int(action), int(mods), sceneMgr.CurrentType())
 		// Esc 仅在游戏前场景退出；原版游戏中没有全局 Esc 退出，
 		// 游戏内通过 DBotExit 按钮退出（ClMain:1575-1612）。
@@ -289,7 +289,7 @@ func main() {
 	})
 
 	glfwWindow.SetCharCallback(func(w *glfw.Window, char rune) {
-		log.Logf(log.LevelDebug, "Key", "char=%q scene=%s", char, sceneMgr.CurrentType())
+		log.Logf(log.LevelTrace, "Key", "char=%q scene=%s", char, sceneMgr.CurrentType())
 		sceneMgr.OnChar(char)
 	})
 
@@ -297,12 +297,12 @@ func main() {
 		switch action {
 		case glfw.Press:
 			x, y := w.GetCursorPos()
-			log.Logf(log.LevelDebug, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
+			log.Logf(log.LevelTrace, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), int(mods), x, y, sceneMgr.CurrentType())
 			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
 			x, y := w.GetCursorPos()
-			log.Logf(log.LevelDebug, "Mouse", "release button=%d pos=(%.0f,%.0f) scene=%s",
+			log.Logf(log.LevelTrace, "Mouse", "release button=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), x, y, sceneMgr.CurrentType())
 			sceneMgr.OnMouse(x, y, int(button), 0, int(mods))
 		}
@@ -459,7 +459,7 @@ func (h *NetHandler) SendEncoded(msg protocol.DefaultMessage, encodedBody string
 }
 
 // SendChgPw 发送密码修改请求: id + #9 + passwd + #9 + newpasswd
-//（ClMain.pas:2864-2870）。
+// （ClMain.pas:2864-2870）。
 func (h *NetHandler) SendChgPw(id, passwd, newpasswd string) {
 	msg := protocol.MakeDefaultMsg(protocol.CMChangePassword, 0, 0, 0, 0)
 	h.Send(msg, id+"\t"+passwd+"\t"+newpasswd)
@@ -2237,12 +2237,12 @@ func (s *DebugScene) Render(glState *engine.GLState, proj [16]float32) {
 	glState.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, r, g, b, 1.0, proj)
 	glState.DrawQuadColor(350, 250, 100, 100, 1.0, 1.0, 1.0, 1.0, proj)
 }
-func (s *DebugScene) OnKey(key int, action int)                    {}
+func (s *DebugScene) OnKey(key int, action int)                              {}
 func (s *DebugScene) OnMouse(x, y float64, button int, action int, mods int) {}
-func (s *DebugScene) OnScroll(x, y float64)                        {}
+func (s *DebugScene) OnScroll(x, y float64)                                  {}
 
 // parseTradeItem 解码 SMDealAddItemOK/SMDealRemoteAddItem 的 payload
-//（服务端 encodeDealItem: MakeIndex i32, WIndex u16, Dura u16, DuraMax u16）。
+// （服务端 encodeDealItem: MakeIndex i32, WIndex u16, Dura u16, DuraMax u16）。
 func (h *NetHandler) parseTradeItem(body string) *BagItem {
 	raw := []byte(body)
 	if len(raw) < 10 {

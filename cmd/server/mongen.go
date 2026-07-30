@@ -189,7 +189,7 @@ func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {
 
 func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 	// Delphi: round-robin 每 tick 只处理一个刷怪器
-	if len(e.MonGenList) > 0 {
+	if len(e.MonGenList) > 0 && !e.NoMonGen {
 		entry := &e.MonGenList[e.currMonGen]
 		e.currMonGen = (e.currMonGen + 1) % len(e.MonGenList)
 

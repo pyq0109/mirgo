@@ -34,6 +34,8 @@ type UserEngine struct {
 	Parties map[int32]*Party
 	Guilds  []*Guild
 	Castle  *CastleObject
+
+	NoMonGen bool
 }
 
 func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {

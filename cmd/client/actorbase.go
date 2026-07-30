@@ -1514,3 +1514,219 @@ func (a *Actor) ScrollHideScale() float32 {
 		return 1.0
 	}
 }
+
+// --- 调试线框：图层边界框计算 ---
+
+type LayerBounds struct {
+	LayerName string
+	WilName   string
+	ImageIdx  int
+	HotX      int16
+	HotY      int16
+	Width     int
+	Height    int
+	DrawX     float32
+	DrawY     float32
+	TexID     uint32
+	Img       *wil.Image
+}
+
+func wilDisplayName(f *wil.File, resources *engine.ResourceManager) string {
+	if f == nil {
+		return "?"
+	}
+	switch f {
+	case resources.Hum:
+		return "Hum.wil"
+	case resources.Hair:
+		return "Hair.wil"
+	case resources.Weapon:
+		return "Weapon.wil"
+	case resources.HumEffect:
+		return "HumEffect.wil"
+	case resources.Effect:
+		return "Effect.wil"
+	case resources.Npc:
+		return "Npc.wil"
+	case resources.Magic:
+		return "Magic.wil"
+	case resources.Magic2:
+		return "Magic2.wil"
+	}
+	for i, m := range resources.Mon {
+		if m == f {
+			return fmt.Sprintf("Mon%d.wil", i)
+		}
+	}
+	return "?.wil"
+}
+
+func ComputeAlphaStats(img *wil.Image) (transparent, opaqueBlack, opaqueOther int) {
+	if img == nil || img.RGBA == nil {
+		return
+	}
+	for y := 0; y < img.Height; y++ {
+		for x := 0; x < img.Width; x++ {
+			off := (y*img.Width + x) * 4
+			al := img.RGBA.Pix[off+3]
+			if al == 0 {
+				transparent++
+			} else if img.RGBA.Pix[off+0] == 0 && img.RGBA.Pix[off+1] == 0 && img.RGBA.Pix[off+2] == 0 {
+				opaqueBlack++
+			} else {
+				opaqueOther++
+			}
+		}
+	}
+	return
+}
+
+func (a *Actor) ComputeLayerBounds(resources *engine.ResourceManager, worldX, worldY float32) []LayerBounds {
+	scale := a.ScrollHideScale()
+	if scale <= 0 {
+		return nil
+	}
+
+	var bounds []LayerBounds
+
+	// body 层
+	bodyImg := a.GetBodyImage(resources)
+	if bodyImg != nil {
+		wilFile := getWilFile(resources, a.Type, a.Appearance)
+		texIdx := a.getTextureIndex()
+		var tex uint32
+		if wilFile != nil {
+			tex = resources.GetTexture(wilFile, texIdx)
+		}
+		dy := worldY + float32(bodyImg.HotY)
+		h := float32(bodyImg.Height)
+		dy, h = applyScale(dy, h, scale)
+		bounds = append(bounds, LayerBounds{
+			LayerName: "body",
+			WilName:   wilDisplayName(wilFile, resources),
+			ImageIdx:  texIdx,
+			HotX:      bodyImg.HotX,
+			HotY:      bodyImg.HotY,
+			Width:     bodyImg.Width,
+			Height:    int(h),
+			DrawX:     worldX + float32(bodyImg.HotX),
+			DrawY:     dy,
+			TexID:     tex,
+			Img:       bodyImg,
+		})
+	}
+
+	if a.Type != ActorHuman {
+		return bounds
+	}
+
+	// weapon 层
+	if a.Weapon >= 2 && resources.Weapon != nil {
+		weaponIdx := HumanFrame*a.Weapon + a.CurrentFrame
+		if weaponIdx >= 0 && weaponIdx < resources.Weapon.Count {
+			img := resources.Weapon.GetImage(weaponIdx)
+			if img != nil && img.RGBA != nil {
+				tex := resources.GetTexture(resources.Weapon, weaponIdx)
+				dy := worldY + float32(img.HotY)
+				h := float32(img.Height)
+				dy, h = applyScale(dy, h, scale)
+				bounds = append(bounds, LayerBounds{
+					LayerName: "weapon",
+					WilName:   "Weapon.wil",
+					ImageIdx:  weaponIdx,
+					HotX:      img.HotX,
+					HotY:      img.HotY,
+					Width:     img.Width,
+					Height:    int(h),
+					DrawX:     worldX + float32(img.HotX),
+					DrawY:     dy,
+					TexID:     tex,
+					Img:       img,
+				})
+			}
+		}
+	}
+
+	// hair 层 — 重新计算 HairOffset（不依赖 a.HairOffset 可能过期的值）
+	hairOffset := -1
+	if a.Hair > 0 && resources.Hair != nil {
+		haircount := resources.Hair.Count / HumanFrame / 2
+		h := a.Hair
+		if haircount > 0 && h > haircount-1 {
+			h = haircount - 1
+		}
+		h = h * 2
+		if h > 1 {
+			hairOffset = HumanFrame * (h + a.Sex)
+		}
+	}
+	if hairOffset >= 0 && resources.Hair != nil {
+		hairIdx := hairOffset + a.CurrentFrame
+		if hairIdx >= 0 && hairIdx < resources.Hair.Count {
+			img := resources.Hair.GetImage(hairIdx)
+			if img != nil && img.RGBA != nil {
+				tex := resources.GetTexture(resources.Hair, hairIdx)
+				dy := worldY + float32(img.HotY)
+				h := float32(img.Height)
+				dy, h = applyScale(dy, h, scale)
+				bounds = append(bounds, LayerBounds{
+					LayerName: "hair",
+					WilName:   "Hair.wil",
+					ImageIdx:  hairIdx,
+					HotX:      img.HotX,
+					HotY:      img.HotY,
+					Width:     img.Width,
+					Height:    int(h),
+					DrawX:     worldX + float32(img.HotX),
+					DrawY:     dy,
+					TexID:     tex,
+					Img:       img,
+				})
+			}
+		}
+	}
+
+	// wing 层
+	if a.Effect > 0 {
+		var wilFile *wil.File
+		var wingIdx int
+		if a.Effect == 50 {
+			if a.CurrentFrame <= 536 {
+				wilFile = resources.Effect
+				wingIdx = 352 + a.WingFrame
+			}
+		} else {
+			wilFile = resources.HumEffect
+			offset := (a.Effect - 1) * HumanFrame
+			if a.CurrentFrame < 64 {
+				wingIdx = offset + a.Dir*8 + a.WingFrame
+			} else {
+				wingIdx = offset + a.CurrentFrame
+			}
+		}
+		if wilFile != nil && wingIdx >= 0 && wingIdx < wilFile.Count {
+			img := wilFile.GetImage(wingIdx)
+			if img != nil && img.RGBA != nil {
+				tex := resources.GetTexture(wilFile, wingIdx)
+				dy := worldY + float32(img.HotY)
+				h := float32(img.Height)
+				dy, h = applyScale(dy, h, scale)
+				bounds = append(bounds, LayerBounds{
+					LayerName: "wing",
+					WilName:   wilDisplayName(wilFile, resources),
+					ImageIdx:  wingIdx,
+					HotX:      img.HotX,
+					HotY:      img.HotY,
+					Width:     img.Width,
+					Height:    int(h),
+					DrawX:     worldX + float32(img.HotX),
+					DrawY:     dy,
+					TexID:     tex,
+					Img:       img,
+				})
+			}
+		}
+	}
+
+	return bounds
+}

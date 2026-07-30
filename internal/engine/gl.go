@@ -21,6 +21,11 @@ type GLState struct {
 	ViewX, ViewY, ViewW, ViewH int32
 
 	scissorStack [][4]int32
+
+	WireRecording  bool
+	WireRecord     bool
+	WireCategory   float32
+	WireBounds     [][5]float32 // x, y, w, h, category
 }
 
 // NewGLState 初始化 OpenGL 资源。
@@ -158,6 +163,12 @@ func (s *GLState) PopScissor() {
 	gl.Scissor(s.ViewX+r[0], s.ViewY+s.ViewH-r[1]-r[3], r[2], r[3])
 }
 
+func (s *GLState) RecordWire(x, y, w, h float32) {
+	if s.WireRecording && s.WireRecord && w > 0 && h > 0 {
+		s.WireBounds = append(s.WireBounds, [5]float32{x, y, w, h, s.WireCategory})
+	}
+}
+
 func (s *GLState) bindTexture(texID uint32) {
 	gl.ActiveTexture(gl.TEXTURE0)
 	if texID != 0 {
@@ -182,6 +193,7 @@ func (s *GLState) setModel(x, y, w, h float32, proj [16]float32) {
 
 // DrawQuad 在 (x, y) 处绘制尺寸为 (w, h) 的带纹理四边形。
 func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
+	s.RecordWire(x, y, w, h)
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
 	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
@@ -193,6 +205,7 @@ func (s *GLState) DrawQuad(texID uint32, x, y, w, h float32, proj [16]float32) {
 
 // DrawQuadTint 绘制带颜色着色的带纹理四边形（frag_color = texture * color）。
 func (s *GLState) DrawQuadTint(texID uint32, x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
+	s.RecordWire(x, y, w, h)
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
 	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
@@ -209,6 +222,7 @@ func (s *GLState) DrawQuadSub(texID uint32, texW, texH float32, sx, sy, sw, sh, 
 	if texW <= 0 || texH <= 0 {
 		return
 	}
+	s.RecordWire(x, y, w, h)
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, sw/texW, sh/texH)
 	gl.Uniform2f(s.TextureShader.UVOffLoc, sx/texW, sy/texH)
@@ -220,6 +234,7 @@ func (s *GLState) DrawQuadSub(texID uint32, texW, texH float32, sx, sy, sw, sh, 
 
 // DrawQuadColor 绘制一个纯色四边形（无纹理）。
 func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16]float32) {
+	s.RecordWire(x, y, w, h)
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
 	gl.Uniform2f(s.TextureShader.UVOffLoc, 0, 0)
@@ -232,6 +247,7 @@ func (s *GLState) DrawQuadColor(x, y, w, h float32, r, g, b, a float32, proj [16
 // DrawQuadAdditive 以叠加混合（src+dst）绘制带纹理四边形，
 // 对应 Delphi 用于选中发光效果的 DrawBlend(...,1)。
 func (s *GLState) DrawQuadAdditive(texID uint32, x, y, w, h float32, proj [16]float32) {
+	s.RecordWire(x, y, w, h)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 	s.setModel(x, y, w, h, proj)
 	gl.Uniform2f(s.TextureShader.UVScaleLoc, 1, 1)
