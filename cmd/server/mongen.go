@@ -39,6 +39,7 @@ func (e *UserEngine) InitWorld(mapMgr *MapManager) {
 	e.mapMgr = mapMgr
 	e.LoadMonGen()
 	e.LoadNpcs()
+	e.LoadNpcUpgradeState()
 }
 
 func (e *UserEngine) LoadMonGen() {
@@ -133,6 +134,69 @@ func (e *UserEngine) LoadNpcs() {
 	}
 
 	log.Logf(log.LevelInfo, "MonGen", "spawned %d NPCs + %d merchants from config", npcCount, merchantCount)
+}
+
+// LoadNpcUpgradeState 从数据库加载NPC武器升级队列状态
+func (e *UserEngine) LoadNpcUpgradeState() {
+	if e.db == nil {
+		return
+	}
+
+	allUpgrades, err := e.db.LoadAllNpcUpgrades()
+	if err != nil {
+		log.Logf(log.LevelError, "MonGen", "failed to load npc upgrades: %v", err)
+		return
+	}
+
+	totalCount := 0
+	for npcID, records := range allUpgrades {
+		// 查找对应的NPC
+		var npc *NpcObject
+		for _, n := range e.Npcs {
+			if n.ID == npcID {
+				npc = n
+				break
+			}
+		}
+		if npc == nil {
+			continue
+		}
+
+		// 恢复升级队列
+		for _, r := range records {
+			var savedItem savedUserItem
+			if err := json.Unmarshal(r.ItemData, &savedItem); err != nil {
+				log.Logf(log.LevelWarn, "MonGen", "failed to unmarshal upgrade item for %s: %v", r.PlayerName, err)
+				continue
+			}
+
+			info := &UpgradeInfo{
+				PlayerName: r.PlayerName,
+				Item: &protocol.UserItem{
+					MakeIndex: savedItem.MakeIndex,
+					WIndex:    savedItem.WIndex,
+					Dura:      savedItem.Dura,
+					DuraMax:   savedItem.DuraMax,
+					BtValue:   savedItem.BtValue,
+				},
+				BtDc:       r.BtDc,
+				BtSc:       r.BtSc,
+				BtMc:       r.BtMc,
+				BtDura:     r.BtDura,
+				Tick:       r.SubmittedAt,
+				DBRecordID: r.ID,
+			}
+
+			npc.mu.Lock()
+			npc.UpgradeWeaponList = append(npc.UpgradeWeaponList, info)
+			npc.mu.Unlock()
+			totalCount++
+		}
+	}
+
+	if totalCount > 0 {
+		log.Logf(log.LevelInfo, "MonGen", "restored %d weapon upgrades from database", totalCount)
+	}
 }
 
 func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {

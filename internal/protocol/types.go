@@ -96,7 +96,8 @@ const (
 	RCNpc          = 10
 	RCGuard        = 11
 	RCPeaceNpc     = 15
-	RCAnimal       = 50
+	RCMerchant     = 50 // NPC商人 (Delphi RCC_MERCHANT)，与RCAnimal共享值50但语义不同
+	RCAnimal       = 50 // 动物类怪物
 	RCMonster      = 80
 	RCArcherGuard  = 112
 )

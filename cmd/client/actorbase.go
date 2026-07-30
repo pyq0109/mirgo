@@ -632,6 +632,18 @@ func (a *Actor) DefaultMotion(now int64) {
 			}
 			start, _ := CalcFrame(action, a.Dir)
 			a.CurrentFrame = start + a.CurrentDefFrame
+		} else if a.Type == ActorNPC {
+			// NPC没有MonAction，使用简单的8帧待机动画循环
+			a.DefFrameCount = 8
+			if now-a.DefFrameTime > 200 { // 200ms每帧
+				a.DefFrameTime = now
+				a.CurrentDefFrame++
+				if a.CurrentDefFrame >= a.DefFrameCount {
+					a.CurrentDefFrame = 0
+				}
+			}
+			// NPC的StartFrame已在calcNPCFrame中设置，这里只需在当前方向上偏移
+			a.CurrentFrame = a.StartFrame + a.CurrentDefFrame
 		}
 		a.Shift(a.Dir, 0, 0, 1)
 		return

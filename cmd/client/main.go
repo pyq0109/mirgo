@@ -1143,6 +1143,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		h.playScene.AddChatMessage(body)
 
 	case protocol.SMMerchantSay:
+		h.playScene.State.ShopNpcID = msg.Recog // 记录当前对话的NPC ID
 		npcName, dialogText := body, ""
 		if idx := strings.IndexByte(body, '/'); idx >= 0 {
 			npcName, dialogText = body[:idx], body[idx+1:]
@@ -1647,6 +1648,37 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMSendRepairCost:
 		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
 		log.Logf(log.LevelInfo, "Client", "repair cost: %d", msg.Recog)
+
+	case protocol.SMSendUserMakeDrugItemList: // 712
+		// 制药列表：复用商店面板，ShopMode=4
+		h.playScene.State.ShowShop = true
+		h.playScene.State.ShopMode = 4
+		h.playScene.State.ShopNpcID = msg.Recog
+		h.playScene.menuTop = 0
+		h.playScene.menuIndex = -1
+		raw := []byte(body)
+		if len(raw) >= 2 {
+			count := int(binary.LittleEndian.Uint16(raw[0:2]))
+			h.playScene.State.ShopGoods = make([]ShopItem, 0, count)
+			for i := 0; i < count; i++ {
+				off := 2 + i*6
+				if off+6 > len(raw) {
+					break
+				}
+				itemIdx := binary.LittleEndian.Uint16(raw[off : off+2])
+				price := int(binary.LittleEndian.Uint16(raw[off+2 : off+4]))
+				stock := int(binary.LittleEndian.Uint16(raw[off+4 : off+6]))
+				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price, Stock: stock})
+			}
+		}
+
+	case protocol.SMMakeDrugSuccess: // 713
+		log.Logf(log.LevelInfo, "Client", "drug crafting succeeded")
+		h.playScene.State.ShowShop = false
+
+	case protocol.SMMakeDrugFail: // 714
+		log.Logf(log.LevelInfo, "Client", "drug crafting failed")
+		h.playScene.State.ShowShop = false
 
 	case protocol.SMSendUserStorageItem:
 		// 仓库复用商店面板（Delphi BoStorageMenu）：列表是

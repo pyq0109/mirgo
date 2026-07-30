@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"math/rand"
 	"time"
 
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -17,6 +19,11 @@ const (
 
 func (p *PlayObject) HandleUpgradeWeapon(npc *NpcObject, server *netserver.TCPServer) {
 	if npc == nil || !npc.CanUpgrade {
+		return
+	}
+
+	// 距离验证
+	if !p.isNearNpc(npc) {
 		return
 	}
 
@@ -96,11 +103,35 @@ func (p *PlayObject) HandleUpgradeWeapon(npc *NpcObject, server *netserver.TCPSe
 	npc.UpgradeWeaponList = append(npc.UpgradeWeaponList, info)
 	npc.mu.Unlock()
 
+	// 持久化到数据库
+	if p.Engine != nil {
+		itemData, err := json.Marshal(savedUserItem{
+			MakeIndex: weapon.MakeIndex,
+			WIndex:    weapon.WIndex,
+			Dura:      weapon.Dura,
+			DuraMax:   weapon.DuraMax,
+			BtValue:   weapon.BtValue,
+		})
+		if err == nil {
+			recordID, err := p.Engine.db.SaveNpcUpgrade(npc.ID, p.Name, itemData, info.BtDc, info.BtSc, info.BtMc, info.BtDura, info.Tick)
+			if err != nil {
+				log.Logf(log.LevelError, "Server", "failed to save upgrade weapon for %s: %v", p.Name, err)
+			} else {
+				info.DBRecordID = recordID
+			}
+		}
+	}
+
 	p.execScriptLabel(npc, "upgrade_ok", server)
 }
 
 func (p *PlayObject) HandleGetBackupWeapon(npc *NpcObject, server *netserver.TCPServer) {
 	if npc == nil || !npc.CanGetBackup {
+		return
+	}
+
+	// 距离验证
+	if !p.isNearNpc(npc) {
 		return
 	}
 
@@ -138,6 +169,13 @@ func (p *PlayObject) HandleGetBackupWeapon(npc *NpcObject, server *netserver.TCP
 	// 从列表移除
 	npc.UpgradeWeaponList = append(npc.UpgradeWeaponList[:idx], npc.UpgradeWeaponList[idx+1:]...)
 	npc.mu.Unlock()
+
+	// 从数据库删除
+	if p.Engine != nil && info.DBRecordID > 0 {
+		if err := p.Engine.db.DeleteNpcUpgrade(info.DBRecordID); err != nil {
+			log.Logf(log.LevelError, "Server", "failed to delete upgrade record %d: %v", info.DBRecordID, err)
+		}
+	}
 
 	// 计算升级结果
 	weapon := info.Item

@@ -32,6 +32,7 @@ type UpgradeInfo struct {
 	BtMc       byte
 	BtDura     byte
 	Tick       int64
+	DBRecordID int64 // 数据库记录ID，用于持久化删除
 }
 
 type NpcObject struct {
@@ -115,9 +116,13 @@ func (o *NpcObject) GetScript() *NpcScript {
 	}
 
 	o.mu.Lock()
+	defer o.mu.Unlock()
+	// 双重检查：可能在等待锁期间已被其他goroutine加载
+	if o.script != nil {
+		return o.script
+	}
 	o.script = script
 	o.scriptTime = time.Now().UnixMilli()
-	o.mu.Unlock()
 
 	return script
 }
@@ -129,7 +134,7 @@ func (o *NpcObject) InvalidateScript() {
 	o.mu.Unlock()
 }
 
-func (o *NpcObject) InitGoodsFromScript(script *NpcScript) {
+func (o *NpcObject) InitGoodsFromScript(script *NpcScript, itemDB *ItemDB) {
 	if !o.IsMerchant || script == nil {
 		return
 	}
@@ -169,6 +174,24 @@ func (o *NpcObject) InitGoodsFromScript(script *NpcScript) {
 			RefillTime: g.RefillTime,
 			LastRefill: time.Now().UnixMilli(),
 		})
+	}
+
+	// 立即填充初始库存，避免首次点击时库存为空
+	if itemDB != nil {
+		for _, cfg := range o.RefillConfig {
+			def := itemDB.GetByName(cfg.ItemName)
+			if def == nil {
+				continue
+			}
+			stock := o.GoodsList[cfg.ItemName]
+			if stock == nil {
+				stock = &GoodsStock{}
+				o.GoodsList[cfg.ItemName] = stock
+			}
+			for len(stock.Items) < cfg.MaxCount {
+				stock.Items = append(stock.Items, itemDB.CreateUserItem(def.Idx))
+			}
+		}
 	}
 }
 

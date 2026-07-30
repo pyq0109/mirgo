@@ -85,9 +85,6 @@ func main() {
 	safeZonesPath := filepath.Join(*configDir, "maps", "start_points.jsonc")
 	LoadSafeZones(safeZonesPath)
 
-	merchantDir := filepath.Join(*configDir, "merchants")
-	LoadMerchantConfigs(merchantDir)
-
 	monGenPath := filepath.Join(*configDir, "monsters", "mon_gen.jsonc")
 	npcConfigDir := filepath.Join(*configDir, "npcs")
 
@@ -913,10 +910,11 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 }
 
 type savedUserItem struct {
-	MakeIndex int32  `json:"makeIndex"`
-	WIndex    uint16 `json:"wIndex"`
-	Dura      uint16 `json:"dura"`
-	DuraMax   uint16 `json:"duraMax"`
+	MakeIndex int32    `json:"makeIndex"`
+	WIndex    uint16   `json:"wIndex"`
+	Dura      uint16   `json:"dura"`
+	DuraMax   uint16   `json:"duraMax"`
+	BtValue   [14]byte `json:"btValue,omitempty"` // 武器升级附加属性
 }
 
 func savePlayerItems(db *storage.Database, player *PlayObject) {
@@ -927,6 +925,7 @@ func savePlayerItems(db *storage.Database, player *PlayObject) {
 			WIndex:    item.WIndex,
 			Dura:      item.Dura,
 			DuraMax:   item.DuraMax,
+			BtValue:   item.BtValue,
 		})
 	}
 	bagJSON, err := json.Marshal(bag)
@@ -943,6 +942,7 @@ func savePlayerItems(db *storage.Database, player *PlayObject) {
 				WIndex:    player.UseItems[i].WIndex,
 				Dura:      player.UseItems[i].Dura,
 				DuraMax:   player.UseItems[i].DuraMax,
+				BtValue:   player.UseItems[i].BtValue,
 			}
 		}
 	}
@@ -980,6 +980,7 @@ func loadPlayerItems(db *storage.Database, player *PlayObject) {
 					WIndex:    si.WIndex,
 					Dura:      si.Dura,
 					DuraMax:   si.DuraMax,
+					BtValue:   si.BtValue,
 				})
 			}
 		}
@@ -995,6 +996,7 @@ func loadPlayerItems(db *storage.Database, player *PlayObject) {
 						WIndex:    equip[i].WIndex,
 						Dura:      equip[i].Dura,
 						DuraMax:   equip[i].DuraMax,
+						BtValue:   equip[i].BtValue,
 					}
 				}
 			}

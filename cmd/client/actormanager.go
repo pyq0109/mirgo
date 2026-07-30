@@ -109,15 +109,16 @@ func NewActorFromMessage(msg protocol.DefaultMessage, body string) *Actor {
 			actor.Hair = int(hair)
 			actor.Sex = int(hair) % 2
 			raceImg := byte(feature & 0xFF)
+			actor.Race = int(raceImg) // 保存种族值，用于点击判断和渲染路径选择
 			if raceImg == 0 {
 				actor.Type = ActorHuman
-			} else if raceImg == 10 || raceImg == 15 {
+			} else if raceImg == protocol.RCNpc || raceImg == protocol.RCPeaceNpc || raceImg == protocol.RCMerchant {
 				actor.Type = ActorNPC
 				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
 			} else {
-			actor.Type = ActorMonster
-			actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
-			actor.MonAction = GetRaceByPM(int(raceImg), actor.Appearance)
+				actor.Type = ActorMonster
+				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
+				actor.MonAction = GetRaceByPM(int(raceImg), actor.Appearance)
 			}
 		}
 	}

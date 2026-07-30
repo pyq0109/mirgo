@@ -1652,6 +1652,11 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 		return
 	}
 
+	// 距离验证：玩家必须在NPC附近才能交互
+	if !p.isNearNpc(npc) {
+		return
+	}
+
 	// 城堡 NPC 权限检查
 	if npc.Castle && !p.canAccessCastleNpc(npc) {
 		resp := protocol.MakeDefaultMsg(protocol.SMMerchantDlgClose, 0, 0, 0, 0)
@@ -1661,7 +1666,7 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 
 	script := npc.GetScript()
 	if script != nil {
-		npc.InitGoodsFromScript(script)
+		npc.InitGoodsFromScript(script, p.ItemDB)
 		p.ScriptGotoCount = 0
 		p.ScriptGoBackLabel = ""
 		p.ScriptCurrLabel = ""

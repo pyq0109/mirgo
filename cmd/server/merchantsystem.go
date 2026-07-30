@@ -2,12 +2,8 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -17,64 +13,6 @@ type MerchantGoods struct {
 	Price    int    `json:"price"`
 }
 
-type MerchantConfig struct {
-	NpcName    string          `json:"npcName"`
-	MapName    string          `json:"mapName"`
-	BuyRate    float64         `json:"buyRate"`
-	SellRate   float64         `json:"sellRate"`
-	RepairRate float64         `json:"repairRate"`
-	Goods      []MerchantGoods `json:"goods"`
-}
-
-var merchantConfigs map[string]*MerchantConfig
-
-func LoadMerchantConfigs(dir string) {
-	merchantConfigs = make(map[string]*MerchantConfig)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		log.Logf(log.LevelWarn, "Merchant", "merchant config directory not found: %v", err)
-		return
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonc") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		lines := strings.Split(string(data), "\n")
-		var clean []string
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "//") {
-				continue
-			}
-			clean = append(clean, line)
-		}
-		var cfg MerchantConfig
-		if json.Unmarshal([]byte(strings.Join(clean, "\n")), &cfg) != nil {
-			continue
-		}
-		if cfg.BuyRate == 0 {
-			cfg.BuyRate = 1.0
-		}
-		if cfg.SellRate == 0 {
-			cfg.SellRate = 0.5
-		}
-		if cfg.RepairRate == 0 {
-			cfg.RepairRate = 0.05
-		}
-		key := strings.ToLower(cfg.NpcName)
-		merchantConfigs[key] = &cfg
-	}
-	log.Logf(log.LevelInfo, "Merchant", "loaded %d merchant configs", len(merchantConfigs))
-}
-
-func getMerchantConfig(npcName string) *MerchantConfig {
-	return merchantConfigs[strings.ToLower(npcName)]
-}
-
 // HandleMerchantDlgSelect 处理点击 NPC 对话链接（Delphi TMerchant.UserSelect, ObjNpc.pas:1419-1607）。
 func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.TCPServer) {
 	if p.envir == nil {
@@ -82,6 +20,14 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 	}
 	npc, ok := p.envir.getNpcByID(int32(msg.Param1))
 	if !ok {
+		return
+	}
+
+	// 距离验证：玩家可能已经走开
+	if !p.isNearNpc(npc) {
+		p.CurrentNpc = nil
+		resp := protocol.MakeDefaultMsg(protocol.SMMerchantDlgClose, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, "")
 		return
 	}
 
@@ -177,8 +123,8 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 		server.Send(p.Session.ID, resp, "")
 	case "@makedrug":
 		if npc.CanMakeDrug {
-			// 发送制药列表（简化：发送通用商品列表）
-			p.sendGoodsListFromDB(server, npc)
+			// 发送制药列表（使用专用消息ID 712）
+			p.sendMakeDrugList(server, npc)
 		}
 	case "@upgradenow":
 		if npc.CanUpgrade {
@@ -263,24 +209,65 @@ func (p *PlayObject) sendGoodsListFromDB(server *netserver.TCPServer, npc *NpcOb
 			break
 		}
 	}
-	buf := make([]byte, 0, 2+len(goods)*4)
+	buf := make([]byte, 0, 2+len(goods)*6)
 	count := make([]byte, 2)
 	binary.LittleEndian.PutUint16(count, uint16(len(goods)))
 	buf = append(buf, count...)
 	for _, g := range goods {
-		entry := make([]byte, 4)
+		entry := make([]byte, 6)
 		def := p.ItemDB.GetByName(g.ItemName)
 		if def != nil {
 			binary.LittleEndian.PutUint16(entry[0:2], uint16(def.Idx))
 		}
 		binary.LittleEndian.PutUint16(entry[2:4], uint16(g.Price))
+		binary.LittleEndian.PutUint16(entry[4:6], 9999) // DB回退路径使用无限库存
 		buf = append(buf, entry...)
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(len(goods)), 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
 }
 
+// sendMakeDrugList 发送制药配方列表（消息ID 712）
+func (p *PlayObject) sendMakeDrugList(server *netserver.TCPServer, npc *NpcObject) {
+	if p.ItemDB == nil {
+		return
+	}
+	// 简化实现：发送可制作的药品列表（StdMode 0-3 为药水类）
+	var goods []MerchantGoods
+	for i := range p.ItemDB.Items {
+		item := &p.ItemDB.Items[i]
+		if item.StdMode <= 3 && item.Price > 0 {
+			goods = append(goods, MerchantGoods{ItemName: item.Name, Price: int(item.Price)})
+		}
+		if len(goods) >= 50 {
+			break
+		}
+	}
+	buf := make([]byte, 0, 2+len(goods)*6)
+	count := make([]byte, 2)
+	binary.LittleEndian.PutUint16(count, uint16(len(goods)))
+	buf = append(buf, count...)
+	for _, g := range goods {
+		entry := make([]byte, 6)
+		def := p.ItemDB.GetByName(g.ItemName)
+		if def != nil {
+			binary.LittleEndian.PutUint16(entry[0:2], uint16(def.Idx))
+		}
+		binary.LittleEndian.PutUint16(entry[2:4], uint16(g.Price))
+		binary.LittleEndian.PutUint16(entry[4:6], 9999) // 无限库存
+		buf = append(buf, entry...)
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMSendUserMakeDrugItemList, npc.ID, uint16(len(goods)), 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+}
+
 func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer) {
+	// 距离验证：确保玩家仍在NPC附近
+	if p.CurrentNpc != nil && !p.isNearNpc(p.CurrentNpc) {
+		p.sendBuyFail(server)
+		return
+	}
+
 	itemIdx := int(msg.Param1)
 	if p.ItemDB == nil {
 		p.sendBuyFail(server)
@@ -359,6 +346,12 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {
+	// 距离验证：确保玩家仍在NPC附近
+	if p.CurrentNpc != nil && !p.isNearNpc(p.CurrentNpc) {
+		p.sendSellFail(server)
+		return
+	}
+
 	// Param1 = MakeIndex（实例 ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
@@ -448,6 +441,12 @@ func (p *PlayObject) HandleQuerySellPrice(msg SendMessage, server *netserver.TCP
 }
 
 func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServer) {
+	// 距离验证：确保玩家仍在NPC附近
+	if p.CurrentNpc != nil && !p.isNearNpc(p.CurrentNpc) {
+		p.sendRepairFail(server)
+		return
+	}
+
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
 		p.sendRepairFail(server)

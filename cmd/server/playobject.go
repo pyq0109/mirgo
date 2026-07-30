@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"math/rand"
-	"strconv"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
@@ -1887,6 +1886,17 @@ func (p *PlayObject) recallSlaves(server *netserver.TCPServer) {
 			count++
 		}
 	}
-	p.SlaveIDs = nil
-	p.sysMsg(server, "召回了 "+strconv.Itoa(count)+" 个宠物")
+	if count > 0 {
+		p.sysMsg(server, "宠物已召回")
+	}
+}
+
+// isNearNpc 检查玩家是否在NPC附近（3格范围内）且在同一地图
+func (p *PlayObject) isNearNpc(npc *NpcObject) bool {
+	if npc == nil || p.MapName != npc.MapName {
+		return false
+	}
+	dx := p.CurrX - npc.CurrX
+	dy := p.CurrY - npc.CurrY
+	return dx >= -3 && dx <= 3 && dy >= -3 && dy <= 3
 }

@@ -92,6 +92,17 @@ func (d *Database) initialize() error {
 			war_state INTEGER NOT NULL DEFAULT 0,
 			tax_rate INTEGER NOT NULL DEFAULT 5
 		)`,
+		`CREATE TABLE IF NOT EXISTS npc_upgrades (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			npc_id INTEGER NOT NULL,
+			player_name TEXT NOT NULL,
+			item_data BLOB NOT NULL,
+			bt_dc INTEGER NOT NULL DEFAULT 0,
+			bt_sc INTEGER NOT NULL DEFAULT 0,
+			bt_mc INTEGER NOT NULL DEFAULT 0,
+			bt_dura INTEGER NOT NULL DEFAULT 0,
+			submitted_at INTEGER NOT NULL DEFAULT 0
+		)`,
 	}
 
 	for _, q := range queries {
@@ -411,4 +422,54 @@ func (d *Database) LoadCastle() (CastleRecord, error) {
 		return CastleRecord{}, nil
 	}
 	return r, err
+}
+
+// UpgradeRecord 是NPC武器升级队列的持久化记录。
+type UpgradeRecord struct {
+	ID          int64
+	NpcID       int32
+	PlayerName  string
+	ItemData    []byte // JSON序列化的savedUserItem
+	BtDc        byte
+	BtSc        byte
+	BtMc        byte
+	BtDura      byte
+	SubmittedAt int64
+}
+
+// SaveNpcUpgrade 保存一条武器升级记录，返回数据库记录ID。
+func (d *Database) SaveNpcUpgrade(npcID int32, playerName string, itemData []byte, btDc, btSc, btMc, btDura byte, submittedAt int64) (int64, error) {
+	res, err := d.db.Exec(
+		`INSERT INTO npc_upgrades (npc_id, player_name, item_data, bt_dc, bt_sc, bt_mc, bt_dura, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		npcID, playerName, itemData, btDc, btSc, btMc, btDura, submittedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// DeleteNpcUpgrade 删除一条武器升级记录。
+func (d *Database) DeleteNpcUpgrade(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM npc_upgrades WHERE id = ?`, id)
+	return err
+}
+
+// LoadAllNpcUpgrades 加载所有武器升级记录，按NPC ID分组。
+func (d *Database) LoadAllNpcUpgrades() (map[int32][]UpgradeRecord, error) {
+	rows, err := d.db.Query(`SELECT id, npc_id, player_name, item_data, bt_dc, bt_sc, bt_mc, bt_dura, submitted_at FROM npc_upgrades`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int32][]UpgradeRecord)
+	for rows.Next() {
+		var r UpgradeRecord
+		if err := rows.Scan(&r.ID, &r.NpcID, &r.PlayerName, &r.ItemData, &r.BtDc, &r.BtSc, &r.BtMc, &r.BtDura, &r.SubmittedAt); err != nil {
+			return nil, err
+		}
+		result[r.NpcID] = append(result[r.NpcID], r)
+	}
+	return result, rows.Err()
 }
