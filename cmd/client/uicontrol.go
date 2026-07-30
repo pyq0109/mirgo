@@ -249,3 +249,11 @@ func (c *UIControl) Show() {
 func (c *UIControl) Hide() {
 	c.Visible = false
 }
+
+// DebugPath 返回从根到本控件的名称路径 (如 "DBackground>DItemBag>DItemGrid")。
+func (c *UIControl) DebugPath() string {
+	if c.Parent == nil {
+		return c.Name
+	}
+	return c.Parent.DebugPath() + ">" + c.Name
+}

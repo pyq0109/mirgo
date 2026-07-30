@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/log"
@@ -21,6 +22,18 @@ type UIManager struct {
 	Modal   *UIControl
 	Capture *UIControl
 	Focused *UIControl
+
+	ShowBounds bool // 调试: 绘制所有可见控件的包围盒
+}
+
+// debugUIEvents 开关: 为 true 时 UI 输入事件会输出到全局控制台,
+// 用于排查 "交互失效" (点击没反应、事件被谁吃掉等问题)。
+var debugUIEvents bool
+
+func uiEventf(format string, args ...interface{}) {
+	if debugUIEvents && gDebug != nil {
+		gDebug.Printf(format, args...)
+	}
 }
 
 func NewUIManager(gl *engine.GLState, resources *engine.ResourceManager, text *engine.TextRenderer) *UIManager {
@@ -87,7 +100,8 @@ func (m *UIManager) CloseModal(c *UIControl) {
 
 // RouteMouseDown 在 UI 消费了事件时返回 true (游戏世界必须忽略该事件
 // — 对应 ClMain.pas 的 `if g_DWinMan.MouseDown then exit`).
-func (m *UIManager) RouteMouseDown(absX, absY int, button int) bool {
+func (m *UIManager) RouteMouseDown(absX, absY int, button int) (consumed bool) {
+	defer func() { uiEventf("[down] (%d,%d) btn=%d consumed=%v", absX, absY, button, consumed) }()
 	if m.Modal != nil && m.Modal.Visible {
 		log.Logf(log.LevelDebug, "UI", "mouse-down routed -> modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
 		return m.dispatchMouseDown(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
@@ -99,7 +113,8 @@ func (m *UIManager) RouteMouseDown(absX, absY int, button int) bool {
 	return m.dispatchMouseDown(m.Root, button, absX-m.Root.Left, absY-m.Root.Top)
 }
 
-func (m *UIManager) RouteMouseUp(absX, absY int, button int) bool {
+func (m *UIManager) RouteMouseUp(absX, absY int, button int) (consumed bool) {
+	defer func() { uiEventf("[up] (%d,%d) btn=%d consumed=%v", absX, absY, button, consumed) }()
 	if m.Modal != nil && m.Modal.Visible {
 		log.Logf(log.LevelDebug, "UI", "mouse-up routed -> modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
 		return m.dispatchMouseUp(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
@@ -264,6 +279,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 					m.ReleaseCapture()
 					if !c.Background && c.InRange(x, y) {
 						log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+				uiEventf("[click] %s (%s)", c.DebugPath(), c.Kind)
 						if c.OnMouseUp != nil {
 							c.OnMouseUp(c, button, x, y)
 						}
@@ -295,6 +311,7 @@ func (m *UIManager) dispatchMouseUp(c *UIControl, button, x, y int) bool {
 			// 控件 (如 DStateWin 魔法页命中检测) 在此收到它.
 			if c.OnClick != nil {
 				log.Logf(log.LevelDebug, "UI", "click %s(%s) pos=(%d,%d)", c.Name, c.Kind, x, y)
+				uiEventf("[click] %s (%s)", c.DebugPath(), c.Kind)
 				if c.ClickSound >= 0 {
 					gSound.PlaySound(c.ClickSound)
 				}
@@ -520,4 +537,208 @@ func (m *UIManager) BlitImage(f *wil.File, idx, x, y int, proj [16]float32) bool
 	}
 	m.gl.DrawQuad(tex, float32(x), float32(y), float32(img.Width), float32(img.Height), proj)
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// 调试检查 (debugconsole "ui" 命令使用)
+// ---------------------------------------------------------------------------
+
+func debugCtlDesc(c *UIControl) string {
+	if c == nil {
+		return "none"
+	}
+	w, h := c.effectiveSize()
+	return fmt.Sprintf("%s (%s) [%d,%d %dx%d]", c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h)
+}
+
+// DebugTree 返回缩进的控件树文本, maxDepth 限制展开深度。
+func (m *UIManager) DebugTree(maxDepth int) string {
+	var sb strings.Builder
+	m.debugTreeWalk(&sb, m.Root, 0, maxDepth)
+	if m.Modal != nil {
+		sb.WriteString("(modal)\n")
+		m.debugTreeWalk(&sb, m.Modal, 0, maxDepth)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m *UIManager) debugTreeWalk(sb *strings.Builder, c *UIControl, depth, maxDepth int) {
+	if depth > maxDepth {
+		return
+	}
+	w, h := c.effectiveSize()
+	vis := "vis"
+	if !c.Visible {
+		vis = "HID"
+	}
+	fmt.Fprintf(sb, "%s%s (%s) [%d,%d %dx%d] %s",
+		strings.Repeat("  ", depth), c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, vis)
+	if len(c.Children) > 0 {
+		fmt.Fprintf(sb, " %dch", len(c.Children))
+	}
+	sb.WriteString("\n")
+	for _, ch := range c.Children {
+		m.debugTreeWalk(sb, ch, depth+1, maxDepth)
+	}
+}
+
+// DebugHitTest 返回绝对坐标 (x,y) 处的命中链 (自底向上) 及路由状态,
+// 用于排查 "点不中/点错控件" 的交互问题。
+func (m *UIManager) DebugHitTest(x, y int) string {
+	var hits []*UIControl
+	m.debugCollectHits(m.Root, x-m.Root.Left, y-m.Root.Top, &hits)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "(%d,%d) hit chain (bottom->top):\n", x, y)
+	if len(hits) == 0 {
+		sb.WriteString("  (none)\n")
+	}
+	for i, c := range hits {
+		fmt.Fprintf(&sb, "  %d. %s (%s)\n", i+1, c.Name, c.Kind)
+	}
+	if n := len(hits); n > 0 {
+		fmt.Fprintf(&sb, "  -> topmost: %s\n", hits[n-1].Name)
+	}
+	fmt.Fprintf(&sb, "modal=%s capture=%s focus=%s",
+		debugCtlName(m.Modal), debugCtlName(m.Capture), debugCtlName(m.Focused))
+	return sb.String()
+}
+
+func debugCtlName(c *UIControl) string {
+	if c == nil {
+		return "none"
+	}
+	return c.Name
+}
+
+// debugCollectHits 以树序收集所有 InRange 命中 (x,y 处于 c 的父空间)。
+func (m *UIManager) debugCollectHits(c *UIControl, x, y int, hits *[]*UIControl) {
+	if !c.Visible {
+		return
+	}
+	if c.InRange(x, y) {
+		*hits = append(*hits, c)
+	}
+	if c.Kind != KindGrid {
+		for _, ch := range c.Children {
+			m.debugCollectHits(ch, x-c.Left, y-c.Top, hits)
+		}
+	}
+}
+
+// DebugFocus 返回焦点/捕获/模态三个路由状态。
+func (m *UIManager) DebugFocus() string {
+	return fmt.Sprintf("focus: %s\ncapture: %s\nmodal: %s",
+		debugCtlDesc(m.Focused), debugCtlDesc(m.Capture), debugCtlDesc(m.Modal))
+}
+
+// DebugFind 按名称子串 (不区分大小写) 查找控件并返回详细信息。
+func (m *UIManager) DebugFind(substr string) string {
+	lower := strings.ToLower(substr)
+	var found []*UIControl
+	m.debugFindWalk(m.Root, lower, &found)
+	if m.Modal != nil {
+		m.debugFindWalk(m.Modal, lower, &found)
+	}
+	if len(found) == 0 {
+		return fmt.Sprintf("no control matching %q", substr)
+	}
+	var sb strings.Builder
+	for _, c := range found {
+		w, h := c.effectiveSize()
+		vis := "vis"
+		if !c.Visible {
+			vis = "HID"
+		}
+		fmt.Fprintf(&sb, "%s (%s) [%d,%d %dx%d] %s\n",
+			c.DebugPath(), c.Kind, c.AbsX(), c.AbsY(), w, h, vis)
+		fmt.Fprintf(&sb, "  rel=(%d,%d)%s\n", c.Left, c.Top, debugCallbacks(c))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (m *UIManager) debugFindWalk(c *UIControl, lower string, found *[]*UIControl) {
+	if strings.Contains(strings.ToLower(c.Name), lower) {
+		*found = append(*found, c)
+	}
+	for _, ch := range c.Children {
+		m.debugFindWalk(ch, lower, found)
+	}
+}
+
+func debugCallbacks(c *UIControl) string {
+	var names []string
+	if c.OnDirectPaint != nil {
+		names = append(names, "paint")
+	}
+	if c.OnClick != nil {
+		names = append(names, "click")
+	}
+	if c.OnDblClick != nil {
+		names = append(names, "dblclick")
+	}
+	if c.OnMouseDown != nil {
+		names = append(names, "down")
+	}
+	if c.OnMouseUp != nil {
+		names = append(names, "up")
+	}
+	if c.OnMouseMove != nil {
+		names = append(names, "move")
+	}
+	if c.OnChar != nil {
+		names = append(names, "char")
+	}
+	if c.OnKeyDown != nil {
+		names = append(names, "key")
+	}
+	if c.OnGridPaint != nil {
+		names = append(names, "gridpaint")
+	}
+	if c.OnGridSelect != nil {
+		names = append(names, "gridselect")
+	}
+	if c.OnInRealArea != nil {
+		names = append(names, "inrealarea")
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return " cb=" + strings.Join(names, ",")
+}
+
+// RenderDebugBounds 绘制所有可见控件的包围盒 (UI 视口), 按类型着色:
+// button=绿 window=蓝 grid=黄 control=灰。用于直观排查布局错位。
+func (m *UIManager) RenderDebugBounds(proj [16]float32) {
+	m.renderBoundsWalk(m.Root, proj)
+	if m.Modal != nil {
+		m.renderBoundsWalk(m.Modal, proj)
+	}
+}
+
+func (m *UIManager) renderBoundsWalk(c *UIControl, proj [16]float32) {
+	if c.Visible && !c.Background {
+		w, h := c.effectiveSize()
+		if w > 0 && h > 0 {
+			var r, g, b float32
+			switch c.Kind {
+			case KindButton:
+				r, g, b = 0, 1, 0
+			case KindWindow:
+				r, g, b = 0.3, 0.6, 1
+			case KindGrid:
+				r, g, b = 1, 0.9, 0
+			default:
+				r, g, b = 0.7, 0.7, 0.7
+			}
+			x, y := float32(c.AbsX()), float32(c.AbsY())
+			drawWireRect(m.gl, x, y, float32(w), float32(h), r, g, b, 0.9, proj)
+			if m.text != nil {
+				m.text.DrawText(c.Name, x+1, y+1, r, g, b, 1, proj)
+			}
+		}
+	}
+	for _, ch := range c.Children {
+		m.renderBoundsWalk(ch, proj)
+	}
 }

@@ -143,7 +143,20 @@ func main() {
 	}()
 
 	sceneMgr := engine.NewSceneManager()
-	playScene := NewPlayScene(glState, resources, *mapDir)
+
+	// 全局调试控制台 (跨场景可用)。使用 13px 小字体, 加载失败时退回 16px。
+	var consoleText *engine.TextRenderer
+	if textRenderer != nil {
+		if small, err := textRenderer.WithSize(13); err == nil {
+			consoleText = small
+		} else {
+			consoleText = textRenderer
+		}
+	}
+	dbgConsole := NewDebugConsole(glState, consoleText, sceneMgr)
+	gDebug = dbgConsole
+
+	playScene := NewPlayScene(glState, resources, *mapDir, dbgConsole)
 	playScene.SetText(textRenderer)
 	loginScene := NewLoginScene(glState, resources, textRenderer)
 	selectChrScene := NewSelectChrScene(glState, resources, textRenderer)
@@ -276,6 +289,16 @@ func main() {
 	glfwWindow.SetKeyCallback(func(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 		log.Logf(log.LevelTrace, "Key", "key=%d action=%d mods=%d scene=%s",
 			int(key), int(action), int(mods), sceneMgr.CurrentType())
+		// 反引号 (`) 切换调试控制台, 跨场景生效。
+		if key == glfw.KeyGraveAccent && action == glfw.Press {
+			dbgConsole.Toggle()
+			return
+		}
+		// 控制台打开时所有按键交给控制台, 不再转发给场景。
+		if dbgConsole.Visible {
+			dbgConsole.OnKey(int(key), int(action))
+			return
+		}
 		// Esc 仅在游戏前场景退出；原版游戏中没有全局 Esc 退出，
 		// 游戏内通过 DBotExit 按钮退出（ClMain:1575-1612）。
 		if action == glfw.Press && key == glfw.KeyEscape && sceneMgr.CurrentType() != engine.ScenePlayGame {
@@ -290,6 +313,10 @@ func main() {
 
 	glfwWindow.SetCharCallback(func(w *glfw.Window, char rune) {
 		log.Logf(log.LevelTrace, "Key", "char=%q scene=%s", char, sceneMgr.CurrentType())
+		if dbgConsole.Visible {
+			dbgConsole.OnChar(char)
+			return
+		}
 		sceneMgr.OnChar(char)
 	})
 
@@ -299,6 +326,13 @@ func main() {
 			x, y := w.GetCursorPos()
 			log.Logf(log.LevelTrace, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), int(mods), x, y, sceneMgr.CurrentType())
+			dbgConsole.SetMouse(x, y)
+			// 非游戏场景的线框点击锁定 (屏幕空间)。游戏场景由
+			// PlayScene 自行在世界空间处理。
+			if button == glfw.MouseButtonLeft && dbgConsole.WireMode > 0 &&
+				sceneMgr.CurrentType() != engine.ScenePlayGame && dbgConsole.ClickInspectScreen() {
+				return
+			}
 			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
 			x, y := w.GetCursorPos()
@@ -309,6 +343,7 @@ func main() {
 	})
 
 	glfwWindow.SetCursorPosCallback(func(w *glfw.Window, xpos, ypos float64) {
+		dbgConsole.SetMouse(xpos, ypos)
 		sceneMgr.OnMouseMove(xpos, ypos)
 	})
 
@@ -331,10 +366,31 @@ func main() {
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 		glState.SetViewport(0, 0, int32(w), int32(h))
 		proj := engine.OrthoProj(800, 600)
+
+		// 统一线框录制: 对所有场景 blanket 录制 (分类 0)。PlayScene 在
+		// 内部做分段录制并置 wireHandled=true, 从而覆盖这里的设置。
+		dbgConsole.wireHandled = false
+		if dbgConsole.WireMode > 0 {
+			glState.WireBounds = glState.WireBounds[:0]
+			glState.WireRecording = true
+			glState.WireRecord = true
+			glState.WireCategory = 0
+		}
 		sceneMgr.Render(glState, proj)
+		if dbgConsole.WireMode > 0 {
+			glState.WireRecording = false
+		}
+
 		if a := globalFade.alpha(); a > 0 {
 			glState.DrawQuadColor(0, 0, 800, 600, 0, 0, 0, a, proj)
 		}
+
+		// 调试控制台叠加层 (场景之后渲染, 重置为完整 800×600 视口)。
+		glState.SetViewport(0, 0, int32(w), int32(h))
+		if dbgConsole.WireMode > 0 && !dbgConsole.wireHandled {
+			dbgConsole.RenderWireOverlay(proj)
+		}
+		dbgConsole.Render(proj)
 	})
 
 	if handler != nil {

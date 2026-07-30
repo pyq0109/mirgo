@@ -228,11 +228,16 @@ type PlayScene struct {
 	effects *EffectManager
 	events  *EventManager
 
-	debugConsole DebugConsole
-	textSmall    *engine.TextRenderer
+	dbg *DebugConsole // 全局调试控制台 (由 main.go 注入)
+
+	// PlayScene 专有的调试开关 (由控制台命令切换, 经 StatusExtra 汇报)
+	ShowGrid     bool
+	ShowLabel    bool
+	DisableLight bool
+	DisableHPBar bool
 }
 
-func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string) *PlayScene {
+func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string, dbg *DebugConsole) *PlayScene {
 	s := &PlayScene{
 		gl:             gl,
 		resources:      resources,
@@ -249,6 +254,7 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		effects:        NewEffectManager(),
 		events:         NewEventManager(),
 		ui:             NewUIManager(gl, resources, nil),
+		dbg:            dbg,
 	}
 	// 手持物品时点击空白处将物品丢到地面
 	// （FState.pas:1865-1886 DBackgroundBackgroundClick）。
@@ -258,7 +264,6 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 			c.WantReturn = true
 		}
 	}
-	s.debugConsole.scene = s
 	s.buildHUD()
 	s.buildBag()
 	s.buildState()
@@ -473,9 +478,6 @@ func (s *PlayScene) RemoveGroundItem(id int32) {
 func (s *PlayScene) SetText(t *engine.TextRenderer) {
 	s.text = t
 	s.ui.SetText(t)
-	if small, err := t.WithSize(13); err == nil {
-		s.textSmall = small
-	}
 }
 
 func (s *PlayScene) LoadMap(mapName string) error {
@@ -511,10 +513,12 @@ func (s *PlayScene) LoadMap(mapName string) error {
 }
 
 func (s *PlayScene) Open() {
+	s.registerDebugCmds()
 	log.Logf(log.LevelInfo, "PlayScene", "opened")
 }
 
 func (s *PlayScene) Close() {
+	s.unregisterDebugCmds()
 	gSound.SilenceSound()
 	s.State.Reset()
 	log.Logf(log.LevelInfo, "PlayScene", "closed")
@@ -735,7 +739,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 	s.renderFrame++
 	debugRenderFrame = s.renderFrame
-	dbg := s.renderFrame <= 2
+	verbose := s.renderFrame <= 2
 
 	m := s.mapData
 	cam := s.cam
@@ -743,7 +747,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-	if dbg {
+	if verbose {
 		var srcRGB, dstRGB, srcA, dstA int32
 		gl.GetIntegerv(gl.BLEND_SRC_RGB, &srcRGB)
 		gl.GetIntegerv(gl.BLEND_DST_RGB, &dstRGB)
@@ -759,12 +763,12 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	fbW, fbH := s.gl.ViewW, s.gl.ViewH
 	worldH := int32(float64(MapSurfaceH) * float64(fbH) / float64(ScreenHeight))
 	s.gl.SetViewport(0, fbH-worldH, fbW, worldH)
-	if s.debugConsole.WireMode > 0 {
+	if s.dbg.WireMode > 0 {
 		s.gl.WireBounds = s.gl.WireBounds[:0]
 		s.gl.WireRecording = true
 		s.gl.WireRecord = false
 	}
-	if dbg {
+	if verbose {
 		log.Logf(log.LevelInfo, "Render", "frame=%d fb=%dx%d worldH=%d viewport=(0,%d,%d,%d) blend=SRC_ALPHA,ONE_MINUS_SRC_ALPHA",
 			s.renderFrame, fbW, fbH, worldH, fbH-worldH, fbW, worldH)
 	}
@@ -839,7 +843,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	if s.debugConsole.WireMode > 0 {
+	if s.dbg.WireMode > 0 {
 		s.gl.WireRecord = true
 	}
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
@@ -865,7 +869,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
 
-	if s.lighting != nil && !s.deathGray && !s.debugConsole.DisableLight {
+	if s.lighting != nil && !s.deathGray && !s.DisableLight {
 		darkness := s.calcDarkness()
 		if darkness > 0.01 {
 			lights := s.collectLightSources()
@@ -873,22 +877,23 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	if s.debugConsole.WireMode > 0 {
+	if s.dbg.WireMode > 0 {
 		s.gl.WireRecording = false
-		s.debugConsole.UpdateHover(s)
+		s.updateHover()
 		s.renderWireframes(proj)
 		s.renderHoverInfo(proj)
+		s.dbg.wireHandled = true
 	}
-	if s.debugConsole.ShowGrid {
+	if s.ShowGrid {
 		s.renderDebugGrid(proj)
 	}
-	if s.debugConsole.ShowLabel {
+	if s.ShowLabel {
 		s.renderDebugInfo(proj)
 	}
 
 	// UI 层使用完整的 800×600 逻辑视口。
 	s.gl.SetViewport(0, 0, fbW, fbH)
-	if dbg {
+	if verbose {
 		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, ScreenWidth, ScreenHeight)
 	}
 	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
@@ -916,18 +921,8 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 	s.RenderUI(uiProj)
-	if s.debugConsole.Visible {
-		txt := s.textSmall
-		if txt == nil {
-			txt = s.text
-		}
-		s.debugConsole.Render(s.gl, txt, uiProj)
-	} else if s.debugConsole.WireMode > 0 || s.debugConsole.ShowGrid || s.debugConsole.ShowLabel || s.debugConsole.ShowHUD || s.debugConsole.DisableLight || s.debugConsole.DisableHPBar {
-		txt := s.textSmall
-		if txt == nil {
-			txt = s.text
-		}
-		s.debugConsole.RenderStatusBar(s, s.gl, txt, uiProj)
+	if s.ui.ShowBounds {
+		s.ui.RenderDebugBounds(uiProj)
 	}
 }
 
@@ -1092,7 +1087,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
 	// 注意：十周年版 Prguse2.wil 的 index 0/1 不是 HP 条图像（80x51 散布暗像素），
 	// 因此直接使用彩色矩形绘制，不使用 Prguse2 纹理。
-	if !a.Death && !s.debugConsole.DisableHPBar {
+	if !a.Death && !s.DisableHPBar {
 		hpBarY := sayY - 10
 		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
 		ratio := float32(1.0)
@@ -1390,10 +1385,6 @@ func (s *PlayScene) collectLightSources() []LightSource {
 }
 
 func (s *PlayScene) OnChar(char rune) {
-	if s.debugConsole.Visible {
-		s.debugConsole.OnChar(char)
-		return
-	}
 	if s.ui.RouteChar(char) {
 		return
 	}
@@ -1413,17 +1404,6 @@ func (s *PlayScene) OnChar(char rune) {
 }
 
 func (s *PlayScene) OnKey(key int, action int) {
-	if key == 96 {
-		if action == 1 {
-			s.debugConsole.Visible = !s.debugConsole.Visible
-			s.debugConsole.ScrollOff = 0
-		}
-		return
-	}
-	if s.debugConsole.Visible {
-		s.debugConsole.OnKey(key, action)
-		return
-	}
 	// UI（模态框 / 聚焦的编辑控件）优先接收按键。
 	if s.ui.RouteKeyDown(key) {
 		return
@@ -1820,8 +1800,8 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		log.Logf(log.LevelDebug, "PlayScene", "mouse event consumed by UI pos=(%d,%d)", ix, iy)
 		return
 	}
-	if button == 0 && s.debugConsole.WireMode > 0 {
-		if s.debugConsole.ClickInspect(s, x, y) {
+	if button == 0 && s.dbg.WireMode > 0 {
+		if s.clickInspect(x, y) {
 			return
 		}
 	}
