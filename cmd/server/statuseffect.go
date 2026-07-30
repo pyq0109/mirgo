@@ -1,6 +1,8 @@
 package main
 
 import (
+	"math/rand"
+
 	"github.com/pyq0109/mirgo/internal/netserver"
 )
 
@@ -20,7 +22,12 @@ func (p *PlayObject) ProcessStatusEffects(server *netserver.TCPServer, now int64
 	for i := 0; i < 12; i++ {
 		if p.StatusTimeArr[i] > 0 {
 			p.StatusTimeArr[i]--
-			if p.StatusTimeArr[i] == 0 {
+			// Delphi: PoisonRecover 加速恢复
+			if p.PoisonRecover > 0 && rand.Intn(p.PoisonRecover+1) == 0 {
+				p.StatusTimeArr[i]--
+			}
+			if p.StatusTimeArr[i] <= 0 {
+				p.StatusTimeArr[i] = 0
 				if i == STATE_TRANSPARENT {
 					p.Hidden = false
 				}
@@ -28,21 +35,44 @@ func (p *PlayObject) ProcessStatusEffects(server *netserver.TCPServer, now int64
 		}
 	}
 
+	// Delphi: 绿毒 DamageHealth(m_btGreenPoisoningPoint + 1) (ObjBase.pas:4261)
 	if p.StatusTimeArr[POISON_DECHEALTH] > 0 {
-		hp := int(p.WAbil.HP)
-		hp -= 2
+		dmg := p.GreenPoisonDamage
+		if dmg < 1 {
+			dmg = 2
+		}
+		hp := int(p.WAbil.HP) - dmg
 		if hp <= 0 {
-			hp = 1
+			hp = 0
+			p.WAbil.HP = 0
+			if !p.Death {
+				p.Death = true
+				p.deathTick = now
+				if p.envir != nil {
+					p.envir.broadcastDeathMsg(p.BaseObject, p.ID, p.CurrX, p.CurrY, p.Dir, true)
+				}
+			}
+			return
 		}
 		p.WAbil.HP = uint16(hp)
+		p.sendHealthSpell(server)
 	}
 }
 
-func (p *PlayObject) MakePoison(effectIdx int, duration int16) {
+// MakePoison — Delphi MakePosion (ObjBase.pas:22730)
+// power: 绿毒每次 tick 伤害（m_btGreenPoisoningPoint），其他效果传 0。
+func (p *PlayObject) MakePoison(effectIdx int, duration int16, power int) {
 	if effectIdx < 0 || effectIdx >= 12 {
 		return
 	}
+	// Delphi: 已有更长时间则不覆盖
+	if p.StatusTimeArr[effectIdx] > duration {
+		return
+	}
 	p.StatusTimeArr[effectIdx] = duration
+	if effectIdx == POISON_DECHEALTH && power > 0 {
+		p.GreenPoisonDamage = power
+	}
 	if effectIdx == STATE_TRANSPARENT {
 		p.Hidden = true
 	}

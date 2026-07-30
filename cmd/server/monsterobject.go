@@ -2,7 +2,6 @@ package main
 
 import (
 	"math/rand"
-	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -91,6 +90,9 @@ type MonsterObject struct {
 	pendingAxeDmg    int
 	pendingAxeTarget int32
 	pendingAxeTick   int64
+
+	// Delphi m_btGreenPoisoningPoint
+	GreenPoisonDamage int
 
 	// 吸血配置（Delphi btGetBackHP）
 	leechDivisor int
@@ -283,10 +285,24 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			o.StatusTimeArr[i]--
 		}
 	}
+	// Delphi: 绿毒可致死 (ObjBase.pas:4261)
 	if o.StatusTimeArr[POISON_DECHEALTH] > 0 {
-		hp := int(o.WAbil.HP) - 2
-		if hp < 1 {
-			hp = 1
+		dmg := o.GreenPoisonDamage
+		if dmg < 1 {
+			dmg = 2
+		}
+		hp := int(o.WAbil.HP) - dmg
+		if hp <= 0 {
+			o.WAbil.HP = 0
+			o.Death = true
+			o.DeathTick = now
+			if o.envir != nil {
+				o.envir.broadcastDeathMsg(o.BaseObject, o.ID, o.CurrX, o.CurrY, o.Dir, true)
+			}
+			if userEngine != nil {
+				userEngine.awardExpForMonster(o, server)
+			}
+			return
 		}
 		o.WAbil.HP = uint16(hp)
 	}
@@ -557,10 +573,6 @@ func (o *MonsterObject) calcMonsterDamage(target *BaseObject) int {
 	if hiAC > loAC {
 		armor = loAC + rand.Intn(hiAC-loAC+1)
 	}
-	// Delphi: 红毒（POISON_DAMAGEARMOR）降低防御力
-	if target.StatusTimeArr[POISON_DAMAGEARMOR] > 0 {
-		armor /= 2
-	}
 	damage := attack - armor
 	if damage < 1 {
 		damage = 1
@@ -667,16 +679,40 @@ func (o *MonsterObject) initAITimers(now int64) {
 }
 
 func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, target *PlayObject, damage int, now int64) {
-	// Delphi: 安全区内怪物不能攻击玩家（IsProperTarget 安全区检查）
 	if IsSafeZone(o.envir, target.CurrX, target.CurrY) {
 		return
 	}
 	target.LastHiterID = o.ID
 	target.LastHiterTick = now
-	// Delphi TWhiteSkeleton: 战斗获得经验
+	target.StruckTick = now
 	if o.AIBehavior == AILevelingSkeleton {
 		o.gainPetXP(damage / 10)
 	}
+
+	// Delphi: 魔法盾 1.5x MP 吸收 (ObjBase.pas:2455)
+	if target.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || target.HasMagicShield {
+		mpCost := damage + damage/2
+		mp := int(target.WAbil.MP)
+		if mp >= mpCost {
+			target.WAbil.MP -= uint16(mpCost)
+			damage = 0
+		} else {
+			absorbed := mp * 2 / 3
+			target.WAbil.MP = 0
+			damage -= absorbed
+			target.StatusTimeArr[STATE_BUBBLEDEFENCE] = 0
+		}
+		if damage < 0 {
+			damage = 0
+		}
+		target.sendHealthSpell(server)
+	}
+
+	// Delphi: 红毒增幅 (ObjBase.pas:22472)
+	if target.StatusTimeArr[POISON_DAMAGEARMOR] > 0 {
+		damage = damage + damage/5
+	}
+
 	hp := int(target.WAbil.HP)
 	hp -= damage
 	if hp < 0 {
@@ -689,11 +725,19 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	}
 
 	if hp <= 0 {
+		// Delphi: 复活戒指 (ObjBase.pas:3753-3763)
+		if target.HasRevival {
+			target.HasRevival = false
+			target.WAbil.HP = target.WAbil.MaxHP / 2
+			target.sendHealthSpell(server)
+			return
+		}
 		target.Death = true
-		target.deathTick = time.Now().UnixMilli()
+		target.deathTick = now
 		if o.envir != nil {
 			o.envir.broadcastDeathMsg(target.BaseObject, target.ID, target.CurrX, target.CurrY, target.Dir, true)
 		}
+		target.DropDeathItems(server)
 		log.Logf(log.LevelInfo, "Combat", "%s killed %s", o.Name, target.Name)
 	} else {
 		target.sendHealthSpell(server)

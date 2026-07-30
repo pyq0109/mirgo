@@ -157,3 +157,15 @@ func (e *UserEngine) InvalidateAllNpcScripts() {
 	}
 	log.Logf(log.LevelInfo, "NPC", "all NPC scripts invalidated (%d NPCs)", len(e.Npcs))
 }
+
+// awardExpForMonster — 怪物被毒杀时，将经验奖励给 LastHiterID。
+func (e *UserEngine) awardExpForMonster(mon *MonsterObject, server *netserver.TCPServer) {
+	if mon.LastHiterID == 0 {
+		return
+	}
+	killer := e.GetPlayer(mon.LastHiterID)
+	if killer == nil || killer.Ghost || killer.Death {
+		return
+	}
+	killer.awardExp(server, mon)
+}

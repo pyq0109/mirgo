@@ -44,6 +44,7 @@ type ServerConfig struct {
 		WalkOnly        bool           `json:"walkOnly"`        // 禁止跑步（仅步行模式）
 		HitIntervalTime int64          `json:"hitIntervalTime"` // 攻击最小间隔(ms)，默认 1400
 		ActionInterval  int64          `json:"actionInterval"`  // 全局动作最小间隔(ms)，默认 350
+		StruckTime      int64          `json:"struckTime"`      // 受击硬直(ms)，默认 500
 	} `json:"game"`
 	Commands struct {
 		Names       map[string]string `json:"names"`
@@ -219,6 +220,13 @@ func (c *ServerConfig) GetActionInterval() int64 {
 		return c.Game.ActionInterval
 	}
 	return 350
+}
+
+func (c *ServerConfig) GetStruckTime() int64 {
+	if c.Game.StruckTime > 0 {
+		return c.Game.StruckTime
+	}
+	return 500
 }
 
 // GetServerHostPort 以 host/port 形式返回服务端地址。

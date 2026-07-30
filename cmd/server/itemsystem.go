@@ -580,6 +580,10 @@ func (p *PlayObject) RecalcAbilitys() {
 				continue
 			}
 			item := p.UseItems[i]
+			// Delphi: 耐久为 0 的装备不提供属性 (ObjBase.pas:22478-22516)
+			if item.Dura <= 0 {
+				continue
+			}
 			def := p.ItemDB.GetByIdx(int(item.WIndex))
 			if def == nil {
 				continue
@@ -741,6 +745,45 @@ func (p *PlayObject) RecalcAbilitys() {
 	}
 
 	p.CheckSpecialItemEffects()
+	p.calcSkillCombatStats()
+}
+
+// calcSkillCombatStats — 根据已学技能等级计算 HitPlus/HitDouble。
+// Delphi: m_nHitPlus 来自攻杀剑术 Power; m_nHitDouble 来自烈火/狂风 Power。
+func (p *PlayObject) calcSkillCombatStats() {
+	p.HitPlus = 0
+	p.HitDouble = 0
+
+	if pm := p.findMagic(7); pm != nil && p.MagicDB != nil {
+		if def := p.MagicDB.GetByID(7); def != nil {
+			p.HitPlus = def.Power + pm.Level*(def.MaxPower-def.Power)/3
+		}
+	}
+	if pm := p.findMagic(26); pm != nil && p.MagicDB != nil {
+		if def := p.MagicDB.GetByID(26); def != nil {
+			p.HitDouble = def.Power + pm.Level*(def.MaxPower-def.Power)/3
+		}
+	}
+	if pm := p.findMagic(38); pm != nil && p.MagicDB != nil {
+		if def := p.MagicDB.GetByID(38); def != nil {
+			v := def.Power + pm.Level*(def.MaxPower-def.Power)/3
+			if v > p.HitDouble {
+				p.HitDouble = v
+			}
+		}
+	}
+
+	// 初始化 PowerHit 蓄力计数器
+	if p.findMagic(7) != nil && p.PowerHitCount <= 0 {
+		maxCycle := 7
+		if pm := p.findMagic(7); pm != nil {
+			maxCycle = 7 - pm.Level
+		}
+		if maxCycle < 1 {
+			maxCycle = 1
+		}
+		p.PowerHitCount = rand.Intn(maxCycle) + 1
+	}
 }
 
 func (p *PlayObject) updateAppearance() {

@@ -27,6 +27,12 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 		p.sendMagicFail(server)
 		return
 	}
+	// Delphi: 受击硬直阻止施法 (ObjBase.pas:25234)
+	now := time.Now().UnixMilli()
+	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+		p.sendMagicFail(server)
+		return
+	}
 
 	magID := msg.Param1
 	targetX := msg.Param2
@@ -271,7 +277,7 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 			}
 		}
 	case 31:
-		p.MakePoison(STATE_BUBBLEDEFENCE, 600)
+		p.MakePoison(STATE_BUBBLEDEFENCE, 600, 0)
 	case 8:
 		for dy := -1; dy <= 1; dy++ {
 			for dx := -1; dx <= 1; dx++ {
@@ -387,7 +393,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			target := p.findAttackTarget(tx, ty)
 			if target != nil {
 				if tp := p.envir.getPlayerByBase(target); tp != nil {
-					tp.MakePoison(POISON_DECHEALTH, 100)
+					tp.MakePoison(POISON_DECHEALTH, 100, 4)
 				} else {
 					target.StatusTimeArr[POISON_DECHEALTH] = 100
 				}
@@ -454,12 +460,12 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			p.addSlave(pet.ID)
 		}
 	case 18:
-		p.MakePoison(STATE_TRANSPARENT, 300)
+		p.MakePoison(STATE_TRANSPARENT, 300, 0)
 	case 19:
 		objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, 3)
 		for _, obj := range objs {
 			if other, ok := obj.(*PlayObject); ok && !other.Ghost && !other.Death {
-				other.MakePoison(STATE_TRANSPARENT, 300)
+				other.MakePoison(STATE_TRANSPARENT, 300, 0)
 			}
 		}
 	case 20:
@@ -501,7 +507,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				}
 			case *PlayObject:
 				if !t.Ghost && !t.Death {
-					t.MakePoison(POISON_DECHEALTH, 80)
+					t.MakePoison(POISON_DECHEALTH, 80, 4)
 				}
 			}
 		}
@@ -527,7 +533,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			}
 			if rand.Intn(10) < 3+skillLvl {
 				if tp := p.envir.getPlayerByBase(target); tp != nil {
-					tp.MakePoison(POISON_STONE, 30)
+					tp.MakePoison(POISON_STONE, 30, 0)
 				} else {
 					target.StatusTimeArr[POISON_STONE] = 30
 				}

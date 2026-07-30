@@ -687,7 +687,7 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMWalk, int(msg.Param), 0, 0, "")
 	case protocol.CMRun:
 		player.SendMsg(protocol.CMRun, int(msg.Param), 0, 0, "")
-	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit, protocol.CMTwinHit:
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit, protocol.CMCrsHit, protocol.CMTwinHit:
 		player.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series), "")
 	case protocol.CMSpell:
 		player.SendMsg(protocol.CMSpell, int(msg.Param), int(msg.Tag), int(msg.Series), body)

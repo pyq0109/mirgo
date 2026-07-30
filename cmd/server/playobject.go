@@ -48,6 +48,24 @@ type PlayObject struct {
 	SkillLng   int
 	SkillWid   int
 
+	// Delphi m_nHitPlus / m_nHitDouble (ObjBase.pas:22125-22132)
+	HitPlus   int // PowerHit 平坦加成（攻杀剑术）
+	HitDouble int // FireHit/TwinHit 百分比加成（烈火/狂风）
+
+	// Delphi PowerHit 自动蓄力 (ObjBase.pas:8862-8875)
+	PowerHitCount int
+	PowerHitReady bool
+
+	// Delphi FireHit 激活窗口 (ObjBase.pas:9782, 6427)
+	FireHitActive       bool
+	FireHitActivateTick int64
+
+	// Delphi 受击硬直 (ObjBase.pas:25234)
+	StruckTick int64
+
+	// Delphi m_btGreenPoisoningPoint (ObjBase.pas:22730)
+	GreenPoisonDamage int
+
 	PkPoint         int
 	LastPkDecayTick int64
 	OnHorse         bool
@@ -186,6 +204,11 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 
 	p.Regenerate(server, now)
 
+	// Delphi: FireHit 20s 过期 (ObjBase.pas:6427)
+	if p.FireHitActive && now-p.FireHitActivateTick > 20000 {
+		p.FireHitActive = false
+	}
+
 	// TIMERECALL 到期检查
 	if p.TimeRecall && now >= p.TimeRecallTick {
 		p.TimeRecall = false
@@ -217,7 +240,7 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleWalk(msg, server)
 	case protocol.CMRun:
 		p.HandleRun(msg, server)
-	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit, protocol.CMTwinHit:
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit, protocol.CMPowerHit, protocol.CMLongHit, protocol.CMWideHit, protocol.CMFireHit, protocol.CMCrsHit, protocol.CMTwinHit:
 		p.HandleHit(msg, server)
 	case protocol.CMSpell:
 		p.HandleSpellFull(msg, server)
@@ -375,6 +398,10 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	now := time.Now().UnixMilli()
+	// Delphi: 受击硬直 (ObjBase.pas:25234)
+	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+		return
+	}
 	interval := p.Engine.Config.GetWalkInterval()
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
 		interval *= 2
@@ -417,12 +444,15 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
+	now := time.Now().UnixMilli()
+	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+		return
+	}
 	// F10: 仅步行模式
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
-	now := time.Now().UnixMilli()
 	interval := p.Engine.Config.GetRunInterval()
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
 		interval *= 2
@@ -553,6 +583,8 @@ func hitSkillMagID(ident int) (int, bool) {
 		return 25, true // 半月弯刀
 	case protocol.CMFireHit:
 		return 26, true // 烈火剑法
+	case protocol.CMCrsHit:
+		return 39, true // 十字斩
 	case protocol.CMTwinHit:
 		return 38, true // 狂风斩
 	default:
@@ -562,7 +594,6 @@ func hitSkillMagID(ident int) (int, bool) {
 
 func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	now := time.Now().UnixMilli()
-	// E5: 攻击速度验证（配置驱动）
 	hitInterval := p.Engine.Config.GetHitIntervalTime()
 	if now-p.HitTick < hitInterval {
 		p.OverSpeedCount++
@@ -574,26 +605,35 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		msg.Ident = protocol.CMHit
 	}
 
-	// E3: 攻击时处理武器升级结果
 	p.CheckWeaponUpgradeStatus(server)
-	// 武器破碎后无法攻击
 	if p.UseItems[protocol.UWeapon] == nil && msg.Ident != protocol.CMHit {
 		return
 	}
 
-	switch msg.Ident {
-	case protocol.CMFireHit:
+	// Delphi: FireHit 是激活模型，不是直接攻击 (ObjBase.pas:9782)
+	if msg.Ident == protocol.CMFireHit {
 		if now-p.FireHitTick < 10000 {
 			return
 		}
+		p.FireHitActive = true
+		p.FireHitActivateTick = now
 		p.FireHitTick = now
-	case protocol.CMTwinHit:
+		p.SendSpecialAttackFlags(server)
+		return
+	}
+	// Delphi: TwinHit 同理 (ObjBase.pas:9797)
+	if msg.Ident == protocol.CMTwinHit {
 		if now-p.TwinHitTick < 60000 {
 			return
 		}
 		p.TwinHitTick = now
+		p.SendSpecialAttackFlags(server)
 	}
+
 	p.HitTick = now
+
+	// Delphi: 攻击延迟回血 Dec(m_nHealthTick, 30) (ObjBase.pas:8876-8880)
+	p.lastRegenTick = now
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
@@ -601,124 +641,268 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	}
 	p.Dir = dir
 
-	rmIdent := RM_HIT
-	switch msg.Ident {
-	case protocol.CMHeavyHit:
-		rmIdent = RM_HEAVYHIT
-	case protocol.CMBigHit:
-		rmIdent = RM_BIGHIT
-	case protocol.CMPowerHit:
-		rmIdent = RM_POWERHIT
-	case protocol.CMLongHit:
-		rmIdent = RM_LONGHIT
-	case protocol.CMWideHit:
-		rmIdent = RM_WIDEHIT
-	case protocol.CMFireHit:
-		rmIdent = RM_FIREHIT
-	}
-	p.SendRefMsg(rmIdent, dir, p.CurrX, p.CurrY, "")
-
 	if p.envir == nil {
 		return
 	}
-
 	if IsSafeZone(p.envir, p.CurrX, p.CurrY) {
 		return
 	}
 
-	var multiplier float64
-	switch msg.Ident {
-	case protocol.CMHeavyHit:
-		multiplier = 1.5
-	case protocol.CMBigHit:
-		multiplier = 2.0
-	case protocol.CMPowerHit:
-		multiplier = 1.3
-	case protocol.CMLongHit:
-		multiplier = 1.2
-	case protocol.CMWideHit:
-		multiplier = 1.1
-	case protocol.CMFireHit:
-		multiplier = 2.5
-		if p.SkillPower > 0 {
-			multiplier += float64(p.SkillPower) / 100.0
-			p.SkillPower = 0
+	// Delphi: PowerHit 自动蓄力 (ObjBase.pas:8862-8875)
+	p.advancePowerHitCharge(msg.Ident, server)
+
+	// Delphi: FireHit 激活窗口内自动触发 (ObjBase.pas:6427)
+	fireHitTriggered := false
+	if p.FireHitActive && now-p.FireHitActivateTick < 20000 {
+		fireHitTriggered = true
+		p.FireHitActive = false
+	}
+
+	// 确定广播 RM_ 类型
+	rmIdent := RM_HIT
+	switch {
+	case fireHitTriggered:
+		rmIdent = RM_FIREHIT
+		msg.Ident = protocol.CMFireHit
+	case p.PowerHitReady && msg.Ident == protocol.CMHit:
+		rmIdent = RM_POWERHIT
+		msg.Ident = protocol.CMPowerHit
+		p.PowerHitReady = false
+	case msg.Ident == protocol.CMHeavyHit:
+		rmIdent = RM_HEAVYHIT
+	case msg.Ident == protocol.CMBigHit:
+		rmIdent = RM_BIGHIT
+	case msg.Ident == protocol.CMPowerHit:
+		rmIdent = RM_POWERHIT
+	case msg.Ident == protocol.CMLongHit:
+		rmIdent = RM_LONGHIT
+	case msg.Ident == protocol.CMWideHit:
+		rmIdent = RM_WIDEHIT
+	case msg.Ident == protocol.CMCrsHit:
+		rmIdent = RM_WIDEHIT
+	case msg.Ident == protocol.CMTwinHit:
+		rmIdent = RM_FIREHIT
+	}
+	p.SendRefMsg(rmIdent, dir, p.CurrX, p.CurrY, "")
+
+	// Delphi: WideHit/CRS 消耗 MP (ObjBase.pas:18788-18811)
+	if msg.Ident == protocol.CMWideHit || msg.Ident == protocol.CMCrsHit {
+		if !p.consumeSkillMP(msg.Ident, server) {
+			msg.Ident = protocol.CMHit
 		}
-	default:
-		multiplier = 1.0
 	}
 
 	dx, dy := dirToOffset(dir)
 
+	// 半月弯刀：3 方向 (Delphi g_Config.WideAttack[0..2])
 	if msg.Ident == protocol.CMWideHit {
-		targets := p.findWideTargets()
-		for _, target := range targets {
-			damage := p.calcDamage(target)
-			damage = int(float64(damage) * multiplier)
-			if damage < 1 {
-				damage = 1
-			}
-			p.applyDamage(server, target, damage, dir)
-		}
+		p.doWideAttack(server, dir, 3)
+		return
+	}
+	// CRS 十字斩：7 方向 (Delphi g_Config.CrsAttack[0..6])
+	if msg.Ident == protocol.CMCrsHit {
+		p.doWideAttack(server, dir, 7)
 		return
 	}
 
 	target := p.findAttackTarget(p.CurrX+dx, p.CurrY+dy)
-	if target == nil && msg.Ident == protocol.CMLongHit {
-		target = p.findAttackTarget(p.CurrX+dx*2, p.CurrY+dy*2)
+
+	// Delphi: 刺杀剑术穿透 2 格 (ObjBase.pas:22167-22185)
+	if msg.Ident == protocol.CMLongHit {
+		pm := p.findMagic(12)
+		if pm != nil {
+			baseDamage := p.calcDamage(nil)
+			secPwr := p.calcSkillPower(baseDamage, pm, 2)
+			x2, y2 := p.CurrX+dx*2, p.CurrY+dy*2
+			if t2 := p.findAttackTarget(x2, y2); t2 != nil && p.CanAttackTarget(t2) {
+				if !IsSafeZone(p.envir, t2.CurrX, t2.CurrY) {
+					if p.hitCheck(t2) {
+						p.applyDamage(server, t2, secPwr, dir)
+					}
+				}
+			}
+		}
+		if target == nil {
+			return
+		}
 	}
+
 	if target == nil {
-		// 攻城战：攻击城门/城墙
 		if p.Engine != nil && p.Engine.Castle != nil && p.envir != nil && p.envir.Castle != nil {
 			attackX, attackY := p.CurrX+dx, p.CurrY+dy
-			loDC := int(p.WAbil.DC & 0xFFFF)
-			hiDC := int(p.WAbil.DC >> 16)
-			damage := loDC
-			if hiDC > loDC {
-				damage = loDC + rand.Intn(hiDC-loDC+1)
-			}
-			damage = int(float64(damage) * multiplier)
-			if damage < 1 {
-				damage = 1
-			}
+			damage := p.rollDC()
 			if p.Engine.Castle.HandleStructureDamage(attackX, attackY, damage) {
 				p.SendRefMsg(RM_HIT, dir, attackX, attackY, "")
-				return
 			}
 		}
 		return
 	}
 
+	// Delphi: IsProperTarget 攻击模式检查 (ObjBase.pas:21495)
+	if !p.CanAttackTarget(target) {
+		return
+	}
 	if IsSafeZone(p.envir, target.CurrX, target.CurrY) {
 		return
 	}
 
+	// Delphi: 命中/闪避 (ObjBase.pas:22243)
+	if !p.hitCheck(target) {
+		return
+	}
+
 	damage := p.calcDamage(target)
-	damage = int(float64(damage) * multiplier)
+	damage = p.applySkillBonus(damage, msg.Ident, fireHitTriggered)
 	if damage < 1 {
 		damage = 1
 	}
 	p.applyDamage(server, target, damage, dir)
 }
 
-func (p *PlayObject) findWideTargets() []*BaseObject {
-	var targets []*BaseObject
-	if p.envir == nil {
-		return targets
+// doWideAttack — Delphi SwordWideAttack/CrsWideAttack (ObjBase.pas:22028-22075)
+// count=3 为半月弯刀（dir-1, dir, dir+1），count=7 为 CRS（除正后方外全部）。
+func (p *PlayObject) doWideAttack(server *netserver.TCPServer, dir, count int) {
+	pm := p.findMagic(25) // 半月弯刀
+	if msg := p.findMagic(39); msg != nil && count == 7 {
+		pm = msg // CRS
 	}
-	for dy := -1; dy <= 1; dy++ {
-		for dx := -1; dx <= 1; dx++ {
-			if dx == 0 && dy == 0 {
-				continue
-			}
-			x, y := p.CurrX+dx, p.CurrY+dy
-			t := p.findAttackTarget(x, y)
-			if t != nil && !IsSafeZone(p.envir, t.CurrX, t.CurrY) {
-				targets = append(targets, t)
-			}
+	baseDamage := p.calcDamage(nil)
+	secPwr := baseDamage
+	if pm != nil {
+		secPwr = p.calcSkillPower(baseDamage, pm, 10)
+	}
+	if secPwr < 1 {
+		secPwr = 1
+	}
+
+	var offsets []int
+	if count == 3 {
+		offsets = []int{-1, 0, 1}
+	} else {
+		offsets = []int{-3, -2, -1, 0, 1, 2, 3}
+	}
+
+	for _, off := range offsets {
+		d := ((dir + off) % 8 + 8) % 8
+		ddx, ddy := dirToOffset(d)
+		t := p.findAttackTarget(p.CurrX+ddx, p.CurrY+ddy)
+		if t == nil {
+			continue
+		}
+		if !p.CanAttackTarget(t) || IsSafeZone(p.envir, t.CurrX, t.CurrY) {
+			continue
+		}
+		if p.hitCheck(t) {
+			p.applyDamage(server, t, secPwr, d)
 		}
 	}
-	return targets
+}
+
+// hitCheck — Delphi 命中判定 (ObjBase.pas:22243):
+// m_btHitPoint < Random(target.m_btSpeedPoint) → MISS
+func (p *PlayObject) hitCheck(target *BaseObject) bool {
+	spd := target.SpeedPoint
+	if spd < 1 {
+		spd = 1
+	}
+	return !(p.HitPoint < rand.Intn(spd))
+}
+
+// rollDC — 仅掷 DC 骰（不含防御减伤），用于攻城等场景。
+func (p *PlayObject) rollDC() int {
+	loDC := int(p.WAbil.DC & 0xFFFF)
+	hiDC := int(p.WAbil.DC >> 16)
+	if hiDC > loDC {
+		return loDC + rand.Intn(hiDC-loDC+1)
+	}
+	if loDC < 1 {
+		return 1
+	}
+	return loDC
+}
+
+// calcSkillPower — Delphi 技能伤害缩放:
+// Ergum: nPower/(btTrainLv+2)*(btLevel+2) (ObjBase.pas:22175)
+// Banwol/CRS: nPower/(btTrainLv+10)*(btLevel+2) (ObjBase.pas:22194)
+func (p *PlayObject) calcSkillPower(baseDamage int, pm *PlayerMagic, divisor int) int {
+	if pm == nil || baseDamage <= 0 {
+		return baseDamage
+	}
+	trainLv := 3 // MagicDef.TrainLv 固定为 3（maxLevel）
+	return baseDamage / (trainLv + divisor) * (pm.Level + 2)
+}
+
+// applySkillBonus — 根据 wHitMode 附加技能伤害 (ObjBase.pas:22119-22163)
+func (p *PlayObject) applySkillBonus(damage int, ident int, fireHit bool) int {
+	switch {
+	case fireHit || ident == protocol.CMFireHit:
+		// Delphi: nPower += Round(nPower / 100 * (m_nHitDouble * 10))
+		damage += damage * p.HitDouble * 10 / 100
+	case ident == protocol.CMTwinHit:
+		damage += damage * p.HitDouble * 10 / 100
+	case ident == protocol.CMPowerHit:
+		// Delphi: nPower += m_nHitPlus
+		damage += p.HitPlus
+	}
+	// HeavyHit/BigHit: 无伤害变化，仅动画不同
+	return damage
+}
+
+// advancePowerHitCharge — Delphi PowerHit 自动蓄力 (ObjBase.pas:8862-8875)
+func (p *PlayObject) advancePowerHitCharge(ident int, server *netserver.TCPServer) {
+	pm := p.findMagic(7) // 攻杀剑术
+	if pm == nil {
+		return
+	}
+	if ident == protocol.CMPowerHit {
+		if p.PowerHitReady {
+			p.PowerHitReady = false
+		}
+		return
+	}
+	p.PowerHitCount--
+	if p.PowerHitCount <= 0 {
+		p.PowerHitReady = true
+		maxCycle := 7 - pm.Level
+		if maxCycle < 1 {
+			maxCycle = 1
+		}
+		p.PowerHitCount = rand.Intn(maxCycle) + 1
+		if server != nil {
+			p.SendSpecialAttackFlags(server)
+		}
+	}
+}
+
+// consumeSkillMP — Delphi 半月/CRS 消耗 MP (ObjBase.pas:18788-18811)
+func (p *PlayObject) consumeSkillMP(ident int, server *netserver.TCPServer) bool {
+	var magID int
+	switch ident {
+	case protocol.CMWideHit:
+		magID = 25
+	case protocol.CMCrsHit:
+		magID = 39
+	default:
+		return true
+	}
+	pm := p.findMagic(magID)
+	if pm == nil {
+		return false
+	}
+	var def *MagicDef
+	if p.MagicDB != nil {
+		def = p.MagicDB.GetByID(magID)
+	}
+	cost := 0
+	if def != nil {
+		cost = def.Spell / (3 + 1) * (pm.Level + 1)
+	}
+	if int(p.WAbil.MP) < cost {
+		return false
+	}
+	p.WAbil.MP -= uint16(cost)
+	p.sendHealthSpell(server)
+	return true
 }
 
 func (p *PlayObject) findAttackTarget(x, y int) *BaseObject {
@@ -747,20 +931,47 @@ func (p *PlayObject) findAttackTarget(x, y int) *BaseObject {
 	return nil
 }
 
+// calcDamage — Delphi GetAttackPower + GetHitStruckDamage (ObjBase.pas:2416, 22414)
+// target 为 nil 时仅掷攻击骰（用于技能次级伤害计算）。
 func (p *PlayObject) calcDamage(target *BaseObject) int {
 	loDC := int(p.WAbil.DC & 0xFFFF)
 	hiDC := int(p.WAbil.DC >> 16)
-	loAC := int(target.WAbil.AC & 0xFFFF)
-	hiAC := int(target.WAbil.AC >> 16)
 
 	attack := loDC
 	if hiDC > loDC {
 		attack = loDC + rand.Intn(hiDC-loDC+1)
 	}
-	if p.Luck > 0 && rand.Intn(100) < p.Luck {
-		attack = hiDC
+
+	// Delphi: Random(10 - MIN(9, luck)) == 0 → 最大伤害
+	luck := p.Luck
+	if luck > 9 {
+		luck = 9
+	}
+	if luck > 0 {
+		if rand.Intn(10-luck) == 0 {
+			attack = hiDC
+		}
+	} else if luck < 0 {
+		// Delphi: 负幸运 → Random(10 - MAX(0, -luck)) == 0 → 最小伤害
+		unluck := -luck
+		if unluck > 9 {
+			unluck = 9
+		}
+		if rand.Intn(10-unluck) == 0 {
+			attack = loDC
+		}
 	}
 
+	if target == nil {
+		if attack < 1 {
+			attack = 1
+		}
+		return attack
+	}
+
+	// Delphi: nArmor = LoAC + Random(HiAC - LoAC + 1)
+	loAC := int(target.WAbil.AC & 0xFFFF)
+	hiAC := int(target.WAbil.AC >> 16)
 	armor := loAC
 	if hiAC > loAC {
 		armor = loAC + rand.Intn(hiAC-loAC+1)
@@ -774,26 +985,45 @@ func (p *PlayObject) calcDamage(target *BaseObject) int {
 }
 
 func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject, damage int, dir int) {
+	// Delphi: 魔法盾 1.5x MP 消耗完全吸收 (ObjBase.pas:2455-2469)
 	if tp := p.envir.getPlayerByBase(target); tp != nil && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
-		absorbed := damage / 2
+		mpCost := damage + damage/2 // 1.5x
 		mp := int(tp.WAbil.MP)
-		if mp < absorbed {
-			absorbed = mp
+		if mp >= mpCost {
+			tp.WAbil.MP -= uint16(mpCost)
+			damage = 0
+		} else {
+			absorbed := mp * 2 / 3 // 反推可吸收伤害
+			tp.WAbil.MP = 0
+			damage -= absorbed
 			tp.StatusTimeArr[STATE_BUBBLEDEFENCE] = 0
 		}
-		tp.WAbil.MP -= uint16(absorbed)
-		damage -= absorbed
-		if damage < 1 {
-			damage = 1
+		if damage < 0 {
+			damage = 0
 		}
+		tp.sendHealthSpell(server)
+	}
+
+	// Delphi: 红毒增幅最终伤害 (ObjBase.pas:22472): damage * (nPosionDamagarmor/10)
+	if target.StatusTimeArr[POISON_DAMAGEARMOR] > 0 {
+		damage = damage + damage/5 // 默认 +20%
 	}
 
 	hp := int(target.WAbil.HP)
 	hp -= damage
 
-	if p.HasParalysis && rand.Intn(20) == 0 {
-		if tp := p.envir.getPlayerByBase(target); tp != nil {
-			tp.MakePoison(POISON_STONE, 50)
+	// Delphi: 麻痹戒指 Random(target.AntiPoison + nAttackPosionRate) == 0 (ObjBase.pas:22265)
+	if p.HasParalysis && damage > 0 {
+		antiPoison := target.AntiPoison
+		if antiPoison < 0 {
+			antiPoison = 0
+		}
+		if rand.Intn(antiPoison+5) == 0 {
+			if tp := p.envir.getPlayerByBase(target); tp != nil {
+				tp.MakePoison(POISON_STONE, 50, 0)
+			} else if mon := p.envir.getMonsterByBase(target); mon != nil {
+				mon.StatusTimeArr[POISON_STONE] = 50
+			}
 		}
 	}
 
@@ -811,6 +1041,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	if tp := p.envir.getPlayerByBase(target); tp != nil {
 		tp.LastHiterID = p.ID
 		tp.LastHiterTick = time.Now().UnixMilli()
+		tp.StruckTick = time.Now().UnixMilli()
 		if it := tp.UseItems[protocol.UDress]; it != nil && it.Dura > 0 {
 			it.Dura--
 			tp.sendDuraChange(server, it)

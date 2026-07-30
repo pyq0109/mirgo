@@ -293,11 +293,10 @@ func (o *MonsterObject) runPoisonAI(server *netserver.TCPServer, target *PlayObj
 		damage := o.calcMonsterDamage(target.BaseObject)
 		o.applyMonsterDamageToPlayer(server, target, damage, now)
 		if rand.Intn(3) == 0 {
-			target.MakePoison(POISON_DECHEALTH, 80)
+			target.MakePoison(POISON_DECHEALTH, 80, 3)
 		}
-		// Delphi: 部分毒怪附带红毒（降防）
 		if rand.Intn(4) == 0 {
-			target.MakePoison(POISON_DAMAGEARMOR, 80)
+			target.MakePoison(POISON_DAMAGEARMOR, 80, 0)
 		}
 		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 		o.FocusTick = now
@@ -306,7 +305,7 @@ func (o *MonsterObject) runPoisonAI(server *netserver.TCPServer, target *PlayObj
 	if dist <= 4 && o.StatusTimeArr[POISON_LOCKSPELL] <= 0 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) && now-o.HitTick > o.AttackSpeed*2 {
 		o.HitTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
-		target.MakePoison(POISON_DECHEALTH, 60)
+		target.MakePoison(POISON_DECHEALTH, 60, 3)
 		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
 		o.FocusTick = now
 		return
@@ -567,7 +566,7 @@ func (o *MonsterObject) runSpitAI(server *netserver.TCPServer, target *PlayObjec
 							o.applyMonsterDamageToPlayer(server, p, damage, now)
 							// Delphi: THighRiskSpider(118) 为非毒变种
 							if o.spitPoison && rand.Intn(3) == 0 {
-								p.MakePoison(POISON_DECHEALTH, 60)
+								p.MakePoison(POISON_DECHEALTH, 60, 3)
 							}
 						}
 					}
@@ -640,9 +639,9 @@ func (o *MonsterObject) runCentiKingAI(server *netserver.TCPServer, target *Play
 				o.applyMonsterDamageToPlayer(server, p, damage, now)
 				if rand.Intn(4) == 0 {
 					if rand.Intn(3) != 0 {
-						p.MakePoison(POISON_DECHEALTH, 60) // 2/3 绿毒
+						p.MakePoison(POISON_DECHEALTH, 60, 3)
 					} else {
-						p.MakePoison(POISON_STONE, 5) // 1/3 石化
+						p.MakePoison(POISON_STONE, 5, 0)
 					}
 				}
 			}
