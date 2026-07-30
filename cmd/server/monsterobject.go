@@ -214,7 +214,7 @@ func getAIBehavior(race byte) int {
 
 func NewMonsterObject(name string, id int32, race, raceImg byte, appr uint16, hp int, walkSpeed, attackSpeed int64, exp int) *MonsterObject {
 	base := NewBaseObject(name, id)
-	return &MonsterObject{
+	mon := &MonsterObject{
 		BaseObject:  base,
 		Race:        race,
 		RaceImg:     raceImg,
@@ -227,6 +227,8 @@ func NewMonsterObject(name string, id int32, race, raceImg byte, appr uint16, hp
 		WalkStep:    3,
 		WalkWait:    1000,
 	}
+	base.outer = mon
+	return mon
 }
 
 func (o *MonsterObject) Feature() int32 {
@@ -320,17 +322,20 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 
 	if now-o.lastThinkTick >= 3000 {
 		o.lastThinkTick = now
+		// Delphi dup mode (ObjMon.pas:359-381)：本格 GetXYObjCount >= 2 → 随机方向逃逸。
 		if o.envir != nil {
-			objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, 0)
-			for _, obj := range objs {
-				if obj != o {
-					if _, isMon := obj.(*MonsterObject); isMon {
-						dir := rand.Intn(8)
-						if o.WalkTo(dir) {
-							o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
-						}
-						break
-					}
+			self := o.self()
+			overlapped := false
+			for _, obj := range o.envir.GetRangeObjects(o.CurrX, o.CurrY, 0) {
+				if obj != self && blocksMovement(obj) {
+					overlapped = true
+					break
+				}
+			}
+			if overlapped {
+				dir := rand.Intn(8)
+				if o.WalkTo(dir) {
+					o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
 				}
 			}
 		}
@@ -628,8 +633,19 @@ func (o *MonsterObject) callSlave(e *UserEngine, now int64) {
 		}
 		x, y := o.CurrX+fdx, o.CurrY+fdy
 		if !o.envir.CanWalk(x, y) {
-			x = o.CurrX + rand.Intn(3) - 1
-			y = o.CurrY + rand.Intn(3) - 1
+			placed := false
+			for tries := 0; tries < 8; tries++ {
+				tx := o.CurrX + rand.Intn(3) - 1
+				ty := o.CurrY + rand.Intn(3) - 1
+				if o.envir.CanWalk(tx, ty) {
+					x, y = tx, ty
+					placed = true
+					break
+				}
+			}
+			if !placed {
+				continue
+			}
 		}
 		e.spawnChild(o, names[rand.Intn(len(names))], x, y, now)
 	}
@@ -899,18 +915,35 @@ func (o *MonsterObject) slaveFollow(e *UserEngine, now int64) {
 	if !needTeleport {
 		return
 	}
-	// GetBackPosition: 主人背后一格
+	// GetBackPosition: 主人背后一格。Delphi SpaceMove：仅校验地形，不可用则随机重试，无果放弃。
+	env := master.envir
+	if env == nil {
+		return
+	}
 	bdx, bdy := dirToOffset((master.Dir + 4) % 8)
 	tx, ty := master.CurrX+bdx, master.CurrY+bdy
+	if !env.CanWalkEx(tx, ty, true) {
+		placed := false
+		for tries := 0; tries < 30; tries++ {
+			rx := master.CurrX + rand.Intn(7) - 3
+			ry := master.CurrY + rand.Intn(7) - 3
+			if env.CanWalkEx(rx, ry, true) {
+				tx, ty = rx, ry
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			return
+		}
+	}
 	if o.envir != nil {
 		o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
 	}
 	o.MapName = master.MapName
 	o.CurrX, o.CurrY = tx, ty
-	o.envir = master.envir
-	if o.envir != nil {
-		o.envir.AddObject(tx, ty, OS_MOVINGOBJECT, o)
-	}
+	o.envir = env
+	env.AddObject(tx, ty, OS_MOVINGOBJECT, o)
 	o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, o.Name)
 }
 

@@ -91,6 +91,18 @@ type BaseObject struct {
 
 	// 地图引用
 	envir *Environment
+
+	// outer 指向具体外层对象（*MonsterObject/*PlayObject/*NpcObject）。
+	// 地图格子必须存具体类型，否则 objectBase 匹配/类型断言全部失效。
+	outer interface{}
+}
+
+// self 返回存入地图格子的对象：优先具体外层对象，回退裸 BaseObject。
+func (o *BaseObject) self() interface{} {
+	if o.outer != nil {
+		return o.outer
+	}
+	return o
 }
 
 type SendMessage struct {
@@ -186,15 +198,16 @@ func (o *BaseObject) WalkTo(dir int) bool {
 	if !o.envir.CanWalk(newX, newY) {
 		return false
 	}
-	if o.envir.hasBlockingObject(newX, newY, o) {
+	self := o.self()
+	if o.envir.hasBlockingObject(newX, newY, self) {
 		return false
 	}
 
-	o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
+	o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, self)
 	o.CurrX = newX
 	o.CurrY = newY
 	o.Dir = dir
-	o.envir.AddObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
+	o.envir.AddObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, self)
 
 	return true
 }

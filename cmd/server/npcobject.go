@@ -77,13 +77,15 @@ type NpcObject struct {
 
 func NewNpcObject(name string, id int32, appr uint16) *NpcObject {
 	base := NewBaseObject(name, id)
-	return &NpcObject{
+	npc := &NpcObject{
 		BaseObject: base,
 		Appr:       appr,
 		PriceRate:  100,
 		GoodsList:  make(map[string]*GoodsStock),
 		PriceList:  make(map[int]*ItemPrice),
 	}
+	base.outer = npc
+	return npc
 }
 
 func (o *NpcObject) Feature() int32 {

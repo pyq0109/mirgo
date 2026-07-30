@@ -145,12 +145,23 @@ func (e *Environment) CanWalkEx(x, y int, ignoreEntities bool) bool {
 		if o.Type != OS_MOVINGOBJECT {
 			continue
 		}
-		switch obj := o.Obj.(type) {
-		case *PlayObject:
-			if !obj.Ghost && !obj.Death && !obj.Hidden {
-				return false
-			}
+		if blocksMovement(o.Obj) {
+			return false
 		}
+	}
+	return true
+}
+
+// blocksMovement 判断格子中的对象是否阻挡通行。
+// Delphi: MoveToMovingObject (Envir.pas:307-323) — 存活移动对象阻挡；
+// 排除 ghost/死亡/潜地（m_boFixedHideMode）。隐身与石化不豁免（与 Delphi 一致）。
+func blocksMovement(obj interface{}) bool {
+	base := objectBase(obj)
+	if base == nil || base.Ghost || base.Death {
+		return false
+	}
+	if mon, ok := obj.(*MonsterObject); ok && mon.FixedHide {
+		return false
 	}
 	return true
 }
@@ -306,7 +317,7 @@ func (e *Environment) GetMovingObject(x, y int) interface{} {
 }
 
 // hasBlockingObject 检查目标格是否有阻挡移动的对象。
-// Delphi: MoveToMovingObject (Envir.pas:287) — 非 ghost、非死亡、非潜地/石化的移动对象阻挡通行。
+// Delphi: MoveToMovingObject (Envir.pas:287) — 非 ghost、非死亡、非潜地的移动对象阻挡通行。
 func (e *Environment) hasBlockingObject(x, y int, self interface{}) bool {
 	if x < 0 || x >= e.Width || y < 0 || y >= e.Height {
 		return false
@@ -316,14 +327,9 @@ func (e *Environment) hasBlockingObject(x, y int, self interface{}) bool {
 		if o.Type != OS_MOVINGOBJECT || o.Obj == self {
 			continue
 		}
-		base := objectBase(o.Obj)
-		if base == nil || base.Ghost || base.Death {
-			continue
+		if blocksMovement(o.Obj) {
+			return true
 		}
-		if mon, ok := o.Obj.(*MonsterObject); ok && (mon.FixedHide || mon.StoneMode) {
-			continue
-		}
-		return true
 	}
 	return false
 }

@@ -141,7 +141,7 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 	if session != nil {
 		account = session.AccountName
 	}
-	return &PlayObject{
+	p := &PlayObject{
 		BaseObject:     base,
 		Session:        session,
 		AccountName:    account,
@@ -154,6 +154,8 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 		StrScriptVars:  make(map[string]string),
 		nameLists:      make(map[string][]string),
 	}
+	base.outer = p
+	return p
 }
 
 func (p *PlayObject) Operate(server *netserver.TCPServer) {

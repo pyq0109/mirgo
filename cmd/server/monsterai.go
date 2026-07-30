@@ -196,7 +196,8 @@ func (o *MonsterObject) runTeleportAI(server *netserver.TCPServer, target *PlayO
 		o.WalkTick = now
 		tx := target.CurrX + rand.Intn(3) - 1
 		ty := target.CurrY + rand.Intn(3) - 1
-		if o.envir != nil && o.envir.CanWalk(tx, ty) {
+		// Delphi SpaceMove：仅校验地形；占用重叠由 dup mode 驱散。
+		if o.envir != nil && o.envir.CanWalkEx(tx, ty, true) {
 			o.envir.RemoveObject(o.CurrX, o.CurrY, OS_MOVINGOBJECT, o)
 			o.CurrX, o.CurrY = tx, ty
 			o.envir.AddObject(tx, ty, OS_MOVINGOBJECT, o)

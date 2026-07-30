@@ -308,14 +308,20 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 		return nil
 	}
 
-	x, y := entry.X, entry.Y
+	// Delphi AddBaseObject (UsrEngn.pas:1819)：CanWalk 含占用检查，31 次失败则放弃生成。
+	x, y := 0, 0
+	placed := false
 	for tries := 0; tries < 31; tries++ {
 		tx := entry.X + rand.Intn(entry.Range*2+1) - entry.Range
 		ty := entry.Y + rand.Intn(entry.Range*2+1) - entry.Range
 		if env.CanWalk(tx, ty) {
 			x, y = tx, ty
+			placed = true
 			break
 		}
+	}
+	if !placed {
+		return nil
 	}
 
 	id := e.nextMonsterID
