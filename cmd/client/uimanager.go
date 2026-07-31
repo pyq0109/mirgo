@@ -26,6 +26,11 @@ type UIManager struct {
 	ShowBounds bool // 调试: 绘制所有可见控件的包围盒
 }
 
+// gActiveUI 是当前活动场景的 UIManager 引用。
+// 各场景在 Open() 中设置、Close() 中置 nil，
+// 使全局注册的 ui/click 调试命令可跨场景工作。
+var gActiveUI *UIManager
+
 // debugUIEvents 开关: 为 true 时 UI 输入事件会输出到全局控制台,
 // 用于排查 "交互失效" (点击没反应、事件被谁吃掉等问题)。
 var debugUIEvents bool
@@ -664,6 +669,54 @@ func (m *UIManager) debugFindWalk(c *UIControl, lower string, found *[]*UIContro
 	for _, ch := range c.Children {
 		m.debugFindWalk(ch, lower, found)
 	}
+}
+
+// FindControl 按名称精确查找控件（不区分大小写），DFS 遍历整棵树含 Modal。
+func (m *UIManager) FindControl(name string) *UIControl {
+	var find func(c *UIControl) *UIControl
+	find = func(c *UIControl) *UIControl {
+		if strings.EqualFold(c.Name, name) {
+			return c
+		}
+		for _, ch := range c.Children {
+			if r := find(ch); r != nil {
+				return r
+			}
+		}
+		return nil
+	}
+	if r := find(m.Root); r != nil {
+		return r
+	}
+	if m.Modal != nil {
+		return find(m.Modal)
+	}
+	return nil
+}
+
+// DebugInspect 返回单个控件的完整属性 dump。
+func (m *UIManager) DebugInspect(name string) string {
+	c := m.FindControl(name)
+	if c == nil {
+		return fmt.Sprintf("control %q not found", name)
+	}
+	w, h := c.effectiveSize()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s (%s)\n", c.DebugPath(), c.Kind)
+	fmt.Fprintf(&sb, "  pos=(%d,%d) abs=(%d,%d) size=%dx%d\n", c.Left, c.Top, c.AbsX(), c.AbsY(), w, h)
+	fmt.Fprintf(&sb, "  visible=%v floating=%v background=%v enablefocus=%v tag=%d\n",
+		c.Visible, c.Floating, c.Background, c.EnableFocus, c.Tag)
+	if c.FaceIndex != 0 || c.WLib != nil {
+		fmt.Fprintf(&sb, "  face=%d wlib=%v\n", c.FaceIndex, c.WLib != nil)
+	}
+	if c.Kind == KindGrid {
+		fmt.Fprintf(&sb, "  grid: %dx%d cell=%dx%d sel=(%d,%d) cur=(%d,%d)\n",
+			c.ColCount, c.RowCount, c.ColWidth, c.RowHeight,
+			c.SelectCol, c.SelectRow, c.Col, c.Row)
+	}
+	fmt.Fprintf(&sb, "  children=%d parent=%s\n", len(c.Children), debugCtlName(c.Parent))
+	fmt.Fprintf(&sb, "  callbacks:%s\n", debugCallbacks(c))
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func debugCallbacks(c *UIControl) string {

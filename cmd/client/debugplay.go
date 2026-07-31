@@ -44,14 +44,22 @@ func (s *PlayScene) registerDebugCmds() {
 			dc.Printf("sent @nomob to server")
 		}
 	})
-	dc.Register("ui", "ui tree|bounds|hit|focus|find|events", s.cmdUI)
+	dc.Register("panel", "panel <name> [on|off] — toggle UI panel", func(args []string) {
+		s.cmdPanel(args)
+	})
+	dc.Register("key", "key <name> — simulate shortcut (b/c/m/enter/esc/f1-f12/1-6)", func(args []string) {
+		s.cmdKey(args)
+	})
+	dc.Register("itemmove", "itemmove [reset] — show/reset item drag state", func(args []string) {
+		s.cmdItemMove(args)
+	})
 	dc.StatusExtra = s.debugStatusExtra
 }
 
 // unregisterDebugCmds 在场景变为非活动时注销命令。
 func (s *PlayScene) unregisterDebugCmds() {
 	dc := s.dbg
-	for _, name := range []string{"grid", "label", "light", "hpbar", "kill", "nomob", "ui"} {
+	for _, name := range []string{"grid", "label", "light", "hpbar", "kill", "nomob", "panel", "key", "itemmove"} {
 		dc.Unregister(name)
 	}
 	dc.StatusExtra = nil
@@ -87,43 +95,114 @@ func (s *PlayScene) debugStatusExtra() string {
 	return strings.Join(parts, " ")
 }
 
-// cmdUI 处理 "ui" 命令的子命令分发。
-func (s *PlayScene) cmdUI(args []string) {
+// cmdPanel 操作 GameState 中的面板可见性标志。
+func (s *PlayScene) cmdPanel(args []string) {
 	dc := s.dbg
-	if s.ui == nil {
-		dc.Printf("ui: no UI manager in this scene")
-		return
-	}
 	if len(args) == 0 {
-		dc.Printf("usage: ui tree [N] | ui bounds | ui hit | ui focus | ui find <name> | ui events")
+		dc.Printf("usage: panel <name> [on|off]")
+		dc.Printf("  names: bag state guild group friend abil npc shop deal minimap")
 		return
 	}
-	switch args[0] {
-	case "tree":
-		depth := 3
-		if len(args) > 1 {
-			fmt.Sscanf(args[1], "%d", &depth)
-		}
-		dc.Print(s.ui.DebugTree(depth))
-	case "bounds":
-		s.ui.ShowBounds = !s.ui.ShowBounds
-		dc.Printf("ui bounds %s", onOff(s.ui.ShowBounds))
-	case "hit":
-		dc.Print(s.ui.DebugHitTest(int(s.mouseX), int(s.mouseY)))
-	case "focus":
-		dc.Print(s.ui.DebugFocus())
-	case "find":
-		if len(args) < 2 {
-			dc.Printf("usage: ui find <name>")
-			return
-		}
-		dc.Print(s.ui.DebugFind(strings.Join(args[1:], " ")))
-	case "events":
-		debugUIEvents = !debugUIEvents
-		dc.Printf("ui events %s", onOff(debugUIEvents))
+	name := strings.ToLower(args[0])
+	var flag *bool
+	switch name {
+	case "bag":
+		flag = &s.State.ShowBag
+	case "state", "equip":
+		flag = &s.State.ShowEquip
+	case "guild":
+		flag = &s.State.ShowGuild
+	case "group":
+		flag = &s.State.ShowGroupDlg
+	case "friend":
+		flag = &s.State.ShowFriend
+	case "abil":
+		flag = &s.State.ShowPlusAbil
+	case "npc":
+		flag = &s.State.ShowNpcDialog
+	case "shop":
+		flag = &s.State.ShowShop
+	case "deal":
+		flag = &s.State.InDeal
+	case "minimap":
+		flag = &s.showMinimap
 	default:
-		dc.Printf("unknown ui subcommand: %s", args[0])
+		dc.Printf("unknown panel: %s", name)
+		return
 	}
+	if len(args) >= 2 {
+		switch strings.ToLower(args[1]) {
+		case "on":
+			*flag = true
+		case "off":
+			*flag = false
+		}
+	} else {
+		*flag = !*flag
+	}
+	dc.Printf("panel %s = %s", name, onOff(*flag))
+}
+
+// cmdKey 模拟键盘快捷键。
+func (s *PlayScene) cmdKey(args []string) {
+	dc := s.dbg
+	if len(args) == 0 {
+		dc.Printf("usage: key <name>  (b c e g m n s v w enter esc f1-f12 1-6)")
+		return
+	}
+	keyMap := map[string]int{
+		"b": 66, "c": 67, "e": 69, "g": 71, "m": 77,
+		"n": 78, "s": 83, "v": 86, "w": 87, "z": 90,
+		"enter": 257, "esc": 256,
+		"f1": 290, "f2": 291, "f3": 292, "f4": 293,
+		"f5": 294, "f6": 295, "f7": 296, "f8": 297,
+		"f9": 298, "f10": 299, "f11": 300, "f12": 301,
+		"1": 49, "2": 50, "3": 51, "4": 52, "5": 53, "6": 54,
+	}
+	name := strings.ToLower(args[0])
+	code, ok := keyMap[name]
+	if !ok {
+		dc.Printf("unknown key: %s", name)
+		return
+	}
+	s.OnKey(code, 1)
+	dc.Printf("key %s -> OnKey(%d)", name, code)
+}
+
+// cmdItemMove 显示或重置物品拖拽状态。
+func (s *PlayScene) cmdItemMove(args []string) {
+	dc := s.dbg
+	m := &s.itemMove
+	if len(args) >= 1 && args[0] == "reset" {
+		m.End()
+		dc.Printf("itemmove reset")
+		return
+	}
+	if !m.Moving {
+		dc.Printf("itemmove: idle (not moving)")
+		return
+	}
+	var src string
+	switch {
+	case m.Index >= 0:
+		src = fmt.Sprintf("bag[%d]", m.Index)
+	case m.Index == -97:
+		src = "deal-gold"
+	case m.Index == -98:
+		src = "bag-gold"
+	case m.Index == -99:
+		src = "sell-spot"
+	case m.Index <= -20 && m.Index > -30:
+		src = fmt.Sprintf("deal[%d]", -m.Index-20)
+	default:
+		src = fmt.Sprintf("equip[%d]", -(m.Index + 1))
+	}
+	itemName := fmt.Sprintf("idx=%d", m.Item.Idx)
+	if m.Item.Def != nil {
+		itemName = m.Item.Def.Name
+	}
+	dc.Printf("itemmove: moving src=%s item=%s belt=%d waitSlot=%d",
+		src, itemName, m.FromBelt, m.WaitSlot)
 }
 
 // --- 悬停检测 (每帧, 世界空间) ---

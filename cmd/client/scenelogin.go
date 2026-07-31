@@ -423,10 +423,12 @@ func (s *LoginScene) Open() {
 	s.servers = nil
 	s.cursorBlink = time.Now()
 	s.compLoggedModes = 0
+	s.registerDebugCmds()
 }
 
 // Close 在场景失活时调用。
 func (s *LoginScene) Close() {
+	s.unregisterDebugCmds()
 	gSound.SilenceSound()
 	log.Logf(log.LevelInfo, "LoginScene", "closed")
 }
@@ -1630,4 +1632,73 @@ func (s *LoginScene) getPrguseSize(index int) (int, int) {
 		return 0, 0
 	}
 	return img.Width, img.Height
+}
+
+// --- 调试命令 ---
+
+func (s *LoginScene) registerDebugCmds() {
+	dc := gDebug
+	if dc == nil {
+		return
+	}
+	dc.Register("lstate", "dump login scene state", func(args []string) {
+		dc.Printf("mode=%s showUI=%v connecting=%v waiting=%v",
+			loginModeNames[s.mode], s.showLoginUI, s.connecting, s.waitingResponse)
+		dc.Printf("door: opening=%v fading=%v frame=%d/%d",
+			s.doorOpening, s.doorFading, s.doorFrame, doorFrameCount)
+		dc.Printf("dialog: msg=%q buttons=%v", s.dlgMsg, s.dlgButtons)
+		dc.Printf("servers: %d  user=%q focus=%d", len(s.servers), s.userID, s.focusedField)
+	})
+	dc.Register("lmode", "lmode <login|reg|chgpw|server> — force mode", func(args []string) {
+		if len(args) == 0 {
+			dc.Printf("usage: lmode <login|reg|chgpw|server>")
+			return
+		}
+		switch strings.ToLower(args[0]) {
+		case "login":
+			s.mode = modeLogin
+		case "reg", "register":
+			s.mode = modeRegister
+		case "chgpw":
+			s.mode = modeChgPw
+		case "server", "serverselect":
+			s.mode = modeServerSelect
+		default:
+			dc.Printf("unknown mode: %s", args[0])
+			return
+		}
+		s.showLoginUI = true
+		s.doorOpening = false
+		dc.Printf("mode -> %s", loginModeNames[s.mode])
+	})
+	dc.Register("ldoor", "ldoor [skip] — trigger/skip door animation", func(args []string) {
+		if len(args) >= 1 && args[0] == "skip" {
+			s.doorOpening = false
+			s.doorFading = false
+			s.doorFrame = doorFrameCount - 1
+			s.showLoginUI = true
+			dc.Printf("door skipped")
+			return
+		}
+		s.OpenLoginDoor()
+		dc.Printf("door animation started")
+	})
+	dc.Register("ldlg", "ldlg [msg] — show/dismiss modal dialog", func(args []string) {
+		if len(args) == 0 {
+			s.closeDialog()
+			dc.Printf("dialog dismissed")
+			return
+		}
+		s.ShowMessage(strings.Join(args, " "))
+		dc.Printf("dialog shown: %q", s.dlgMsg)
+	})
+}
+
+func (s *LoginScene) unregisterDebugCmds() {
+	if gDebug == nil {
+		return
+	}
+	for _, name := range []string{"lstate", "lmode", "ldoor", "ldlg"} {
+		gDebug.Unregister(name)
+	}
 }

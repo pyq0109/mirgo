@@ -513,11 +513,13 @@ func (s *PlayScene) LoadMap(mapName string) error {
 }
 
 func (s *PlayScene) Open() {
+	gActiveUI = s.ui
 	s.registerDebugCmds()
 	log.Logf(log.LevelInfo, "PlayScene", "opened")
 }
 
 func (s *PlayScene) Close() {
+	gActiveUI = nil
 	s.unregisterDebugCmds()
 	gSound.SilenceSound()
 	s.State.Reset()

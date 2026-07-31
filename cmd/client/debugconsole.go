@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -114,6 +115,8 @@ func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer, sceneMgr *en
 	dc.Register("wire", "wireframe: wire | wire all | wire 0", dc.cmdWire)
 	dc.Register("fps", "toggle FPS display", dc.cmdFPS)
 	dc.Register("hud", "toggle debug status bar", dc.cmdHUD)
+	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click", dc.cmdUI)
+	dc.Register("click", "click <x> <y> [right] — simulate click", dc.cmdClick)
 	return dc
 }
 
@@ -321,6 +324,151 @@ func (dc *DebugConsole) cmdFPS(args []string) {
 func (dc *DebugConsole) cmdHUD(args []string) {
 	dc.ShowHUD = !dc.ShowHUD
 	dc.Printf("hud %s", onOff(dc.ShowHUD))
+}
+
+func (dc *DebugConsole) cmdUI(args []string) {
+	ui := gActiveUI
+	if ui == nil {
+		dc.Printf("no UI in current scene")
+		return
+	}
+	if len(args) == 0 {
+		dc.Printf("usage: ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click")
+		return
+	}
+	switch args[0] {
+	case "tree":
+		depth := 3
+		if len(args) > 1 {
+			fmt.Sscanf(args[1], "%d", &depth)
+		}
+		dc.Print(ui.DebugTree(depth))
+	case "bounds":
+		ui.ShowBounds = !ui.ShowBounds
+		dc.Printf("ui bounds %s", onOff(ui.ShowBounds))
+	case "hit":
+		dc.Print(ui.DebugHitTest(int(dc.mouseX), int(dc.mouseY)))
+	case "focus":
+		dc.Print(ui.DebugFocus())
+	case "find":
+		if len(args) < 2 {
+			dc.Printf("usage: ui find <name>")
+			return
+		}
+		dc.Print(ui.DebugFind(strings.Join(args[1:], " ")))
+	case "events":
+		debugUIEvents = !debugUIEvents
+		dc.Printf("ui events %s", onOff(debugUIEvents))
+	case "state":
+		dc.Printf("modal=%s capture=%s focus=%s",
+			debugCtlName(ui.Modal), debugCtlName(ui.Capture), debugCtlName(ui.Focused))
+		vis := 0
+		var countVis func(c *UIControl)
+		countVis = func(c *UIControl) {
+			if c.Visible {
+				vis++
+			}
+			for _, ch := range c.Children {
+				countVis(ch)
+			}
+		}
+		countVis(ui.Root)
+		dc.Printf("root children=%d visible controls=%d", len(ui.Root.Children), vis)
+	case "inspect":
+		if len(args) < 2 {
+			dc.Printf("usage: ui inspect <name>")
+			return
+		}
+		dc.Print(ui.DebugInspect(strings.Join(args[1:], " ")))
+	case "show":
+		if len(args) < 2 {
+			dc.Printf("usage: ui show <name>")
+			return
+		}
+		c := ui.FindControl(strings.Join(args[1:], " "))
+		if c == nil {
+			dc.Printf("control %q not found", strings.Join(args[1:], " "))
+			return
+		}
+		for p := c; p != nil; p = p.Parent {
+			p.Visible = true
+		}
+		dc.Printf("%s -> visible (ancestors unhidden)", c.Name)
+	case "hide":
+		if len(args) < 2 {
+			dc.Printf("usage: ui hide <name>")
+			return
+		}
+		c := ui.FindControl(strings.Join(args[1:], " "))
+		if c == nil {
+			dc.Printf("control %q not found", strings.Join(args[1:], " "))
+			return
+		}
+		c.Visible = false
+		dc.Printf("%s -> hidden", c.Name)
+	case "move":
+		if len(args) < 4 {
+			dc.Printf("usage: ui move <name> <x> <y>")
+			return
+		}
+		name := strings.Join(args[1:len(args)-2], " ")
+		x, err1 := strconv.Atoi(args[len(args)-2])
+		y, err2 := strconv.Atoi(args[len(args)-1])
+		if err1 != nil || err2 != nil {
+			dc.Printf("usage: ui move <name> <x> <y>  (x,y must be integers)")
+			return
+		}
+		c := ui.FindControl(name)
+		if c == nil {
+			dc.Printf("control %q not found", name)
+			return
+		}
+		oldX, oldY := c.Left, c.Top
+		c.Left, c.Top = x, y
+		dc.Printf("%s moved (%d,%d) -> (%d,%d)", c.Name, oldX, oldY, x, y)
+	case "click":
+		if len(args) < 2 {
+			dc.Printf("usage: ui click <name>")
+			return
+		}
+		c := ui.FindControl(strings.Join(args[1:], " "))
+		if c == nil {
+			dc.Printf("control %q not found", strings.Join(args[1:], " "))
+			return
+		}
+		w, h := c.effectiveSize()
+		cx, cy := c.AbsX()+w/2, c.AbsY()+h/2
+		ui.RouteMouseDown(cx, cy, 0)
+		ui.RouteMouseUp(cx, cy, 0)
+		dc.Printf("clicked %s at (%d,%d)", c.Name, cx, cy)
+	default:
+		dc.Printf("unknown ui subcommand: %s", args[0])
+	}
+}
+
+func (dc *DebugConsole) cmdClick(args []string) {
+	ui := gActiveUI
+	if ui == nil {
+		dc.Printf("no UI in current scene")
+		return
+	}
+	if len(args) < 2 {
+		dc.Printf("usage: click <x> <y> [right]")
+		return
+	}
+	x, err1 := strconv.Atoi(args[0])
+	y, err2 := strconv.Atoi(args[1])
+	if err1 != nil || err2 != nil {
+		dc.Printf("usage: click <x> <y> [right]")
+		return
+	}
+	button := 0
+	if len(args) >= 3 && args[2] == "right" {
+		button = 1
+	}
+	consumed := ui.RouteMouseDown(x, y, button)
+	ui.RouteMouseUp(x, y, button)
+	dc.Printf("click (%d,%d) btn=%d consumed=%v", x, y, button, consumed)
 }
 
 // --- FPS 统计 ---
