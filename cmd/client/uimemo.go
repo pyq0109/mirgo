@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/pyq0109/mirgo/internal/engine"
 )
 
 // MemoBox — 多行文本编辑器, 移植自行会公告/职位编辑器所用的 VCL TMemo
@@ -11,7 +13,8 @@ import (
 // 支持回车换行、方向键移动光标和滚动.
 type MemoBox struct {
 	Ctrl       *UIControl
-	scene      *PlayScene
+	gl         *engine.GLState
+	text       *engine.TextRenderer
 	Lines      []string
 	curX, curY int // 字符索引 / 行索引
 	scroll     int
@@ -19,8 +22,8 @@ type MemoBox struct {
 	lineH      int
 }
 
-func NewMemoBox(scene *PlayScene, name string, w, h int) *MemoBox {
-	m := &MemoBox{scene: scene, Lines: []string{""}, MaxLen: 4000, lineH: 14}
+func NewMemoBox(gl *engine.GLState, text *engine.TextRenderer, name string, w, h int) *MemoBox {
+	m := &MemoBox{gl: gl, text: text, Lines: []string{""}, MaxLen: 4000, lineH: 14}
 	m.Ctrl = NewUIControl(name, KindControl)
 	m.Ctrl.Width = w
 	m.Ctrl.Height = h
@@ -146,23 +149,22 @@ func (m *MemoBox) JoinedText() string {
 }
 
 func (m *MemoBox) paint(proj [16]float32) {
-	s := m.scene
-	if s == nil || s.text == nil {
+	if m.gl == nil || m.text == nil {
 		return
 	}
 	x, y := float32(m.Ctrl.AbsX()), float32(m.Ctrl.AbsY())
-	s.gl.DrawQuadColor(x, y, float32(m.Ctrl.Width), float32(m.Ctrl.Height), 0, 0, 0, 0.6, proj)
+	m.gl.DrawQuadColor(x, y, float32(m.Ctrl.Width), float32(m.Ctrl.Height), 0, 0, 0, 0.6, proj)
 	vis := m.Ctrl.Height / m.lineH
-	focused := s.ui.Focused == m.Ctrl
+	focused := gActiveUI != nil && gActiveUI.Focused == m.Ctrl
 	blink := time.Now().UnixMilli()%1000 < 500
 	for i := m.scroll; i < len(m.Lines) && i < m.scroll+vis; i++ {
 		ln := m.Lines[i]
 		ly := y + float32((i-m.scroll)*m.lineH)
-		s.text.DrawText(ln, x+2, ly, 1, 1, 1, 1, proj)
+		m.text.DrawText(ln, x+2, ly, 1, 1, 1, 1, proj)
 		if focused && i == m.curY && blink {
 			pre := string([]rune(ln)[:m.curX])
-			cx := x + 2 + float32(s.text.MeasureText(pre))
-			s.text.DrawText("|", cx, ly, 1, 1, 1, 1, proj)
+			cx := x + 2 + float32(m.text.MeasureText(pre))
+			m.text.DrawText("|", cx, ly, 1, 1, 1, 1, proj)
 		}
 	}
 }

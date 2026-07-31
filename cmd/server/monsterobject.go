@@ -120,6 +120,9 @@ type MonsterObject struct {
 
 	// 运行时缓存（Run 期间有效）
 	engine *UserEngine
+
+	// 安全区守卫标志（不可被玩家击杀）
+	IsSafeZoneGuard bool
 }
 
 func getAIBehavior(race byte) int {

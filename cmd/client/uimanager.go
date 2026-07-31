@@ -23,7 +23,8 @@ type UIManager struct {
 	Capture *UIControl
 	Focused *UIControl
 
-	ShowBounds bool // 调试: 绘制所有可见控件的包围盒
+	ShowBounds   bool // 调试: 绘制所有可见控件的包围盒
+	ShowHoverInfo bool // 调试: 鼠标悬停时浮动显示控件信息
 }
 
 // gActiveUI 是当前活动场景的 UIManager 引用。
@@ -717,6 +718,46 @@ func (m *UIManager) DebugInspect(name string) string {
 	fmt.Fprintf(&sb, "  children=%d parent=%s\n", len(c.Children), debugCtlName(c.Parent))
 	fmt.Fprintf(&sb, "  callbacks:%s\n", debugCallbacks(c))
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// DebugList 返回所有控件的平铺表格，可按 kind 过滤。
+func (m *UIManager) DebugList(kindFilter string) string {
+	var sb strings.Builder
+	sb.WriteString("  Name                 Kind     Abs(x,y)   Size     Vis\n")
+	sb.WriteString("  -------------------- -------- ---------- -------- ---\n")
+	var walk func(c *UIControl)
+	walk = func(c *UIControl) {
+		if kindFilter == "" || strings.EqualFold(c.Kind.String(), kindFilter) {
+			w, h := c.effectiveSize()
+			vis := "Y"
+			if !c.Visible {
+				vis = "N"
+			}
+			fmt.Fprintf(&sb, "  %-20s %-8s (%4d,%4d) %4dx%-4d %s\n",
+				c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, vis)
+		}
+		for _, ch := range c.Children {
+			walk(ch)
+		}
+	}
+	walk(m.Root)
+	if m.Modal != nil {
+		walk(m.Modal)
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// DebugHoverInfo 返回鼠标坐标处最顶层控件的简要信息。
+func (m *UIManager) DebugHoverInfo(x, y int) string {
+	var hits []*UIControl
+	m.debugCollectHits(m.Root, x-m.Root.Left, y-m.Root.Top, &hits)
+	if len(hits) == 0 {
+		return ""
+	}
+	c := hits[len(hits)-1]
+	w, h := c.effectiveSize()
+	return fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d vis=%v",
+		c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, c.Visible)
 }
 
 func debugCallbacks(c *UIControl) string {

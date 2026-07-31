@@ -239,13 +239,13 @@ func (o *NpcObject) RefillGoods(itemDB *ItemDB) {
 }
 
 func (o *NpcObject) idleAnimate() {
-	if rand.Intn(2) != 0 {
+	if rand.Intn(50) != 0 {
 		return
 	}
 	if rand.Intn(2) == 0 {
 		o.Dir = rand.Intn(8)
-		o.SendRefMsg(RM_TURN, o.CurrX, o.CurrY, o.Dir, "")
+		o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, "")
 	} else {
-		o.SendRefMsg(RM_HIT, o.CurrX, o.CurrY, o.Dir, "")
+		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
 	}
 }

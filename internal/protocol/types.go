@@ -94,7 +94,7 @@ const (
 const (
 	RCPlayObject   = 0
 	RCNpc          = 10
-	RCGuard        = 11
+	RCGuard        = 12
 	RCPeaceNpc     = 15
 	RCMerchant     = 50 // NPC商人 (Delphi RCC_MERCHANT)，与RCAnimal共享值50但语义不同
 	RCAnimal       = 50 // 动物类怪物

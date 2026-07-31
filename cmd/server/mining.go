@@ -87,6 +87,10 @@ func (p *PlayObject) HandleMineDig(server *netserver.TCPServer) {
 	if p.envir == nil {
 		return
 	}
+	now := time.Now().UnixMilli()
+	if !p.checkActionSpeed(now, p.Engine.Config.GetDigUpInterval(), &p.DigUpTick, server) {
+		return
+	}
 
 	// 检查是否装备了镐（简化：任何武器都可以采矿）
 	weapon := p.UseItems[protocol.UWeapon]

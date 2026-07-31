@@ -407,7 +407,7 @@ func (s *PlayScene) openGuildNoticeEditor() {
 	win.Left = (ScreenWidth - win.Width) / 2
 	win.Top = (ScreenHeight - win.Height) / 2
 
-	memo := NewMemoBox(s, "DGENMemo", 571, 246)
+	memo := NewMemoBox(s.gl, s.text, "DGENMemo", 571, 246)
 	memo.MaxLen = 4000
 	memo.SetText(s.State.GuildNotice)
 	memo.Ctrl.Left, memo.Ctrl.Top = 16, 36
@@ -460,7 +460,7 @@ func (s *PlayScene) openGuildRankEditor() {
 	win.Left = (ScreenWidth - win.Width) / 2
 	win.Top = (ScreenHeight - win.Height) / 2
 
-	memo := NewMemoBox(s, "DGEGMemo", 571, 246)
+	memo := NewMemoBox(s.gl, s.text, "DGEGMemo", 571, 246)
 	memo.MaxLen = 5000
 	lines := make([]string, 0, len(s.State.GuildMembers))
 	for _, m := range s.State.GuildMembers {

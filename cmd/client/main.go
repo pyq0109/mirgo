@@ -173,6 +173,8 @@ func main() {
 	var handler *NetHandler
 
 	glfwWindow := window.GetWindow()
+	dbgConsole.SetClipboard = glfwWindow.SetClipboardString
+	dbgConsole.GetClipboard = glfwWindow.GetClipboardString
 
 	// 连接登录场景回调。
 	loginScene.SetLoginFunc(func(id, password string) {
@@ -296,7 +298,7 @@ func main() {
 		}
 		// 控制台打开时所有按键交给控制台, 不再转发给场景。
 		if dbgConsole.Visible {
-			dbgConsole.OnKey(int(key), int(action))
+			dbgConsole.OnKey(int(key), int(action), int(mods))
 			return
 		}
 		// Esc 仅在游戏前场景退出；原版游戏中没有全局 Esc 退出，
@@ -327,6 +329,11 @@ func main() {
 			log.Logf(log.LevelTrace, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), int(mods), x, y, sceneMgr.CurrentType())
 			dbgConsole.SetMouse(x, y)
+			if dbgConsole.Visible {
+				if dbgConsole.OnMouseButton(x, y, int(button), 1) {
+					return
+				}
+			}
 			// 非游戏场景的线框点击锁定 (屏幕空间)。游戏场景由
 			// PlayScene 自行在世界空间处理。
 			if button == glfw.MouseButtonLeft && dbgConsole.WireMode > 0 &&
@@ -338,16 +345,26 @@ func main() {
 			x, y := w.GetCursorPos()
 			log.Logf(log.LevelTrace, "Mouse", "release button=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), x, y, sceneMgr.CurrentType())
+			if dbgConsole.Visible {
+				dbgConsole.OnMouseButton(x, y, int(button), 0)
+			}
 			sceneMgr.OnMouse(x, y, int(button), 0, int(mods))
 		}
 	})
 
 	glfwWindow.SetCursorPosCallback(func(w *glfw.Window, xpos, ypos float64) {
 		dbgConsole.SetMouse(xpos, ypos)
+		if dbgConsole.Visible {
+			dbgConsole.OnMouseMoveSelect(xpos, ypos)
+		}
 		sceneMgr.OnMouseMove(xpos, ypos)
 	})
 
 	glfwWindow.SetScrollCallback(func(w *glfw.Window, xoff, yoff float64) {
+		if dbgConsole.Visible {
+			dbgConsole.OnScroll(yoff)
+			return
+		}
 		sceneMgr.OnScroll(xoff, yoff)
 	})
 
@@ -1224,6 +1241,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 		}
 
+	case protocol.SMDigUp:
+		actor := h.playScene.State.Actors.Get(msg.Recog)
+		if actor != nil {
+			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+		}
+
 	case protocol.SMStruck:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
@@ -1249,7 +1272,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 
 	case protocol.SMDeath, protocol.SMNowDeath:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
-		if actor != nil {
+		if actor != nil && actor.Type != ActorNPC {
 			actor.Death = true
 			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 			if h.playScene.State.MySelf != nil && actor.RecogID == h.playScene.State.MySelf.RecogID {

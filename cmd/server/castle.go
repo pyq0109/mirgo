@@ -99,6 +99,15 @@ type CastleObject struct {
 	AttackGuilds []string
 	GuardIDs     []int32
 	DoorOpen     bool
+
+	// Delphi: 城堡经济 (Castle.pas:67-80)
+	TechLevel   int   // 科技等级
+	Power       int   // 能源
+	TodayIncome int64 // 今日收入
+
+	// Delphi: 修理冷却 (Castle.pas:1150-1219)
+	DoorStruckTick int64 // 城门最后被攻击时间
+	WallStruckTick int64 // 城墙最后被攻击时间
 }
 
 func NewCastleObject(cfg CastleConfig) *CastleObject {
@@ -171,10 +180,45 @@ func (c *CastleObject) StartWar(server *netserver.TCPServer, engine *UserEngine)
 	copy(attackers, c.AttackGuilds)
 	c.mu.Unlock()
 
+	// Delphi: 攻城开始时关门 (Castle.pas:697)
+	c.ToggleDoor(true) // close door
+
+	// Delphi: 生成弓箭守卫 (Castle.pas:260-290)
+	c.spawnCastleArchers(engine, now)
+
 	text := fmt.Sprintf("[攻城战] %s 攻城战开始！进攻方: %s，防守方: %s",
 		c.Config.Name, strings.Join(attackers, ","), c.OwnerGuild)
 	c.broadcastSysMsg(server, engine, text)
 	log.Logf(log.LevelInfo, "Castle", "castle war started: attackers=%v defender=%s", attackers, c.OwnerGuild)
+}
+
+// spawnCastleArchers — Delphi: 攻城战时在城堡地图生成弓箭手 (Castle.pas:260-290)
+func (c *CastleObject) spawnCastleArchers(engine *UserEngine, now int64) {
+	if engine == nil || engine.mapMgr == nil {
+		return
+	}
+	env := engine.mapMgr.FindMap(c.Config.MapName)
+	if env == nil {
+		return
+	}
+	// 在皇宫周围生成弓箭手
+	count := c.Config.MaxGuards
+	if count <= 0 {
+		count = 8
+	}
+	for i := 0; i < count; i++ {
+		ax := c.Config.PalaceX + (i%4)*3 - 4
+		ay := c.Config.PalaceY + (i/4)*3 - 2
+		mon := engine.SpawnMonsterByName(c.Config.MapName, ax, ay, "弓箭守卫", now)
+		if mon != nil {
+			mon.StickMode = true
+			mon.AIBehavior = AIGuard
+			mon.ViewRange = 12
+			c.mu.Lock()
+			c.GuardIDs = append(c.GuardIDs, mon.ID)
+			c.mu.Unlock()
+		}
+	}
 }
 
 func (c *CastleObject) EndWar(server *netserver.TCPServer, engine *UserEngine) {
@@ -198,6 +242,7 @@ func (c *CastleObject) DamageDoor(dmg int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.DoorHP -= dmg
+	c.DoorStruckTick = time.Now().UnixMilli()
 	if c.DoorHP <= 0 {
 		c.DoorHP = 0
 		log.Logf(log.LevelInfo, "Castle", "castle door destroyed")
@@ -209,7 +254,12 @@ func (c *CastleObject) DamageDoor(dmg int) bool {
 func (c *CastleObject) DamageWall(dmg int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Delphi: 非攻城期间城墙无敌 (Castle.pas:720-726, m_boStoneMode=True)
+	if c.WarState != CastleWarActive {
+		return false
+	}
 	c.WallHP -= dmg
+	c.WallStruckTick = time.Now().UnixMilli()
 	if c.WallHP <= 0 {
 		c.WallHP = 0
 		log.Logf(log.LevelInfo, "Castle", "castle wall destroyed")
@@ -218,10 +268,18 @@ func (c *CastleObject) DamageWall(dmg int) bool {
 	return false
 }
 
+// RepairDoor — Delphi (Castle.pas:1150-1182): 攻城期间不可修，被攻击60秒后才能修
 func (c *CastleObject) RepairDoor() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.WarState == CastleWarActive {
+		return false
+	}
 	if c.DoorHP >= c.Config.DoorMaxHP {
+		return false
+	}
+	now := time.Now().UnixMilli()
+	if c.DoorStruckTick > 0 && now-c.DoorStruckTick < 60000 {
 		return false
 	}
 	if c.Gold < int64(c.Config.DoorRepairCost) {
@@ -233,10 +291,18 @@ func (c *CastleObject) RepairDoor() bool {
 	return true
 }
 
+// RepairWall — Delphi (Castle.pas:1184-1219): 攻城期间不可修，被攻击60秒后才能修
 func (c *CastleObject) RepairWall() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.WarState == CastleWarActive {
+		return false
+	}
 	if c.WallHP >= c.Config.WallMaxHP {
+		return false
+	}
+	now := time.Now().UnixMilli()
+	if c.WallStruckTick > 0 && now-c.WallStruckTick < 60000 {
 		return false
 	}
 	if c.Gold < int64(c.Config.WallRepairCost) {
@@ -296,6 +362,7 @@ func (c *CastleObject) CollectTax(amount int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Gold += amount
+	c.TodayIncome += amount
 }
 
 func (c *CastleObject) WithdrawGold(amount int64) bool {
@@ -305,6 +372,17 @@ func (c *CastleObject) WithdrawGold(amount int64) bool {
 		return false
 	}
 	c.Gold -= amount
+	return true
+}
+
+// DepositGold — Delphi: 城主存款 (Castle.pas:120)
+func (c *CastleObject) DepositGold(amount int64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if amount <= 0 {
+		return false
+	}
+	c.Gold += amount
 	return true
 }
 

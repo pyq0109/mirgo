@@ -45,6 +45,9 @@ type ServerConfig struct {
 		HitIntervalTime int64          `json:"hitIntervalTime"` // 攻击最小间隔(ms)，默认 1400
 		ActionInterval  int64          `json:"actionInterval"`  // 全局动作最小间隔(ms)，默认 350
 		StruckTime      int64          `json:"struckTime"`      // 受击硬直(ms)，默认 500
+		TurnInterval    int64          `json:"turnInterval"`    // 转向最小间隔(ms)，默认 300
+		SpellInterval   int64          `json:"spellInterval"`   // 施法最小间隔(ms)，默认 600
+		DigUpInterval   int64          `json:"digUpInterval"`   // 挖矿最小间隔(ms)，默认 1000
 	} `json:"game"`
 	Commands struct {
 		Names       map[string]string `json:"names"`
@@ -227,6 +230,27 @@ func (c *ServerConfig) GetStruckTime() int64 {
 		return c.Game.StruckTime
 	}
 	return 500
+}
+
+func (c *ServerConfig) GetTurnInterval() int64 {
+	if c.Game.TurnInterval > 0 {
+		return c.Game.TurnInterval
+	}
+	return 300
+}
+
+func (c *ServerConfig) GetSpellInterval() int64 {
+	if c.Game.SpellInterval > 0 {
+		return c.Game.SpellInterval
+	}
+	return 600
+}
+
+func (c *ServerConfig) GetDigUpInterval() int64 {
+	if c.Game.DigUpInterval > 0 {
+		return c.Game.DigUpInterval
+	}
+	return 1000
 }
 
 // GetServerHostPort 以 host/port 形式返回服务端地址。

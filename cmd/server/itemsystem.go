@@ -366,19 +366,13 @@ func (p *PlayObject) useSpecialItem(def *ItemDef, server *netserver.TCPServer) b
 		return p.teleportRandom(server)
 	case 3, 5: // 回城卷 / 行会回城卷。
 		return p.teleportToSafe(server)
-	case 4: // 祝福油：武器幸运 +1。
+	case 4: // 祝福油：Delphi WeaptonMakeLuck (ObjBase.pas:23621-23671)
 		weapon := p.UseItems[protocol.UWeapon]
 		if weapon == nil {
 			p.sysMsg(server, "请先装备武器")
 			return false
 		}
-		if weapon.BtValue[7] >= 7 {
-			p.sysMsg(server, "幸运已达上限")
-			return false
-		}
-		weapon.BtValue[7]++
-		p.sendDuraChange(server, weapon)
-		p.RecalcAbilitys()
+		p.weaponMakeLuck(server, weapon)
 		return true
 	case 9, 10: // 修复油 / 战神油：修复武器耐久。
 		weapon := p.UseItems[protocol.UWeapon]
@@ -618,6 +612,9 @@ func (p *PlayObject) RecalcAbilitys() {
 					p.HitSpeed -= int(def.MACMax)
 				}
 				p.Luck += int(def.AC)
+				// Delphi: BtValue[3]=祝福, BtValue[4]=诅咒 (ItmUnit.pas:569-570)
+				p.Luck += int(item.BtValue[3])
+				p.Luck -= int(item.BtValue[4])
 				// BtValue[10]: 升级结果加成。
 				switch {
 				case item.BtValue[10] >= 10 && item.BtValue[10] <= 12:
@@ -748,6 +745,16 @@ func (p *PlayObject) RecalcAbilitys() {
 		p.BuffExpireTick = 0
 		p.BuffDC, p.BuffMC, p.BuffSC = 0, 0, 0
 		p.BuffHP, p.BuffMP, p.BuffHitSpeed = 0, 0, 0
+	}
+
+	// Delphi: STATE_DEFENCEUP/STATE_MAGDEFENCEUP 状态加成 (ObjBase.pas:3418-3421)
+	if p.StatusTimeArr[STATE_DEFENCEUP] > 0 {
+		bonus := uint32(2 + int(p.WAbil.Level)/7)
+		p.WAbil.AC += bonus << 16
+	}
+	if p.StatusTimeArr[STATE_MAGDEFENCEUP] > 0 {
+		bonus := uint32(2 + int(p.WAbil.Level)/7)
+		p.WAbil.MAC += bonus << 16
 	}
 
 	if p.WAbil.HP > p.WAbil.MaxHP {
@@ -1080,4 +1087,79 @@ func (p *PlayObject) takeItem(name string, count int) {
 		remaining = append(remaining, item)
 	}
 	p.ItemList = remaining
+}
+
+// weaponMakeLuck — Delphi WeaptonMakeLuck (ObjBase.pas:23621-23671)
+// BtValue[3] = 祝福等级(0~7), BtValue[4] = 诅咒等级(0~10)
+func (p *PlayObject) weaponMakeLuck(server *netserver.TCPServer, weapon *protocol.UserItem) {
+	// 1/20 概率失败 → 变诅咒
+	if rand.Intn(20) == 0 {
+		p.weaponMakeUnlock(server, weapon)
+		return
+	}
+
+	made := false
+	luck := weapon.BtValue[3]
+	curse := weapon.BtValue[4]
+
+	// 计算 nRand = |DCMax - DC| / 5
+	nRand := 1
+	if p.ItemDB != nil {
+		if def := p.ItemDB.GetByIdx(int(weapon.WIndex)); def != nil {
+			diff := int(def.DCMax) - int(def.DC)
+			if diff < 0 {
+				diff = -diff
+			}
+			nRand = diff / 5
+			if nRand < 1 {
+				nRand = 1
+			}
+		}
+	}
+
+	switch {
+	case curse > 0:
+		// 有诅咒 → 先消诅咒（100%成功）
+		weapon.BtValue[4]--
+		p.sysMsg(server, "武器充满了祝福...")
+		made = true
+	case luck < 1:
+		// 祝福 < 1 → 100%成功
+		weapon.BtValue[3]++
+		made = true
+	case luck < 3:
+		// 祝福 < 3 → 1/(nRand + 6) 概率
+		if rand.Intn(nRand+6) == 0 {
+			weapon.BtValue[3]++
+			made = true
+		}
+	case luck < 7:
+		// 祝福 < 7 → 1/(nRand * 40) 概率
+		if rand.Intn(nRand*40) == 0 {
+			weapon.BtValue[3]++
+			made = true
+		}
+	}
+
+	p.RecalcAbilitys()
+	p.SendAbility(server)
+	if !made {
+		p.sysMsg(server, "无效")
+	} else {
+		p.sendDuraChange(server, weapon)
+	}
+}
+
+// weaponMakeUnlock — Delphi MakeWeaponUnlock (ObjBase.pas:2393-2414)
+func (p *PlayObject) weaponMakeUnlock(server *netserver.TCPServer, weapon *protocol.UserItem) {
+	if weapon.BtValue[3] > 0 {
+		weapon.BtValue[3]--
+		p.sysMsg(server, "武器被诅咒了...")
+	} else if weapon.BtValue[4] < 10 {
+		weapon.BtValue[4]++
+		p.sysMsg(server, "武器被诅咒了...")
+	}
+	p.RecalcAbilitys()
+	p.SendAbility(server)
+	p.sendDuraChange(server, weapon)
 }

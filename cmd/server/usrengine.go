@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -80,6 +81,16 @@ func (e *UserEngine) GetMonster(id int32) *MonsterObject {
 	return nil
 }
 
+func (e *UserEngine) clearMapMonsters(env *Environment) {
+	for _, mon := range e.Monsters {
+		if mon.envir == env && !mon.Death && !mon.Ghost && !mon.IsSafeZoneGuard {
+			mon.Death = true
+			mon.DeathTick = time.Now().UnixMilli()
+			mon.WAbil.HP = 0
+		}
+	}
+}
+
 func (e *UserEngine) ProcessHumans(server *netserver.TCPServer) {
 	e.mu.RLock()
 	players := make([]*PlayObject, 0, len(e.PlayObjectList))
@@ -147,7 +158,14 @@ func (e *UserEngine) ProcessNpcs() {
 		if npc.IsMerchant && len(npc.RefillConfig) > 0 {
 			npc.RefillGoods(e.ItemDB)
 		}
-		npc.idleAnimate()
+	}
+}
+
+func (e *UserEngine) ProcessNpcIdle() {
+	for _, npc := range e.Npcs {
+		if npc.IsMerchant {
+			npc.idleAnimate()
+		}
 	}
 }
 

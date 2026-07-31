@@ -40,6 +40,7 @@ func (e *UserEngine) InitWorld(mapMgr *MapManager) {
 	e.LoadMonGen()
 	e.LoadNpcs()
 	e.LoadNpcUpgradeState()
+	e.loadSafeZoneGuards()
 }
 
 func (e *UserEngine) LoadMonGen() {
@@ -134,6 +135,43 @@ func (e *UserEngine) LoadNpcs() {
 	}
 
 	log.Logf(log.LevelInfo, "MonGen", "spawned %d NPCs + %d merchants from config", npcCount, merchantCount)
+}
+
+// loadSafeZoneGuards 在每个安全区生成守卫（Delphi TSuperGuard, ObjGuard.pas）。
+func (e *UserEngine) loadSafeZoneGuards() {
+	now := time.Now().UnixMilli()
+	guardName := "弓箭守卫"
+	count := 0
+
+	for _, zone := range globalSafeZones.zones {
+		env := e.mapMgr.FindMap(zone.MapName)
+		if env == nil {
+			continue
+		}
+		// 在安全区中心两侧各放一个守卫
+		offsets := [][2]int{{-2, 0}, {2, 0}}
+		for _, off := range offsets {
+			gx, gy := zone.X+off[0], zone.Y+off[1]
+			if !env.CanWalk(gx, gy) {
+				continue
+			}
+			mon := e.SpawnMonsterByName(zone.MapName, gx, gy, guardName, now)
+			if mon == nil {
+				continue
+			}
+			mon.IsSafeZoneGuard = true
+			mon.StickMode = true
+			mon.AIBehavior = AIGuard
+			mon.ViewRange = 7
+			mon.MaxHP = 65535
+			mon.WAbil.HP = 65535
+			mon.WAbil.MaxHP = 65535
+			count++
+		}
+	}
+	if count > 0 {
+		log.Logf(log.LevelInfo, "MonGen", "spawned %d safe zone guards", count)
+	}
 }
 
 // LoadNpcUpgradeState 从数据库加载NPC武器升级队列状态

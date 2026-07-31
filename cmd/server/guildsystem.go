@@ -31,8 +31,24 @@ type Guild struct {
 	Notice     string
 	WarGuilds  []GuildWar
 	AllyGuilds []string
-	BuildPoint int
-	AuraePoint int
+
+	// Delphi: 行会属性点 (Guild.pas:35-39)
+	BuildPoint     int // 建设点
+	AuraePoint     int // 人气度
+	StabilityPoint int // 安定度
+	FlourishPoint  int // 繁荣度
+	ChiefItemCount int // 会长已取物品数
+
+	// Delphi: 团队战 (Guild.pas:25-28)
+	ContestPoint      int                // 团队战总积分
+	TeamFightActive   bool               // 是否正在团队战
+	TeamFightMembers  map[string]*TeamFightRecord // 成员记录
+}
+
+// TeamFightRecord — Delphi: Low16=死亡次数, High16=个人得分
+type TeamFightRecord struct {
+	Deaths int
+	Score  int
 }
 
 func (ue *UserEngine) FindGuild(name string) *Guild {
@@ -470,5 +486,48 @@ func (p *PlayObject) HandleGuildWar(msg SendMessage, server *netserver.TCPServer
 		}
 	}
 	log.Logf(log.LevelInfo, "Guild", "guild war declared: %s vs %s", guild.Name, targetGuildName)
+}
+
+// StartTeamFight — Delphi TGUild.StartTeamFight (Guild.pas:1272-1277)
+func (g *Guild) StartTeamFight() {
+	g.ContestPoint = 0
+	g.TeamFightActive = true
+	g.TeamFightMembers = make(map[string]*TeamFightRecord)
+}
+
+// EndTeamFight — Delphi TGUild.EndTeamFight (Guild.pas:1279-1282)
+func (g *Guild) EndTeamFight() {
+	g.TeamFightActive = false
+}
+
+// AddTeamFightMember — Delphi TGUild.AddTeamFightMember (Guild.pas:1284-1287)
+func (g *Guild) AddTeamFightMember(name string) {
+	if g.TeamFightMembers == nil {
+		g.TeamFightMembers = make(map[string]*TeamFightRecord)
+	}
+	if _, ok := g.TeamFightMembers[name]; !ok {
+		g.TeamFightMembers[name] = &TeamFightRecord{}
+	}
+}
+
+// TeamFightWhoDead — Delphi TGUild.TeamFightWhoDead (Guild.pas:771-784)
+func (g *Guild) TeamFightWhoDead(name string) {
+	if !g.TeamFightActive {
+		return
+	}
+	if rec, ok := g.TeamFightMembers[name]; ok {
+		rec.Deaths++
+	}
+}
+
+// TeamFightWhoWinPoint — Delphi TGUild.TeamFightWhoWinPoint (Guild.pas:786-800)
+func (g *Guild) TeamFightWhoWinPoint(name string, point int) {
+	if !g.TeamFightActive {
+		return
+	}
+	g.ContestPoint += point
+	if rec, ok := g.TeamFightMembers[name]; ok {
+		rec.Score += point
+	}
 }
 

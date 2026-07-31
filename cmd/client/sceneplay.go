@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -982,6 +983,16 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		s.drawChatBubble(a, worldX, worldY, proj)
 	}
 
+	// NPC 特效覆盖层（Delphi PlayScn.pas:1321-1326 DrawEff pass）
+	s.gl.WireCategory = 2
+	for _, a := range actors {
+		if a.Type == ActorNPC && a.NpcUseEffect {
+			worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
+			worldY := float32(float64(a.Ry*engine.TileHeight) + a.ShiftY)
+			a.DrawNpcEffect(s.gl, s.resources, worldX, worldY, proj)
+		}
+	}
+
 	// 阶段 C：覆盖层重绘和地面物品闪烁/名称
 	// （PlayScn.pas:1290-1396）。
 	if s.State.MySelf != nil && !s.State.MySelf.Death {
@@ -1089,7 +1100,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
 	// 注意：十周年版 Prguse2.wil 的 index 0/1 不是 HP 条图像（80x51 散布暗像素），
 	// 因此直接使用彩色矩形绘制，不使用 Prguse2 纹理。
-	if !a.Death && !s.DisableHPBar {
+	if !a.Death && !s.DisableHPBar && a.Type != ActorNPC {
 		hpBarY := sayY - 10
 		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
 		ratio := float32(1.0)
@@ -1799,7 +1810,11 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		return
 	}
 	if s.ui.RouteMouseDown(ix, iy, button) {
-		log.Logf(log.LevelDebug, "PlayScene", "mouse event consumed by UI pos=(%d,%d)", ix, iy)
+		if debugClickLog {
+			if hit := s.ui.DebugHitTest(ix, iy); hit != "" {
+				clickLogf("[click] UI consumed (%d,%d): %s", ix, iy, strings.Split(hit, "\n")[0])
+			}
+		}
 		return
 	}
 	if button == 0 && s.dbg.WireMode > 0 {
@@ -1883,6 +1898,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			if target != nil {
 				// NPC 对话（ClMain:2292-2298）：商人 + 静止 1.5 秒
 				if target.Type == ActorNPC || target.Race == 50 {
+					clickLogf("[click] NPC #%d %q tile=(%d,%d)", target.RecogID, target.UserName, tx, ty)
 					if now-s.lastMoveActionTick > 1500 && s.sendNpcClick != nil {
 						s.sendNpcClick(int(target.RecogID))
 					}
@@ -1890,6 +1906,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 				}
 
 				if !target.Death && !my.OnHorse {
+					clickLogf("[click] attack type=%d #%d %q tile=(%d,%d)", target.Type, target.RecogID, target.UserName, tx, ty)
 					s.targetCret = target
 					if s.shouldAttack(target) {
 						s.attackTarget(target)
@@ -1899,6 +1916,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			}
 
 			// Shift+无目标 → 空砍（ClMain:2316-2334）
+			clickLogf("[click] swing (no target) tile=(%d,%d)", tx, ty)
 			tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
 			if my.IsIdle() && s.ServerAcceptNextAction() && s.canNextHit() {
 				s.lastHitTick = now
@@ -1914,6 +1932,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		// 4. 无目标无 Shift：拾取或移动（ClMain:2336-2353）
 		if tx == my.CurrX && ty == my.CurrY {
 			// 点击自己格子 → 拾取
+			clickLogf("[click] pickup tile=(%d,%d)", tx, ty)
 			if s.sendPickup != nil {
 				s.clearAutoPath()
 				s.sendPickup()
@@ -1926,6 +1945,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			return
 		}
 
+		clickLogf("[click] move to tile=(%d,%d)", tx, ty)
 		s.targetCret = nil
 		s.startAutoPath(tx, ty)
 	}

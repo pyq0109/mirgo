@@ -363,7 +363,7 @@ func (s *NpcScript) sendMerchantSay(text string, p *PlayObject, npc *NpcObject, 
 	text = s.replaceVars(text, p)
 	p.CanJmpLabels = extractDialogLabels(text)
 	body := npc.Name + "/" + text
-	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
+	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, uint16(npc.Face), 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(body))
 }
 
@@ -744,6 +744,70 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		idx, _ := strconv.Atoi(parts[1])
 		val, _ := strconv.Atoi(parts[2])
 		return questGetBit(&p.QuestFlag, idx) == (val == 1)
+	case "MIN":
+		if len(parts) < 2 {
+			return false
+		}
+		minute, _ := strconv.Atoi(parts[1])
+		return time.Now().Minute() == minute
+	case "CHECKLUCKYPOINT":
+		val, op := parseConditionValue(parts)
+		return compareOp(p.Luck, op, val)
+	case "CHECKNAMELIST":
+		if len(parts) < 3 {
+			return false
+		}
+		return p.inNameList(parts[1], parts[2])
+	case "CHECKACCOUNTLIST":
+		if len(parts) < 3 {
+			return false
+		}
+		return p.inNameList(parts[1], p.AccountName)
+	case "CHECKIPLIST":
+		return true
+	case "CHECKLEVELEX":
+		if len(parts) < 3 {
+			return false
+		}
+		lo, _ := strconv.Atoi(parts[1])
+		hi, _ := strconv.Atoi(parts[2])
+		lv := int(p.WAbil.Level)
+		return lv >= lo && lv <= hi
+	case "CHECKBONUSPOINT":
+		val, op := parseConditionValue(parts)
+		return compareOp(p.BonusPoint, op, val)
+	case "CHECKCASTLEMASTER":
+		// Delphi: 是否城主（城主行会会长）(ObjNpc.pas:7296)
+		if p.Engine == nil || p.Engine.Castle == nil {
+			return false
+		}
+		castle := p.Engine.Castle
+		if castle.OwnerGuild == "" || p.GuildName == "" {
+			return false
+		}
+		if castle.OwnerGuild != p.GuildName {
+			return false
+		}
+		g := p.Engine.FindGuild(p.GuildName)
+		return g != nil && g.Leader == p.Name
+	case "ISCASTLEGUILD":
+		// Delphi: 是否城主行会成员 (ObjNpc.pas:7297)
+		if p.Engine == nil || p.Engine.Castle == nil {
+			return false
+		}
+		return p.Engine.Castle.OwnerGuild != "" && p.Engine.Castle.OwnerGuild == p.GuildName
+	case "ISATTACKGUILD":
+		// Delphi: 是否攻击行会 (ObjNpc.pas:7298)
+		if p.Engine == nil || p.Engine.Castle == nil {
+			return false
+		}
+		return p.Engine.Castle.IsAttackingGuild(p.GuildName)
+	case "ISDEFENSEGUILD":
+		// Delphi: 是否防守行会 (ObjNpc.pas:7299)
+		if p.Engine == nil || p.Engine.Castle == nil {
+			return false
+		}
+		return p.Engine.Castle.IsDefendingGuild(p.GuildName)
 	default:
 		return true
 	}
@@ -1432,6 +1496,357 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			count, _ := strconv.Atoi(parts[2])
 			questClearRange(&p.QuestFlag, idx, count)
 		}
+	case "EXCHANGEMAP":
+		if len(parts) < 3 {
+			return
+		}
+		p.exchangeMap(server, parts[1], parts[2])
+	case "RECALLMAP":
+		if len(parts) < 2 {
+			return
+		}
+		p.recallMap(server, parts[1])
+	case "ADDGUILDLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.addNameList("G_"+parts[1], parts[2])
+	case "DELGUILDLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.delNameList("G_"+parts[1], parts[2])
+	case "ADDACCOUNTLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.addNameList("A_"+parts[1], parts[2])
+	case "DELACCOUNTLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.delNameList("A_"+parts[1], parts[2])
+	case "ADDIPLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.addNameList("IP_"+parts[1], parts[2])
+	case "DELIPLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.delNameList("IP_"+parts[1], parts[2])
+	case "GOQUEST":
+		if len(parts) < 2 {
+			return
+		}
+		idx, _ := strconv.Atoi(parts[1])
+		questSetBit(&p.QuestUnitOpen, idx)
+	case "ENDQUEST":
+		if len(parts) < 2 {
+			return
+		}
+		idx, _ := strconv.Atoi(parts[1])
+		questSetBit(&p.QuestUnit, idx)
+	case "MAPTING":
+		if p.envir != nil {
+			for i := 0; i < 20; i++ {
+				nx := p.CurrX + rand.Intn(21) - 10
+				ny := p.CurrY + rand.Intn(21) - 10
+				if p.envir.CanWalk(nx, ny) {
+					p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
+					p.CurrX, p.CurrY = nx, ny
+					p.envir.AddObject(nx, ny, OS_MOVINGOBJECT, p)
+					p.SendRefMsg(RM_LOGON, p.Dir, nx, ny, "")
+					break
+				}
+			}
+		}
+	case "DELNOJOBSKILL":
+		job := int(p.Job)
+		var kept []*PlayerMagic
+		for _, pm := range p.LearnedMagics {
+			def := p.MagicDB.GetByID(pm.MagID)
+			if def != nil && def.Job != job {
+				continue
+			}
+			kept = append(kept, pm)
+		}
+		p.LearnedMagics = kept
+		p.SendMyMagicFull(server)
+	case "MOBPLACE":
+		if len(parts) < 5 {
+			return
+		}
+		mapName := parts[1]
+		x, _ := strconv.Atoi(parts[2])
+		y, _ := strconv.Atoi(parts[3])
+		monName := parts[4]
+		count := 1
+		if len(parts) >= 6 {
+			count, _ = strconv.Atoi(parts[5])
+		}
+		if p.Engine != nil {
+			now := time.Now().UnixMilli()
+			for i := 0; i < count; i++ {
+				p.Engine.SpawnMonsterByName(mapName, x+i, y, monName, now)
+			}
+		}
+	case "KILLSLAVE":
+		for _, sid := range p.SlaveIDs {
+			if mon := p.Engine.GetMonster(sid); mon != nil && !mon.Death {
+				mon.Death = true
+				mon.DeathTick = time.Now().UnixMilli()
+				mon.WAbil.HP = 0
+			}
+		}
+		p.SlaveIDs = nil
+	case "KILLMONEXPRATE":
+		if len(parts) < 3 {
+			return
+		}
+		rate, _ := strconv.Atoi(parts[1])
+		duration, _ := strconv.Atoi(parts[2])
+		p.KillMonExpRate = rate
+		p.KillMonExpRateTick = time.Now().UnixMilli() + int64(duration)*1000
+	case "POWERRATE":
+		if len(parts) < 3 {
+			return
+		}
+		rate, _ := strconv.Atoi(parts[1])
+		duration, _ := strconv.Atoi(parts[2])
+		p.PowerRate = rate
+		p.PowerRateTick = time.Now().UnixMilli() + int64(duration)*1000
+	case "CHANGEMODE":
+		if len(parts) < 2 {
+			return
+		}
+		mode, _ := strconv.Atoi(parts[1])
+		switch mode {
+		case 1:
+			p.Permission = 10
+		case 2:
+			p.Permission = 0
+		}
+	case "CHANGEPERMISSION":
+		if len(parts) < 2 {
+			return
+		}
+		perm, _ := strconv.Atoi(parts[1])
+		p.Permission = byte(perm)
+	case "BONUSPOINT":
+		if len(parts) < 2 {
+			return
+		}
+		val, _ := strconv.Atoi(parts[1])
+		p.BonusPoint += val
+	case "RESTBONUSPOINT":
+		p.BonusPoint = 0
+	case "CREDITPOINT":
+		if len(parts) < 2 {
+			return
+		}
+		val, _ := strconv.Atoi(parts[1])
+		p.CreditPoint += val
+	case "RENEWLEVEL":
+		p.ReNewLevel++
+		p.WAbil.Level = 1
+		p.WAbil.Exp = 0
+		p.RecalcAbilitys()
+		p.WAbil.HP = p.WAbil.MaxHP
+		p.WAbil.MP = p.WAbil.MaxMP
+		p.SendAbility(server)
+		p.sendHealthSpell(server)
+	case "RESTRENEWLEVEL":
+		p.ReNewLevel = 0
+	case "CLEARPASSWORD":
+		p.StoragePassword = ""
+	case "MONGENEX":
+		if len(parts) < 5 {
+			return
+		}
+		mapName := parts[1]
+		x, _ := strconv.Atoi(parts[2])
+		y, _ := strconv.Atoi(parts[3])
+		monName := parts[4]
+		count := 1
+		if len(parts) >= 6 {
+			count, _ = strconv.Atoi(parts[5])
+		}
+		if p.Engine != nil {
+			now := time.Now().UnixMilli()
+			for i := 0; i < count; i++ {
+				p.Engine.SpawnMonsterByName(mapName, x, y, monName, now)
+			}
+		}
+	case "CLEARMAPMON":
+		if len(parts) < 2 {
+			return
+		}
+		if p.Engine != nil && p.MapMgr != nil {
+			if env := p.MapMgr.FindMap(parts[1]); env != nil {
+				p.Engine.clearMapMonsters(env)
+			}
+		}
+	case "SETMAPMODE":
+		// 地图模式设置（简化：仅记录日志）
+	case "PKZONE":
+		// PK 区域设置（简化：仅记录日志）
+	case "TAKECASTLEGOLD":
+		if len(parts) < 2 {
+			return
+		}
+		gold, _ := strconv.Atoi(parts[1])
+		if p.Engine != nil && p.Engine.Castle != nil {
+			if p.Engine.Castle.WithdrawGold(int64(gold)) {
+				p.Gold += gold
+				goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
+				server.Send(p.Session.ID, goldResp, "")
+			}
+		}
+	case "MOBFIREBURN":
+		if len(parts) < 5 {
+			return
+		}
+		x, _ := strconv.Atoi(parts[1])
+		y, _ := strconv.Atoi(parts[2])
+		damage, _ := strconv.Atoi(parts[3])
+		duration, _ := strconv.Atoi(parts[4])
+		if p.envir != nil {
+			p.envir.AddFireEvent(server, x, y, damage, int64(duration)*1000, p.ID)
+		}
+	case "SETSCRIPTFLAG":
+		if len(parts) < 3 {
+			return
+		}
+		idx, _ := strconv.Atoi(parts[1])
+		val, _ := strconv.Atoi(parts[2])
+		if val == 1 {
+			questSetBit(&p.QuestFlag, idx)
+		} else {
+			questClearBit(&p.QuestFlag, idx)
+		}
+	case "SETAUTOGETEXP":
+		// Delphi: SETAUTOGETEXP <时间秒> <经验点> <安全区1/0> [地图名]
+		if len(parts) < 3 {
+			return
+		}
+		nTime, _ := strconv.Atoi(parts[1])
+		nPoint, _ := strconv.Atoi(parts[2])
+		if nTime <= 0 || nPoint <= 0 {
+			p.AutoGetExpPoint = 0
+			p.AutoGetExpTime = 0
+			return
+		}
+		p.AutoGetExpTime = int64(nTime) * 1000
+		p.AutoGetExpPoint = nPoint
+		p.AutoGetExpSafeZone = len(parts) >= 4 && parts[3] == "1"
+		if len(parts) >= 5 {
+			p.AutoGetExpMap = parts[4]
+		} else {
+			p.AutoGetExpMap = ""
+		}
+		p.autoGetExpTick = time.Now().UnixMilli()
+	case "VAR":
+		if len(parts) < 4 {
+			return
+		}
+		v, _ := strconv.Atoi(parts[3])
+		p.setScriptVar(parts[1], v)
+	case "CALCVAR":
+		if len(parts) < 5 {
+			return
+		}
+		a := p.getScriptVar(parts[2])
+		b := p.getScriptVar(parts[4])
+		var result int
+		switch parts[3] {
+		case "+":
+			result = a + b
+		case "-":
+			result = a - b
+		case "*":
+			result = a * b
+		case "/":
+			if b != 0 {
+				result = a / b
+			}
+		}
+		p.setScriptVar(parts[1], result)
+	case "GROUPADDLIST":
+		if len(parts) < 3 {
+			return
+		}
+		p.addNameList("GRP_"+parts[1], parts[2])
+	case "CLEARLIST":
+		if len(parts) < 2 {
+			return
+		}
+		p.clearNameList(parts[1])
+	case "TAKECHECKITEM":
+		// 收取上次 CHECKITEM 检查的物品（简化：不做操作）
+	case "PARAM1", "PARAM2", "PARAM3", "PARAM4":
+		// 临时参数（简化：不做操作）
+	case "EXEACTION":
+		// 执行外部动作（简化：不做操作）
+	case "UPGRADEITEMS", "UPGRADEITEMSEX":
+		// Delphi: 随机强化当前装备武器 (ItmUnit.pas:179-226)
+		weapon := p.UseItems[protocol.UWeapon]
+		if weapon != nil && p.ItemDB != nil {
+			if def := p.ItemDB.GetByIdx(int(weapon.WIndex)); def != nil {
+				// 随机选择一个属性 +1
+				switch rand.Intn(5) {
+				case 0:
+					weapon.BtValue[0]++
+				case 1:
+					weapon.BtValue[1]++
+				case 2:
+					weapon.BtValue[2]++
+				case 3:
+					weapon.BtValue[5]++
+				case 4:
+					weapon.BtValue[6]++
+				}
+				p.RecalcAbilitys()
+				p.SendAbility(server)
+				p.sendDuraChange(server, weapon)
+			}
+		}
+	case "SETMEMBERTYPE", "SETMEMBERLEVEL":
+		// Delphi: 设置行会成员职位 (ObjNpc.pas:8365-8366)
+		if len(parts) >= 3 && p.Engine != nil {
+			memberName := parts[1]
+			rankName := parts[2]
+			if g := p.Engine.PlayerGuild(p.Name); g != nil && g.Leader == p.Name {
+				if g.IsMember(memberName) {
+					g.Ranks[memberName] = rankName
+				}
+			}
+		}
+	case "AUTOADDGAMEGOLD", "AUTOSUBGAMEGOLD":
+		if len(parts) >= 3 {
+			gold, _ := strconv.Atoi(parts[2])
+			if parts[0] == "AUTOADDGAMEGOLD" {
+				p.Gold += gold
+			} else {
+				p.Gold -= gold
+				if p.Gold < 0 {
+					p.Gold = 0
+				}
+			}
+			goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
+			server.Send(p.Session.ID, goldResp, "")
+		}
+	case "SC_SETRANKLEVELNAME", "SETRANKLEVELNAME":
+		// 设置称号（简化：不做操作）
+	case "OPENMAGICBOX":
+		// Delphi: 开宝箱 — 给指定物品
+		if len(parts) >= 2 && p.ItemDB != nil {
+			if def := p.ItemDB.GetByName(parts[1]); def != nil {
+				p.GiveItem(def.Idx)
+				p.SendBagItemsFull(server)
+			}
+		}
 	default:
 		_ = parts
 	}
@@ -1676,7 +2091,7 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 	}
 
 	body := npc.Name + "/" + "欢迎光临！"
-	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, 0, 0, 0)
+	resp := protocol.MakeDefaultMsg(protocol.SMMerchantSay, npc.ID, uint16(npc.Face), 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeString(body))
 }
 
@@ -1862,5 +2277,55 @@ func (p *PlayObject) delNameList(listName, name string) {
 			p.nameLists[listName] = append(list[:i], list[i+1:]...)
 			return
 		}
+	}
+}
+
+func (p *PlayObject) inNameList(listName, name string) bool {
+	for _, n := range p.nameLists[listName] {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *PlayObject) clearNameList(listName string) {
+	p.nameLists[listName] = nil
+}
+
+func (p *PlayObject) exchangeMap(server *netserver.TCPServer, map1, map2 string) {
+	if p.Engine == nil || p.MapMgr == nil {
+		return
+	}
+	env1 := p.MapMgr.FindMap(map1)
+	env2 := p.MapMgr.FindMap(map2)
+	if env1 == nil || env2 == nil {
+		return
+	}
+	for _, pl := range p.Engine.allPlayers() {
+		if pl.Ghost || pl.Death {
+			continue
+		}
+		if pl.MapName == map1 {
+			pl.EnterAnotherMap(server, env2, pl.CurrX, pl.CurrY)
+		} else if pl.MapName == map2 {
+			pl.EnterAnotherMap(server, env1, pl.CurrX, pl.CurrY)
+		}
+	}
+}
+
+func (p *PlayObject) recallMap(server *netserver.TCPServer, mapName string) {
+	if p.Engine == nil {
+		return
+	}
+	for _, pl := range p.Engine.allPlayers() {
+		if pl.Ghost || pl.Death || pl.MapName != mapName {
+			continue
+		}
+		tx, ty := p.CurrX, p.CurrY
+		if p.envir != nil && !p.envir.CanWalk(tx, ty) {
+			tx, ty = p.CurrX+1, p.CurrY
+		}
+		pl.EnterAnotherMap(server, p.envir, tx, ty)
 	}
 }

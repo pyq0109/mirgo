@@ -183,7 +183,7 @@ func showDialog(scene *PlayScene, size int, msg string, buttons []ModalResult, i
 	if inputMode {
 		// 宽度 = 窗口宽 - 170, 水平居中 (x=85), 垂直居中偏上 10px,
 		// 相对窗口定位 (FState.pas:2089-2094)。
-		edit := NewEditBox(scene, "EdDlgEdit", win.Width-170, 20)
+		edit := NewEditBox(scene.gl, scene.text, "EdDlgEdit", win.Width-170, 20)
 		edit.MaxLen = 30 // 对应 EdDlgEdit.MaxLength := 30 (:662)
 		edit.Ctrl.Left = (win.Width - edit.Ctrl.Width) / 2
 		edit.Ctrl.Top = win.Height/2 - edit.Ctrl.Height/2 - 10

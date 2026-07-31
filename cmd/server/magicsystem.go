@@ -33,6 +33,9 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 		p.sendMagicFail(server)
 		return
 	}
+	if !p.checkActionSpeed(now, p.Engine.Config.GetSpellInterval(), &p.SpellTick, server) {
+		return
+	}
 
 	magID := msg.Param1
 	targetX := msg.Param2
@@ -147,7 +150,7 @@ func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power,
 				// 推动目标
 				switch t := target.(type) {
 				case *MonsterObject:
-					if !t.Death {
+					if !t.Death && !t.IsSafeZoneGuard {
 						p.envir.RemoveObject(t.CurrX, t.CurrY, OS_MOVINGOBJECT, t)
 						t.CurrX, t.CurrY = pushX, pushY
 						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, t)
@@ -418,11 +421,19 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			p.envir.AddHolyCurtainEvent(server, tx, ty, damage, 8000, p.ID)
 		}
 	case 16:
+		// Delphi: 幽灵盾 — STATE_DEFENCEUP + STATE_MAGDEFENCEUP (ObjBase.pas:24255, 24309)
+		lv := 0
+		if m := p.findMagic(16); m != nil {
+			lv = m.Level
+		}
+		duration := int16(30 + lv*15) // 30/45/60/75 秒
 		objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, 3)
 		for _, obj := range objs {
 			if other, ok := obj.(*PlayObject); ok && !other.Ghost && !other.Death {
-				other.WAbil.AC += uint32(power / 5)
-				other.WAbil.MAC += uint32(power / 5)
+				other.MakePoison(STATE_DEFENCEUP, duration, 0)
+				other.MakePoison(STATE_MAGDEFENCEUP, duration, 0)
+				other.RecalcAbilitys()
+				other.SendAbility(server)
 			}
 		}
 	case 17, 30:

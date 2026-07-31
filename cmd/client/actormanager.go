@@ -115,6 +115,7 @@ func NewActorFromMessage(msg protocol.DefaultMessage, body string) *Actor {
 			} else if raceImg == protocol.RCNpc || raceImg == protocol.RCPeaceNpc || raceImg == protocol.RCMerchant {
 				actor.Type = ActorNPC
 				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))
+				actor.MonAction = getRaceByPM50(actor.Appearance)
 			} else {
 				actor.Type = ActorMonster
 				actor.Appearance = int(uint16((feature >> 16) & 0xFFFF))

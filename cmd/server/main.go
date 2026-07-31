@@ -398,6 +398,7 @@ func main() {
 			userEngine.ProcessDoors(now)
 			userEngine.ProcessEvents(server, now)
 			userEngine.ProcessMineRegen(now)
+			userEngine.ProcessNpcIdle()
 			if userEngine.Castle != nil {
 				userEngine.Castle.ProcessCastleTick(userEngine, server, now)
 			}

@@ -21,6 +21,15 @@ const (
 // 供 UI 事件日志等无法直接持有控制台引用的代码使用。
 var gDebug *DebugConsole
 
+// debugClickLog 开关: 为 true 时鼠标点击命中信息输出到控制台。
+var debugClickLog bool
+
+func clickLogf(format string, args ...interface{}) {
+	if debugClickLog && gDebug != nil {
+		gDebug.Printf(format, args...)
+	}
+}
+
 // DebugCmd 是一条已注册的调试命令。args 不含命令名本身;
 // 对带子命令的命令 (如 "ui tree"), args 为 ["tree"]。
 type DebugCmd struct {
@@ -54,6 +63,21 @@ type DebugConsole struct {
 
 	// 每帧由 main.go 更新的鼠标逻辑坐标 (800x600 空间)
 	mouseX, mouseY float64
+
+	// 文本选择状态 (行级)
+	selStart    int  // 选中起始行 (-1=无选择)
+	selEnd      int  // 选中结束行
+	selDragging bool // 鼠标拖拽中
+	SetClipboard  func(string)  // 剪贴板写入回调 (由 main.go 设置)
+	GetClipboard  func() string // 剪贴板读取回调 (由 main.go 设置)
+
+	// 面板高度 (可拖拽调节)
+	panelH   int  // 当前高度
+	resizing bool // 正在拖拽顶边调节高度
+
+	// 滚动条显隐 (悬停/滚动时渐显)
+	sbAlpha    float32 // 当前透明度 0..1
+	sbLastTick int64   // 上次滚动/悬停的时间戳
 
 	cmds    map[string]DebugCmd
 	gl      *engine.GLState
@@ -104,6 +128,8 @@ func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer, sceneMgr *en
 		HoverIdx: -1,
 		LockIdx:  -1,
 		HistIdx:  0,
+		selStart: -1,
+		panelH:   320,
 		cmds:     make(map[string]DebugCmd),
 		gl:       gl,
 		text:     text,
@@ -115,8 +141,9 @@ func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer, sceneMgr *en
 	dc.Register("wire", "wireframe: wire | wire all | wire 0", dc.cmdWire)
 	dc.Register("fps", "toggle FPS display", dc.cmdFPS)
 	dc.Register("hud", "toggle debug status bar", dc.cmdHUD)
-	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click", dc.cmdUI)
+	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list", dc.cmdUI)
 	dc.Register("click", "click <x> <y> [right] — simulate click", dc.cmdClick)
+	dc.Register("clicklog", "toggle verbose click hit logging", dc.cmdClickLog)
 	return dc
 }
 
@@ -139,6 +166,9 @@ func (dc *DebugConsole) SetMouse(x, y float64) {
 func (dc *DebugConsole) Toggle() {
 	dc.Visible = !dc.Visible
 	dc.ScrollOff = 0
+	if dc.Visible && len(dc.Lines) == 0 {
+		dc.cmdHelp(nil)
+	}
 }
 
 // --- 输出 ---
@@ -165,11 +195,39 @@ func (dc *DebugConsole) Print(text string) {
 
 // --- 输入 ---
 
-func (dc *DebugConsole) OnKey(key int, action int) {
+func (dc *DebugConsole) OnKey(key int, action int, mods int) {
 	if action == 0 {
 		return
 	}
+	const modCtrl = 0x0002
+	if mods&modCtrl != 0 && key == 67 { // Ctrl+C
+		dc.CopySelection()
+		return
+	}
+	if mods&modCtrl != 0 && key == 86 { // Ctrl+V
+		if dc.GetClipboard != nil {
+			clip := dc.GetClipboard()
+			clip = strings.ReplaceAll(clip, "\n", " ")
+			clip = strings.ReplaceAll(clip, "\r", "")
+			remaining := 120 - utf8.RuneCountInString(dc.Input)
+			runes := []rune(clip)
+			if len(runes) > remaining {
+				runes = runes[:remaining]
+			}
+			dc.Input += string(runes)
+		}
+		return
+	}
+	if mods&modCtrl != 0 && key == 65 { // Ctrl+A
+		if len(dc.Lines) > 0 {
+			dc.selStart = 0
+			dc.selEnd = len(dc.Lines) - 1
+		}
+		return
+	}
 	switch key {
+	case 258: // Tab — 自动补全
+		dc.tabComplete()
 	case 257: // Enter
 		if action == 1 {
 			dc.execute(dc.Input)
@@ -190,23 +248,19 @@ func (dc *DebugConsole) OnKey(key int, action int) {
 		dc.histNext()
 	case 266: // PageUp
 		dc.ScrollOff += 5
-		if max := len(dc.Lines) - 1; dc.ScrollOff > max {
-			dc.ScrollOff = max
-		}
-		if dc.ScrollOff < 0 {
-			dc.ScrollOff = 0
-		}
+		dc.clampScroll()
+		dc.sbLastTick = time.Now().UnixMilli()
 	case 267: // PageDown
 		dc.ScrollOff -= 5
-		if dc.ScrollOff < 0 {
-			dc.ScrollOff = 0
-		}
+		dc.clampScroll()
+		dc.sbLastTick = time.Now().UnixMilli()
 	case 268: // Home
-		if max := len(dc.Lines) - 1; max > 0 {
-			dc.ScrollOff = max
-		}
+		dc.ScrollOff = len(dc.Lines)
+		dc.clampScroll()
+		dc.sbLastTick = time.Now().UnixMilli()
 	case 269: // End
 		dc.ScrollOff = 0
+		dc.sbLastTick = time.Now().UnixMilli()
 	}
 }
 
@@ -219,6 +273,180 @@ func (dc *DebugConsole) OnChar(char rune) {
 			dc.Input += string(char)
 		}
 	}
+}
+
+// OnScroll 鼠标滚轮滚动输出区域。yoff>0 向上滚（看更早的内容）。
+func (dc *DebugConsole) OnScroll(yoff float64) {
+	delta := int(-yoff * 3)
+	dc.ScrollOff -= delta
+	dc.clampScroll()
+	dc.sbLastTick = time.Now().UnixMilli()
+}
+
+func (dc *DebugConsole) clampScroll() {
+	if dc.ScrollOff < 0 {
+		dc.ScrollOff = 0
+	}
+	lineH := 14
+	if dc.text != nil {
+		if lh := dc.text.LineHeight(); lh > 0 {
+			lineH = lh
+		}
+	}
+	outputH := dc.panelH - 40
+	maxVisible := outputH / lineH
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	maxOff := len(dc.Lines) - maxVisible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if dc.ScrollOff > maxOff {
+		dc.ScrollOff = maxOff
+	}
+}
+
+// OnMouseButton 处理控制台可见时的鼠标选择。
+// 返回 true 表示事件被消费（鼠标在输出区域内）。
+func (dc *DebugConsole) OnMouseButton(x, y float64, button int, action int) bool {
+	if button != 0 { // 仅左键
+		return false
+	}
+	baseY := float64(ScreenHeight - dc.panelH)
+
+	if action == 1 { // press
+		// 顶边拖拽手柄 (±5px)
+		if y >= baseY-5 && y <= baseY+5 {
+			dc.resizing = true
+			return true
+		}
+	}
+	if action == 0 { // release
+		dc.resizing = false
+	}
+
+	outputTop := baseY + 8
+	outputBot := baseY + float64(dc.panelH) - 40
+	if y < outputTop || y > outputBot {
+		if action == 1 {
+			dc.selStart = -1
+			dc.selDragging = false
+		}
+		return false
+	}
+	lineH := float32(14)
+	if dc.text != nil {
+		if lh := dc.text.LineHeight(); lh > 0 {
+			lineH = float32(lh)
+		}
+	}
+	outputH := float32(dc.panelH - 40)
+	maxVisible := int(outputH / lineH)
+	total := len(dc.Lines)
+	endIdx := total - dc.ScrollOff
+	if endIdx > total {
+		endIdx = total
+	}
+	if endIdx < 0 {
+		endIdx = 0
+	}
+	startIdx := endIdx - maxVisible
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	relLine := int((float32(y) - float32(outputTop)) / lineH)
+	lineIdx := startIdx + relLine
+	if lineIdx >= endIdx {
+		lineIdx = endIdx - 1
+	}
+	if lineIdx < 0 {
+		lineIdx = 0
+	}
+	switch action {
+	case 1: // press
+		dc.selStart = lineIdx
+		dc.selEnd = lineIdx
+		dc.selDragging = true
+	case 0: // release
+		dc.selDragging = false
+	}
+	return true
+}
+
+// OnMouseMoveSelect 拖拽时更新选择范围。
+func (dc *DebugConsole) OnMouseMoveSelect(x, y float64) {
+	if dc.resizing {
+		newH := ScreenHeight - int(y)
+		if newH < 150 {
+			newH = 150
+		}
+		if newH > 550 {
+			newH = 550
+		}
+		dc.panelH = newH
+		return
+	}
+	if !dc.selDragging {
+		return
+	}
+	baseY := float32(ScreenHeight - dc.panelH)
+	outputTop := baseY + 8
+	lineH := float32(14)
+	if dc.text != nil {
+		if lh := dc.text.LineHeight(); lh > 0 {
+			lineH = float32(lh)
+		}
+	}
+	outputH := float32(dc.panelH - 40)
+	maxVisible := int(outputH / lineH)
+	total := len(dc.Lines)
+	endIdx := total - dc.ScrollOff
+	if endIdx > total {
+		endIdx = total
+	}
+	if endIdx < 0 {
+		endIdx = 0
+	}
+	startIdx := endIdx - maxVisible
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	relLine := int((float32(y) - float32(outputTop)) / lineH)
+	lineIdx := startIdx + relLine
+	if lineIdx >= endIdx {
+		lineIdx = endIdx - 1
+	}
+	if lineIdx < 0 {
+		lineIdx = 0
+	}
+	dc.selEnd = lineIdx
+}
+
+// CopySelection 将选中行复制到剪贴板。
+func (dc *DebugConsole) CopySelection() {
+	if dc.selStart < 0 || dc.SetClipboard == nil {
+		return
+	}
+	lo, hi := dc.selStart, dc.selEnd
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	if lo < 0 {
+		lo = 0
+	}
+	if hi >= len(dc.Lines) {
+		hi = len(dc.Lines) - 1
+	}
+	var sb strings.Builder
+	for i := lo; i <= hi; i++ {
+		if i > lo {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(dc.Lines[i])
+	}
+	dc.SetClipboard(sb.String())
+	dc.Printf("copied %d line(s)", hi-lo+1)
 }
 
 func (dc *DebugConsole) histPrev() {
@@ -243,6 +471,35 @@ func (dc *DebugConsole) histNext() {
 		return
 	}
 	dc.Input = dc.History[dc.HistIdx]
+}
+
+func (dc *DebugConsole) tabComplete() {
+	prefix := strings.TrimSpace(dc.Input)
+	if prefix == "" {
+		return
+	}
+	// 只补全第一个 token (命令名)
+	parts := strings.SplitN(prefix, " ", 2)
+	cmdPrefix := parts[0]
+	var matches []string
+	for name := range dc.cmds {
+		if strings.HasPrefix(name, cmdPrefix) {
+			matches = append(matches, name)
+		}
+	}
+	if len(matches) == 0 {
+		return
+	}
+	sort.Strings(matches)
+	if len(matches) == 1 {
+		rest := ""
+		if len(parts) > 1 {
+			rest = " " + parts[1]
+		}
+		dc.Input = matches[0] + rest
+	} else {
+		dc.Printf("%s", "  "+strings.Join(matches, "  "))
+	}
 }
 
 // --- 指令解析 ---
@@ -333,7 +590,7 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		return
 	}
 	if len(args) == 0 {
-		dc.Printf("usage: ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click")
+		dc.Printf("usage: ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list")
 		return
 	}
 	switch args[0] {
@@ -441,6 +698,12 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		ui.RouteMouseDown(cx, cy, 0)
 		ui.RouteMouseUp(cx, cy, 0)
 		dc.Printf("clicked %s at (%d,%d)", c.Name, cx, cy)
+	case "list":
+		filter := ""
+		if len(args) > 1 {
+			filter = args[1]
+		}
+		dc.Print(ui.DebugList(filter))
 	default:
 		dc.Printf("unknown ui subcommand: %s", args[0])
 	}
@@ -471,6 +734,11 @@ func (dc *DebugConsole) cmdClick(args []string) {
 	dc.Printf("click (%d,%d) btn=%d consumed=%v", x, y, button, consumed)
 }
 
+func (dc *DebugConsole) cmdClickLog(args []string) {
+	debugClickLog = !debugClickLog
+	dc.Printf("clicklog %s", onOff(debugClickLog))
+}
+
 // --- FPS 统计 ---
 
 func (dc *DebugConsole) updateFPS() {
@@ -498,26 +766,63 @@ func (dc *DebugConsole) Render(proj [16]float32) {
 	}
 	if dc.Visible {
 		dc.renderPanel(proj)
-		return
-	}
-	if dc.ShowHUD || dc.WireMode > 0 {
+	} else if dc.ShowHUD || dc.WireMode > 0 {
 		dc.renderStatusBar(proj)
 	}
+	if gActiveUI != nil && gActiveUI.ShowHoverInfo {
+		dc.renderHoverInfo(proj)
+	}
+}
+
+func (dc *DebugConsole) renderHoverInfo(proj [16]float32) {
+	info := gActiveUI.DebugHoverInfo(int(dc.mouseX), int(dc.mouseY))
+	if info == "" {
+		return
+	}
+	dc.drawHoverLabel(proj, info)
+}
+
+func (dc *DebugConsole) drawHoverLabel(proj [16]float32, info string) {
+	gl := dc.gl
+	text := dc.text
+	x := float32(dc.mouseX) + 12
+	y := float32(dc.mouseY) + 12
+	w := float32(text.MeasureText(info)) + 8
+	lineH := float32(text.LineHeight())
+	if lineH <= 0 {
+		lineH = 14
+	}
+	if x+w > 800 {
+		x = 800 - w
+	}
+	if y+lineH+4 > 600 {
+		y = float32(dc.mouseY) - lineH - 8
+	}
+	gl.DrawQuadColor(x, y, w, lineH+4, 0, 0, 0, 0.8, proj)
+	text.DrawText(info, x+4, y+2, 1, 1, 0, 1, proj)
 }
 
 func (dc *DebugConsole) renderPanel(proj [16]float32) {
 	gl := dc.gl
 	text := dc.text
-	const consoleH = 220
-	const baseY = float32(ScreenHeight - consoleH)
+	consoleH := float32(dc.panelH)
+	baseY := float32(ScreenHeight) - consoleH
 	gl.DrawQuadColor(0, baseY, 800, consoleH, 0, 0, 0, 0.75, proj)
+
+	// 顶边拖拽手柄 (悬停时高亮)
+	handleAlpha := float32(0.4)
+	if dc.mouseY >= float64(baseY)-3 && dc.mouseY <= float64(baseY)+6 {
+		handleAlpha = 0.9
+	}
+	gl.DrawQuadColor(0, baseY, 800, 3, 0.6, 0.6, 0.6, handleAlpha, proj)
 
 	lineH := float32(text.LineHeight())
 	if lineH <= 0 {
 		lineH = 14
 	}
 	outputTop := baseY + 8
-	maxVisible := int(180 / lineH)
+	outputH := consoleH - 40
+	maxVisible := int(outputH / lineH)
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
@@ -536,11 +841,64 @@ func (dc *DebugConsole) renderPanel(proj [16]float32) {
 	}
 	for i := startIdx; i < endIdx; i++ {
 		y := outputTop + float32(i-startIdx)*lineH
-		text.DrawText(dc.Lines[i], 8, y, 0.8, 0.8, 0.8, 1.0, proj)
+		if dc.selStart >= 0 {
+			lo, hi := dc.selStart, dc.selEnd
+			if lo > hi {
+				lo, hi = hi, lo
+			}
+			if i >= lo && i <= hi {
+				gl.DrawQuadColor(0, y, 800, lineH, 0.2, 0.4, 0.8, 0.4, proj)
+			}
+		}
+		line := dc.Lines[i]
+		const maxTextW = 780
+		if text.MeasureText(line) > maxTextW {
+			runes := []rune(line)
+			for len(runes) > 3 && text.MeasureText(string(runes)+"...") > maxTextW {
+				runes = runes[:len(runes)-1]
+			}
+			line = string(runes) + "..."
+		}
+		text.DrawText(line, 8, y, 0.8, 0.8, 0.8, 1.0, proj)
 	}
 
-	gl.DrawQuadColor(0, baseY+190, 800, 1, 0.5, 0.5, 0.5, 0.5, proj)
-	inputY := baseY + 196
+	// 滚动条 (细、渐显)
+	now := time.Now().UnixMilli()
+	mouseInOutput := dc.mouseY >= float64(outputTop) && dc.mouseY <= float64(outputTop+outputH)
+	if mouseInOutput || now-dc.sbLastTick < 1500 {
+		dc.sbAlpha += 0.15
+		if dc.sbAlpha > 1 {
+			dc.sbAlpha = 1
+		}
+	} else {
+		dc.sbAlpha -= 0.05
+		if dc.sbAlpha < 0 {
+			dc.sbAlpha = 0
+		}
+	}
+	if total > maxVisible && dc.sbAlpha > 0.01 {
+		const sbW = float32(3)
+		sbX := float32(795)
+		trackTop := outputTop
+		trackH := outputH
+		gl.DrawQuadColor(sbX, trackTop, sbW, trackH, 0.4, 0.4, 0.4, 0.3*dc.sbAlpha, proj)
+		thumbRatio := float32(maxVisible) / float32(total)
+		thumbH := trackH * thumbRatio
+		if thumbH < 12 {
+			thumbH = 12
+		}
+		maxScroll := total - maxVisible
+		scrollFrac := float32(0)
+		if maxScroll > 0 {
+			scrollFrac = float32(maxScroll-dc.ScrollOff) / float32(maxScroll)
+		}
+		thumbY := trackTop + (trackH-thumbH)*scrollFrac
+		gl.DrawQuadColor(sbX, thumbY, sbW, thumbH, 0.8, 0.8, 0.8, 0.7*dc.sbAlpha, proj)
+	}
+
+	sepY := baseY + consoleH - 30
+	gl.DrawQuadColor(0, sepY, 800, 1, 0.5, 0.5, 0.5, 0.5, proj)
+	inputY := sepY + 6
 	prompt := "> " + dc.Input
 	text.DrawText(prompt, 8, inputY, 0, 1, 0, 1, proj)
 	if time.Now().UnixMilli()%1000 < 500 {

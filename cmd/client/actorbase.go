@@ -84,7 +84,6 @@ type Actor struct {
 	Type ActorType
 
 	MonAction *MonsterAction
-	NpcAppr   int
 
 	HitEffectNumber int
 
@@ -141,6 +140,17 @@ type Actor struct {
 	ShowHP          bool  // SMOpenHealth: 显示头顶HP条
 	ShowHPVal       int   // 当前HP
 	ShowMaxHPVal    int   // 最大HP
+
+	// NPC 特效覆盖层（Delphi TNpcActor: Actor.pas:760-775）
+	NpcUseEffect     bool  // m_boUseEffect
+	NpcEffectStart   int   // m_nEffectStart
+	NpcEffectFrame   int   // m_nEffectFrame
+	NpcEffectEnd     int   // m_nEffectEnd
+	NpcEffectTime    int64 // m_dwEffectStartTime
+	NpcEffectFTime   int   // m_dwEffectFrameTime
+	NpcEffX, NpcEffY int  // m_nEffX, m_nEffY（特效位置偏移）
+	NpcEffectHold    bool  // m_bo248（限时循环，appearance 52 挖掘）
+	NpcEffectHoldEnd int64 // m_dwUseEffectTick（限时循环截止时间）
 }
 
 func NewActor(recogID int32, x, y, dir int) *Actor {
@@ -498,13 +508,84 @@ func (a *Actor) calcMonsterFrame() {
 	}
 }
 
+// calcNPCFrame 对应 Delphi TNpcActor.CalcActorFrame（Actor.pas:2866-2960）。
+// NPC 只处理 SMTurn/SMHit/SMDigUp，其余动作回落到待机；不支持 Walk/Run/Struck/Death。
 func (a *Actor) calcNPCFrame() {
-	npcDir := a.Dir % 3
-	a.StartFrame = GetNpcOffset(a.Appearance) + npcDir*8
-	a.EndFrame = a.StartFrame + 7
+	if a.MonAction == nil {
+		return
+	}
+	a.Dir = a.Dir % 3
+
+	var action ActionInfo
+	switch a.CurrentAction {
+	case protocol.SMTurn:
+		action = a.MonAction.ActStand
+		a.Shift(a.Dir, 0, 0, 1)
+		a.npcActivateTurnEffect()
+	case protocol.SMHit:
+		// Delphi Actor.pas:2917-2942：appearance 33/34/52 用 ActStand 代替 ActAttack
+		switch a.Appearance {
+		case 33, 34, 52:
+			action = a.MonAction.ActStand
+		default:
+			action = a.MonAction.ActAttack
+		}
+		if a.Appearance == 51 {
+			a.NpcUseEffect = true
+			a.NpcEffectStart = 60
+			a.NpcEffectFrame = 60
+			a.NpcEffectEnd = 67
+			a.NpcEffectFTime = 500
+			a.NpcEffectTime = 0
+		}
+	case protocol.SMDigUp:
+		action = a.MonAction.ActStand
+		if a.Appearance == 52 {
+			a.NpcEffectHold = true
+			a.NpcEffectHoldEnd = 0 // 由 Run() 用 now+23000 设置
+			a.NpcUseEffect = true
+			a.NpcEffectStart = 60
+			a.NpcEffectFrame = 60
+			a.NpcEffectEnd = 71
+			a.NpcEffectFTime = 100
+			a.NpcEffectTime = 0
+		}
+	default:
+		action = a.MonAction.ActStand
+	}
+	a.StartFrame, a.EndFrame = CalcFrame(action, a.Dir)
 	a.CurrentFrame = a.StartFrame
-	a.FrameTime = 200
+	a.FrameTime = action.FTime
 	a.LastFrameTick = 0
+}
+
+// npcActivateTurnEffect 在 SMTurn 时按 appearance 激活特效（Delphi Actor.pas:2893-2916）。
+func (a *Actor) npcActivateTurnEffect() {
+	switch {
+	case a.Appearance == 33 || a.Appearance == 34:
+		if !a.NpcUseEffect {
+			a.NpcUseEffect = true
+			a.NpcEffectStart = 0
+			a.NpcEffectFrame = 0
+			a.NpcEffectEnd = 9
+			a.NpcEffectFTime = 300
+			a.NpcEffectTime = 0
+		}
+	case a.Appearance >= 42 && a.Appearance <= 47:
+		a.NpcUseEffect = true
+		a.NpcEffectStart = 0
+		a.NpcEffectFrame = 0
+		a.NpcEffectEnd = 19
+		a.NpcEffectFTime = 100
+		a.NpcEffectTime = 0
+	case a.Appearance == 51:
+		a.NpcUseEffect = true
+		a.NpcEffectStart = 60
+		a.NpcEffectFrame = 60
+		a.NpcEffectEnd = 67
+		a.NpcEffectFTime = 500
+		a.NpcEffectTime = 0
+	}
 }
 
 func (a *Actor) Move(now int64) bool {
@@ -604,6 +685,27 @@ func (a *Actor) Run(now int64) {
 	}
 
 	a.DefaultMotion(now)
+
+	// NPC 特效帧推进（Delphi TNpcActor.Run: Actor.pas:3086-3119）
+	if a.Type == ActorNPC && a.NpcUseEffect {
+		if a.NpcEffectHold && a.NpcEffectHoldEnd == 0 {
+			a.NpcEffectHoldEnd = now + 23000
+		}
+		if now-a.NpcEffectTime >= int64(a.NpcEffectFTime) {
+			a.NpcEffectTime = now
+			if a.NpcEffectFrame < a.NpcEffectEnd {
+				a.NpcEffectFrame++
+			} else {
+				if a.NpcEffectHold {
+					if now > a.NpcEffectHoldEnd {
+						a.NpcUseEffect = false
+						a.NpcEffectHold = false
+					}
+				}
+				a.NpcEffectFrame = a.NpcEffectStart
+			}
+		}
+	}
 }
 
 func (a *Actor) DefaultMotion(now int64) {
@@ -632,18 +734,6 @@ func (a *Actor) DefaultMotion(now int64) {
 			}
 			start, _ := CalcFrame(action, a.Dir)
 			a.CurrentFrame = start + a.CurrentDefFrame
-		} else if a.Type == ActorNPC {
-			// NPC没有MonAction，使用简单的8帧待机动画循环
-			a.DefFrameCount = 8
-			if now-a.DefFrameTime > 200 { // 200ms每帧
-				a.DefFrameTime = now
-				a.CurrentDefFrame++
-				if a.CurrentDefFrame >= a.DefFrameCount {
-					a.CurrentDefFrame = 0
-				}
-			}
-			// NPC的StartFrame已在calcNPCFrame中设置，这里只需在当前方向上偏移
-			a.CurrentFrame = a.StartFrame + a.CurrentDefFrame
 		}
 		a.Shift(a.Dir, 0, 0, 1)
 		return
@@ -861,6 +951,10 @@ func (a *Actor) getNPCBodyImage(resources *engine.ResourceManager) *wil.Image {
 	if resources.Npc == nil {
 		return nil
 	}
+	// Delphi Actor.pas:3053-3054：appearance 42-47 的 body 为 nil（纯特效渲染）
+	if a.Appearance >= 42 && a.Appearance <= 47 {
+		return nil
+	}
 	idx := GetNpcOffset(a.Appearance) + a.CurrentFrame
 	if idx < 0 || idx >= resources.Npc.Count {
 		return nil
@@ -980,7 +1074,8 @@ func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceMana
 			fmtAlpha(stateAlpha(a.State)), transparent, opaqueBlack, opaqueOther)
 	}
 
-	blend := a.State&0x00800000 != 0
+	// Delphi Actor.pas:2982-2990：appearance 51 强制混合模式
+	blend := a.State&0x00800000 != 0 || (a.Type == ActorNPC && a.Appearance == 51)
 	if blend {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 	}
@@ -989,6 +1084,55 @@ func (a *Actor) drawBody(glState *engine.GLState, resources *engine.ResourceMana
 	if blend {
 		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	}
+}
+
+// DrawNpcEffect 绘制 NPC 特效覆盖层（Delphi TNpcActor.DrawEff: Actor.pas:3000-3010）。
+// 使用加法混合，位置偏移按 appearance 不同（Actor.pas:3055-3082）。
+func (a *Actor) DrawNpcEffect(glState *engine.GLState, resources *engine.ResourceManager, screenX, screenY float32, proj [16]float32) {
+	if a.Type != ActorNPC || !a.NpcUseEffect || resources.Npc == nil {
+		return
+	}
+	idx := GetNpcOffset(a.Appearance) + a.NpcEffectFrame
+	if idx < 0 || idx >= resources.Npc.Count {
+		return
+	}
+	img := resources.Npc.GetImage(idx)
+	if img == nil || img.RGBA == nil {
+		return
+	}
+	tex := resources.GetTexture(resources.Npc, idx)
+	if tex == 0 {
+		return
+	}
+
+	effX, effY := float32(img.HotX), float32(img.HotY)
+	switch a.Appearance {
+	case 42:
+		effX += 71
+		effY += 5
+	case 43:
+		effX += 71
+		effY += 37
+	case 44:
+		effX += 7
+		effY += 12
+	case 45:
+		effX += 6
+		effY += 12
+	case 46:
+		effX += 7
+		effY += 12
+	case 47:
+		effX += 8
+		effY += 12
+	}
+
+	drawX := screenX + effX + float32(a.ShiftX)
+	drawY := screenY + effY + float32(a.ShiftY)
+
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+	glState.DrawQuad(tex, drawX, drawY, float32(img.Width), float32(img.Height), proj)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 }
 
 func (a *Actor) wingBehind() bool {

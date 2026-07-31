@@ -19,6 +19,7 @@ const (
 )
 
 func (p *PlayObject) ProcessStatusEffects(server *netserver.TCPServer, now int64) {
+	needRecalc := false
 	for i := 0; i < 12; i++ {
 		if p.StatusTimeArr[i] > 0 {
 			p.StatusTimeArr[i]--
@@ -28,11 +29,18 @@ func (p *PlayObject) ProcessStatusEffects(server *netserver.TCPServer, now int64
 			}
 			if p.StatusTimeArr[i] <= 0 {
 				p.StatusTimeArr[i] = 0
-				if i == STATE_TRANSPARENT {
+				switch i {
+				case STATE_TRANSPARENT:
 					p.Hidden = false
+				case STATE_DEFENCEUP, STATE_MAGDEFENCEUP:
+					needRecalc = true
 				}
 			}
 		}
+	}
+	if needRecalc {
+		p.RecalcAbilitys()
+		p.SendAbility(server)
 	}
 
 	// Delphi: 绿毒 DamageHealth(m_btGreenPoisoningPoint + 1) (ObjBase.pas:4261)

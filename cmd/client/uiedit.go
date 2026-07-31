@@ -3,6 +3,8 @@ package main
 import (
 	"time"
 	"unicode/utf8"
+
+	"github.com/pyq0109/mirgo/internal/engine"
 )
 
 // EditBox — 单行文本输入控件, 移植自 Delphi TEdit 用法
@@ -10,15 +12,17 @@ import (
 // 通过 UIManager 获取焦点; 处理字符输入及 Backspace/Enter/Esc。
 type EditBox struct {
 	Ctrl    *UIControl
-	scene   *PlayScene
+	gl      *engine.GLState
+	text    *engine.TextRenderer
 	Text    string
 	MaxLen  int // 字符数
+	Masked  bool // true 时显示 *** 代替明文
 	OnEnter func(text string)
 	OnEsc   func()
 }
 
-func NewEditBox(scene *PlayScene, name string, w, h int) *EditBox {
-	e := &EditBox{scene: scene, MaxLen: 80}
+func NewEditBox(gl *engine.GLState, text *engine.TextRenderer, name string, w, h int) *EditBox {
+	e := &EditBox{gl: gl, text: text, MaxLen: 80}
 	e.Ctrl = NewUIControl(name, KindControl)
 	e.Ctrl.Width = w
 	e.Ctrl.Height = h
@@ -58,19 +62,26 @@ func NewEditBox(scene *PlayScene, name string, w, h int) *EditBox {
 func (e *EditBox) Clear() { e.Text = "" }
 
 func (e *EditBox) paint(proj [16]float32) {
-	s := e.scene
-	if s == nil || s.text == nil {
+	if e.gl == nil || e.text == nil {
 		return
 	}
 	x, y := float32(e.Ctrl.AbsX()), float32(e.Ctrl.AbsY())
 	w, h := float32(e.Ctrl.Width), float32(e.Ctrl.Height)
-	s.gl.DrawQuadColor(x, y, w, h, 0, 0, 0, 0.6, proj)
+	e.gl.DrawQuadColor(x, y, w, h, 0, 0, 0, 0.6, proj)
 
 	display := e.Text
-	focused := s.ui.Focused == e.Ctrl
+	if e.Masked {
+		runes := []rune(display)
+		masked := make([]rune, len(runes))
+		for i := range runes {
+			masked[i] = '*'
+		}
+		display = string(masked)
+	}
+	focused := gActiveUI != nil && gActiveUI.Focused == e.Ctrl
 	if focused && time.Now().UnixMilli()%1000 < 500 {
 		display += "|"
 	}
-	s.text.DrawText(display, x+4, y+(h-float32(s.text.LineHeight()))/2,
+	e.text.DrawText(display, x+4, y+(h-float32(e.text.LineHeight()))/2,
 		1, 1, 1, 1, proj)
 }

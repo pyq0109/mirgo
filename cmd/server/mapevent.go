@@ -50,7 +50,7 @@ func (e *Environment) processFireDamage(server *netserver.TCPServer, ev *MapEven
 	obj := e.GetMovingObject(ev.X, ev.Y)
 	switch o := obj.(type) {
 	case *MonsterObject:
-		if !o.Death {
+		if !o.Death && !o.IsSafeZoneGuard {
 			hp := int(o.WAbil.HP) - ev.Damage
 			if hp <= 0 {
 				o.Death = true

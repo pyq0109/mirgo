@@ -33,6 +33,11 @@ type PlayObject struct {
 	skeletonSent   bool
 
 	WalkTick       int64
+	RunTick        int64
+	HorseRunTick   int64
+	TurnTick       int64
+	SpellTick      int64
+	DigUpTick      int64
 	WalkSpeed      int64
 	RunSpeed       int64
 	OverSpeedCount int
@@ -128,6 +133,21 @@ type PlayObject struct {
 	ScriptVarsD [10]int  // 动态变量 D0-D9
 	ScriptVarsM [100]int // 持久变量 M0-M99
 
+	CreditPoint    int    // 声望点（Delphi m_nCreditPoint）
+	ReNewLevel     int    // 转生等级（Delphi m_nReNewLevel）
+	StoragePassword string // 仓库密码
+	AutoGetExp     int    // 自动获取经验点数
+
+	// Delphi: 自动获取经验 (ObjBase.pas:7100-7105)
+	AutoGetExpTime     int64  // 间隔（毫秒）
+	AutoGetExpPoint    int    // 每次经验值
+	AutoGetExpMap      string // 限定地图（空=不限）
+	AutoGetExpSafeZone bool   // 是否要求安全区
+	autoGetExpTick     int64  // 上次给经验时间
+
+	// Delphi: 反外挂 XOR 校验 (ObjBase.pas:7017-7048)
+	RemoteXORKey int32 // 客户端上报密钥（-1=未设置）
+
 	StrScriptVars map[string]string
 	nameLists     map[string][]string
 
@@ -145,6 +165,12 @@ type PlayObject struct {
 	TimeRecallTick int64
 	RecallMap      string
 	RecallX, RecallY int
+
+	// Delphi: 经验/攻击倍率限时 (ObjBase.pas:6882-6903)
+	KillMonExpRate     int   // 杀怪经验倍率（百分比，100=1x，0 视为 100）
+	KillMonExpRateTick int64 // 到期时间（0=无限制）
+	PowerRate          int   // 攻击力倍率（百分比，100=1x，0 视为 100）
+	PowerRateTick      int64 // 到期时间
 
 	// 渐进回复池（Delphi m_nIncHealth/m_nIncSpell/m_nIncHealing, ObjBase.pas:3782）
 	IncHealth   int
@@ -213,6 +239,26 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	// Delphi: FireHit 20s 过期 (ObjBase.pas:6427)
 	if p.FireHitActive && now-p.FireHitActivateTick > 20000 {
 		p.FireHitActive = false
+	}
+
+	// Delphi: 经验/攻击倍率到期重置 (ObjBase.pas:6882-6903)
+	if p.KillMonExpRateTick > 0 && now >= p.KillMonExpRateTick {
+		p.KillMonExpRate = 0
+		p.KillMonExpRateTick = 0
+	}
+	if p.PowerRateTick > 0 && now >= p.PowerRateTick {
+		p.PowerRate = 0
+		p.PowerRateTick = 0
+	}
+
+	// Delphi: 自动获取经验 (ObjBase.pas:7100-7105)
+	if p.AutoGetExpPoint > 0 && p.AutoGetExpTime > 0 && now-p.autoGetExpTick >= p.AutoGetExpTime {
+		mapOK := p.AutoGetExpMap == "" || p.MapName == p.AutoGetExpMap
+		safeOK := !p.AutoGetExpSafeZone || CheckSafeZone(p.MapName, p.CurrX, p.CurrY)
+		if mapOK && safeOK {
+			p.autoGetExpTick = now
+			p.addExp(server, p.AutoGetExpPoint)
+		}
 	}
 
 	// TIMERECALL 到期检查
@@ -394,6 +440,10 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 	if dir < 0 || dir > 7 {
 		return
 	}
+	now := time.Now().UnixMilli()
+	if !p.checkActionSpeed(now, p.Engine.Config.GetTurnInterval(), &p.TurnTick, server) {
+		return
+	}
 	p.TurnTo(dir)
 	server.SendRaw(p.Session.ID, "#+GOOD!")
 }
@@ -412,7 +462,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
 		interval *= 2
 	}
-	if !p.checkMoveSpeed(now, interval, server) {
+	if !p.checkActionSpeed(now, interval, &p.WalkTick, server) {
 		return
 	}
 
@@ -463,7 +513,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
 		interval *= 2
 	}
-	if !p.checkMoveSpeed(now, interval, server) {
+	if !p.checkActionSpeed(now, interval, &p.RunTick, server) {
 		return
 	}
 
@@ -512,7 +562,7 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
 		interval *= 2
 	}
-	if !p.checkMoveSpeed(now, interval, server) {
+	if !p.checkActionSpeed(now, interval, &p.HorseRunTick, server) {
 		return
 	}
 	dir := msg.Param1
@@ -555,15 +605,15 @@ func (p *PlayObject) runIgnoreEntities() bool {
 	return cfg.Game.DisableRun || (p.Permission > 9 && cfg.Game.GMRunAll)
 }
 
-// checkMoveSpeed 校验移动间隔并记录超速违规。
-// 返回 true 表示允许移动，false 表示拒绝（速度过快）。
-func (p *PlayObject) checkMoveSpeed(now, interval int64, server *netserver.TCPServer) bool {
+// checkActionSpeed 校验动作间隔并记录超速违规。
+// 返回 true 表示允许动作，false 表示拒绝（速度过快）。
+func (p *PlayObject) checkActionSpeed(now, interval int64, tick *int64, server *netserver.TCPServer) bool {
 	// E5: 超速计数衰减 — 10秒无违规则 -1
 	if p.OverSpeedCount > 0 && now-p.LastSpeedViolationTick > 10000 {
 		p.OverSpeedCount--
 		p.LastSpeedViolationTick = now
 	}
-	if now-p.WalkTick < interval {
+	if now-*tick < interval {
 		p.OverSpeedCount++
 		p.LastSpeedViolationTick = now
 		cfg := p.Engine.Config
@@ -575,7 +625,7 @@ func (p *PlayObject) checkMoveSpeed(now, interval int64, server *netserver.TCPSe
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return false
 	}
-	p.WalkTick = now
+	*tick = now
 	return true
 }
 
@@ -968,6 +1018,14 @@ func (p *PlayObject) calcDamage(target *BaseObject) int {
 		}
 	}
 
+	// Delphi: 攻击力倍率 (ObjBase.pas:6882-6903, m_nPowerRate)
+	if rate := p.PowerRate; rate > 0 && rate != 100 {
+		attack = attack * rate / 100
+		if attack < 1 {
+			attack = 1
+		}
+	}
+
 	if target == nil {
 		if attack < 1 {
 			attack = 1
@@ -991,6 +1049,11 @@ func (p *PlayObject) calcDamage(target *BaseObject) int {
 }
 
 func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject, damage int, dir int) {
+	// 安全区守卫不可被玩家伤害
+	if mon := p.envir.getMonsterByBase(target); mon != nil && mon.IsSafeZoneGuard {
+		return
+	}
+
 	// Delphi: 魔法盾 1.5x MP 消耗完全吸收 (ObjBase.pas:2455-2469)
 	if tp := p.envir.getPlayerByBase(target); tp != nil && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
 		mpCost := damage + damage/2 // 1.5x
@@ -1182,6 +1245,14 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	exp := mon.Exp
 	if exp <= 0 {
 		exp = 10
+	}
+
+	// Delphi: 经验倍率 (ObjBase.pas:1828-1842)
+	if rate := p.KillMonExpRate; rate > 0 && rate != 100 {
+		exp = exp * rate / 100
+		if exp < 1 {
+			exp = 1
+		}
 	}
 
 	if party := p.partyOf(); party != nil && len(party.Members) > 1 {
@@ -2043,12 +2114,13 @@ func (p *PlayObject) recallSlaves(server *netserver.TCPServer) {
 	}
 }
 
-// isNearNpc 检查玩家是否在NPC附近（3格范围内）且在同一地图
+// isNearNpc 检查玩家是否在NPC附近（15格范围内）且在同一地图
+// Delphi ObjBase.pas:9833 使用 15 格距离。
 func (p *PlayObject) isNearNpc(npc *NpcObject) bool {
 	if npc == nil || p.MapName != npc.MapName {
 		return false
 	}
 	dx := p.CurrX - npc.CurrX
 	dy := p.CurrY - npc.CurrY
-	return dx >= -3 && dx <= 3 && dy >= -3 && dy <= 3
+	return dx >= -15 && dx <= 15 && dy >= -15 && dy <= 15
 }
