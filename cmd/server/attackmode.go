@@ -169,11 +169,12 @@ func (p *PlayObject) HandleDropGold(msg SendMessage, server *netserver.TCPServer
 	p.Engine.mu.Unlock()
 
 	gi := &GroundItem{
-		ID:   id,
-		Name: "金币",
-		X:    p.CurrX,
-		Y:    p.CurrY + 1,
-		Gold: amount,
+		ID:       id,
+		Name:     "金币",
+		X:        p.CurrX,
+		Y:        p.CurrY + 1,
+		Gold:     amount,
+		DropTick: time.Now().UnixMilli(),
 	}
 	if p.envir != nil {
 		p.envir.AddGroundItem(gi)

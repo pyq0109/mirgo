@@ -145,6 +145,12 @@ type PlayObject struct {
 	TimeRecallTick int64
 	RecallMap      string
 	RecallX, RecallY int
+
+	// 渐进回复池（Delphi m_nIncHealth/m_nIncSpell/m_nIncHealing, ObjBase.pas:3782）
+	IncHealth   int
+	IncSpell    int
+	IncHealing  int
+	lastIncTick int64
 }
 
 type VisibleEntry struct {
@@ -202,6 +208,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	}
 
 	p.Regenerate(server, now)
+	p.processIncHealth(server, now)
 
 	// Delphi: FireHit 20s 过期 (ObjBase.pas:6427)
 	if p.FireHitActive && now-p.FireHitActivateTick > 20000 {
@@ -1033,25 +1040,63 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 
 	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, target.CurrX, target.CurrY, dir)
 
+	// 攻击方武器磨损（Delphi: DoDamageWeapon, ObjBase.pas:18967）
+	if damage > 0 {
+		if wp := p.UseItems[protocol.UWeapon]; wp != nil && wp.Dura > 0 {
+			wear := damage / 5
+			if wear < 1 {
+				wear = 1
+			}
+			if int(wp.Dura) <= wear {
+				p.UseItems[protocol.UWeapon] = nil
+				p.RecalcAbilitys()
+				p.updateAppearance()
+				p.SendUseItemsFull(server)
+				log.Logf(log.LevelInfo, "Items", "%s weapon broke (Dura was %d)", p.Name, wp.Dura)
+			} else {
+				wp.Dura -= uint16(wear)
+				p.sendDuraChange(server, wp)
+			}
+		}
+	}
+
 	if mon := p.envir.getMonsterByBase(target); mon != nil {
 		mon.OnStruck(p.ID, time.Now().UnixMilli(), p.Engine)
 	}
 
+	// 被击方装备磨损与破碎（Delphi: StruckDamage, ObjBase.pas:22461）
 	if tp := p.envir.getPlayerByBase(target); tp != nil {
 		tp.LastHiterID = p.ID
 		tp.LastHiterTick = time.Now().UnixMilli()
 		tp.StruckTick = time.Now().UnixMilli()
+
+		equipChanged := false
 		if it := tp.UseItems[protocol.UDress]; it != nil && it.Dura > 0 {
 			it.Dura--
-			tp.sendDuraChange(server, it)
+			if it.Dura == 0 {
+				tp.UseItems[protocol.UDress] = nil
+				equipChanged = true
+			} else {
+				tp.sendDuraChange(server, it)
+			}
 		}
 		for i := 1; i < 13; i++ {
 			if it := tp.UseItems[i]; it != nil && it.Dura > 0 {
 				if rand.Intn(8) == 0 {
 					it.Dura--
-					tp.sendDuraChange(server, it)
+					if it.Dura == 0 {
+						tp.UseItems[i] = nil
+						equipChanged = true
+					} else {
+						tp.sendDuraChange(server, it)
+					}
 				}
 			}
+		}
+		if equipChanged {
+			tp.RecalcAbilitys()
+			tp.updateAppearance()
+			tp.SendUseItemsFull(server)
 		}
 	}
 
@@ -1227,9 +1272,12 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 	maxMP := int(p.WAbil.MaxMP)
 
 	if int(p.WAbil.HP) < maxHP {
-		regen := maxHP / 20
+		regen := p.HealthRecover
 		if regen < 1 {
 			regen = 1
+		}
+		if base := maxHP / 20; base > regen {
+			regen = base
 		}
 		hp := int(p.WAbil.HP) + regen
 		if hp > maxHP {
@@ -1240,9 +1288,12 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 	}
 
 	if int(p.WAbil.MP) < maxMP {
-		regen := maxMP / 15
+		regen := p.SpellRecover
 		if regen < 1 {
 			regen = 1
+		}
+		if base := maxMP / 15; base > regen {
+			regen = base
 		}
 		mp := int(p.WAbil.MP) + regen
 		if mp > maxMP {
@@ -1250,6 +1301,78 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 		}
 		p.WAbil.MP = uint16(mp)
 		changed = true
+	}
+
+	if changed {
+		p.sendHealthSpell(server)
+	}
+}
+
+// processIncHealth 处理渐进回复池（Delphi: Run 循环, ObjBase.pas:3782-3855）。
+// 间隔 = 600 - min(400, Level*10) ms，每次回复 Level/10+5 点。
+func (p *PlayObject) processIncHealth(server *netserver.TCPServer, now int64) {
+	if p.IncHealth <= 0 && p.IncSpell <= 0 && p.IncHealing <= 0 {
+		return
+	}
+	level := int(p.WAbil.Level)
+	interval := int64(600 - level*10)
+	if interval < 200 {
+		interval = 200
+	}
+	if now-p.lastIncTick < interval {
+		return
+	}
+	p.lastIncTick = now
+
+	perTick := level/10 + 5
+	changed := false
+
+	if p.IncHealth > 0 && int(p.WAbil.HP) < int(p.WAbil.MaxHP) {
+		heal := perTick
+		if heal > p.IncHealth {
+			heal = p.IncHealth
+		}
+		p.IncHealth -= heal
+		hp := int(p.WAbil.HP) + heal
+		if hp > int(p.WAbil.MaxHP) {
+			hp = int(p.WAbil.MaxHP)
+		}
+		p.WAbil.HP = uint16(hp)
+		changed = true
+	} else if int(p.WAbil.HP) >= int(p.WAbil.MaxHP) {
+		p.IncHealth = 0
+	}
+
+	if p.IncSpell > 0 && int(p.WAbil.MP) < int(p.WAbil.MaxMP) {
+		heal := perTick
+		if heal > p.IncSpell {
+			heal = p.IncSpell
+		}
+		p.IncSpell -= heal
+		mp := int(p.WAbil.MP) + heal
+		if mp > int(p.WAbil.MaxMP) {
+			mp = int(p.WAbil.MaxMP)
+		}
+		p.WAbil.MP = uint16(mp)
+		changed = true
+	} else if int(p.WAbil.MP) >= int(p.WAbil.MaxMP) {
+		p.IncSpell = 0
+	}
+
+	if p.IncHealing > 0 && int(p.WAbil.HP) < int(p.WAbil.MaxHP) {
+		heal := 5
+		if heal > p.IncHealing {
+			heal = p.IncHealing
+		}
+		p.IncHealing -= heal
+		hp := int(p.WAbil.HP) + heal
+		if hp > int(p.WAbil.MaxHP) {
+			hp = int(p.WAbil.MaxHP)
+		}
+		p.WAbil.HP = uint16(hp)
+		changed = true
+	} else if int(p.WAbil.HP) >= int(p.WAbil.MaxHP) {
+		p.IncHealing = 0
 	}
 
 	if changed {
@@ -1387,6 +1510,23 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 		return
 	}
 
+	// 拾取保护：2 分钟内仅归属者/队友可拾取（Delphi: ClientPickUpItem, ObjBase.pas:1699）
+	now := time.Now().UnixMilli()
+	if item.OwnerID != 0 && item.OwnerID != p.ID && now-item.OwnerTick < pickupProtectMs {
+		allowed := false
+		if party := p.partyOf(); party != nil {
+			for _, id := range party.Members {
+				if id == item.OwnerID {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			return
+		}
+	}
+
 	if item.Gold > 0 {
 		p.Gold += item.Gold
 		resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
@@ -1396,8 +1536,20 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 		added := false
 		if item.UserItem != nil {
 			if len(p.ItemList) < MaxBagItems {
+				// 负重检查（Delphi: IsAddWeightAvailable, ObjBase.pas:2085）
+				if p.ItemDB != nil {
+					if def := p.ItemDB.GetByIdx(int(item.UserItem.WIndex)); def != nil {
+						if int(p.WAbil.Weight)+int(def.Weight) > int(p.WAbil.MaxWeight) {
+							p.sysMsg(server, "物品太重，无法携带更多")
+							return
+						}
+					}
+				}
 				p.ItemList = append(p.ItemList, item.UserItem)
 				added = true
+			} else {
+				p.sysMsg(server, "背包已满")
+				return
 			}
 		} else if p.ItemDB != nil {
 			if def := p.ItemDB.GetByName(item.Name); def != nil {

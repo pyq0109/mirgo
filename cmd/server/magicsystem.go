@@ -620,12 +620,11 @@ func (p *PlayObject) doSpellDamageAreaAt(server *netserver.TCPServer, damage, cx
 
 func (p *PlayObject) healTarget(server *netserver.TCPServer, amount, tx, ty int) {
 	if tx == p.CurrX && ty == p.CurrY {
-		hp := int(p.WAbil.HP) + amount
-		if hp > int(p.WAbil.MaxHP) {
-			hp = int(p.WAbil.MaxHP)
+		// 治疗术加入渐进池（Delphi: RM_MAGHEALING, ObjBase.pas:4527，上限 300）
+		p.IncHealing += amount
+		if p.IncHealing > 300 {
+			p.IncHealing = 300
 		}
-		p.WAbil.HP = uint16(hp)
-		p.sendHealthSpell(server)
 	}
 }
 

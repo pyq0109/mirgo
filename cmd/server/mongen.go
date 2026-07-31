@@ -341,13 +341,20 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 	e.despawnGroundItems(server, now)
 }
 
+const groundItemDespawnMs = 180000  // 3 分钟
+const pickupProtectMs = 120000     // 拾取保护 2 分钟
+
 func (e *UserEngine) despawnGroundItems(server *netserver.TCPServer, now int64) {
 	e.mapMgr.mu.RLock()
 	defer e.mapMgr.mu.RUnlock()
 	for _, env := range e.mapMgr.maps {
 		var remaining []*GroundItem
 		for _, item := range env.GroundItems {
-			if now-item.DropTick > 60000 {
+			// 拾取保护过期后清除归属（Delphi: dwFloorItemCanPickUpTime）
+			if item.OwnerID != 0 && now-item.OwnerTick > pickupProtectMs {
+				item.OwnerID = 0
+			}
+			if now-item.DropTick > groundItemDespawnMs {
 				env.RemoveGroundItem(item.ID)
 				resp := protocol.MakeDefaultMsg(protocol.SMItemHide, item.ID, 0, 0, 0)
 				objs := env.GetRangeObjects(item.X, item.Y, viewRange)

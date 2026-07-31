@@ -295,21 +295,34 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 	used := false
 	switch def.StdMode {
 	case 0: // 药水（Delphi EatItems, ObjBase.pas:23324）：AC=HP, MAC=MP。
-		if def.AC > 0 {
-			hp := int(p.WAbil.HP) + int(def.AC)
-			if hp > int(p.WAbil.MaxHP) {
-				hp = int(p.WAbil.MaxHP)
+		if def.Shape == 1 {
+			// 太阳水：即时回复（Delphi IncHealthSpell）
+			if def.AC > 0 {
+				hp := int(p.WAbil.HP) + int(def.AC)
+				if hp > int(p.WAbil.MaxHP) {
+					hp = int(p.WAbil.MaxHP)
+				}
+				p.WAbil.HP = uint16(hp)
+				used = true
 			}
-			p.WAbil.HP = uint16(hp)
-			used = true
-		}
-		if def.MAC > 0 {
-			mp := int(p.WAbil.MP) + int(def.MAC)
-			if mp > int(p.WAbil.MaxMP) {
-				mp = int(p.WAbil.MaxMP)
+			if def.MAC > 0 {
+				mp := int(p.WAbil.MP) + int(def.MAC)
+				if mp > int(p.WAbil.MaxMP) {
+					mp = int(p.WAbil.MaxMP)
+				}
+				p.WAbil.MP = uint16(mp)
+				used = true
 			}
-			p.WAbil.MP = uint16(mp)
-			used = true
+		} else {
+			// 金创药/魔法药：渐进回复（Delphi m_nIncHealth/m_nIncSpell）
+			if def.AC > 0 {
+				p.IncHealth += int(def.AC)
+				used = true
+			}
+			if def.MAC > 0 {
+				p.IncSpell += int(def.MAC)
+				used = true
+			}
 		}
 	case 1, 2: // 食物/杂项。
 		if def.AC > 0 {
