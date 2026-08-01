@@ -29,7 +29,7 @@ type ScriptGoods struct {
 }
 
 type NpcScript struct {
-	Labels map[string]*ScriptSection
+	Labels map[string][]*ScriptSection
 	Goods  []ScriptGoods
 
 	// 商人脚本头
@@ -46,7 +46,7 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 	defer f.Close()
 
 	script := &NpcScript{
-		Labels:       make(map[string]*ScriptSection),
+		Labels:       make(map[string][]*ScriptSection),
 		PriceRate:    100,
 		Capabilities: make(map[string]bool),
 	}
@@ -99,7 +99,7 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 			}
 			currentLabel = label
 			currentSection = &ScriptSection{ExtJmp: extJmp}
-			script.Labels[currentLabel] = currentSection
+			script.Labels[currentLabel] = append(script.Labels[currentLabel], currentSection)
 			mode = ""
 			continue
 		}
@@ -117,6 +117,11 @@ func LoadNpcScript(path string) (*NpcScript, error) {
 		upper := strings.ToUpper(line)
 		switch {
 		case upper == "#IF":
+			// Delphi LocalDB.pas:3194-3203：若当前块已有条件或对话文本，新建过程块
+			if len(currentSection.Conditions) > 0 || len(currentSection.SayText) > 0 {
+				currentSection = &ScriptSection{}
+				script.Labels[currentLabel] = append(script.Labels[currentLabel], currentSection)
+			}
 			mode = "IF"
 			continue
 		case upper == "#ACT":
@@ -187,7 +192,7 @@ func processCallDirective(line, scriptPath string, script *NpcScript, current *S
 	// 将外部段落解析为新的 ScriptSection
 	extSection := parseCallLines(lines)
 	if _, exists := script.Labels[label]; !exists {
-		script.Labels[label] = extSection
+		script.Labels[label] = []*ScriptSection{extSection}
 	}
 	// 当前 section 添加 GOTO 动作
 	current.Actions = append(current.Actions, "GOTO @"+label)
@@ -326,34 +331,40 @@ func parseGoodsLine(line string, script *NpcScript) {
 	})
 }
 
+// Execute 执行指定标签的所有过程块（Delphi ObjNpc.pas:8508-8540 GotoLable）。
+// 多块按顺序执行，对话文本累积后一次性发送；BREAK 动作中止后续块。
 func (s *NpcScript) Execute(label string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
-	section, ok := s.Labels[label]
+	sections, ok := s.Labels[label]
 	if !ok {
-		section, ok = s.Labels["main"]
+		sections, ok = s.Labels["main"]
 		if !ok {
 			return
 		}
 	}
 
-	conditionsMet := true
-	if len(section.Conditions) > 0 {
-		conditionsMet = s.evalConditions(section.Conditions, p)
+	var sayParts []string
+	for _, section := range sections {
+		conditionsMet := true
+		if len(section.Conditions) > 0 {
+			conditionsMet = s.evalConditions(section.Conditions, p)
+		}
+
+		if conditionsMet {
+			if !s.execActions(section.Actions, p, npc, server) {
+				break
+			}
+			sayParts = append(sayParts, section.SayText...)
+		} else {
+			if !s.execActions(section.ElseAct, p, npc, server) {
+				break
+			}
+			sayParts = append(sayParts, section.ElseSay...)
+		}
 	}
 
-	// 各行用 '\' 连接——这是 Delphi NPC 对话的行分隔符，
-	// 客户端解析器（及其 <text/@label> 标签处理）按此分割。
-	if conditionsMet {
-		s.execActions(section.Actions, p, npc, server)
-		if len(section.SayText) > 0 {
-			text := strings.Join(section.SayText, "\\")
-			s.sendMerchantSay(text, p, npc, server)
-		}
-	} else {
-		s.execActions(section.ElseAct, p, npc, server)
-		if len(section.ElseSay) > 0 {
-			text := strings.Join(section.ElseSay, "\\")
-			s.sendMerchantSay(text, p, npc, server)
-		}
+	if len(sayParts) > 0 {
+		text := strings.Join(sayParts, "\\")
+		s.sendMerchantSay(text, p, npc, server)
 	}
 }
 
@@ -808,6 +819,113 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 			return false
 		}
 		return p.Engine.Castle.IsDefendingGuild(p.GuildName)
+
+	// Delphi ObjNpc.pas:5525-5536 CHECKPOS mapName x y
+	case "CHECKPOS":
+		if len(parts) < 4 {
+			return true
+		}
+		x, _ := strconv.Atoi(parts[2])
+		y, _ := strconv.Atoi(parts[3])
+		return p.MapName == parts[1] && p.CurrX == x && p.CurrY == y
+
+	// Delphi ObjNpc.pas:4907-4926 CHECKINMAPRANGE map x y range
+	case "CHECKINMAPRANGE":
+		if len(parts) < 5 {
+			return true
+		}
+		x, _ := strconv.Atoi(parts[2])
+		y, _ := strconv.Atoi(parts[3])
+		r, _ := strconv.Atoi(parts[4])
+		if p.MapName != parts[1] {
+			return false
+		}
+		dx := p.CurrX - x
+		dy := p.CurrY - y
+		if dx < 0 {
+			dx = -dx
+		}
+		if dy < 0 {
+			dy = -dy
+		}
+		return dx <= r && dy <= r
+
+	// Delphi ObjNpc.pas:10080-10097 CHECKUSEITEM slotIndex
+	case "CHECKUSEITEM":
+		if len(parts) < 2 {
+			return true
+		}
+		slot, _ := strconv.Atoi(parts[1])
+		return slot >= 0 && slot < len(p.UseItems) && p.UseItems[slot] != nil && p.UseItems[slot].WIndex > 0
+
+	// Delphi ObjNpc.pas:4207-4221 CHECKBAGSIZE count
+	case "CHECKBAGSIZE":
+		if len(parts) < 2 {
+			return true
+		}
+		n, _ := strconv.Atoi(parts[1])
+		return len(p.ItemList)+n <= MaxBagItems
+
+	// Delphi ObjNpc.pas:10384-10400 CHECKOFGUILD guildName
+	case "CHECKOFGUILD":
+		if len(parts) < 2 {
+			return true
+		}
+		return strings.EqualFold(p.GuildName, parts[1])
+
+	// Delphi ObjNpc.pas:5485-5492 CHECKSERVERNAME name
+	case "CHECKSERVERNAME":
+		if len(parts) < 2 {
+			return true
+		}
+		if p.Engine == nil || p.Engine.Config == nil {
+			return false
+		}
+		return strings.EqualFold(p.Engine.Config.Server.Name, parts[1])
+
+	// Delphi ObjNpc.pas:5583-5600 CHECKMAGICLVL magicName level
+	case "CHECKMAGICLVL":
+		if len(parts) < 3 {
+			return true
+		}
+		lvl, _ := strconv.Atoi(parts[2])
+		for _, m := range p.MagicList {
+			if m.MagicInfo != nil {
+				name := string(m.MagicInfo.SMagicName[:])
+				if i := strings.IndexByte(name, 0); i >= 0 {
+					name = name[:i]
+				}
+				if strings.EqualFold(strings.TrimSpace(name), parts[1]) {
+					return int(m.Level) == lvl
+				}
+			}
+		}
+		return false
+
+	// Delphi ObjNpc.pas:11131-11153 CHECKMAPHUMANCOUNT map op count
+	case "CHECKMAPHUMANCOUNT":
+		if len(parts) < 4 {
+			return true
+		}
+		val, op := parseConditionValue(parts[1:])
+		if p.Engine == nil {
+			return false
+		}
+		count := p.Engine.CountMapHumans(parts[1])
+		return compareOp(count, op, val)
+
+	// Delphi ObjNpc.pas:11157-11182 CHECKMAPMONCOUNT map op count
+	case "CHECKMAPMONCOUNT":
+		if len(parts) < 4 {
+			return true
+		}
+		val, op := parseConditionValue(parts[1:])
+		if p.Engine == nil {
+			return false
+		}
+		count := p.Engine.CountMapMonsters(parts[1])
+		return compareOp(count, op, val)
+
 	default:
 		return true
 	}
@@ -831,23 +949,28 @@ func parseConditionValue(parts []string) (int, string) {
 	return 0, ">="
 }
 
-func (s *NpcScript) execActions(actions []string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
+// execActions 执行动作列表，返回 false 表示遇到 BREAK 应中止后续过程块。
+func (s *NpcScript) execActions(actions []string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) bool {
 	for _, act := range actions {
-		s.execOneAction(act, p, npc, server)
+		if !s.execOneAction(act, p, npc, server) {
+			return false
+		}
 	}
+	return true
 }
 
-func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) {
+// execOneAction 返回 false 表示 BREAK。
+func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, server *netserver.TCPServer) bool {
 	parts := strings.Fields(act)
 	if len(parts) == 0 {
-		return
+		return true
 	}
 
 	cmd := strings.ToUpper(parts[0])
 	switch cmd {
 	case "GIVE":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		itemName := parts[1]
 		count := 1
@@ -859,7 +982,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			p.Gold += count
 			resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 			server.Send(p.Session.ID, resp, "")
-			return
+			return true
 		}
 		if p.ItemDB != nil {
 			def := p.ItemDB.GetByName(itemName)
@@ -872,7 +995,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "TAKE":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		itemName := parts[1]
 		count := 1
@@ -887,18 +1010,18 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			}
 			resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 			server.Send(p.Session.ID, resp, "")
-			return
+			return true
 		}
 		p.takeItem(itemName, count)
 		p.SendBagItemsFull(server)
 	case "SENDMSG":
 		// SENDMSG <type> <text> — 10种广播频道 (Delphi ObjNpc.pas:3364-3386)
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		msgType, err := strconv.Atoi(parts[1])
 		if err != nil {
-			return
+			return true
 		}
 		text := strings.Join(parts[2:], " ")
 		text = strings.ReplaceAll(text, "%s", p.Name)
@@ -908,7 +1031,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	case "MESSAGEBOX":
 		// Delphi: RM_MENU_OK → SM_MENU_OK(767) 模态弹窗 (ObjNpc.pas:3904-3908)
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		text := strings.Join(parts[1:], " ")
 		text = s.replaceVars(text, p)
@@ -916,7 +1039,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		server.Send(p.Session.ID, msg, protocol.EncodeString(text))
 	case "CHANGELEVEL":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		lvl, _ := strconv.Atoi(parts[1])
 		if lvl > 0 && lvl <= 500 {
@@ -926,7 +1049,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "ADDGOLD", "GAMEGOLD":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		gold, _ := strconv.Atoi(parts[1])
 		p.Gold += gold
@@ -937,7 +1060,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		server.Send(p.Session.ID, resp, "")
 	case "TAKEGOLD":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		gold, _ := strconv.Atoi(parts[1])
 		p.Gold -= gold
@@ -948,7 +1071,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		server.Send(p.Session.ID, resp, "")
 	case "MAPMOVE", "MAP":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		mapName := parts[1]
 		x, y := 100, 100
@@ -963,11 +1086,11 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "GOTO":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		p.ScriptGotoCount++
 		if p.ScriptGotoCount > 10 {
-			return
+			return true
 		}
 		label := strings.TrimPrefix(parts[1], "@")
 		s.Execute(label, p, npc, server)
@@ -977,10 +1100,10 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		resp := protocol.MakeDefaultMsg(protocol.SMMerchantDlgClose, 0, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 	case "BREAK":
-		return
+		return false
 	case "ADDSKILL":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		magicID, _ := strconv.Atoi(parts[1])
 		level := 0
@@ -991,14 +1114,14 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.SendMyMagicFull(server)
 	case "DELSKILL":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		magicID, _ := strconv.Atoi(parts[1])
 		p.removeMagic(magicID)
 		p.SendMyMagicFull(server)
 	case "CHANGEEXP":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		exp, _ := strconv.Atoi(parts[1])
 		p.WAbil.Exp += uint32(exp)
@@ -1012,7 +1135,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.sendHealthSpell(server)
 	case "CHANGEPKPOINT":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		pk, _ := strconv.Atoi(parts[1])
 		p.PkPoint += pk
@@ -1021,7 +1144,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "HUMANHP":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		val, _ := strconv.Atoi(parts[2])
 		switch strings.ToUpper(parts[1]) {
@@ -1040,7 +1163,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.sendHealthSpell(server)
 	case "HUMANMP":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		val, _ := strconv.Atoi(parts[2])
 		switch strings.ToUpper(parts[1]) {
@@ -1071,7 +1194,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "CHANGEGENDER":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		switch strings.ToLower(parts[1]) {
 		case "man", "男", "0":
@@ -1082,7 +1205,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.updateAppearance()
 	case "CHANGEJOB":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		switch strings.ToLower(parts[1]) {
 		case "warrior", "战士", "0":
@@ -1095,11 +1218,11 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	case "LINEMSG":
 		// LINEMSG 与 SENDMSG 共享处理 (Delphi ActionOfLineMsg)
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		msgType, err := strconv.Atoi(parts[1])
 		if err != nil {
-			return
+			return true
 		}
 		text := strings.Join(parts[2:], " ")
 		text = strings.ReplaceAll(text, "%s", p.Name)
@@ -1108,7 +1231,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		s.sendMsgByType(msgType, text, p, npc, server)
 	case "MONGEN":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		monName := parts[1]
 		count := 1
@@ -1140,7 +1263,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "SET":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		// 支持 SET [N] val 和 SET P0 val 两种格式
 		varName := strings.Trim(parts[1], "[]")
@@ -1155,7 +1278,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "INC":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		varName := strings.Trim(parts[1], "[]")
 		val := 1
@@ -1172,7 +1295,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "DEC":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		varName := strings.Trim(parts[1], "[]")
 		val := 1
@@ -1189,14 +1312,14 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "MOV":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		varName := parts[1]
 		val, _ := strconv.Atoi(parts[2])
 		p.setScriptVar(varName, val)
 	case "MOVR":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		varName := parts[1]
 		n, _ := strconv.Atoi(parts[2])
@@ -1205,14 +1328,14 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "SUM":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		v1 := p.getScriptVar(parts[1])
 		v2 := p.getScriptVar(parts[2])
 		p.ScriptVars[9] = v1 + v2
 	case "RESET":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		startStr := strings.Trim(parts[1], "[]")
 		start, _ := strconv.Atoi(startStr)
@@ -1224,7 +1347,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "TAKEW":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		slot := strings.ToUpper(strings.Trim(parts[1], "[]"))
 		slotMap := map[string]int{
@@ -1242,7 +1365,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "RECALLMOB":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		monName := parts[1]
 		level := 1
@@ -1261,7 +1384,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "SKILLLEVEL":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		magicID, _ := strconv.Atoi(parts[1])
 		level, _ := strconv.Atoi(parts[2])
@@ -1304,12 +1427,12 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	case "GROUPMOVEMAP":
 		// 移动全队到目标地图 (Delphi ObjNpc.pas:8275-8305)
 		if len(parts) < 2 || p.MapMgr == nil {
-			return
+			return true
 		}
 		mapName := parts[1]
 		newEnvir := p.MapMgr.FindMap(mapName)
 		if newEnvir == nil {
-			return
+			return true
 		}
 		tx, ty := newEnvir.Width/2, newEnvir.Height/2
 		p.EnterAnotherMap(server, newEnvir, tx, ty)
@@ -1325,22 +1448,22 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "ADDNAMELIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.addNameList(parts[1], parts[2])
 	case "DELNAMELIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.delNameList(parts[1], parts[2])
 	case "OFFLINESENDMSG":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.sysMsg(server, "["+parts[1]+"] "+strings.Join(parts[2:], " "))
 	case "MOVEX":
 		if len(parts) < 4 {
-			return
+			return true
 		}
 		mapName := parts[1]
 		x, _ := strconv.Atoi(parts[2])
@@ -1352,7 +1475,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "EXCHGTAKEON":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		itemName := parts[1]
 		slot, _ := strconv.Atoi(parts[2])
@@ -1386,7 +1509,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	case "NPCPAGE":
 	case "CALC":
 		if len(parts) < 4 {
-			return
+			return true
 		}
 		v1 := p.getScriptVar(parts[1])
 		v2, _ := strconv.Atoi(parts[3])
@@ -1411,14 +1534,14 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "SAVEVAR":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		globalScriptVars.mu.Lock()
 		globalScriptVars.StrVars[parts[1]] = parts[2]
 		globalScriptVars.mu.Unlock()
 	case "LOADVAR":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		globalScriptVars.mu.RLock()
 		val := globalScriptVars.StrVars[parts[1]]
@@ -1426,7 +1549,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.StrScriptVars[parts[1]] = val
 	case "CLEARNAMELIST":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		p.nameLists[parts[1]] = nil
 	case "MARRY":
@@ -1498,53 +1621,53 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "EXCHANGEMAP":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.exchangeMap(server, parts[1], parts[2])
 	case "RECALLMAP":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		p.recallMap(server, parts[1])
 	case "ADDGUILDLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.addNameList("G_"+parts[1], parts[2])
 	case "DELGUILDLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.delNameList("G_"+parts[1], parts[2])
 	case "ADDACCOUNTLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.addNameList("A_"+parts[1], parts[2])
 	case "DELACCOUNTLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.delNameList("A_"+parts[1], parts[2])
 	case "ADDIPLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.addNameList("IP_"+parts[1], parts[2])
 	case "DELIPLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.delNameList("IP_"+parts[1], parts[2])
 	case "GOQUEST":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		idx, _ := strconv.Atoi(parts[1])
 		questSetBit(&p.QuestUnitOpen, idx)
 	case "ENDQUEST":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		idx, _ := strconv.Atoi(parts[1])
 		questSetBit(&p.QuestUnit, idx)
@@ -1576,7 +1699,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.SendMyMagicFull(server)
 	case "MOBPLACE":
 		if len(parts) < 5 {
-			return
+			return true
 		}
 		mapName := parts[1]
 		x, _ := strconv.Atoi(parts[2])
@@ -1603,7 +1726,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.SlaveIDs = nil
 	case "KILLMONEXPRATE":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		rate, _ := strconv.Atoi(parts[1])
 		duration, _ := strconv.Atoi(parts[2])
@@ -1611,7 +1734,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.KillMonExpRateTick = time.Now().UnixMilli() + int64(duration)*1000
 	case "POWERRATE":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		rate, _ := strconv.Atoi(parts[1])
 		duration, _ := strconv.Atoi(parts[2])
@@ -1619,7 +1742,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.PowerRateTick = time.Now().UnixMilli() + int64(duration)*1000
 	case "CHANGEMODE":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		mode, _ := strconv.Atoi(parts[1])
 		switch mode {
@@ -1630,13 +1753,13 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "CHANGEPERMISSION":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		perm, _ := strconv.Atoi(parts[1])
 		p.Permission = byte(perm)
 	case "BONUSPOINT":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		val, _ := strconv.Atoi(parts[1])
 		p.BonusPoint += val
@@ -1644,7 +1767,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.BonusPoint = 0
 	case "CREDITPOINT":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		val, _ := strconv.Atoi(parts[1])
 		p.CreditPoint += val
@@ -1663,7 +1786,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.StoragePassword = ""
 	case "MONGENEX":
 		if len(parts) < 5 {
-			return
+			return true
 		}
 		mapName := parts[1]
 		x, _ := strconv.Atoi(parts[2])
@@ -1681,7 +1804,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "CLEARMAPMON":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		if p.Engine != nil && p.MapMgr != nil {
 			if env := p.MapMgr.FindMap(parts[1]); env != nil {
@@ -1694,7 +1817,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		// PK 区域设置（简化：仅记录日志）
 	case "TAKECASTLEGOLD":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		gold, _ := strconv.Atoi(parts[1])
 		if p.Engine != nil && p.Engine.Castle != nil {
@@ -1706,7 +1829,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "MOBFIREBURN":
 		if len(parts) < 5 {
-			return
+			return true
 		}
 		x, _ := strconv.Atoi(parts[1])
 		y, _ := strconv.Atoi(parts[2])
@@ -1717,7 +1840,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 	case "SETSCRIPTFLAG":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		idx, _ := strconv.Atoi(parts[1])
 		val, _ := strconv.Atoi(parts[2])
@@ -1729,14 +1852,14 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	case "SETAUTOGETEXP":
 		// Delphi: SETAUTOGETEXP <时间秒> <经验点> <安全区1/0> [地图名]
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		nTime, _ := strconv.Atoi(parts[1])
 		nPoint, _ := strconv.Atoi(parts[2])
 		if nTime <= 0 || nPoint <= 0 {
 			p.AutoGetExpPoint = 0
 			p.AutoGetExpTime = 0
-			return
+			return true
 		}
 		p.AutoGetExpTime = int64(nTime) * 1000
 		p.AutoGetExpPoint = nPoint
@@ -1749,13 +1872,13 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.autoGetExpTick = time.Now().UnixMilli()
 	case "VAR":
 		if len(parts) < 4 {
-			return
+			return true
 		}
 		v, _ := strconv.Atoi(parts[3])
 		p.setScriptVar(parts[1], v)
 	case "CALCVAR":
 		if len(parts) < 5 {
-			return
+			return true
 		}
 		a := p.getScriptVar(parts[2])
 		b := p.getScriptVar(parts[4])
@@ -1775,12 +1898,12 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		p.setScriptVar(parts[1], result)
 	case "GROUPADDLIST":
 		if len(parts) < 3 {
-			return
+			return true
 		}
 		p.addNameList("GRP_"+parts[1], parts[2])
 	case "CLEARLIST":
 		if len(parts) < 2 {
-			return
+			return true
 		}
 		p.clearNameList(parts[1])
 	case "TAKECHECKITEM":
@@ -1850,6 +1973,7 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	default:
 		_ = parts
 	}
+	return true
 }
 
 func (s *NpcScript) replaceVars(text string, p *PlayObject) string {
@@ -2193,6 +2317,13 @@ func (p *PlayObject) getScriptVar(name string) int {
 		if idx >= 0 && idx < 100 {
 			return p.ScriptVarsM[idx]
 		}
+	case 'I':
+		if idx >= 0 && idx < 100 {
+			globalScriptVars.mu.RLock()
+			v := globalScriptVars.I[idx]
+			globalScriptVars.mu.RUnlock()
+			return v
+		}
 	}
 	return 0
 }
@@ -2221,6 +2352,12 @@ func (p *PlayObject) setScriptVar(name string, val int) {
 	case 'M':
 		if idx >= 0 && idx < 100 {
 			p.ScriptVarsM[idx] = val
+		}
+	case 'I':
+		if idx >= 0 && idx < 100 {
+			globalScriptVars.mu.Lock()
+			globalScriptVars.I[idx] = val
+			globalScriptVars.mu.Unlock()
 		}
 	}
 }

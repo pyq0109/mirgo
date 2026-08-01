@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/protocol"
+	"github.com/pyq0109/mirgo/internal/storage"
 )
 
 type GoodsConfig struct {
@@ -45,6 +47,11 @@ type NpcObject struct {
 	Face       int
 	Race       int
 
+	// Delphi TNormNpc 构造器字段 (ObjNpc.pas:5646-5658)
+	SuperMan      bool // 无敌模式（HP/MP 每 tick 回满，Die() 跳过）
+	AntiPoisonNpc int  // 抗毒（默认99）
+	FixedHideMode bool // 城堡战隐藏状态
+
 	// 商人能力标志
 	CanBuy      bool
 	CanSell     bool
@@ -79,11 +86,13 @@ type NpcObject struct {
 func NewNpcObject(name string, id int32, appr uint16) *NpcObject {
 	base := NewBaseObject(name, id)
 	npc := &NpcObject{
-		BaseObject: base,
-		Appr:       appr,
-		PriceRate:  100,
-		GoodsList:  make(map[string]*GoodsStock),
-		PriceList:  make(map[int]*ItemPrice),
+		BaseObject:    base,
+		Appr:          appr,
+		PriceRate:     100,
+		GoodsList:     make(map[string]*GoodsStock),
+		PriceList:     make(map[int]*ItemPrice),
+		SuperMan:      true,  // Delphi ObjNpc.pas:5649
+		AntiPoisonNpc: 99,    // Delphi ObjNpc.pas:5652
 	}
 	base.outer = npc
 	return npc
@@ -93,6 +102,8 @@ func (o *NpcObject) Feature() int32 {
 	raceImg := byte(10) // RC_NPC
 	if o.IsMerchant {
 		raceImg = 50 // RCC_MERCHANT
+	} else if o.Race == 15 {
+		raceImg = 15 // RC_PEACENPC
 	}
 	return protocol.MakeMonsterFeature(raceImg, 0, o.Appr)
 }
@@ -235,6 +246,17 @@ func (o *NpcObject) RefillGoods(itemDB *ItemDB) {
 		} else if current > cfg.MaxCount {
 			stock.Items = stock.Items[:cfg.MaxCount]
 		}
+
+		// Delphi ObjNpc.pas:798-823 CheckItemPrice：补货时价格 +10%
+		if ip, ok := o.PriceList[def.Idx]; ok {
+			newPrice := ip.Price * 11 / 10
+			if newPrice == ip.Price {
+				newPrice++
+			}
+			ip.Price = newPrice
+		} else {
+			o.PriceList[def.Idx] = &ItemPrice{ItemIdx: def.Idx, Price: int(def.Price) * 11 / 10}
+		}
 	}
 }
 
@@ -247,5 +269,49 @@ func (o *NpcObject) idleAnimate() {
 		o.SendRefMsg(RM_TURN, o.Dir, o.CurrX, o.CurrY, "")
 	} else {
 		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
+	}
+}
+
+// NpcDataKey 返回 NPC 数据持久化键（Delphi: m_sScript + '-' + m_sMapName）。
+func (o *NpcObject) NpcDataKey() string {
+	if o.MerchantID != "" {
+		return o.MerchantID + "-" + o.MapName
+	}
+	return o.Name + "-" + o.MapName
+}
+
+// SaveData 将商品库存和价格列表持久化到 SQLite。
+func (o *NpcObject) SaveData(db *storage.Database) {
+	if db == nil || !o.IsMerchant {
+		return
+	}
+	key := o.NpcDataKey()
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	if data, err := json.Marshal(o.GoodsList); err == nil {
+		db.SaveNpcData(key, "goods", data)
+	}
+	if data, err := json.Marshal(o.PriceList); err == nil {
+		db.SaveNpcData(key, "prices", data)
+	}
+}
+
+// LoadData 从 SQLite 加载商品库存和价格列表。
+func (o *NpcObject) LoadData(db *storage.Database) {
+	if db == nil || !o.IsMerchant {
+		return
+	}
+	key := o.NpcDataKey()
+
+	if data, err := db.LoadNpcData(key, "goods"); err == nil && data != nil {
+		o.mu.Lock()
+		json.Unmarshal(data, &o.GoodsList)
+		o.mu.Unlock()
+	}
+	if data, err := db.LoadNpcData(key, "prices"); err == nil && data != nil {
+		o.mu.Lock()
+		json.Unmarshal(data, &o.PriceList)
+		o.mu.Unlock()
 	}
 }

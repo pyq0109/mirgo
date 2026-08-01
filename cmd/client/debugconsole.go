@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pyq0109/mirgo/internal/engine"
+	"github.com/pyq0109/mirgo/internal/log"
 )
 
 const (
@@ -74,6 +75,9 @@ type DebugConsole struct {
 	// 面板高度 (可拖拽调节)
 	panelH   int  // 当前高度
 	resizing bool // 正在拖拽顶边调节高度
+
+	// 输入行光标位置 (rune 偏移)
+	cursorPos int
 
 	// 滚动条显隐 (悬停/滚动时渐显)
 	sbAlpha    float32 // 当前透明度 0..1
@@ -144,6 +148,7 @@ func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer, sceneMgr *en
 	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list", dc.cmdUI)
 	dc.Register("click", "click <x> <y> [right] — simulate click", dc.cmdClick)
 	dc.Register("clicklog", "toggle verbose click hit logging", dc.cmdClickLog)
+	dc.Register("dump", "dump console output to log", dc.cmdDump)
 	return dc
 }
 
@@ -214,7 +219,7 @@ func (dc *DebugConsole) OnKey(key int, action int, mods int) {
 			if len(runes) > remaining {
 				runes = runes[:remaining]
 			}
-			dc.Input += string(runes)
+			dc.insertAtCursor(string(runes))
 		}
 		return
 	}
@@ -228,15 +233,31 @@ func (dc *DebugConsole) OnKey(key int, action int, mods int) {
 	switch key {
 	case 258: // Tab — 自动补全
 		dc.tabComplete()
+		dc.cursorPos = utf8.RuneCountInString(dc.Input)
 	case 257: // Enter
 		if action == 1 {
 			dc.execute(dc.Input)
 			dc.Input = ""
+			dc.cursorPos = 0
 		}
 	case 259: // Backspace
-		if dc.Input != "" {
+		if dc.cursorPos > 0 {
 			runes := []rune(dc.Input)
-			dc.Input = string(runes[:len(runes)-1])
+			dc.Input = string(append(runes[:dc.cursorPos-1], runes[dc.cursorPos:]...))
+			dc.cursorPos--
+		}
+	case 261: // Delete
+		runes := []rune(dc.Input)
+		if dc.cursorPos < len(runes) {
+			dc.Input = string(append(runes[:dc.cursorPos], runes[dc.cursorPos+1:]...))
+		}
+	case 263: // Left
+		if dc.cursorPos > 0 {
+			dc.cursorPos--
+		}
+	case 262: // Right
+		if dc.cursorPos < utf8.RuneCountInString(dc.Input) {
+			dc.cursorPos++
 		}
 	case 256: // Escape
 		if action == 1 {
@@ -244,8 +265,10 @@ func (dc *DebugConsole) OnKey(key int, action int, mods int) {
 		}
 	case 265: // Up — 历史上一条
 		dc.histPrev()
+		dc.cursorPos = utf8.RuneCountInString(dc.Input)
 	case 264: // Down — 历史下一条
 		dc.histNext()
+		dc.cursorPos = utf8.RuneCountInString(dc.Input)
 	case 266: // PageUp
 		dc.ScrollOff += 5
 		dc.clampScroll()
@@ -254,13 +277,10 @@ func (dc *DebugConsole) OnKey(key int, action int, mods int) {
 		dc.ScrollOff -= 5
 		dc.clampScroll()
 		dc.sbLastTick = time.Now().UnixMilli()
-	case 268: // Home
-		dc.ScrollOff = len(dc.Lines)
-		dc.clampScroll()
-		dc.sbLastTick = time.Now().UnixMilli()
-	case 269: // End
-		dc.ScrollOff = 0
-		dc.sbLastTick = time.Now().UnixMilli()
+	case 268: // Home — 光标移到行首
+		dc.cursorPos = 0
+	case 269: // End — 光标移到行尾
+		dc.cursorPos = utf8.RuneCountInString(dc.Input)
 	}
 }
 
@@ -270,9 +290,19 @@ func (dc *DebugConsole) OnChar(char rune) {
 	}
 	if char >= 32 && char != 127 {
 		if utf8.RuneCountInString(dc.Input) < 120 {
-			dc.Input += string(char)
+			dc.insertAtCursor(string(char))
 		}
 	}
+}
+
+func (dc *DebugConsole) insertAtCursor(s string) {
+	runes := []rune(dc.Input)
+	if dc.cursorPos > len(runes) {
+		dc.cursorPos = len(runes)
+	}
+	newRunes := append(runes[:dc.cursorPos], append([]rune(s), runes[dc.cursorPos:]...)...)
+	dc.Input = string(newRunes)
+	dc.cursorPos += utf8.RuneCountInString(s)
 }
 
 // OnScroll 鼠标滚轮滚动输出区域。yoff>0 向上滚（看更早的内容）。
@@ -571,6 +601,9 @@ func (dc *DebugConsole) cmdWire(args []string) {
 		}
 	}
 	dc.Printf("wire: %s", []string{"off", "hover", "all"}[dc.WireMode])
+	if gActiveUI != nil {
+		gActiveUI.ShowBounds = dc.WireMode > 0
+	}
 }
 
 func (dc *DebugConsole) cmdFPS(args []string) {
@@ -698,6 +731,10 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		ui.RouteMouseDown(cx, cy, 0)
 		ui.RouteMouseUp(cx, cy, 0)
 		dc.Printf("clicked %s at (%d,%d)", c.Name, cx, cy)
+	case "hover":
+		ui.ShowHoverInfo = !ui.ShowHoverInfo
+		ui.ShowBounds = ui.ShowHoverInfo
+		dc.Printf("ui hover %s", onOff(ui.ShowHoverInfo))
 	case "list":
 		filter := ""
 		if len(args) > 1 {
@@ -739,6 +776,14 @@ func (dc *DebugConsole) cmdClickLog(args []string) {
 	dc.Printf("clicklog %s", onOff(debugClickLog))
 }
 
+func (dc *DebugConsole) cmdDump(args []string) {
+	log.Logf(log.LevelInfo, "ConsoleDump", "=== console output (%d lines) ===", len(dc.Lines))
+	for _, line := range dc.Lines {
+		log.Logf(log.LevelInfo, "ConsoleDump", "%s", line)
+	}
+	dc.Printf("dumped %d lines to log", len(dc.Lines))
+}
+
 // --- FPS 统计 ---
 
 func (dc *DebugConsole) updateFPS() {
@@ -775,10 +820,24 @@ func (dc *DebugConsole) Render(proj [16]float32) {
 }
 
 func (dc *DebugConsole) renderHoverInfo(proj [16]float32) {
-	info := gActiveUI.DebugHoverInfo(int(dc.mouseX), int(dc.mouseY))
-	if info == "" {
+	gActiveUI.RenderInteractiveOverlay(proj)
+	c := gActiveUI.HoveredControl(int(dc.mouseX), int(dc.mouseY))
+	if c == nil {
 		return
 	}
+	// 高亮悬停组件
+	w, h := c.effectiveSize()
+	cx, cy := float32(c.AbsX()), float32(c.AbsY())
+	cw, ch := float32(w), float32(h)
+	dc.gl.DrawQuadColor(cx, cy, cw, ch, 0.3, 0.6, 1.0, 0.12, proj)
+	drawWireRect(dc.gl, cx-1, cy-1, cw+2, ch+2, 0.3, 0.7, 1.0, 1.0, proj)
+	// 高亮父级 panel
+	if c.Parent != nil && c.Parent.Kind == KindWindow && c.Parent.Visible {
+		pw, ph := c.Parent.effectiveSize()
+		px, py := float32(c.Parent.AbsX()), float32(c.Parent.AbsY())
+		drawWireRect(dc.gl, px-1, py-1, float32(pw)+2, float32(ph)+2, 0.3, 0.7, 1.0, 1.0, proj)
+	}
+	info := fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d", c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h)
 	dc.drawHoverLabel(proj, info)
 }
 
@@ -902,7 +961,13 @@ func (dc *DebugConsole) renderPanel(proj [16]float32) {
 	prompt := "> " + dc.Input
 	text.DrawText(prompt, 8, inputY, 0, 1, 0, 1, proj)
 	if time.Now().UnixMilli()%1000 < 500 {
-		cursorX := 8 + float32(text.MeasureText(prompt))
+		runes := []rune(dc.Input)
+		cp := dc.cursorPos
+		if cp > len(runes) {
+			cp = len(runes)
+		}
+		beforePrompt := "> " + string(runes[:cp])
+		cursorX := 8 + float32(text.MeasureText(beforePrompt))
 		gl.DrawQuadColor(cursorX+1, inputY, 2, lineH, 0, 1, 0, 1, proj)
 	}
 }

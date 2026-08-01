@@ -129,6 +129,7 @@ func (e *UserEngine) LoadNpcs() {
 			npc.Script = scriptPath
 		}
 
+		npc.LoadData(e.db)
 		env.AddObject(npc.CurrX, npc.CurrY, OS_MOVINGOBJECT, npc)
 		e.Npcs = append(e.Npcs, npc)
 		merchantCount++
@@ -496,6 +497,7 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 	// Delphi 对齐：不死属性
 	if def.Undead > 0 {
 		mon.LifeAttrib = LA_UNDEAD
+		mon.UndeadBonus = def.Undead
 	}
 
 	// Delphi 对齐：特殊 Race 初始状态

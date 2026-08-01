@@ -158,12 +158,25 @@ func (e *UserEngine) ProcessNpcs() {
 		if npc.IsMerchant && len(npc.RefillConfig) > 0 {
 			npc.RefillGoods(e.ItemDB)
 		}
+		npc.SaveData(e.db)
 	}
 }
 
 func (e *UserEngine) ProcessNpcIdle() {
 	for _, npc := range e.Npcs {
 		if npc.IsMerchant {
+			// 城堡战 NPC 隐藏（Delphi ObjNpc.pas:1642-1657）
+			if npc.Castle && e.Castle != nil && e.Castle.IsAtWar() {
+				if !npc.FixedHideMode {
+					npc.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
+					npc.FixedHideMode = true
+				}
+			} else {
+				if npc.FixedHideMode {
+					npc.FixedHideMode = false
+					npc.SendRefMsg(RM_HIT, npc.Dir, npc.CurrX, npc.CurrY, "")
+				}
+			}
 			npc.idleAnimate()
 		}
 	}
@@ -186,4 +199,28 @@ func (e *UserEngine) awardExpForMonster(mon *MonsterObject, server *netserver.TC
 		return
 	}
 	killer.awardExp(server, mon)
+}
+
+// CountMapHumans 统计指定地图的在线玩家数（Delphi ObjNpc.pas:11131-11153）。
+func (e *UserEngine) CountMapHumans(mapName string) int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	count := 0
+	for _, p := range e.PlayObjectList {
+		if p.MapName == mapName && !p.Ghost {
+			count++
+		}
+	}
+	return count
+}
+
+// CountMapMonsters 统计指定地图的怪物数（Delphi ObjNpc.pas:11157-11182）。
+func (e *UserEngine) CountMapMonsters(mapName string) int {
+	count := 0
+	for _, mon := range e.Monsters {
+		if mon.MapName == mapName && !mon.Death && !mon.Ghost {
+			count++
+		}
+	}
+	return count
 }

@@ -103,6 +103,12 @@ func (d *Database) initialize() error {
 			bt_dura INTEGER NOT NULL DEFAULT 0,
 			submitted_at INTEGER NOT NULL DEFAULT 0
 		)`,
+		`CREATE TABLE IF NOT EXISTS npc_data (
+			npc_key TEXT NOT NULL,
+			data_type TEXT NOT NULL,
+			json_data BLOB,
+			PRIMARY KEY (npc_key, data_type)
+		)`,
 	}
 
 	for _, q := range queries {
@@ -472,4 +478,22 @@ func (d *Database) LoadAllNpcUpgrades() (map[int32][]UpgradeRecord, error) {
 		result[r.NpcID] = append(result[r.NpcID], r)
 	}
 	return result, rows.Err()
+}
+
+// SaveNpcData 保存 NPC 数据（商品库存/价格），以 JSON blob 存储。
+func (d *Database) SaveNpcData(npcKey, dataType string, jsonData []byte) error {
+	_, err := d.db.Exec(`INSERT OR REPLACE INTO npc_data (npc_key, data_type, json_data) VALUES (?, ?, ?)`,
+		npcKey, dataType, jsonData)
+	return err
+}
+
+// LoadNpcData 加载 NPC 数据。
+func (d *Database) LoadNpcData(npcKey, dataType string) ([]byte, error) {
+	var data []byte
+	err := d.db.QueryRow(`SELECT json_data FROM npc_data WHERE npc_key = ? AND data_type = ?`,
+		npcKey, dataType).Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return data, err
 }

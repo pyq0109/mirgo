@@ -69,6 +69,27 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 		}
 	}
 
+	// Delphi: 魔法射程校验 abs(我-目标) <= nMagicAttackRage (Magic.pas:266)
+	dx := targetX - p.CurrX
+	dy := targetY - p.CurrY
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	if dx > dy {
+		if dx > p.Engine.Config.GetMagicAttackRange() {
+			p.sendMagicFail(server)
+			return
+		}
+	} else {
+		if dy > p.Engine.Config.GetMagicAttackRange() {
+			p.sendMagicFail(server)
+			return
+		}
+	}
+
 	p.WAbil.MP -= uint16(def.Spell)
 	p.sendHealthSpell(server)
 
@@ -257,9 +278,25 @@ func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power,
 }
 
 func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx, ty int) {
+	// Delphi: 弹道魔法遮挡检测 (ObjBase.pas:24055-24089)
+	switch magID {
+	case 1, 5, 10, 11, 44, 45:
+		if !p.magCanHitTarget(tx, ty) {
+			p.sendMagicFire(server, magID, tx, ty)
+			return
+		}
+	}
+
 	switch magID {
 	case 1, 5, 44:
-		p.doSpellDamageAt(server, power, tx, ty)
+		// Delphi: 弹道魔法 600ms 飞行延迟 (Magic.pas:285-292, ObjBase.pas:4565-4582)
+		p.PendingMagics = append(p.PendingMagics, PendingMagic{
+			MagID:    magID,
+			Power:    power,
+			TargetX:  tx,
+			TargetY:  ty,
+			FireTick: time.Now().UnixMilli() + 600,
+		})
 	case 10, 11:
 		p.doSpellDamageAt(server, power, tx, ty)
 	case 9:
@@ -894,4 +931,74 @@ func (p *PlayObject) SendSpecialAttackFlags(server *netserver.TCPServer) {
 	} else {
 		send("UTWN")
 	}
+}
+
+// magCanHitTarget 弹道遮挡检测（Delphi MagCanHitTarget, ObjBase.pas:24055-24089）。
+// 沿施法者到目标的方向逐格检查，最多 13 格，有墙则不可命中。
+func (p *PlayObject) magCanHitTarget(tx, ty int) bool {
+	if p.envir == nil {
+		return true
+	}
+	dx := tx - p.CurrX
+	dy := ty - p.CurrY
+	steps := dx
+	if dy < 0 {
+		steps = -dy
+	}
+	if dx < 0 {
+		steps = -dx
+	}
+	if dy > steps {
+		steps = dy
+	}
+	if steps > 13 {
+		steps = 13
+	}
+	if steps <= 1 {
+		return true
+	}
+	sx := 0
+	if dx > 0 {
+		sx = 1
+	} else if dx < 0 {
+		sx = -1
+	}
+	sy := 0
+	if dy > 0 {
+		sy = 1
+	} else if dy < 0 {
+		sy = -1
+	}
+	cx, cy := p.CurrX, p.CurrY
+	for i := 1; i < steps; i++ {
+		cx += sx
+		cy += sy
+		if cx == tx && cy == ty {
+			break
+		}
+		if !p.envir.CanWalkEx(cx, cy, true) {
+			return false
+		}
+	}
+	return true
+}
+
+// processPendingMagics 处理延迟魔法（弹道飞行到期后结算伤害）。
+// Delphi: RM_DELAYMAGIC (ObjBase.pas:4565-4582)
+func (p *PlayObject) processPendingMagics(server *netserver.TCPServer, now int64) {
+	if len(p.PendingMagics) == 0 {
+		return
+	}
+	remaining := p.PendingMagics[:0]
+	for _, pm := range p.PendingMagics {
+		if now < pm.FireTick {
+			remaining = append(remaining, pm)
+			continue
+		}
+		// Delphi: 到期后校验目标仍在范围内 (ObjBase.pas:4579)
+		if p.envir != nil {
+			p.doSpellDamageAt(server, pm.Power, pm.TargetX, pm.TargetY)
+		}
+	}
+	p.PendingMagics = remaining
 }

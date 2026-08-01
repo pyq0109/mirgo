@@ -987,6 +987,7 @@ func (p *PlayObject) checkSetBonuses() {
 
 	// 记忆套(4件)：允许行会传送（Delphi m_boRecallSuite → @recall 命令）
 	p.HasRecallSuite = nameCounts["记忆"] >= 4
+	p.HongMoSuite = 0
 
 	// 魔血套(3件)：MP 转 HP（Delphi m_nMoXieSuite=50）
 	if nameCounts["魔血"] >= 3 {
@@ -1000,9 +1001,10 @@ func (p *PlayObject) checkSetBonuses() {
 		}
 	}
 
-	// 虹魔套(3件)：命中 +2（Delphi m_AddAbil.wHitPoint += 2）
+	// 虹魔套(3件)：命中 +2，吸血 5%（Delphi m_nHongMoSuite）
 	if nameCounts["虹魔"] >= 3 {
 		p.HitPoint += 2
+		p.HongMoSuite = 5
 	}
 
 	// 精神套(4件)：DC +2/+5，攻速 +2（Delphi m_bopirit）

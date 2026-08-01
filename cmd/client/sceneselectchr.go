@@ -203,7 +203,7 @@ func (s *SelectChrScene) buildUI() {
 		if prg != nil {
 			jb.SetImgIndex(prg, ImgCreateJob1+i)
 		} else {
-			jb.Width, jb.Height = 60, 28
+			jb.Width, jb.Height = 60, 42
 		}
 		jb.Left = jobXs[i]
 		jb.Top = 139
@@ -212,11 +212,12 @@ func (s *SelectChrScene) buildUI() {
 			if prg == nil {
 				return
 			}
-			switch {
-			case c.Downed:
+			if c.Downed {
 				s.ui.BlitImage(prg, ImgCreateJob1+idx, c.AbsX(), c.AbsY(), proj)
-			case s.createJob == idx:
+			} else if s.createJob == idx {
 				s.ui.BlitImage(prg, ImgClassHi1+idx, c.AbsX(), c.AbsY(), proj)
+			} else {
+				s.ui.BlitImage(prg, ImgCreateJob1+idx, c.AbsX(), c.AbsY(), proj)
 			}
 		}
 		cp.AddChild(jb)
@@ -231,7 +232,7 @@ func (s *SelectChrScene) buildUI() {
 		if prg != nil {
 			sb.SetImgIndex(prg, ImgCreateMale+i)
 		} else {
-			sb.Width, sb.Height = 60, 28
+			sb.Width, sb.Height = 60, 42
 		}
 		sb.Left = sexXs[i]
 		sb.Top = 211
@@ -240,11 +241,12 @@ func (s *SelectChrScene) buildUI() {
 			if prg == nil {
 				return
 			}
-			switch {
-			case c.Downed:
+			if c.Downed {
 				s.ui.BlitImage(prg, ImgCreateMale+idx, c.AbsX(), c.AbsY(), proj)
-			case s.createSex == idx:
+			} else if s.createSex == idx {
 				s.ui.BlitImage(prg, sexHi[idx], c.AbsX(), c.AbsY(), proj)
+			} else {
+				s.ui.BlitImage(prg, ImgCreateMale+idx, c.AbsX(), c.AbsY(), proj)
 			}
 		}
 		cp.AddChild(sb)
@@ -252,36 +254,11 @@ func (s *SelectChrScene) buildUI() {
 	}
 
 	okBtn := NewUIControl("BtnCreateOk", KindButton)
-	if prg != nil {
-		okBtn.SetImgIndex(prg, ImgCreateOk)
-	} else {
-		okBtn.Width, okBtn.Height = 80, 28
-	}
-	okBtn.Left = 46
-	okBtn.Top = 273
+	okBtn.Width, okBtn.Height = 80, 30
+	okBtn.Left = 85
+	okBtn.Top = 275
 	okBtn.OnClick = func(c *UIControl, x, y int) { s.confirmCreate() }
-	okBtn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-		if c.Downed && prg != nil {
-			s.ui.BlitImage(prg, ImgCreateOk, c.AbsX(), c.AbsY(), proj)
-		}
-	}
 	cp.AddChild(okBtn)
-
-	cancelBtn := NewUIControl("BtnCreateCancel", KindButton)
-	if prg != nil {
-		cancelBtn.SetImgIndex(prg, ImgCreateCancel)
-	} else {
-		cancelBtn.Width, cancelBtn.Height = 80, 28
-	}
-	cancelBtn.Left = 142
-	cancelBtn.Top = 273
-	cancelBtn.OnClick = func(c *UIControl, x, y int) { s.createMode = false }
-	cancelBtn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-		if c.Downed && prg != nil {
-			s.ui.BlitImage(prg, ImgCreateCancel, c.AbsX(), c.AbsY(), proj)
-		}
-	}
-	cp.AddChild(cancelBtn)
 
 	// --- 删除确认面板 ---
 	dp := NewUIControl("DDeletePanel", KindWindow)
@@ -534,8 +511,9 @@ func (s *SelectChrScene) paintCreatePreview(proj [16]float32, idx int) {
 	if sex > 1 {
 		sex = 0
 	}
-	slotX, slotY := s.slotPos(job, sex, idx, selOX, selOY)
-	imgIdx := 60 + job*40 + sex*120
+	slotX, slotY := s.standingPos(job, sex, idx, selOX, selOY)
+	frame := int(time.Now().UnixMilli()/300) % selectedFrame
+	imgIdx := 40 + job*40 + sex*120 + frame
 	if s.resources.ChrSel == nil || imgIdx >= s.resources.ChrSel.Count {
 		return
 	}

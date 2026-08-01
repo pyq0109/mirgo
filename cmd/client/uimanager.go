@@ -481,21 +481,7 @@ func (m *UIManager) Paint(proj [16]float32) {
 
 func (m *UIManager) paintControl(c *UIControl, proj [16]float32) {
 	if !c.Visible {
-		if debugRenderFrame <= 2 {
-			log.Logf(log.LevelInfo, "UI", "paintControl SKIP(invisible) name=%s kind=%d", c.Name, c.Kind)
-		}
 		return
-	}
-
-	if debugRenderFrame <= 2 {
-		method := "none"
-		if c.OnDirectPaint != nil {
-			method = "OnDirectPaint"
-		} else if c.WLib != nil {
-			method = fmt.Sprintf("BlitImage[%d]", c.FaceIndex)
-		}
-		log.Logf(log.LevelInfo, "UI", "paintControl name=%s kind=%d vis=%v pos=(%d,%d) size=(%d,%d) method=%s children=%d",
-			c.Name, c.Kind, c.Visible, c.AbsX(), c.AbsY(), c.Width, c.Height, method, len(c.Children))
 	}
 
 	if c.Kind == KindGrid {
@@ -516,7 +502,6 @@ func (m *UIManager) paintControl(c *UIControl, proj [16]float32) {
 	if c.OnDirectPaint != nil {
 		c.OnDirectPaint(c, proj)
 	} else if c.WLib != nil {
-		log.Logf(log.LevelTrace, "UI", "%s img=%d pos=(%d,%d)", c.Name, c.FaceIndex, c.AbsX(), c.AbsY())
 		m.BlitImage(c.WLib, c.FaceIndex, c.AbsX(), c.AbsY(), proj)
 	}
 
@@ -749,15 +734,56 @@ func (m *UIManager) DebugList(kindFilter string) string {
 
 // DebugHoverInfo 返回鼠标坐标处最顶层控件的简要信息。
 func (m *UIManager) DebugHoverInfo(x, y int) string {
-	var hits []*UIControl
-	m.debugCollectHits(m.Root, x-m.Root.Left, y-m.Root.Top, &hits)
-	if len(hits) == 0 {
+	c := m.HoveredControl(x, y)
+	if c == nil {
 		return ""
 	}
-	c := hits[len(hits)-1]
 	w, h := c.effectiveSize()
 	return fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d vis=%v",
 		c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, c.Visible)
+}
+
+// HoveredControl 返回鼠标坐标处最顶层的可交互控件 (Button/Grid/EnableFocus)。
+func (m *UIManager) HoveredControl(x, y int) *UIControl {
+	var hits []*UIControl
+	m.debugCollectHits(m.Root, x-m.Root.Left, y-m.Root.Top, &hits)
+	for i := len(hits) - 1; i >= 0; i-- {
+		c := hits[i]
+		if c.Background || c.Kind == KindWindow {
+			continue
+		}
+		if c.Kind == KindButton || c.Kind == KindGrid || c.EnableFocus {
+			return c
+		}
+	}
+	return nil
+}
+
+// RenderInteractiveOverlay 在所有可见可交互控件上画类型着色边框。
+func (m *UIManager) RenderInteractiveOverlay(proj [16]float32) {
+	m.overlayWalk(m.Root, proj)
+	if m.Modal != nil && m.Modal.Visible {
+		m.overlayWalk(m.Modal, proj)
+	}
+}
+
+func (m *UIManager) overlayWalk(c *UIControl, proj [16]float32) {
+	if !c.Visible {
+		return
+	}
+	if !c.Background {
+		isInteractive := c.Kind == KindWindow || c.Kind == KindButton || c.Kind == KindGrid || c.EnableFocus
+		if isInteractive {
+			w, h := c.effectiveSize()
+			if w > 0 && h > 0 {
+				x, y := float32(c.AbsX()), float32(c.AbsY())
+				drawWireRect(m.gl, x, y, float32(w), float32(h), 0.2, 0.8, 0.2, 0.4, proj)
+			}
+		}
+	}
+	for _, ch := range c.Children {
+		m.overlayWalk(ch, proj)
+	}
 }
 
 func debugCallbacks(c *UIControl) string {

@@ -10,6 +10,15 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
+// PendingMagic 延迟魔法（火球等弹道技能的飞行时间）。
+type PendingMagic struct {
+	MagID    int
+	Power    int
+	TargetX  int
+	TargetY  int
+	FireTick int64 // 预计命中时间
+}
+
 type PlayObject struct {
 	*BaseObject
 
@@ -72,6 +81,8 @@ type PlayObject struct {
 
 	PkPoint         int
 	LastPkDecayTick int64
+	PKFlag          bool  // 正当防卫标记（Delphi m_boPKFlag）
+	PKFlagTick      int64 // PK 旗设置时间
 	OnHorse         bool
 	HorseType       byte
 	Permission      byte
@@ -79,6 +90,7 @@ type PlayObject struct {
 
 	LastHiterID   int32 // 最后攻击者 ID（供奴隶目标选择）
 	LastHiterTick int64
+	EnterMapTick  int64 // 进入地图时间（切图保护）
 
 	Deal         *DealState
 	GuildName    string
@@ -111,6 +123,7 @@ type PlayObject struct {
 	HasMagicShield bool
 	HasMuscle      bool
 	HasRecallSuite bool
+	HongMoSuite    int // 虹魔套装吸血百分比 (Delphi m_nHongMoSuite)
 
 	// 临时 Buff（StdMode 3, Shape 12 神水/精酿）。
 	BuffDC         int
@@ -123,6 +136,9 @@ type PlayObject struct {
 
 	SlaveIDs   []int32 // 当前宠物 ID 列表
 	SlaveLevel int     // 宠物等级（1-7，Delphi m_btSlaveExpLevel）
+
+	// Delphi: RM_DELAYMAGIC 延迟魔法队列 (ObjBase.pas:4565-4582)
+	PendingMagics []PendingMagic
 
 	// E2: 任务位标志（3×1024 bits，Delphi m_QuestUnitOpen/m_QuestUnit/m_QuestFlag）
 	QuestUnitOpen [128]byte
@@ -220,6 +236,8 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 
 	p.ProcessStatusEffects(server, now)
 	p.DecayPkPoint(now)
+	p.CheckPKStatus(now)
+	p.processPendingMagics(server, now)
 
 	if p.Death {
 		if p.deathTick > 0 && now-p.deathTick > 10000 && !p.skeletonSent {
@@ -418,6 +436,10 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.sendHitToClient(server, protocol.SMWideHit, msg)
 	case RM_FIREHIT:
 		p.sendHitToClient(server, protocol.SMFireHit, msg)
+	case RM_CRSHIT:
+		p.sendHitToClient(server, protocol.SMCrsHit, msg)
+	case RM_TWINHIT:
+		p.sendHitToClient(server, protocol.SMTwinHit, msg)
 	case RM_STRUCK:
 		p.sendStruckToClient(server, msg)
 	case RM_DEATH:
@@ -657,6 +679,12 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 
+	// Delphi: 受击硬直阻止攻击 (ObjBase.pas:25234)
+	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+		server.SendRaw(p.Session.ID, "#+FAIL!")
+		return
+	}
+
 	if magID, ok := hitSkillMagID(msg.Ident); ok && p.findMagic(magID) == nil {
 		msg.Ident = protocol.CMHit
 	}
@@ -669,12 +697,14 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	// Delphi: FireHit 是激活模型，不是直接攻击 (ObjBase.pas:9782)
 	if msg.Ident == protocol.CMFireHit {
 		if now-p.FireHitTick < 10000 {
+			server.SendRaw(p.Session.ID, "#+FAIL!")
 			return
 		}
 		p.FireHitActive = true
 		p.FireHitActivateTick = now
 		p.FireHitTick = now
 		p.SendSpecialAttackFlags(server)
+		server.SendRaw(p.Session.ID, "#+GOOD!")
 		return
 	}
 	// Delphi: TwinHit 同理 (ObjBase.pas:9797)
@@ -735,11 +765,12 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	case msg.Ident == protocol.CMWideHit:
 		rmIdent = RM_WIDEHIT
 	case msg.Ident == protocol.CMCrsHit:
-		rmIdent = RM_WIDEHIT
+		rmIdent = RM_CRSHIT
 	case msg.Ident == protocol.CMTwinHit:
-		rmIdent = RM_FIREHIT
+		rmIdent = RM_TWINHIT
 	}
 	p.SendRefMsg(rmIdent, dir, p.CurrX, p.CurrY, "")
+	server.SendRaw(p.Session.ID, "#+GOOD!")
 
 	// Delphi: WideHit/CRS 消耗 MP (ObjBase.pas:18788-18811)
 	if msg.Ident == protocol.CMWideHit || msg.Ident == protocol.CMCrsHit {
@@ -799,6 +830,11 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	if IsSafeZone(p.envir, target.CurrX, target.CurrY) {
+		return
+	}
+
+	// Delphi: IsProtectTarget 等级保护 (ObjBase.pas:21258-21330)
+	if tp := p.envir.getPlayerByBase(target); tp != nil && p.IsProtectTarget(tp) {
 		return
 	}
 
@@ -1078,6 +1114,11 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		damage = damage + damage/5 // 默认 +20%
 	}
 
+	// Delphi: 不死系易伤 (ObjBase.pas:22428-22431)
+	if target.UndeadBonus > 0 {
+		damage += target.UndeadBonus
+	}
+
 	hp := int(target.WAbil.HP)
 	hp -= damage
 
@@ -1101,7 +1142,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	}
 	target.WAbil.HP = uint16(hp)
 
-	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, target.CurrX, target.CurrY, dir)
+	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, damage, target.CurrY, dir)
 
 	// 攻击方武器磨损（Delphi: DoDamageWeapon, ObjBase.pas:18967）
 	if damage > 0 {
@@ -1132,6 +1173,9 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		tp.LastHiterID = p.ID
 		tp.LastHiterTick = time.Now().UnixMilli()
 		tp.StruckTick = time.Now().UnixMilli()
+
+		// Delphi: 被玩家击中标记正当防卫旗 (ObjBase.pas:21220-21236)
+		tp.SetPKFlag(p)
 
 		equipChanged := false
 		if it := tp.UseItems[protocol.UDress]; it != nil && it.Dura > 0 {
@@ -1189,6 +1233,19 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		}
 	}
 
+	// Delphi: 虹魔套装吸血 (ObjBase.pas:22272-22281)
+	if p.HongMoSuite > 0 && damage > 0 {
+		heal := damage * p.HongMoSuite / 100
+		if heal > 0 {
+			hp := int(p.WAbil.HP) + heal
+			if hp > int(p.WAbil.MaxHP) {
+				hp = int(p.WAbil.MaxHP)
+			}
+			p.WAbil.HP = uint16(hp)
+			p.sendHealthSpell(server)
+		}
+	}
+
 	log.Logf(log.LevelInfo, "Combat", "%s attacked %s dealing %d damage (HP: %d/%d)",
 		p.Name, target.Name, damage, hp, target.WAbil.MaxHP)
 }
@@ -1209,24 +1266,22 @@ func (p *PlayObject) sendHitToClient(server *netserver.TCPServer, smIdent uint16
 
 func (p *PlayObject) sendStruckToClient(server *netserver.TCPServer, msg SendMessage) {
 	resp := protocol.MakeDefaultMsg(protocol.SMStruck, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), uint16(msg.Param3))
-	// body[0:4] = 攻击者 ID（客户端据此查找武器/种族以区分受击声）
-	var body string
+	// body[0:4] = 攻击者 ID, body[4:6] = 伤害值
+	var hiterID int32
 	if p.envir != nil {
 		if obj := p.envir.getObjectByID(msg.SourceID); obj != nil {
-			var hiterID int32
 			switch t := obj.(type) {
 			case *PlayObject:
 				hiterID = t.LastHiterID
 			case *MonsterObject:
 				hiterID = t.LastHiterID
 			}
-			if hiterID != 0 {
-				buf := make([]byte, 4)
-				binary.LittleEndian.PutUint32(buf, uint32(hiterID))
-				body = protocol.EncodeBuffer(buf)
-			}
 		}
 	}
+	buf := make([]byte, 6)
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(hiterID))
+	binary.LittleEndian.PutUint16(buf[4:6], uint16(msg.Param1))
+	body := protocol.EncodeBuffer(buf)
 	server.Send(p.Session.ID, resp, body)
 }
 
@@ -2007,6 +2062,7 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 	p.MapName = newEnvir.Name
 	p.CurrX = newX
 	p.CurrY = newY
+	p.EnterMapTick = time.Now().UnixMilli()
 
 	newEnvir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 

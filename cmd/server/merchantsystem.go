@@ -70,8 +70,15 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 	// 先尝试脚本标签跳转（带安全校验, Delphi ObjBase.pas:25401-25430）
 	label := strings.TrimPrefix(tag, "@")
 	if script := npc.GetScript(); script != nil {
-		if section, exists := script.Labels[label]; exists {
-			if p.labelIsCanJmp(label) || section.ExtJmp {
+		if sections, exists := script.Labels[label]; exists {
+			extJmp := false
+			for _, s := range sections {
+				if s.ExtJmp {
+					extJmp = true
+					break
+				}
+			}
+			if p.labelIsCanJmp(label) || extJmp {
 				script.Execute(label, p, npc, server)
 			}
 			return
@@ -261,6 +268,71 @@ func (p *PlayObject) sendMakeDrugList(server *netserver.TCPServer, npc *NpcObjec
 	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
 }
 
+// calcBuyPrice 计算物品实例的购买价格。
+// Delphi: ObjNpc.pas:1838-1919 GetUserItemPrice + ObjNpc.pas:1385-1416 GetUserPrice。
+func (p *PlayObject) calcBuyPrice(npc *NpcObject, def *ItemDef, item *protocol.UserItem) int {
+	// 基础价格：PriceList 优先，否则 StdItem.Price
+	price := int(def.Price)
+	if npc != nil {
+		npc.mu.RLock()
+		if ip, ok := npc.PriceList[def.Idx]; ok && ip.Price > 0 {
+			price = ip.Price
+		}
+		npc.mu.RUnlock()
+	}
+
+	// StdMode > 4 的装备：附加值 + 耐久比（Delphi ObjNpc.pas:1880-1915）
+	if def.StdMode > 4 && item != nil {
+		addon := 0
+		for i := 0; i < 8 && i < len(item.BtValue); i++ {
+			// 武器(5)/衣服(6)：跳过 idx 4/9，idx 6 只计 (val-10)*2
+			if (def.StdMode == 5 || def.StdMode == 6) && (i == 4 || i == 9) {
+				continue
+			}
+			v := int(item.BtValue[i])
+			if (def.StdMode == 5 || def.StdMode == 6) && i == 6 {
+				if v > 10 {
+					addon += (v - 10) * 2
+				}
+			} else {
+				addon += v
+			}
+		}
+		if addon > 0 {
+			price = price / 5 * addon
+		}
+		// DuraMax 比率
+		if def.DuraMax > 0 && item.DuraMax > 0 {
+			price = price * int(item.DuraMax) / int(def.DuraMax)
+		}
+		// Dura 比率：线性折旧至半价
+		if item.DuraMax > 0 {
+			loss := price / 2 * (int(item.DuraMax) - int(item.Dura)) / int(item.DuraMax)
+			price -= loss
+			if price < 2 {
+				price = 2
+			}
+		}
+	}
+
+	// PriceRate% + 城堡成员折扣（Delphi ObjNpc.pas:1385-1416）
+	if npc != nil {
+		rate := npc.PriceRate
+		if npc.Castle && p.Engine != nil && p.Engine.Castle != nil &&
+			p.Engine.Castle.IsDefendingGuild(p.GuildName) {
+			rate = rate * 80 / 100 // nCastleMemberPriceRate=80
+			if rate < 60 {
+				rate = 60
+			}
+		}
+		price = price * rate / 100
+	}
+	if price <= 0 {
+		price = 1
+	}
+	return price
+}
+
 func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer) {
 	// 距离验证：确保玩家仍在NPC附近
 	if p.CurrentNpc != nil && !p.isNearNpc(p.CurrentNpc) {
@@ -283,59 +355,60 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 		return
 	}
 
-	// 查找当前交互的 NPC
 	var npc *NpcObject
 	if p.CurrentNpc != nil {
 		npc = p.CurrentNpc
 	}
 
-	// 计算价格
-	price := int(def.Price)
-	if npc != nil {
-		npc.mu.RLock()
-		if ip, ok := npc.PriceList[def.Idx]; ok && ip.Price > 0 {
-			price = ip.Price
+	// 先从库存选取物品，再按实例计算价格（Delphi ObjNpc.pas:1922-2028）
+	var item *protocol.UserItem
+	if npc != nil && len(npc.GoodsList) > 0 {
+		npc.mu.Lock()
+		if stock, ok := npc.GoodsList[def.Name]; ok && len(stock.Items) > 0 {
+			item = stock.Items[0]
+			stock.Items = stock.Items[1:]
 		}
-		price = price * npc.PriceRate / 100
-		npc.mu.RUnlock()
+		npc.mu.Unlock()
 	}
-	if price <= 0 {
-		price = 100
+	if item == nil {
+		item = p.ItemDB.CreateUserItem(def.Idx)
 	}
-	if p.Gold < price {
+	if item == nil {
 		p.sendBuyFail(server)
 		return
 	}
 
-	// 尝试从 NPC 库存购买
-	bought := false
-	if npc != nil && len(npc.GoodsList) > 0 {
-		npc.mu.Lock()
-		if stock, ok := npc.GoodsList[def.Name]; ok && len(stock.Items) > 0 {
-			item := stock.Items[0]
-			stock.Items = stock.Items[1:]
-			// 分配唯一 MakeIndex
-			if p.Engine != nil {
-				p.Engine.mu.Lock()
-				item.MakeIndex = int32(p.Engine.nextItemID)
-				p.Engine.nextItemID++
-				p.Engine.mu.Unlock()
+	price := p.calcBuyPrice(npc, def, item)
+	if p.Gold < price {
+		// 放回库存
+		if npc != nil {
+			npc.mu.Lock()
+			stock := npc.GoodsList[def.Name]
+			if stock == nil {
+				stock = &GoodsStock{}
+				npc.GoodsList[def.Name] = stock
 			}
-			p.ItemList = append(p.ItemList, item)
-			bought = true
+			stock.Items = append([]*protocol.UserItem{item}, stock.Items...)
+			npc.mu.Unlock()
 		}
-		npc.mu.Unlock()
+		p.sendBuyFail(server)
+		return
 	}
 
-	// 回退：从 ItemDB 创建（无库存 NPC）
-	if !bought {
-		if !p.GiveItem(itemIdx) {
-			p.sendBuyFail(server)
-			return
-		}
+	// 分配唯一 MakeIndex
+	if p.Engine != nil {
+		p.Engine.mu.Lock()
+		item.MakeIndex = int32(p.Engine.nextItemID)
+		p.Engine.nextItemID++
+		p.Engine.mu.Unlock()
 	}
+	p.ItemList = append(p.ItemList, item)
 
 	p.Gold -= price
+	// 城堡税（Delphi Castle.pas:1022-1061）
+	if npc != nil && npc.Castle && p.Engine != nil && p.Engine.Castle != nil {
+		p.Engine.Castle.CollectTax(int64(price * 5 / 100))
+	}
 	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 	p.RecalcAbilitys()
@@ -365,6 +438,12 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 	}
 	def := p.ItemDB.GetByIdx(int(item.WIndex))
 	if def == nil {
+		p.sendSellFail(server)
+		return
+	}
+
+	// Delphi ObjNpc.pas:2134-2145：药水(StdMode=25)和卷轴(StdMode=30) Dura<4000 不可出售
+	if (def.StdMode == 25 || def.StdMode == 30) && item.Dura < 4000 {
 		p.sendSellFail(server)
 		return
 	}
@@ -499,6 +578,17 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 	p.SendBagItemsFull(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
+
+	// Delphi ObjNpc.pas:2476-2486：修理后跳转脚本标签
+	if p.CurrentNpc != nil {
+		if script := p.CurrentNpc.GetScript(); script != nil {
+			if isSpecial {
+				script.Execute("~@s_repair", p, p.CurrentNpc, server)
+			} else {
+				script.Execute("~@repair", p, p.CurrentNpc, server)
+			}
+		}
+	}
 }
 
 func (p *PlayObject) HandleQueryRepairCost(msg SendMessage, server *netserver.TCPServer) {

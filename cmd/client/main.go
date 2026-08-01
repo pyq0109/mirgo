@@ -1238,6 +1238,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMHit, protocol.SMHeavyHit, protocol.SMBigHit, protocol.SMPowerHit, protocol.SMLongHit, protocol.SMWideHit, protocol.SMFireHit, protocol.SMCrsHit, protocol.SMTwinHit:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
+			// 本地预测已播放自身攻击动画，跳过服务端广播
+			if h.playScene.State.MySelf != nil && msg.Recog == h.playScene.State.MySelf.RecogID {
+				break
+			}
 			actor.SendMsg(int(msg.Ident), int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 		}
 
@@ -1251,8 +1255,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
 			hiterID := int32(0)
+			damage := uint16(0)
 			if raw := []byte(body); len(raw) >= 4 {
 				hiterID = int32(binary.LittleEndian.Uint32(raw[0:4]))
+				if len(raw) >= 6 {
+					damage = binary.LittleEndian.Uint16(raw[4:6])
+				}
 			}
 			actor.HiterCode = hiterID
 			if hiterID != 0 && actor.MagicStruckSound < 1 {
@@ -1266,6 +1274,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 				} else if hiter != nil {
 					actor.StruckSound = sStruckBodyFist
 				}
+			}
+			if damage > 0 {
+				h.playScene.addFloatingText(actor.CurrX, actor.CurrY, strconv.Itoa(int(damage)), 1.0, 0.3, 0.3)
 			}
 			actor.SendMsg(protocol.SMStruck, actor.CurrX, actor.CurrY, int(msg.Series)&0xFF, 0, int(hiterID))
 		}
@@ -2082,6 +2093,10 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 	playScene.SetSendAttack(func(ident int, dir int) {
 		hitMsg := protocol.MakeDefaultMsg(uint16(ident), 0, uint16(dir), 0, 0)
 		handler.Send(hitMsg, "")
+		// 本地预测：立即播放攻击动画（Delphi ReadyAction, Actor.pas:1479-1528）
+		if my := playScene.State.MySelf; my != nil {
+			my.SendMsg(ident, my.CurrX, my.CurrY, dir, 0, 0)
+		}
 	})
 
 	playScene.SetSendPickup(func() {

@@ -48,6 +48,7 @@ type ServerConfig struct {
 		TurnInterval    int64          `json:"turnInterval"`    // 转向最小间隔(ms)，默认 300
 		SpellInterval   int64          `json:"spellInterval"`   // 施法最小间隔(ms)，默认 600
 		DigUpInterval   int64          `json:"digUpInterval"`   // 挖矿最小间隔(ms)，默认 1000
+		MagicAttackRange int           `json:"magicAttackRange"` // 魔法射程(格)，默认 12
 	} `json:"game"`
 	Commands struct {
 		Names       map[string]string `json:"names"`
@@ -251,6 +252,13 @@ func (c *ServerConfig) GetDigUpInterval() int64 {
 		return c.Game.DigUpInterval
 	}
 	return 1000
+}
+
+func (c *ServerConfig) GetMagicAttackRange() int {
+	if c.Game.MagicAttackRange > 0 {
+		return c.Game.MagicAttackRange
+	}
+	return 12
 }
 
 // GetServerHostPort 以 host/port 形式返回服务端地址。

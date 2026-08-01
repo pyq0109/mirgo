@@ -724,7 +724,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	target.WAbil.HP = uint16(hp)
 
 	if o.envir != nil {
-		o.envir.broadcastRefMsg(target.BaseObject, RM_STRUCK, target.ID, target.CurrX, target.CurrY, o.Dir)
+		o.envir.broadcastRefMsg(target.BaseObject, RM_STRUCK, target.ID, damage, target.CurrY, o.Dir)
 	}
 
 	if hp <= 0 {
