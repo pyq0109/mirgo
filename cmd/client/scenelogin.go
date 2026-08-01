@@ -69,7 +69,7 @@ var loginBtnOffsets = []loginArea{
 	{168, 165, 73, 32},  // 提交
 	{131, 204, 117, 32}, // 修改密码
 	{26, 204, 102, 32},  // 新用户
-	{264, 28, 20, 20},   // 关闭 (X)
+	{252, 28, 16, 23},   // 关闭 (X) —— 对齐 Delphi DLoginClose (FState.pas:797-798, Prguse[64]=16x23)
 }
 
 // 注册窗口输入框 (IntroScn.pas:279-410)，基准 nx=800/2-320=80,
@@ -107,12 +107,12 @@ var regFieldDefs = []fieldDef{
 
 // 注册窗口按钮——按十周年版 Prguse[63] 实际图片测量。
 var regButtonAreas = []loginArea{
-	{regNX + 138, regNY + 418, 82, 30}, // 提交
-	{regNX + 438, regNY + 418, 82, 30}, // 取消
+	{regNX + 157, regNY + 415, 82, 30}, // 提交 (对齐 Delphi DNewAccountOk: 157+1,415+1)
+	{regNX + 445, regNY + 418, 82, 30}, // 取消 (对齐 Delphi DNewAccountCancel: 445+1,418+1)
 	{regNX + 608, regNY + 8, 20, 20},   // 关闭 (X)
 }
 
-var regButtonImages = []int{51, 52, 83}
+var regButtonImages = []int{62, 52, 83} // 提交按下=62, 取消按下=52, 关闭=83
 
 // 修改密码窗口输入框——按十周年版 Prguse[50] 实际图片测量。
 const (
@@ -121,13 +121,13 @@ const (
 )
 
 var chgFieldDefs = []fieldDef{
-	{chgNX + 175, chgNY + 75, 195, 22, 10, false, false},
-	{chgNX + 175, chgNY + 108, 195, 22, 10, true, false},
-	{chgNX + 175, chgNY + 141, 195, 22, 10, true, true},
-	{chgNX + 175, chgNY + 174, 195, 22, 10, true, true},
+	{chgNX + 239, chgNY + 118, 137, 16, 10, false, false}, // 用户名 (对齐 Delphi m_EdChgId)
+	{chgNX + 239, chgNY + 150, 137, 16, 10, true, false},  // 当前密码 (m_EdChgCurrentpw)
+	{chgNX + 239, chgNY + 177, 137, 16, 10, true, true},   // 新密码 (m_EdChgNewPw)
+	{chgNX + 239, chgNY + 208, 137, 16, 10, true, true},   // 重复密码 (m_EdChgRepeat)
 }
 
-var chgButtonImages = []int{361, 365}
+var chgButtonImages = []int{81, 52} // 同意按下=81, 取消按下=52
 
 // serverInfo 保存 SM_PASSOKSELECTSERVER 返回的服务器条目。
 type serverInfo struct {
@@ -519,6 +519,13 @@ func (s *LoginScene) buildLoginUI() {
 		btn.ClickSound = sRockButtonClick
 		idx := i
 		btn.OnClick = func(c *UIControl, x, y int) { s.handleRegButton(idx) }
+		if idx < 2 { // 提交/取消: 休息态烘焙在 Prguse[63], 仅按下绘制凹陷图(+1 行程)
+			btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
+				if c.Downed {
+					s.ui.BlitImage(prg, regButtonImages[idx], c.AbsX()+1, c.AbsY()+1, proj)
+				}
+			}
+		}
 		rp.AddChild(btn)
 	}
 
@@ -577,7 +584,7 @@ func (s *LoginScene) buildLoginUI() {
 	}
 
 	// 修改密码按钮
-	chgBtnOffsets := []struct{ x, y int }{{155, 248}, {248, 248}}
+	chgBtnOffsets := []struct{ x, y int }{{180, 252}, {275, 251}} // 对齐 Delphi DChgpwOk 180+1,252+1 / DChgPwCancel 275+1,251+1
 	chgBtnNames := [2]string{"BtnChgOk", "BtnChgCancel"}
 	for i, off := range chgBtnOffsets {
 		btn := NewUIControl(chgBtnNames[i], KindButton)
@@ -598,11 +605,9 @@ func (s *LoginScene) buildLoginUI() {
 			}
 		}
 		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-			imgIdx := chgButtonImages[idx]
-			if c.Downed {
-				imgIdx++
+			if c.Downed { // 休息态烘焙在 Prguse[50], 仅按下绘制凹陷图(+1 行程)
+				s.ui.BlitImage(prg, chgButtonImages[idx], c.AbsX()+1, c.AbsY()+1, proj)
 			}
-			s.ui.BlitImage(prg, imgIdx, c.AbsX(), c.AbsY(), proj)
 		}
 		cp.AddChild(btn)
 	}
