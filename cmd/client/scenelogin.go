@@ -109,10 +109,10 @@ var regFieldDefs = []fieldDef{
 var regButtonAreas = []loginArea{
 	{regNX + 157, regNY + 415, 82, 30}, // 提交 (对齐 Delphi DNewAccountOk: 157+1,415+1)
 	{regNX + 445, regNY + 418, 82, 30}, // 取消 (对齐 Delphi DNewAccountCancel: 445+1,418+1)
-	{regNX + 608, regNY + 8, 20, 20},   // 关闭 (X)
+	{regNX + 587, regNY + 33, 16, 23},  // 关闭 (X) (对齐 Delphi DNewAccountClose 587,33; Prguse[64]=16x23)
 }
 
-var regButtonImages = []int{62, 52, 83} // 提交按下=62, 取消按下=52, 关闭=83
+var regButtonImages = []int{62, 52, 64} // 提交按下=62, 取消按下=52, 关闭X按下=64
 
 // 修改密码窗口输入框——按十周年版 Prguse[50] 实际图片测量。
 const (
@@ -519,11 +519,14 @@ func (s *LoginScene) buildLoginUI() {
 		btn.ClickSound = sRockButtonClick
 		idx := i
 		btn.OnClick = func(c *UIControl, x, y int) { s.handleRegButton(idx) }
-		if idx < 2 { // 提交/取消: 休息态烘焙在 Prguse[63], 仅按下绘制凹陷图(+1 行程)
-			btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-				if c.Downed {
-					s.ui.BlitImage(prg, regButtonImages[idx], c.AbsX()+1, c.AbsY()+1, proj)
+		// 休息态烘焙在 Prguse[63], 仅按下绘制凹陷图; 石按钮 +1 行程, 关闭X 图已内凹不偏移
+		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
+			if c.Downed {
+				dx, dy := c.AbsX(), c.AbsY()
+				if idx < 2 {
+					dx, dy = dx+1, dy+1
 				}
+				s.ui.BlitImage(prg, regButtonImages[idx], dx, dy, proj)
 			}
 		}
 		rp.AddChild(btn)
