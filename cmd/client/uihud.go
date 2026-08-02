@@ -201,9 +201,6 @@ func (s *PlayScene) paintBottomBar(barX, barY int, proj [16]float32) {
 		s.hudPlusAbil.Visible = st.BonusPoint > 0
 	}
 
-	// HUD 区全宽背景（底栏两侧可见）。
-	s.gl.DrawQuadColor(0, float32(mapViewH()), float32(winW), float32(hudZoneH), 0.04, 0.04, 0.06, 1, proj)
-
 	// 底板: 上 120px 做颜色键混合 (WIL 解码器已将黑色烘焙为 alpha=0,
 	// 因此 alpha 1.0 即可精确复现 DDBLTFAST_SRCCOLORKEY,
 	// FState:3577-3586), 下半部分不透明 (:3587-3593).

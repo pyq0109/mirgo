@@ -492,9 +492,9 @@ func (s *PlayScene) LoadMap(mapName string) error {
 	s.mapData = m
 	s.clearAutoPath()
 	if s.cam == nil {
-		s.cam = engine.NewCamera(winW, mapViewH())
+		s.cam = engine.NewCamera(winW, winH)
 	} else {
-		s.cam.SetViewport(winW, mapViewH())
+		s.cam.SetViewport(winW, winH)
 	}
 	s.cam.CenterOn(float64(m.Width)*engine.TileWidth/2, float64(m.Height)*engine.TileHeight/2)
 	s.State.MapName = mapName
@@ -517,7 +517,7 @@ func (s *PlayScene) LoadMap(mapName string) error {
 
 func (s *PlayScene) OnResize() {
 	if s.cam != nil {
-		s.cam.SetViewport(winW, mapViewH())
+		s.cam.SetViewport(winW, winH)
 	}
 	if s.ui != nil && s.ui.Root != nil {
 		s.ui.Root.Width, s.ui.Root.Height = winW, winH
@@ -592,7 +592,10 @@ func (s *PlayScene) Update(dt float64) {
 		my := s.State.MySelf
 		wx := float64(my.Rx)*engine.TileWidth + my.ShiftX + engine.TileWidth/2
 		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
-		s.cam.CenterOn(wx, wy)
+		// 玩家居中在无遮挡可视区（底栏不透明部分上方）。
+		// 底栏不透明起始 y = winH - (251-120) = winH - 131。
+		s.cam.X = wx - float64(winW)/(2*s.cam.Zoom)
+		s.cam.Y = wy - float64(winH-131)/(2*s.cam.Zoom)
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
@@ -768,19 +771,17 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 			s.renderFrame, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ZERO)
 	}
 
-	// 世界渲染到地图视口区域；底部 hudZoneH 逻辑行是 HUD。
+	// 地图渲染到全窗口；底栏上浮覆盖底部。
 	fbW, fbH := s.gl.ViewW, s.gl.ViewH
-	msH := mapViewH()
-	worldH := int32(float64(msH) * float64(fbH) / float64(winH))
-	s.gl.SetViewport(0, fbH-worldH, fbW, worldH)
+	s.gl.SetViewport(0, 0, fbW, fbH)
 	if s.dbg.WireMode > 0 {
 		s.gl.WireBounds = s.gl.WireBounds[:0]
 		s.gl.WireRecording = true
 		s.gl.WireRecord = false
 	}
 	if verbose {
-		log.Logf(log.LevelInfo, "Render", "frame=%d fb=%dx%d worldH=%d viewport=(0,%d,%d,%d) blend=SRC_ALPHA,ONE_MINUS_SRC_ALPHA",
-			s.renderFrame, fbW, fbH, worldH, fbH-worldH, fbW, worldH)
+		log.Logf(log.LevelInfo, "Render", "frame=%d fb=%dx%d viewport=(0,0,%d,%d) blend=SRC_ALPHA,ONE_MINUS_SRC_ALPHA",
+			s.renderFrame, fbW, fbH, fbW, fbH)
 	}
 
 	left := float32(cam.X)
