@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,16 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 	"github.com/pyq0109/mirgo/internal/storage"
 )
+
+type loginAttempt struct {
+	count    int
+	lockTime time.Time
+}
+
+var loginAttempts = struct {
+	sync.Mutex
+	m map[string]*loginAttempt
+}{m: make(map[string]*loginAttempt)}
 
 func main() {
 	configDir := flag.String("config", "serverconfig", "Path to serverconfig directory")
@@ -189,8 +200,10 @@ func main() {
 
 		// 验证证书与会话匹配
 		if session.Certification != 0 && session.Certification != cert {
-			log.Logf(log.LevelWarn, "Server", "[**RunLogin] cert mismatch: expected %d, got %d",
+			log.Logf(log.LevelWarn, "Server", "[**RunLogin] cert mismatch: expected %d, got %d — disconnecting",
 				session.Certification, cert)
+			server.CloseSession(session.ID)
+			return true
 		}
 
 		// 加载角色并进入游戏
@@ -355,7 +368,7 @@ func main() {
 
 		switch session.State {
 		case netserver.StateConnected:
-			handleConnectedMessage(server, session, msg, body, rawBody, config, db)
+			handleConnectedMessage(server, session, msg, body, rawBody, config, db, sessionMgr)
 		case netserver.StateAuthenticated:
 			handleAuthenticatedMessage(server, session, msg, body, config, db, userEngine, mapMgr)
 		case netserver.StateInGame:
@@ -422,7 +435,7 @@ func main() {
 }
 
 // handleConnectedMessage 处理 Connected 状态（认证前）的消息。
-func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string, config *ServerConfig, db *storage.Database) {
+func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string, config *ServerConfig, db *storage.Database, sessionMgr *SessionManager) {
 	switch msg.Ident {
 	case protocol.CMProtocol:
 		log.Logf(log.LevelInfo, "Server", "protocol version: %d", msg.Recog)
@@ -502,36 +515,60 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		username, password := parseCredentials(body)
 		log.Logf(log.LevelInfo, "Server", "login attempt: %s", username)
 
+		// 登录失败锁定检查（Delphi: 5次后锁定60秒，LoginSrv/LMain.pas:1218-1230）
+		loginAttempts.Lock()
+		attempt := loginAttempts.m[username]
+		if attempt != nil && attempt.count >= 5 && time.Since(attempt.lockTime) < 60*time.Second {
+			loginAttempts.Unlock()
+			log.Logf(log.LevelWarn, "Server", "account locked (too many attempts): %s", username)
+			resp := protocol.MakeDefaultMsg(protocol.SMPasswdFail, -2, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		loginAttempts.Unlock()
+
 		// 对照数据库验证
 		accountID, passwordHash, err := db.GetAccountByUsername(username)
 		if err != nil {
 			log.Logf(log.LevelWarn, "Server", "account not found: %s", username)
-			// 开发环境自动创建账号（生产环境移除）
-			hash := simpleHash(password)
-			accountID, err = db.CreateAccount(username, hash)
-			if err != nil {
-				log.Logf(log.LevelError, "Server", "failed to create account: %v", err)
-				sendLoginFail(server, session)
-				return
-			}
-			log.Logf(log.LevelInfo, "Server", "auto-created account: %s (id=%d)", username, accountID)
-		} else {
-			// 验证密码
-			if !verifyPassword(password, passwordHash) {
-				log.Logf(log.LevelWarn, "Server", "invalid password: %s", username)
-				sendLoginFail(server, session)
-				return
-			}
+			resp := protocol.MakeDefaultMsg(protocol.SMPasswdFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
 		}
 
-		// 认证成功
+		// 验证密码
+		if !verifyPassword(password, passwordHash) {
+			log.Logf(log.LevelWarn, "Server", "invalid password: %s", username)
+			loginAttempts.Lock()
+			if loginAttempts.m[username] == nil {
+				loginAttempts.m[username] = &loginAttempt{}
+			}
+			loginAttempts.m[username].count++
+			if loginAttempts.m[username].count >= 5 {
+				loginAttempts.m[username].lockTime = time.Now()
+			}
+			loginAttempts.Unlock()
+			sendLoginFail(server, session)
+			return
+		}
+
+		// 认证成功，清除失败记录
+		loginAttempts.Lock()
+		delete(loginAttempts.m, username)
+		loginAttempts.Unlock()
+
+		// 重复登录检测：踢出旧会话（Delphi: LoginSrv/LMain.pas:1253-1268）
+		if old := sessionMgr.GetByAccount(username); old != nil && old.ID != session.ID {
+			log.Logf(log.LevelInfo, "Server", "kicking duplicate session %d for account %s", old.ID, username)
+			server.CloseSession(old.ID)
+		}
+
 		session.State = netserver.StateAuthenticated
 		session.AccountName = username
 		session.CharacterID = accountID
 		log.Logf(log.LevelInfo, "Server", "session %d: connected -> authenticated (account=%s ID=%d)",
 			session.ID, username, accountID)
 
-		// Fix 2: 发送服务器列表，body 为 "serverName/status"
 		resp := protocol.MakeDefaultMsg(protocol.SMPassOKSelectServer, 0, 0, 0, 0)
 		serverName := config.Server.Name
 		if serverName == "" {
