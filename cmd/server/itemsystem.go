@@ -807,8 +807,10 @@ func (p *PlayObject) calcSkillCombatStats() {
 }
 
 func (p *PlayObject) updateAppearance() {
-	p.DressLook = 0
-	p.WeaponLook = 0
+	// 性别位无条件折叠进外观字节：裸体女=1（Hum.wil 奇数块为女体）。
+	// Delphi: nDress/nWeapon := 0 后在 if 外执行 Inc(…, m_btGender)（ObjBase.pas:20010,20021）
+	p.DressLook = p.Gender
+	p.WeaponLook = p.Gender
 	if p.ItemDB == nil {
 		return
 	}
