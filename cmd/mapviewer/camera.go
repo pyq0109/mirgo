@@ -1,4 +1,4 @@
-package renderer
+package main
 
 import "math"
 

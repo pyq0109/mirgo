@@ -10,8 +10,6 @@ import (
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/go-gl/glfw/v3.4/glfw"
 
-	"github.com/pyq0109/mirgo/cmd/wilviewer/renderer"
-	"github.com/pyq0109/mirgo/cmd/wilviewer/ui"
 	mlog "github.com/pyq0109/mirgo/internal/log"
 )
 
@@ -74,17 +72,17 @@ func main() {
 	mlog.Logf(mlog.LevelDebug, "Main", "OpenGL 初始化成功")
 
 	// 初始化 ImGui
-	ui.Init(window)
-	defer ui.Shutdown()
+	Init(window)
+	defer Shutdown()
 	mlog.Logf(mlog.LevelDebug, "Main", "ImGui 初始化成功")
 
 	// 创建 WIL 渲染器（尚未加载文件）
-	wilRenderer := renderer.NewWILRenderer(nil)
+	wilRenderer := NewWILRenderer(nil)
 	defer wilRenderer.Destroy()
 	mlog.Logf(mlog.LevelDebug, "Main", "WIL 渲染器创建成功")
 
 	// 创建 UI 状态
-	uiState := &ui.UIState{
+	uiState := &UIState{
 		DataDir:      dataDir,
 		WILFile:      nil,
 		Renderer:     wilRenderer,
@@ -93,7 +91,7 @@ func main() {
 	}
 
 	// 设置 GLFW 回调：滚轮用于网格滚动，方向键用于切换图像
-	ui.SetGLFWCallbacks(window, nil, func(w *glfw.Window, key glfw.Key, action glfw.Action) {
+	SetGLFWCallbacks(window, nil, func(w *glfw.Window, key glfw.Key, action glfw.Action) {
 		if action != glfw.Press {
 			return
 		}
@@ -131,7 +129,7 @@ func main() {
 		glfwWi, glfwHi := window.GetSize()
 		glfwW := int32(glfwWi)
 		glfwH := int32(glfwHi)
-		io := ui.IO()
+		io := IO()
 
 		// 键盘输入（仅在 ImGui 不拦截时处理）
 		if !io.WantCaptureKeyboard() {
@@ -147,14 +145,14 @@ func main() {
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
 		// ImGui 帧
-		ui.BeginFrame()
+		BeginFrame()
 
-		ui.RenderLeftPanel(uiState, glfwW, glfwH)
-		ui.RenderGridPanel(uiState, glfwW, glfwH)
-		ui.RenderInfoPanel(uiState, glfwW, glfwH)
-		ui.RenderPreviewPanel(uiState, glfwW, glfwH)
+		RenderLeftPanel(uiState, glfwW, glfwH)
+		RenderGridPanel(uiState, glfwW, glfwH)
+		RenderInfoPanel(uiState, glfwW, glfwH)
+		RenderPreviewPanel(uiState, glfwW, glfwH)
 
-		ui.EndFrame()
+		EndFrame()
 
 		window.SwapBuffers()
 	}

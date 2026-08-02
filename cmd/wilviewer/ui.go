@@ -1,4 +1,4 @@
-package ui
+package main
 
 import (
 	"fmt"
@@ -16,7 +16,6 @@ import (
 	igglfw "github.com/AllenDang/cimgui-go/impl/glfw"
 	igopengl3 "github.com/AllenDang/cimgui-go/impl/opengl3"
 
-	"github.com/pyq0109/mirgo/cmd/wilviewer/renderer"
 	mlog "github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
@@ -32,7 +31,7 @@ type UIState struct {
 	DataDir        string // 根资源目录
 	WILFile        *wil.File
 	CurrentWILName string // 当前打开的 .wil 文件名
-	Renderer       *renderer.WILRenderer
+	Renderer       *WILRenderer
 	CurrentIdx     int
 
 	// 网格状态
@@ -466,19 +465,6 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	}
 
 	ig.End()
-}
-
-func formatIdx(i int) string {
-	if i < 10 {
-		return "000" + string(rune('0'+i))
-	}
-	if i < 100 {
-		return fmt.Sprintf("%03d", i)
-	}
-	if i < 1000 {
-		return fmt.Sprintf("%03d", i)
-	}
-	return fmt.Sprintf("%04d", i)
 }
 
 // wilCategory 根据文件名为 WIL 文件分类。

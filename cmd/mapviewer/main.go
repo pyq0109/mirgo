@@ -12,9 +12,6 @@ import (
 
 	"github.com/pyq0109/mirgo/internal/mapformat"
 	"github.com/pyq0109/mirgo/internal/wil"
-
-	"github.com/pyq0109/mirgo/cmd/mapviewer/renderer"
-	"github.com/pyq0109/mirgo/cmd/mapviewer/ui"
 )
 
 const (
@@ -90,21 +87,21 @@ func main() {
 	gl.ClearColor(0.1, 0.1, 0.1, 1.0)
 
 	// 初始化 ImGui
-	ui.Init(window)
-	defer ui.Shutdown()
+	Init(window)
+	defer Shutdown()
 
 	// 创建渲染器
-	glState, err := renderer.NewGLState()
+	glState, err := NewGLState()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	rightW := float64(ui.RightPanelWidth())
-	cam := renderer.NewCamera(int(float64(windowW)-rightW), windowH)
-	cam.CenterOnContent(float64(m.Width)*renderer.TileWidth, float64(m.Height)*renderer.TileHeight)
+	rightW := float64(RightPanelWidth())
+	cam := NewCamera(int(float64(windowW)-rightW), windowH)
+	cam.CenterOnContent(float64(m.Width)*TileWidth, float64(m.Height)*TileHeight)
 
-	ren := renderer.NewGLRenderer(tiles, smTiles, objects, dataDir, glState)
-	minimap := renderer.NewMinimap(m)
+	ren := NewGLRenderer(tiles, smTiles, objects, dataDir, glState)
+	minimap := NewMinimap(m)
 
 	// 显示状态
 	showBack := true
@@ -113,7 +110,7 @@ func main() {
 	showCollision := false
 	showGrid := false
 
-	uiState := &ui.UIState{
+	uiState := &UIState{
 		Map:            m,
 		Renderer:       ren,
 		Cam:            cam,
@@ -137,8 +134,8 @@ func main() {
 	gPressed := false
 
 	// 设置 GLFW 回调（转发给 ImGui，加上缩放处理）
-	ui.SetGLFWCallbacks(window, func(w *glfw.Window, xoff, yoff float64) {
-		io := ui.IO()
+	SetGLFWCallbacks(window, func(w *glfw.Window, xoff, yoff float64) {
+		io := IO()
 		if io.WantCaptureMouse() {
 			return
 		}
@@ -166,7 +163,7 @@ func main() {
 		glfw.PollEvents()
 
 		glfwW, glfwH := window.GetSize()
-		io := ui.IO()
+		io := IO()
 
 		// 键盘输入（仅在 ImGui 不拦截时处理）
 		if !io.WantCaptureKeyboard() {
@@ -278,19 +275,19 @@ func main() {
 		uiState.MinimapTex = minimap.FBOTex
 
 		// ImGui 帧
-		ui.BeginFrame()
+		BeginFrame()
 
-		menuH := ui.FrameHeight()
+		menuH := FrameHeight()
 		shouldClose := false
-		ui.RenderMenuBar(&shouldClose)
+		RenderMenuBar(&shouldClose)
 		if shouldClose {
 			window.SetShouldClose(true)
 		}
 
-		ui.RenderRightPanel(uiState, int32(glfwW), int32(glfwH), menuH, mouseTileX, mouseTileY, lockedTileX, lockedTileY, tileLocked)
-		ui.RenderMinimapWindow(uiState)
+		RenderRightPanel(uiState, int32(glfwW), int32(glfwH), menuH, mouseTileX, mouseTileY, lockedTileX, lockedTileY, tileLocked)
+		RenderMinimapWindow(uiState)
 
-		ui.EndFrame()
+		EndFrame()
 
 		window.SwapBuffers()
 	}

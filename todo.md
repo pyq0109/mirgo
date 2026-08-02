@@ -24,11 +24,11 @@
 - [ ] 右下角 Preview 窗口支持鼠标滚轮上下滚能缩放图片大小, 并且按住滚轮可以左右拖动图片, 方便观察
 - [ ] 三个列表可以随意拖动大小高宽
 - [x] 动画播放模式是否应该去掉?
-- [ ] wilviewer 目录扁平化
+- [x] wilviewer 目录扁平化
 
 # mapviewer
 
-- [ ] mapviewer 目录扁平化
+- [x] mapviewer 目录扁平化
 
 # serverconfig
 

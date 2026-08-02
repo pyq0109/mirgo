@@ -1,6 +1,7 @@
-package renderer
+package main
 
 import (
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -121,29 +122,12 @@ func (r *WILRenderer) ExportAllPNG(dir string) (int, error) {
 	return exported, nil
 }
 
+// formatIdx 将图片索引格式化为文件名（零填充）。
 func formatIdx(i int) string {
-	if i < 10 {
-		return "000" + string(rune('0'+i))
-	}
-	if i < 100 {
-		return "00" + itoa(i)
-	}
 	if i < 1000 {
-		return "0" + itoa(i)
+		return fmt.Sprintf("%03d", i)
 	}
-	return itoa(i)
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	s := ""
-	for i > 0 {
-		s = string(rune('0'+i%10)) + s
-		i /= 10
-	}
-	return s
+	return fmt.Sprintf("%04d", i)
 }
 
 // Destroy 释放渲染器持有的所有 GL 资源。

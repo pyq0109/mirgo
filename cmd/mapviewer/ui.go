@@ -1,4 +1,4 @@
-package ui
+package main
 
 import (
 	"fmt"
@@ -10,21 +10,17 @@ import (
 	igglfw "github.com/AllenDang/cimgui-go/impl/glfw"
 	igopengl3 "github.com/AllenDang/cimgui-go/impl/opengl3"
 
-	"github.com/pyq0109/mirgo/cmd/mapviewer/renderer"
 	mlog "github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/mapformat"
 )
 
-const (
-	rightPanelWidth = 380
-	minimapSize     = 200
-)
+const rightPanelWidth = 380
 
 // UIState 持有 UI 和主循环之间的共享状态。
 type UIState struct {
 	Map            *mapformat.MapData
-	Renderer       *renderer.GLRenderer
-	Cam            *renderer.Camera2D
+	Renderer       *GLRenderer
+	Cam            *Camera2D
 	ShowBackground *bool
 	ShowMiddle     *bool
 	ShowForeground *bool
@@ -296,8 +292,8 @@ func RenderMinimapWindow(state *UIState) {
 	ig.SetCursorScreenPos(imgMin)
 	ig.InvisibleButtonV("##minimap_btn", ig.NewVec2(minimapSize, minimapSize), ig.ButtonFlagsNone)
 
-	mapW := float32(m.Width * renderer.TileWidth)
-	mapH := float32(m.Height * renderer.TileHeight)
+	mapW := float32(m.Width * TileWidth)
+	mapH := float32(m.Height * TileHeight)
 	viewW := float32(float64(state.Cam.ViewW) / state.Cam.Zoom)
 	viewH := float32(float64(state.Cam.ViewH) / state.Cam.Zoom)
 
