@@ -603,6 +603,11 @@ func (dc *DebugConsole) cmdWire(args []string) {
 	dc.Printf("wire: %s", []string{"off", "hover", "all"}[dc.WireMode])
 	if gActiveUI != nil {
 		gActiveUI.ShowBounds = dc.WireMode > 0
+		if dc.WireMode == wireAll {
+			gActiveUI.BoundsNames = 2
+		} else {
+			gActiveUI.BoundsNames = 1
+		}
 	}
 }
 
@@ -635,6 +640,9 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		dc.Print(ui.DebugTree(depth))
 	case "bounds":
 		ui.ShowBounds = !ui.ShowBounds
+		if ui.ShowBounds {
+			ui.BoundsNames = 1 // 默认可读模式: 框+仅光标下名字
+		}
 		dc.Printf("ui bounds %s", onOff(ui.ShowBounds))
 	case "hit":
 		dc.Print(ui.DebugHitTest(int(dc.mouseX), int(dc.mouseY)))
@@ -733,8 +741,8 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		dc.Printf("clicked %s at (%d,%d)", c.Name, cx, cy)
 	case "hover":
 		ui.ShowHoverInfo = !ui.ShowHoverInfo
-		ui.ShowBounds = ui.ShowHoverInfo
-		dc.Printf("ui hover %s", onOff(ui.ShowHoverInfo))
+		// 与 ShowBounds 解耦: hover 只开悬停检查器, 不再顺带打开全量包围盒(那是标签成团的根因)。
+		dc.Printf("ui hover %s (包围盒独立, 用 ui bounds / wire 切换)", onOff(ui.ShowHoverInfo))
 	case "list":
 		filter := ""
 		if len(args) > 1 {
@@ -806,6 +814,9 @@ func (dc *DebugConsole) updateFPS() {
 // Render 在场景之后绘制控制台 (面板或状态栏)。
 func (dc *DebugConsole) Render(proj [16]float32) {
 	dc.updateFPS()
+	if gActiveUI != nil {
+		gActiveUI.SetHoverPos(int(dc.mouseX), int(dc.mouseY))
+	}
 	if dc.text == nil {
 		return
 	}

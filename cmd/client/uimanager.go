@@ -23,8 +23,12 @@ type UIManager struct {
 	Capture *UIControl
 	Focused *UIControl
 
-	ShowBounds   bool // 调试: 绘制所有可见控件的包围盒
+	ShowBounds    bool // 调试: 绘制所有可见控件的包围盒
 	ShowHoverInfo bool // 调试: 鼠标悬停时浮动显示控件信息
+	// 调试: 包围盒名字模式 0=仅框 1=框+仅光标悬停控件及其祖先的名字 2=框+全部名字(带底条+去重)。
+	// 与 ShowBounds 解耦: ShowBounds 只决定是否画框, BoundsNames 决定名字密度。
+	BoundsNames    int
+	hoverX, hoverY int // 调试: 最近一帧光标位置 (供 BoundsNames=1 取悬停控件)
 }
 
 // gActiveUI 是当前活动场景的 UIManager 引用。
@@ -771,7 +775,9 @@ func (m *UIManager) overlayWalk(c *UIControl, proj [16]float32) {
 	if !c.Visible {
 		return
 	}
-	if !c.Background {
+	// 网格子格不画淡框: 父 KindGrid 的格子由网格容器代表, 逐个画框会在背包等密集区成团。
+	parentIsGrid := c.Parent != nil && c.Parent.Kind == KindGrid
+	if !c.Background && !parentIsGrid {
 		isInteractive := c.Kind == KindWindow || c.Kind == KindButton || c.Kind == KindGrid || c.EnableFocus
 		if isInteractive {
 			w, h := c.effectiveSize()
@@ -827,17 +833,40 @@ func debugCallbacks(c *UIControl) string {
 	return " cb=" + strings.Join(names, ",")
 }
 
-// RenderDebugBounds 绘制所有可见控件的包围盒 (UI 视口), 按类型着色:
-// button=绿 window=蓝 grid=黄 control=灰。用于直观排查布局错位。
+// SetHoverPos 记录最近一帧光标位置, 供包围盒"仅光标下显示名字"模式 (BoundsNames=1) 取悬停控件。
+func (m *UIManager) SetHoverPos(x, y int) { m.hoverX, m.hoverY = x, y }
+
+// RenderDebugBounds 绘制可见控件包围盒 (按类型着色: button=绿 window=蓝 grid=黄 control=灰)。
+// 名字密度由 BoundsNames 控制: 0=仅框; 1=仅光标悬停控件及其祖先; 2=全部名字(带底条+去重)。
+// 网格(KindGrid)子格在模式2不画名字, 避免背包等密集区标签成团。
 func (m *UIManager) RenderDebugBounds(proj [16]float32) {
-	m.renderBoundsWalk(m.Root, proj)
-	if m.Modal != nil {
-		m.renderBoundsWalk(m.Modal, proj)
+	ctx := &boundsCtx{m: m, mode: m.BoundsNames}
+	if m.BoundsNames == 1 {
+		if h := m.HoveredControl(m.hoverX, m.hoverY); h != nil {
+			ctx.hot = map[*UIControl]bool{}
+			for p := h; p != nil; p = p.Parent {
+				ctx.hot[p] = true
+			}
+		}
+	}
+	ctx.walk(m.Root, proj)
+	if m.Modal != nil && m.Modal.Visible {
+		ctx.walk(m.Modal, proj)
 	}
 }
 
-func (m *UIManager) renderBoundsWalk(c *UIControl, proj [16]float32) {
-	if c.Visible && !c.Background {
+type boundsCtx struct {
+	m      *UIManager
+	mode   int
+	hot    map[*UIControl]bool
+	placed [][4]float32 // 已放置的标签矩形 (x,y,w,h), 用于去重
+}
+
+func (ctx *boundsCtx) walk(c *UIControl, proj [16]float32) {
+	if !c.Visible {
+		return
+	}
+	if !c.Background {
 		w, h := c.effectiveSize()
 		if w > 0 && h > 0 {
 			var r, g, b float32
@@ -852,13 +881,76 @@ func (m *UIManager) renderBoundsWalk(c *UIControl, proj [16]float32) {
 				r, g, b = 0.7, 0.7, 0.7
 			}
 			x, y := float32(c.AbsX()), float32(c.AbsY())
-			drawWireRect(m.gl, x, y, float32(w), float32(h), r, g, b, 0.9, proj)
-			if m.text != nil {
-				m.text.DrawText(c.Name, x+1, y+1, r, g, b, 1, proj)
+			drawWireRect(ctx.m.gl, x, y, float32(w), float32(h), r, g, b, 0.9, proj)
+			parentIsGrid := c.Parent != nil && c.Parent.Kind == KindGrid
+			drawName := false
+			switch ctx.mode {
+			case 2:
+				drawName = !parentIsGrid
+			case 1:
+				drawName = ctx.hot[c]
+			}
+			if drawName {
+				ctx.drawLabel(c.Name, x, y, float32(w), float32(h), r, g, b, proj)
 			}
 		}
 	}
 	for _, ch := range c.Children {
-		m.renderBoundsWalk(ch, proj)
+		ctx.walk(ch, proj)
 	}
+}
+
+// drawLabel 在控件附近画带半透明底条的名字, 并贪心下移避让已放置标签, 保证可读不重叠。
+func (ctx *boundsCtx) drawLabel(name string, x, y, w, h, r, g, b float32, proj [16]float32) {
+	text := ctx.m.text
+	if text == nil || name == "" {
+		return
+	}
+	lineH := float32(text.LineHeight())
+	if lineH <= 0 {
+		lineH = 14
+	}
+	const padX = 3.0
+	chipW := float32(text.MeasureText(name)) + padX*2
+	chipH := lineH + 3
+	screenW := float32(ScreenWidth)
+	screenH := float32(ScreenHeight)
+	cx := x
+	if cx+chipW > screenW {
+		cx = screenW - chipW
+	}
+	if cx < 0 {
+		cx = 0
+	}
+	// 候选纵坐标: 框上方 -> 框下方 -> 框内顶 -> 依次下移堆叠
+	cands := []float32{y - chipH, y + h, y}
+	for k := 1; k <= 6; k++ {
+		cands = append(cands, y-chipH+float32(k)*chipH)
+	}
+	chosenY := y - chipH
+	if chosenY < 0 {
+		chosenY = 0
+	}
+	for _, cy := range cands {
+		if cy < 0 || cy+chipH > screenH {
+			continue
+		}
+		if !ctx.overlaps(cx, cy, chipW, chipH) {
+			chosenY = cy
+			break
+		}
+	}
+	ctx.placed = append(ctx.placed, [4]float32{cx, chosenY, chipW, chipH})
+	ctx.m.gl.DrawQuadColor(cx, chosenY, chipW, chipH, 0, 0, 0, 0.75, proj)
+	text.DrawText(name, cx+padX, chosenY+1, r, g, b, 1, proj)
+}
+
+func (ctx *boundsCtx) overlaps(x, y, w, h float32) bool {
+	for _, p := range ctx.placed {
+		if x+w <= p[0] || p[0]+p[2] <= x || y+h <= p[1] || p[1]+p[3] <= y {
+			continue
+		}
+		return true
+	}
+	return false
 }
