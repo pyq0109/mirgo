@@ -24,12 +24,18 @@
 - [ ] 右下角 Preview 窗口支持鼠标滚轮上下滚能缩放图片大小, 并且按住滚轮可以左右拖动图片, 方便观察
 - [ ] 三个列表可以随意拖动大小高宽
 - [x] 动画播放模式是否应该去掉?
+- [ ] wilviewer 目录扁平化
+
+# mapviewer
+
+- [ ] mapviewer 目录扁平化
 
 # serverconfig
 
 - [ ] 检查 serverconfig 转换出来的配置文件与 asset/server 是否完全一致
 - [ ] serverdata 目录取消, 让 mir2.db 与 server 同级
 - [ ] 压缩优化 serverconfig 目录结构, 让配置更密集, 更合理
+- [ ] serverconfig 文件名去掉 "\_"
 
 # 综合
 

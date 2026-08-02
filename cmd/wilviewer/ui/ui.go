@@ -34,18 +34,9 @@ type UIState struct {
 	CurrentWILName string // 当前打开的 .wil 文件名
 	Renderer       *renderer.WILRenderer
 	CurrentIdx     int
-	Mode           string // "browse" 或 "animation"
 
 	// 网格状态
 	GridScrollTo int // 滚动到网格中此图片索引（-1 = 不滚动）
-
-	// 动画状态
-	AnimPlaying   bool
-	AnimDirection int     // 0-7
-	AnimAction    string  // "stand", "walk", "run" 等
-	AnimSpeed     float64 // 播放速度倍率
-	animFrameIdx  int     // 当前帧在序列中的索引
-	animLastTick  float64 // 动画用 glfw 计时器
 }
 
 // toImGuiWindow 将 go-gl/glfw Window 转换为 cimgui-go 的 GLFWwindow 类型。
@@ -201,8 +192,6 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 			state.CurrentIdx = 0
 			state.GridScrollTo = 0
 			state.Renderer.SetWILFile(newFile)
-			state.AnimPlaying = false
-			state.animFrameIdx = 0
 		}
 		ig.PopStyleColor()
 	}
@@ -353,19 +342,6 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	ig.Text(fmt.Sprintf("Images: %d", wf.Count))
 	ig.Separator()
 
-	// 模式选择
-	ig.Text("Mode:")
-	if ig.RadioButtonBool("Browse", state.Mode == "browse") {
-		state.Mode = "browse"
-		mlog.Logf(mlog.LevelInfo, "UI", "模式切换: browse")
-	}
-	ig.SameLine()
-	if ig.RadioButtonBool("Animation", state.Mode == "animation") {
-		state.Mode = "animation"
-		mlog.Logf(mlog.LevelInfo, "UI", "模式切换: animation")
-	}
-	ig.Separator()
-
 	// 当前图像信息
 	if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
 		img := wf.GetImage(state.CurrentIdx)
@@ -442,7 +418,7 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	ig.End()
 }
 
-// RenderPreviewPanel 渲染右下方的图像预览或动画面板。
+// RenderPreviewPanel 渲染右下方的图像预览面板。
 func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	infoH := float32(glfwH) * 0.4
 	previewH := float32(glfwH) - infoH
@@ -459,14 +435,7 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 
 	wf := state.WILFile
 
-	// 动画控制（仅动画模式）
-	if state.Mode == "animation" {
-		renderAnimationControls(state, wf)
-		ig.End()
-		return
-	}
-
-	// 浏览模式：将选中图像显示为 ImGui Image
+	// 将选中图像显示为 ImGui Image
 	if state.CurrentIdx >= 0 && state.CurrentIdx < wf.Count {
 		img := wf.GetImage(state.CurrentIdx)
 		if img != nil && img.RGBA != nil {
@@ -497,210 +466,6 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	}
 
 	ig.End()
-}
-
-// renderAnimationControls 渲染动画控制面板。
-func renderAnimationControls(state *UIState, wf *wil.File) {
-	ig.TextColored(ig.NewVec4(0.4, 0.7, 1.0, 1), "Animation Controls")
-
-	// 动作选择
-	ig.Text("Action:")
-	actions := []string{"stand", "walk", "run", "attack", "spell", "hit", "death"}
-	for i, a := range actions {
-		if i > 0 {
-			ig.SameLine()
-		}
-		if ig.RadioButtonBool(a, state.AnimAction == a) {
-			state.AnimAction = a
-			state.AnimPlaying = false
-			state.animFrameIdx = 0
-			mlog.Logf(mlog.LevelInfo, "Anim", "动作切换: %s, direction=%d", a, state.AnimDirection)
-		}
-	}
-	if state.AnimAction == "" {
-		state.AnimAction = "stand"
-	}
-
-	// 方向选择
-	ig.Text("Direction:")
-	dirNames := []string{"Up", "UpRight", "Right", "DownRight", "Down", "DownLeft", "Left", "UpLeft"}
-	dirArrows := []string{"\u2191", "\u2197", "\u2192", "\u2198", "\u2193", "\u2199", "\u2190", "\u2196"}
-	for i := 0; i < 8; i++ {
-		if i > 0 {
-			ig.SameLine()
-		}
-		if ig.RadioButtonBool(dirArrows[i], state.AnimDirection == i) {
-			state.AnimDirection = i
-			state.animFrameIdx = 0
-			mlog.Logf(mlog.LevelInfo, "Anim", "方向切换: %s (%d), action=%s", dirNames[i], i, state.AnimAction)
-		}
-		if ig.IsItemHovered() {
-			ig.SetTooltip(dirNames[i])
-		}
-	}
-
-	// 播放控制
-	ig.Text("Playback:")
-	if ig.Button("|<") {
-		state.animFrameIdx = 0
-	}
-	ig.SameLine()
-	if ig.Button("<") {
-		if state.animFrameIdx > 0 {
-			state.animFrameIdx--
-		}
-	}
-	ig.SameLine()
-	playLabel := "Play"
-	if state.AnimPlaying {
-		playLabel = "Pause"
-	}
-	if ig.Button(playLabel) {
-		state.AnimPlaying = !state.AnimPlaying
-		if state.AnimPlaying {
-			state.animLastTick = glfw.GetTime()
-			mlog.Logf(mlog.LevelInfo, "Anim", "播放: action=%s, dir=%d, speed=%.1f", state.AnimAction, state.AnimDirection, state.AnimSpeed)
-		} else {
-			mlog.Logf(mlog.LevelInfo, "Anim", "暂停: action=%s, dir=%d, frame=%d", state.AnimAction, state.AnimDirection, state.animFrameIdx)
-		}
-	}
-	ig.SameLine()
-	if ig.Button(">") {
-		state.animFrameIdx++
-	}
-	ig.SameLine()
-	if ig.Button(">|") {
-		state.animFrameIdx = 0
-		state.AnimPlaying = false
-	}
-
-	// 速度控制
-	ig.Text("Speed:")
-	if state.AnimSpeed == 0 {
-		state.AnimSpeed = 1.0
-	}
-	speedF32 := float32(state.AnimSpeed)
-	ig.SliderFloat("##speed", &speedF32, 0.1, 5.0)
-	state.AnimSpeed = float64(speedF32)
-
-	// 帧信息
-	frames := calcAnimFrames(state.AnimAction, state.AnimDirection, wf.Count)
-	totalFrames := len(frames)
-	if totalFrames > 0 {
-		if state.animFrameIdx >= totalFrames {
-			state.animFrameIdx = 0
-		}
-		actualFrame := frames[state.animFrameIdx]
-		state.CurrentIdx = actualFrame
-
-		dirName := "N/A"
-		if state.AnimDirection >= 0 && state.AnimDirection < 8 {
-			dirName = dirNames[state.AnimDirection]
-		}
-		ig.Text(fmt.Sprintf("Frame: %d/%d (image %d)", state.animFrameIdx+1, totalFrames, actualFrame))
-		ig.Text(fmt.Sprintf("Direction: %s (%d)", dirName, state.AnimDirection))
-		ig.Text(fmt.Sprintf("Action: %s", state.AnimAction))
-
-		// 显示动画帧预览
-		tex := state.Renderer.GetOrCreateTexture(actualFrame)
-		if tex != 0 {
-			img := state.Renderer.GetImage(actualFrame)
-			if img != nil {
-				avail := ig.ContentRegionAvail()
-				imgW := float32(img.Width)
-				imgH := float32(img.Height)
-				scale := math.Min(float64(avail.X)/float64(imgW), float64(avail.Y)/float64(imgH))
-				if scale > 4.0 {
-					scale = 4.0
-				}
-				drawW := float32(float64(imgW) * scale)
-				drawH := float32(float64(imgH) * scale)
-				offsetX := (avail.X - drawW) / 2
-				offsetY := (avail.Y - drawH) / 2
-				if offsetX > 0 || offsetY > 0 {
-					ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+offsetX, ig.CursorPosY()+offsetY))
-				}
-				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
-				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
-			}
-		}
-
-		// 自动推进动画
-		if state.AnimPlaying {
-			now := glfw.GetTime()
-			interval := 0.1 / state.AnimSpeed
-			if now-state.animLastTick >= interval {
-				state.animLastTick = now
-				state.animFrameIdx++
-				if state.animFrameIdx >= totalFrames {
-					state.animFrameIdx = 0
-				}
-			}
-		}
-	} else {
-		ig.Text("No animation frames available")
-	}
-}
-
-// calcAnimFrames 计算动画的帧索引序列。
-// 帧数对应 Delphi Actor.pas 中的 TActionInfo 定义。
-func calcAnimFrames(action string, direction int, maxCount int) []int {
-	var start, frameCount int
-	switch action {
-	case "stand":
-		start = 0
-		frameCount = 4
-	case "walk":
-		start = 64
-		frameCount = 60
-	case "run":
-		start = 128
-		frameCount = 60
-	case "attack":
-		start = 192
-		frameCount = 60
-	case "spell":
-		start = 256
-		frameCount = 60
-	case "hit":
-		start = 320
-		frameCount = 30
-	case "death":
-		start = 384
-		frameCount = 30
-	default:
-		frames := make([]int, maxCount)
-		for i := range frames {
-			frames[i] = i
-		}
-		return frames
-	}
-
-	// 帧数少于方向数的动作（如 stand=4），所有方向共享帧序列；否则按 8 方向分配
-	dirFrames := frameCount
-	if frameCount >= 8 {
-		dirFrames = frameCount / 8
-		start = start + direction*dirFrames
-	}
-
-	frames := make([]int, 0, dirFrames)
-	for i := 0; i < dirFrames; i++ {
-		idx := start + i
-		if idx < maxCount {
-			frames = append(frames, idx)
-		}
-	}
-	return frames
-}
-
-// RightPanelWidth 返回右侧面板宽度，用于视口计算。
-func RightPanelWidth() int {
-	return rightPanelWidth
-}
-
-// LeftPanelWidth 返回左侧面板宽度。
-func LeftPanelWidth() int {
-	return leftPanelWidth
 }
 
 func formatIdx(i int) string {

@@ -78,16 +78,8 @@ func main() {
 	defer ui.Shutdown()
 	mlog.Logf(mlog.LevelDebug, "Main", "ImGui 初始化成功")
 
-	// 创建渲染器
-	glState, err := renderer.NewGLState()
-	if err != nil {
-		mlog.Logf(mlog.LevelError, "Main", "GLState 创建失败: %v", err)
-		log.Fatal(err)
-	}
-	defer glState.Destroy()
-
 	// 创建 WIL 渲染器（尚未加载文件）
-	wilRenderer := renderer.NewWILRenderer(nil, glState)
+	wilRenderer := renderer.NewWILRenderer(nil)
 	defer wilRenderer.Destroy()
 	mlog.Logf(mlog.LevelDebug, "Main", "WIL 渲染器创建成功")
 
@@ -98,9 +90,6 @@ func main() {
 		Renderer:     wilRenderer,
 		CurrentIdx:   0,
 		GridScrollTo: -1,
-		Mode:         "browse",
-		AnimAction:   "stand",
-		AnimSpeed:    1.0,
 	}
 
 	// 设置 GLFW 回调：滚轮用于网格滚动，方向键用于切换图像

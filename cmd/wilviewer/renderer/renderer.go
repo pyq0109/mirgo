@@ -11,24 +11,17 @@ import (
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
-// WILRenderer 使用 OpenGL 渲染 WIL 图像。
+// WILRenderer 管理 WIL 图像的 GL 纹理缓存与导出。
 type WILRenderer struct {
 	WILFile  *wil.File
-	glState  *GLState
 	texCache map[int]uint32 // 图片索引 -> GL 纹理
-
-	// 相机状态，用于缩放/平移
-	Zoom             float64
-	OffsetX, OffsetY float64
 }
 
 // NewWILRenderer 创建 WIL 图像渲染器。
-func NewWILRenderer(wilFile *wil.File, glState *GLState) *WILRenderer {
+func NewWILRenderer(wilFile *wil.File) *WILRenderer {
 	return &WILRenderer{
 		WILFile:  wilFile,
-		glState:  glState,
 		texCache: make(map[int]uint32),
-		Zoom:     1.0,
 	}
 }
 
@@ -40,9 +33,6 @@ func (r *WILRenderer) SetWILFile(f *wil.File) {
 	}
 	r.WILFile = f
 	r.texCache = make(map[int]uint32)
-	r.Zoom = 1.0
-	r.OffsetX = 0
-	r.OffsetY = 0
 	if f != nil {
 		mlog.Logf(mlog.LevelDebug, "Renderer", "SetWILFile: title=%s, images=%d, 清除旧纹理=%d", f.Title, f.Count, oldCount)
 	} else {
@@ -53,14 +43,6 @@ func (r *WILRenderer) SetWILFile(f *wil.File) {
 // GetOrCreateTexture 返回指定图片索引的 GL 纹理，需要时创建并缓存。
 func (r *WILRenderer) GetOrCreateTexture(idx int) uint32 {
 	return r.getTexture(idx)
-}
-
-// GetImage 返回指定索引的图像数据，不可用时返回 nil。
-func (r *WILRenderer) GetImage(idx int) *wil.Image {
-	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
-		return nil
-	}
-	return r.WILFile.GetImage(idx)
 }
 
 // getTexture 返回指定图片索引的 GL 纹理，需要时缓存。
@@ -81,53 +63,6 @@ func (r *WILRenderer) getTexture(idx int) uint32 {
 	r.texCache[idx] = tex
 	mlog.Logf(mlog.LevelTrace, "Renderer", "纹理上传: idx=%d, size=%dx%d, tex=%d", idx, img.Width, img.Height, tex)
 	return tex
-}
-
-// Render 在指定视口中绘制 WIL 图像。
-// vpX, vpY, vpW, vpH 定义屏幕像素坐标的 GL 视口。
-func (r *WILRenderer) Render(idx int, vpX, vpY, vpW, vpH int32) {
-	if r.WILFile == nil || idx < 0 || idx >= r.WILFile.Count {
-		return
-	}
-
-	tex := r.getTexture(idx)
-	if tex == 0 {
-		return
-	}
-
-	img := r.WILFile.GetImage(idx)
-	if img == nil || img.Width <= 0 || img.Height <= 0 {
-		return
-	}
-
-	// 设置视口到中心区域
-	gl.Viewport(vpX, vpY, vpW, vpH)
-
-	// 启用透明图像混合
-	gl.Enable(gl.BLEND)
-	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-
-	// 使用着色器程序
-	gl.UseProgram(r.glState.Shader.ID)
-	gl.Uniform1i(r.glState.Shader.TexLoc, 0)
-
-	// 正交投影：像素坐标，Y 轴向下
-	imgW := float32(img.Width)
-	imgH := float32(img.Height)
-	vpw := float32(vpW)
-	vph := float32(vpH)
-	zoom := float32(r.Zoom)
-
-	// 视口中心的世界坐标
-	cx := vpw/2/zoom + float32(r.OffsetX)
-	cy := vph/2/zoom + float32(r.OffsetY)
-
-	// 图像位置：居中于 (cx, cy)
-	x := cx - imgW/2
-	y := cy - imgH/2
-
-	proj := OrthoProj(float32(r.OffsetX), vpw/zoom+float32(r.OffsetX), vph/zoom+float32(r.OffsetY), float32(r.OffsetY))
-	r.glState.DrawQuad(x, y, imgW, imgH, tex, true, proj)
 }
 
 // ExportPNG 将指定图像导出为 PNG 文件。
