@@ -46,11 +46,15 @@ func ParseINI(filename string) (map[string]map[string]string, error) {
 		}
 
 		// Key=Value
+		// 重复键保留首次出现的值：Delphi 配置文件中配置值在前，
+		// 后续重复项多为引擎回写的运行时状态（如 SabukW.txt 的门/墙 HP）。
 		if idx := strings.Index(line, "="); idx > 0 {
 			key := strings.TrimSpace(line[:idx])
 			value := strings.TrimSpace(line[idx+1:])
 			if currentSection != "" {
-				result[currentSection][key] = value
+				if _, exists := result[currentSection][key]; !exists {
+					result[currentSection][key] = value
+				}
 			}
 		}
 	}
@@ -297,16 +301,41 @@ func CopyFile(src, dst string) error {
 }
 
 // CopyDir 将 srcDir 中匹配 pattern 的所有文件复制到 dstDir。
+// pattern 形如 "*.map"，扩展名匹配不区分大小写（Linux 下 .MAP 与 .map 均命中）。
 func CopyDir(srcDir, dstDir, pattern string) (int, error) {
-	matches, err := filepath.Glob(filepath.Join(srcDir, pattern))
+	return copyDirInternal(srcDir, dstDir, pattern, false)
+}
+
+// CopyDirRecursive 递归复制 srcDir 中匹配 pattern 的文件到 dstDir，保留相对子目录结构。
+func CopyDirRecursive(srcDir, dstDir, pattern string) (int, error) {
+	return copyDirInternal(srcDir, dstDir, pattern, true)
+}
+
+func copyDirInternal(srcDir, dstDir, pattern string, recursive bool) (int, error) {
+	entries, err := os.ReadDir(srcDir)
 	if err != nil {
-		return 0, fmt.Errorf("globbing pattern %s: %w", pattern, err)
+		return 0, fmt.Errorf("reading directory %s: %w", srcDir, err)
 	}
 
+	ext := strings.ToLower(strings.TrimPrefix(pattern, "*"))
+
 	count := 0
-	for _, src := range matches {
-		dst := filepath.Join(dstDir, filepath.Base(src))
-		if err := CopyFile(src, dst); err != nil {
+	for _, entry := range entries {
+		srcPath := filepath.Join(srcDir, entry.Name())
+		if entry.IsDir() {
+			if recursive {
+				sub, err := copyDirInternal(srcPath, filepath.Join(dstDir, entry.Name()), pattern, true)
+				if err != nil {
+					return count, err
+				}
+				count += sub
+			}
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(entry.Name()), ext) {
+			continue
+		}
+		if err := CopyFile(srcPath, filepath.Join(dstDir, entry.Name())); err != nil {
 			return count, err
 		}
 		count++

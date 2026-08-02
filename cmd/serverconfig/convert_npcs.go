@@ -179,7 +179,8 @@ func copyNpcScripts(envirDir, outputDir, srcSubdir, dstSubdir string) error {
 		return nil
 	}
 
-	count, err := CopyDir(srcDir, dstDir, "*.txt")
+	// 递归复制以保留子目录（如 market_def/魔龙城、market_def/backup）。
+	count, err := CopyDirRecursive(srcDir, dstDir, "*.txt")
 	if err != nil {
 		return err
 	}

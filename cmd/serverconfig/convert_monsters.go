@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -43,6 +44,11 @@ func ConvertMonsters(inputDir, outputDir string) error {
 	// Copy SmartMonster/*.ini
 	if err := copySmartMonster(envirDir, outputDir); err != nil {
 		return fmt.Errorf("copying SmartMonster: %w", err)
+	}
+
+	// Copy MonUseItems/*.txt（人形怪装备配置）
+	if err := copyMonUseItems(envirDir, outputDir); err != nil {
+		return fmt.Errorf("copying MonUseItems: %w", err)
 	}
 
 	return nil
@@ -100,22 +106,31 @@ func convertMonItems(envirDir, outputDir string) error {
 	monItemsDir := filepath.Join(envirDir, "MonItems")
 	dstDir := filepath.Join(outputDir, "monsters", "mon_items")
 
-	// Get all .txt files
-	matches, err := filepath.Glob(filepath.Join(monItemsDir, "*.txt"))
+	// 读取目录并按扩展名不区分大小写过滤（.txt/.TXT 均命中）。
+	entries, err := os.ReadDir(monItemsDir)
 	if err != nil {
 		return err
 	}
 
 	count := 0
-	for _, srcFile := range matches {
-		// Parse each monster drop file
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		base := entry.Name()
+		ext := filepath.Ext(base)
+		if !strings.EqualFold(ext, ".txt") {
+			continue
+		}
+		srcFile := filepath.Join(monItemsDir, base)
+
 		data, err := ReadGBKFile(srcFile)
 		if err != nil {
 			fmt.Printf("  警告: 读取 %s 失败: %v\n", srcFile, err)
 			continue
 		}
 
-		monsterName := strings.TrimSuffix(filepath.Base(srcFile), ".txt")
+		monsterName := strings.TrimSuffix(base, ext)
 		var items []MonItem
 
 		scanner := bufio.NewScanner(strings.NewReader(string(data)))
@@ -139,10 +154,10 @@ func convertMonItems(envirDir, outputDir string) error {
 		}
 
 		result := map[string]interface{}{
-			"_source":     fmt.Sprintf("asset/server/Envir/MonItems/%s.txt", monsterName),
+			"_source":      fmt.Sprintf("asset/server/Envir/MonItems/%s", base),
 			"_description": fmt.Sprintf("%s 的掉落表", monsterName),
-			"monster":     monsterName,
-			"items":       items,
+			"monster":      monsterName,
+			"items":        items,
 		}
 
 		jsonData, err := json.MarshalIndent(result, "", "  ")
@@ -151,7 +166,7 @@ func convertMonItems(envirDir, outputDir string) error {
 		}
 
 		outputFile := filepath.Join(dstDir, monsterName+".jsonc")
-		comment := fmt.Sprintf("怪物掉落表\n来源: asset/server/Envir/MonItems/%s.txt\n怪物: %s", filepath.Base(srcFile), monsterName)
+		comment := fmt.Sprintf("怪物掉落表\n来源: asset/server/Envir/MonItems/%s\n怪物: %s", base, monsterName)
 
 		if err := WriteJSONC(outputFile, string(jsonData), comment); err != nil {
 			fmt.Printf("  警告: 写入 %s 失败: %v\n", outputFile, err)
@@ -174,5 +189,23 @@ func copySmartMonster(envirDir, outputDir string) error {
 	}
 
 	fmt.Printf("  复制了 %d 个智能怪物配置\n", count)
+	return nil
+}
+
+func copyMonUseItems(envirDir, outputDir string) error {
+	srcDir := filepath.Join(envirDir, "MonUseItems")
+	dstDir := filepath.Join(outputDir, "monsters", "mon_use_items")
+
+	if !DirExists(srcDir) {
+		fmt.Println("  跳过 MonUseItems (目录不存在)")
+		return nil
+	}
+
+	count, err := CopyDir(srcDir, dstDir, "*.txt")
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("  复制了 %d 个怪物装备配置\n", count)
 	return nil
 }

@@ -9,11 +9,12 @@ import (
 )
 
 // MapInfo 表示地图定义。
+// Index 为字符串：地图编号可以是数字（"0"）或字母（"D001"、"dygw"）。
 type MapInfo struct {
-	Index  int      `json:"index"`
-	Name   string   `json:"name"`
-	Flags  int      `json:"flags"`
-	Props  []string `json:"props,omitempty"`
+	Index string   `json:"index"`
+	Name  string   `json:"name"`
+	Flags int      `json:"flags"`
+	Props []string `json:"props,omitempty"`
 }
 
 // MapRoute 表示地图间的传送路线。
@@ -24,13 +25,6 @@ type MapRoute struct {
 	DstMap string `json:"dstMap"`
 	DstX   int    `json:"dstX"`
 	DstY   int    `json:"dstY"`
-}
-
-// MapsConfig 表示地图配置。
-type MapsConfig struct {
-	Source  string     `json:"source"`
-	Maps    []MapInfo  `json:"maps"`
-	Routes  []MapRoute `json:"routes"`
 }
 
 // MiniMap 表示小地图映射。
@@ -81,82 +75,82 @@ func convertMapInfo(envirDir, outputDir string) error {
 		return err
 	}
 
-	config := MapsConfig{
-		Source: "asset/server/Envir/mapinfo.txt",
-	}
+	var maps []MapInfo
+	var routes []MapRoute
 
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments
 		if line == "" || line[0] == ';' {
 			continue
 		}
 
-		// Map definition: [index name flags]
-		if line[0] == '[' && line[len(line)-1] == ']' {
-			content := line[1 : len(line)-1]
-			parts := strings.Fields(content)
-			if len(parts) >= 3 {
-				var index int
-				var name string
-				var flags int
-				fmt.Sscanf(parts[0], "%d", &index)
-				name = parts[1]
-				fmt.Sscanf(parts[2], "%d", &flags)
-
-				// Parse additional properties
-				var props []string
-				if len(parts) > 3 {
-					props = parts[3:]
-				}
-
-				config.Maps = append(config.Maps, MapInfo{
-					Index: index,
-					Name:  name,
-					Flags: flags,
-					Props: props,
-				})
+		// 路线定义: srcMap x,y -> dstMap x,y
+		if strings.Contains(line, "->") {
+			parts := strings.SplitN(line, "->", 2)
+			srcParts := strings.Fields(strings.TrimSpace(parts[0]))
+			dstParts := strings.Fields(strings.TrimSpace(parts[1]))
+			if len(srcParts) >= 2 && len(dstParts) >= 2 {
+				var route MapRoute
+				route.SrcMap = srcParts[0]
+				fmt.Sscanf(srcParts[1], "%d,%d", &route.SrcX, &route.SrcY)
+				route.DstMap = dstParts[0]
+				fmt.Sscanf(dstParts[1], "%d,%d", &route.DstX, &route.DstY)
+				routes = append(routes, route)
 			}
 			continue
 		}
 
-		// Route definition: srcMap x,y -> dstMap x,y
-		if strings.Contains(line, "->") {
-			parts := strings.Split(line, "->")
-			if len(parts) == 2 {
-				srcParts := strings.Fields(strings.TrimSpace(parts[0]))
-				dstParts := strings.Fields(strings.TrimSpace(parts[1]))
-
-				if len(srcParts) >= 2 && len(dstParts) >= 2 {
-					var route MapRoute
-					route.SrcMap = srcParts[0]
-					fmt.Sscanf(srcParts[1], "%d,%d", &route.SrcX, &route.SrcY)
-					route.DstMap = dstParts[0]
-					fmt.Sscanf(dstParts[1], "%d,%d", &route.DstX, &route.DstY)
-					config.Routes = append(config.Routes, route)
+		// 地图定义: [index name flags] [PROPS...]
+		// 属性后缀出现在右括号之后（如 [D001 兽人古墓一层 0] DARK NORECALL），
+		// flags 可省略（如 [6 魔龙城]）。
+		openIdx := strings.Index(line, "[")
+		closeIdx := strings.Index(line, "]")
+		if openIdx >= 0 && closeIdx > openIdx {
+			content := line[openIdx+1 : closeIdx]
+			propsStr := strings.TrimSpace(line[closeIdx+1:])
+			parts := strings.Fields(content)
+			if len(parts) >= 2 {
+				mi := MapInfo{Index: parts[0], Name: parts[1]}
+				if len(parts) >= 3 {
+					fmt.Sscanf(parts[2], "%d", &mi.Flags)
 				}
+				if propsStr != "" {
+					mi.Props = strings.Fields(propsStr)
+				}
+				maps = append(maps, mi)
 			}
 		}
 	}
 
-	result := map[string]interface{}{
-		"_source":     config.Source,
-		"_description": "地图信息定义，包含地图属性和传送点",
-		"maps":        config.Maps,
-		"routes":      config.Routes,
+	// 地图定义 → maps/map_info.jsonc
+	mapResult := map[string]interface{}{
+		"_source":      "asset/server/Envir/mapinfo.txt",
+		"_description": "地图信息定义（地图属性）",
+		"maps":         maps,
 	}
-
-	jsonData, err := json.MarshalIndent(result, "", "  ")
+	mapJSON, err := json.MarshalIndent(mapResult, "", "  ")
 	if err != nil {
 		return err
 	}
+	mapComment := fmt.Sprintf("地图信息\n来源: asset/server/Envir/mapinfo.txt\n数量: %d 个地图", len(maps))
+	if err := WriteJSONC(filepath.Join(outputDir, "maps", "map_info.jsonc"), string(mapJSON), mapComment); err != nil {
+		return err
+	}
 
-	outputFile := filepath.Join(outputDir, "maps", "map_info.jsonc")
-	comment := fmt.Sprintf("地图信息\n来源: asset/server/Envir/mapinfo.txt\n数量: %d 个地图, %d 个传送点", len(config.Maps), len(config.Routes))
-
-	return WriteJSONC(outputFile, string(jsonData), comment)
+	// 传送路线 → maps/map_routes.jsonc（与 server MapManager.InitRoutes 约定一致）
+	routeResult := map[string]interface{}{
+		"_source":      "asset/server/Envir/mapinfo.txt",
+		"_description": "地图间传送路线",
+		"routes":       routes,
+	}
+	routeJSON, err := json.MarshalIndent(routeResult, "", "  ")
+	if err != nil {
+		return err
+	}
+	routeComment := fmt.Sprintf("传送路线\n来源: asset/server/Envir/mapinfo.txt\n数量: %d 条路线", len(routes))
+	return WriteJSONC(filepath.Join(outputDir, "maps", "map_routes.jsonc"), string(routeJSON), routeComment)
 }
 
 func copyMapFiles(inputDir, outputDir string) error {

@@ -25,10 +25,10 @@ type DrugMaterial struct {
 
 var drugRecipes map[string]*DrugRecipe // key: product item name
 
-// LoadDrugRecipes 从 make_item.jsonc 加载制药配方。
+// LoadDrugRecipes 从 make_items.jsonc 加载制药配方。
 func LoadDrugRecipes(configDir string) {
 	drugRecipes = make(map[string]*DrugRecipe)
-	path := filepath.Join(configDir, "items", "make_item.jsonc")
+	path := filepath.Join(configDir, "items", "make_items.jsonc")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Logf(log.LevelInfo, "MakeDrug", "no recipe file at %s, using gold-only mode", path)

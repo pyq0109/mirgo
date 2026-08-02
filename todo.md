@@ -5,8 +5,8 @@
 - [ ] 攻击特效 (攻杀剑术) 的动画播放问题
 - [ ] 声音
 - [ ] WIL 解析问题, DnItems.wil 解析错误
-- [ ] 人物男女角色渲染问题
-- [ ] NPC 不能点
+- [x] 人物男女角色渲染问题
+- [x] NPC 不能点
 - [ ] 支持更大更多的分辨率
 - [ ] 小地图显示错误
 
@@ -26,6 +26,8 @@
 # serverconfig
 
 - [ ] 检查 serverconfig 转换出来的配置文件与 asset/server 是否完全一致
+- [ ] serverdata 目录取消, 让 mir2.db 与 server 同级
+- [ ] 压缩优化 serverconfig 目录结构, 让配置更密集, 更合理
 
 # 综合
 

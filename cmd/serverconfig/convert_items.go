@@ -32,9 +32,10 @@ type GroupItem struct {
 }
 
 // MakeItem 表示合成配方。
+// schema 与服务端 cmd/server/makedrug.go 的 DrugRecipe 对齐（product/materials）。
 type MakeItem struct {
-	Name  string         `json:"name"`
-	Items []MakeItemPart `json:"items"`
+	Product   string         `json:"product"`
+	Materials []MakeItemPart `json:"materials"`
 }
 
 // MakeItemPart 表示合成配方中的材料。
@@ -281,7 +282,7 @@ func convertMakeItems(envirDir, outputDir string) error {
 				recipes = append(recipes, *currentRecipe)
 			}
 			name := line[1 : len(line)-1]
-			currentRecipe = &MakeItem{Name: name}
+			currentRecipe = &MakeItem{Product: name}
 			continue
 		}
 
@@ -292,7 +293,7 @@ func convertMakeItems(envirDir, outputDir string) error {
 				var part MakeItemPart
 				part.Name = parts[0]
 				fmt.Sscanf(parts[1], "%d", &part.Count)
-				currentRecipe.Items = append(currentRecipe.Items, part)
+				currentRecipe.Materials = append(currentRecipe.Materials, part)
 			}
 		}
 	}

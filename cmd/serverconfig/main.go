@@ -47,7 +47,7 @@ func main() {
 	// 创建子目录
 	subdirs := []string{
 		"maps", "items", "monsters", "magic", "npcs",
-		"guards", "castle", "guild", "notice", "misc",
+		"guards", "castle", "notice",
 		"monsters/mon_items", "monsters/mon_use_items", "monsters/smart_monster",
 		"magic/custom_magic",
 		"npcs/npc_scripts", "npcs/merchant_scripts", "npcs/map_quest_scripts",
@@ -129,6 +129,7 @@ func main() {
 		stats.Success += 3
 		if *verbose {
 			fmt.Println("  -> maps/map_info.jsonc")
+			fmt.Println("  -> maps/map_routes.jsonc")
 			fmt.Println("  -> maps/mini_map.jsonc")
 			fmt.Println("  -> maps/start_points.jsonc")
 		}
@@ -161,6 +162,7 @@ func main() {
 			fmt.Println("  -> monsters/mon_gen.jsonc")
 			fmt.Println("  -> monsters/mon_items/*.jsonc")
 			fmt.Println("  -> monsters/smart_monster/*.ini")
+			fmt.Println("  -> monsters/mon_use_items/*.txt")
 		}
 	}
 

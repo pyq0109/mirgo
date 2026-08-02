@@ -55,6 +55,8 @@ type GameSection struct {
 	RunInterval     int64          `json:"runInterval"`
 	SpeedHackKick   bool           `json:"speedHackKick"`
 	SpeedHackMax    int            `json:"speedHackMax"`
+	HitIntervalTime int64          `json:"hitIntervalTime"`
+	StruckTime      int64          `json:"struckTime"`
 }
 
 // CommandsSection 包含 GM 命令定义。
@@ -123,13 +125,16 @@ func ConvertServer(inputDir, outputDir string) error {
 			RunInterval:     int64(getINIInt(setup, "Setup", "RunIntervalTime", 600)),
 			SpeedHackKick:   getINIBool(setup, "Setup", "KickOverSpeed", false),
 			SpeedHackMax:    getINIInt(setup, "Setup", "OverSpeedKickCount", 4),
+			HitIntervalTime: int64(getINIInt(setup, "Setup", "HitIntervalTime", 1400)),
+			StruckTime:      int64(getINIInt(setup, "Setup", "StruckTime", 500)),
 		},
 		Commands: CommandsSection{
 			Names:       getINISection(commands, "Command"),
 			Permissions: getINISectionInt(commands, "Permission"),
 		},
 		Plugins: PluginsSection{
-			Enabled: getINISectionBool(plugins, "Plugins"),
+			// 系统插件.ini 的节名为 [setup]（非 [Plugins]）。
+			Enabled: getINISectionBool(plugins, "setup"),
 		},
 	}
 

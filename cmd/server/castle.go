@@ -65,7 +65,7 @@ func DefaultCastleConfig() *CastleConfig {
 func LoadCastleConfig(configDir string) (*CastleConfig, error) {
 	cfg := DefaultCastleConfig()
 
-	data, err := os.ReadFile(filepath.Join(configDir, "castle.jsonc"))
+	data, err := os.ReadFile(filepath.Join(configDir, "castle", "sabuk_wall.jsonc"))
 	if err != nil {
 		return cfg, nil // 配置文件不存在时使用默认值
 	}
