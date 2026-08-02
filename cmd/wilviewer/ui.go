@@ -36,6 +36,15 @@ type UIState struct {
 
 	// 网格状态
 	GridScrollTo int // 滚动到网格中此图片索引（-1 = 不滚动）
+
+	// Preview 状态
+	PreviewScale float64 // 预览缩放（屏幕像素/图像像素），0 = 自适应
+	PreviewPanX  float32 // 图像平移偏移（屏幕像素）
+	PreviewPanY  float32
+
+	previewWIL  string // 缩放/平移重置检测
+	previewIdx  int    // 缩放/平移重置检测
+	panDragging bool   // 中键拖拽进行中
 }
 
 // toImGuiWindow 将 go-gl/glfw Window 转换为 cimgui-go 的 GLFWwindow 类型。
@@ -328,7 +337,8 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 		ig.Separator()
 		ig.Text("Controls:")
 		ig.BulletText("Arrow keys: Navigate images")
-		ig.BulletText("Scroll: Zoom in/out")
+		ig.BulletText("Preview wheel: Zoom at cursor")
+		ig.BulletText("Preview middle-drag: Pan")
 		ig.BulletText("ESC: Quit")
 		ig.End()
 		return
@@ -417,7 +427,14 @@ func RenderInfoPanel(state *UIState, glfwW, glfwH int32) {
 	ig.End()
 }
 
+const (
+	previewMinScale = 0.02 // 缩放下限 2%
+	previewMaxScale = 64.0 // 缩放上限 6400%
+	previewZoomStep = 1.25 // 每格滚轮的缩放系数
+)
+
 // RenderPreviewPanel 渲染右下方的图像预览面板。
+// 支持滚轮缩放（以鼠标位置为锚点）和中键拖拽平移；切换图片或文件时重置。
 func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	infoH := float32(glfwH) * 0.4
 	previewH := float32(glfwH) - infoH
@@ -425,11 +442,21 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 	ig.SetNextWindowPosV(ig.NewVec2(float32(glfwW-rightPanelWidth), infoH), ig.CondAlways, ig.NewVec2(0, 0))
 	ig.SetNextWindowSizeV(ig.NewVec2(rightPanelWidth, previewH), ig.CondAlways)
 
-	ig.BeginV("Preview", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize)
+	// NoScrollbar：缩放/平移后图像超出内容区，不能出现滚动条（否则会抢占滚轮事件）
+	ig.BeginV("Preview", nil, ig.WindowFlagsNoMove|ig.WindowFlagsNoResize|ig.WindowFlagsNoScrollbar)
 
 	if state.WILFile == nil {
 		ig.End()
 		return
+	}
+
+	// 切换文件或图片时重置缩放/平移
+	if state.previewWIL != state.CurrentWILName || state.previewIdx != state.CurrentIdx {
+		state.previewWIL = state.CurrentWILName
+		state.previewIdx = state.CurrentIdx
+		state.PreviewScale = 0
+		state.PreviewPanX = 0
+		state.PreviewPanY = 0
 	}
 
 	wf := state.WILFile
@@ -440,23 +467,64 @@ func RenderPreviewPanel(state *UIState, glfwW, glfwH int32) {
 		if img != nil && img.RGBA != nil {
 			tex := state.Renderer.GetOrCreateTexture(state.CurrentIdx)
 			if tex != 0 {
-				// 计算图像尺寸以适应可用区域，保持宽高比
 				avail := ig.ContentRegionAvail()
+				contentMin := ig.CursorScreenPos()
 				imgW := float32(img.Width)
 				imgH := float32(img.Height)
-				scale := math.Min(float64(avail.X)/float64(imgW), float64(avail.Y)/float64(imgH))
-				if scale > 4.0 {
-					scale = 4.0 // 最大 4 倍
+
+				// 自适应缩放（保持宽高比，上限 4 倍）作为基准
+				fitScale := math.Min(float64(avail.X)/float64(imgW), float64(avail.Y)/float64(imgH))
+				if fitScale > 4.0 {
+					fitScale = 4.0
 				}
+				scale := state.PreviewScale
+				if scale <= 0 {
+					scale = fitScale
+				}
+
+				// 中键拖拽平移（拖拽必须起始于窗口内，开始后允许鼠标移出窗口）
+				if ig.IsMouseDown(ig.MouseButtonMiddle) {
+					if !state.panDragging && ig.IsWindowHovered() {
+						state.panDragging = true
+					}
+				} else {
+					state.panDragging = false
+				}
+				if state.panDragging {
+					d := ig.MouseDragDeltaV(ig.MouseButtonMiddle, 0)
+					state.PreviewPanX += d.X
+					state.PreviewPanY += d.Y
+					ig.ResetMouseDragDeltaV(ig.MouseButtonMiddle)
+				}
+
 				drawW := float32(float64(imgW) * scale)
 				drawH := float32(float64(imgH) * scale)
+				originX := contentMin.X + (avail.X-drawW)/2 + state.PreviewPanX
+				originY := contentMin.Y + (avail.Y-drawH)/2 + state.PreviewPanY
 
-				// 居中图像
-				offsetX := (avail.X - drawW) / 2
-				offsetY := (avail.Y - drawH) / 2
-				if offsetX > 0 || offsetY > 0 {
-					ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+offsetX, ig.CursorPosY()+offsetY))
+				// 滚轮缩放，锚定鼠标位置：保持鼠标下的图像点不动
+				if wheel := ig.CurrentIO().MouseWheel(); wheel != 0 && ig.IsWindowHovered() {
+					factor := math.Pow(previewZoomStep, float64(wheel))
+					newScale := scale * factor
+					if newScale < previewMinScale {
+						newScale = previewMinScale
+					} else if newScale > previewMaxScale {
+						newScale = previewMaxScale
+					}
+					factor = newScale / scale
+					m := ig.MousePos()
+					newDrawW := float32(float64(imgW) * newScale)
+					newDrawH := float32(float64(imgH) * newScale)
+					state.PreviewPanX = m.X - (m.X-originX)*float32(factor) - contentMin.X - (avail.X-newDrawW)/2
+					state.PreviewPanY = m.Y - (m.Y-originY)*float32(factor) - contentMin.Y - (avail.Y-newDrawH)/2
+					state.PreviewScale = newScale
+					scale = newScale
+					drawW, drawH = newDrawW, newDrawH
+					originX = contentMin.X + (avail.X-drawW)/2 + state.PreviewPanX
+					originY = contentMin.Y + (avail.Y-drawH)/2 + state.PreviewPanY
 				}
+
+				ig.SetCursorPos(ig.NewVec2(ig.CursorPosX()+(originX-contentMin.X), ig.CursorPosY()+(originY-contentMin.Y)))
 
 				texRef := ig.NewTextureRefTextureID(ig.TextureID(tex))
 				ig.ImageWithBgV(*texRef, ig.NewVec2(drawW, drawH), ig.NewVec2(0, 0), ig.NewVec2(1, 1), ig.NewVec4(0, 0, 0, 0), ig.NewVec4(1, 1, 1, 1))
