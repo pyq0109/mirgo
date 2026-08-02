@@ -1,8 +1,10 @@
 # mirgo
 
-用 Go 语言重新实现热血传奇（MIR2）客户端和服务端
+用 Go 语言重新实现热血传奇客户端和服务端
 
-目前处在非常早期的开发阶段, 功能很不完善存在大量 bug, 讨论 QQ 群: 32309474
+目前处在非常早期的开发阶段, 功能很不完善存在大量 bug.
+
+讨论 QQ 群: 32309474
 
 # 资源
 
@@ -30,7 +32,8 @@ asset/
 依赖:
 
 - Go 1.26
-- GCC (MinGW-w64)
+
+Windows 使用 CGO (GCC (MinGW-w64)):
 
 ```PowerShell
 $env:CGO_ENABLED=1
@@ -43,16 +46,19 @@ go mod vendor
 
 ## serverconfig
 
+把 github.com/cjlaaa/Mir2-GeeM2 项目的 176 服务端配置文件转换为本项目使用的配置文件
+
 ```bash
 go run ./cmd/serverconfig -v
 ```
 
 ## mapviewer
 
+地图查看工具
+
 运行:
 
 ```bash
-# WIL 资源默认从 asset/client/Data/ 加载
 # Linux 需 -tags x11 跳过 Wayland 编译；Windows 可省略
 go run -tags x11 ./cmd/mapviewer ./asset/client/Map/0.map
 ```
@@ -84,6 +90,7 @@ go run ./cmd/server
 # Linux 需 -tags x11 跳过 Wayland 编译；Windows 可省略
 go run -tags x11 ./cmd/client
 
+# -loglevel trace 为调试命令
 go run -tags x11 ./cmd/client -server localhost:7000 -loglevel trace
 ```
 
