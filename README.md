@@ -1,5 +1,15 @@
 # mirgo
 
+用 Go 语言重新实现热血传奇（MIR2）客户端和服务端
+
+目前处在非常早期的开发阶段, 功能很不完善存在大量 bug, 讨论 QQ 群: 32309474
+
+# 资源
+
+- 游戏 delphi 源码参考: https://github.com/lzxsz/MIR2 (commit: 98711dad31567d9a7e272956f6c5a2487000848b)
+- 服务端配置文件: https://github.com/cjlaaa/Mir2-GeeM2 (commit: 26b2881ae2e8aca0aac0ab58acbfca9c39dbfc9c)
+- 客户端美术资源: [热血传奇十周年硬盘版.rar (提取码: ussz)](https://pan.baidu.com/s/1Fo4rnHku8EFRXDUcE-incw?pwd=ussz)
+
 # 准备
 
 1. 新建 asset 目录
@@ -77,8 +87,6 @@ go run -tags x11 ./cmd/client
 go run -tags x11 ./cmd/client -server localhost:7000 -loglevel trace
 ```
 
-# 资源
+# 开源协议
 
-- 游戏 delphi 源码参考: https://github.com/lzxsz/MIR2 (commit: 98711dad31567d9a7e272956f6c5a2487000848b)
-- 服务端配置文件: https://github.com/cjlaaa/Mir2-GeeM2 (commit: 26b2881ae2e8aca0aac0ab58acbfca9c39dbfc9c)
-- 客户端美术资源: [热血传奇十周年硬盘版.rar (提取码: ussz)](https://pan.baidu.com/s/1Fo4rnHku8EFRXDUcE-incw?pwd=ussz)
+MIT
