@@ -423,10 +423,11 @@ func main() {
 // netEvent 是由读协程排队、通过 Pump 在主线程分发的已解码服务器消息，
 // 确保所有 actor/scene 修改都是单线程的（ReadLoop 和渲染循环之间无数据竞争）。
 type netEvent struct {
-	isCtrl bool
-	ctrl   string
-	msg    protocol.DefaultMessage
-	body   string
+	isCtrl  bool
+	ctrl    string
+	msg     protocol.DefaultMessage
+	body    string
+	rawBody string // 未解码的 body 原文（SMTurn 需按 Delphi 方式分段解码名称）
 }
 
 // NetHandler 处理网络通信。
@@ -489,7 +490,7 @@ func (h *NetHandler) Pump() {
 		if e.isCtrl {
 			h.handleControlMsg(e.ctrl)
 		} else {
-			h.HandleMessage(e.msg, e.body)
+			h.HandleMessage(e.msg, e.body, e.rawBody)
 		}
 	}
 }
@@ -675,10 +676,12 @@ func (h *NetHandler) ReadLoop() {
 				if len(payload) >= protocol.DefBlockSize {
 					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
 					body := ""
+					rawBody := ""
 					if len(payload) > protocol.DefBlockSize {
-						body = protocol.DecodeString(payload[protocol.DefBlockSize:])
+						rawBody = payload[protocol.DefBlockSize:]
+						body = protocol.DecodeString(rawBody)
 					}
-					h.enqueue(netEvent{msg: msg, body: body})
+					h.enqueue(netEvent{msg: msg, body: body, rawBody: rawBody})
 				}
 			}
 		}
@@ -740,8 +743,26 @@ func (h *NetHandler) handleControlMsg(payload string) {
 	}
 }
 
+// turnCharDescEncodedLen 是 8 字节 TCharDesc 经 6Bit 编码后的字符数：ceil(8*4/3)=11。
+// SMTurn body = EncodeBuffer(charDesc) + EncodeString(name)，两段需分别解码
+// （整体解码会在段边界处错位），与 Delphi ClMain.pas:3907-3914 一致。
+const turnCharDescEncodedLen = 11
+
+// decodeTurnName 从 SMTurn 的原始编码 body 中提取角色/NPC 名称。
+func decodeTurnName(rawBody string) string {
+	if len(rawBody) <= turnCharDescEncodedLen {
+		return ""
+	}
+	name := protocol.DecodeString(rawBody[turnCharDescEncodedLen:])
+	// Delphi 名称可能带 "名字/名字颜色" 后缀，取 '/' 前的部分。
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		name = name[:i]
+	}
+	return name
+}
+
 // HandleMessage 处理服务器消息。
-func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
+func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody string) {
 	log.Logf(log.LevelInfo, "Client", "<<< recv %s Recog=%d Param=%d Tag=%d Series=%d body=%q",
 		protocol.MsgName(msg.Ident), msg.Recog, msg.Param, msg.Tag, msg.Series, body)
 
@@ -956,6 +977,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 			h.playScene.State.Actors.Add(actor)
 		} else {
 			actor.updateFeatureFromBody(body)
+		}
+		if name := decodeTurnName(rawBody); name != "" {
+			actor.UserName = name
 		}
 		actor.SendMsg(protocol.SMTurn, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
 

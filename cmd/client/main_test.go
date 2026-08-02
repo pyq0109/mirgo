@@ -431,3 +431,44 @@ func TestParseMagicsExtendedLayout(t *testing.T) {
 		t.Errorf("magic = %+v, fields mismatch", m)
 	}
 }
+
+// TestDecodeTurnName 验证 SMTurn body 按 Delphi 方式分段解码名称：
+// body = EncodeBuffer(8字节charDesc) + EncodeString(name)，编码层在第 11 字符处分割。
+func TestDecodeTurnName(t *testing.T) {
+	// 构造与服务端 playobject.go SearchViewRange 一致的 body。
+	charDesc := make([]byte, 8)
+	binary.LittleEndian.PutUint32(charDesc[0:4], 65586) // feature: raceImg=50, appr=1
+	binary.LittleEndian.PutUint32(charDesc[4:8], 0)     // featureEx
+
+	tests := []struct {
+		name string
+		body string // 附加在 charDesc 之后的名称段（明文，测试内编码）
+		want string
+	}{
+		{"chinese npc", "传送员", "传送员"},
+		{"merchant", "屠夫", "屠夫"},
+		{"with color suffix", "铁匠铺老板/255", "铁匠铺老板"},
+		{"empty name", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawBody := protocol.EncodeBuffer(charDesc)
+			if tt.body != "" {
+				rawBody += protocol.EncodeString(tt.body)
+			}
+			if got := decodeTurnName(rawBody); got != tt.want {
+				t.Errorf("decodeTurnName(%q) = %q, want %q", rawBody, got, tt.want)
+			}
+		})
+	}
+
+	// charDesc 单独编码应为 11 字符（ceil(8*4/3)），确保分割点正确。
+	if n := len(protocol.EncodeBuffer(charDesc)); n != turnCharDescEncodedLen {
+		t.Errorf("encoded charDesc len = %d, want %d", n, turnCharDescEncodedLen)
+	}
+
+	// body 过短（仅 charDesc）应返回空名称。
+	if got := decodeTurnName(protocol.EncodeBuffer(charDesc)); got != "" {
+		t.Errorf("decodeTurnName(charDesc only) = %q, want empty", got)
+	}
+}

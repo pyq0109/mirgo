@@ -720,6 +720,25 @@ func assertHasPrefix(t *testing.T, s string, prefix string, desc string) {
 	}
 }
 
+// TestExtractDialogLabels 验证对话链接白名单提取 (F3: 不应误收 </C> 的 "C")。
+func TestExtractDialogLabels(t *testing.T) {
+	text := "欢迎光临\\" +
+		"<C>居中文字</C>\\" +
+		"<购买/@buy><出售/@sell>\\" +
+		"<关闭/@exit>"
+	got := extractDialogLabels(text)
+
+	want := map[string]bool{"buy": true, "sell": true, "exit": true}
+	if len(got) != len(want) {
+		t.Fatalf("extractDialogLabels = %v (len %d), want %d labels %v", got, len(got), len(want), want)
+	}
+	for _, lbl := range got {
+		if !want[lbl] {
+			t.Errorf("unexpected label %q in %v (centering tags must be skipped)", lbl, got)
+		}
+	}
+}
+
 // 消除未使用导入的警告
 var _ = net.Listen
 var _ = os.RemoveAll

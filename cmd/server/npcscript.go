@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -395,6 +396,11 @@ func extractDialogLabels(text string) []string {
 			}
 			tag := rest[lt+1 : lt+gt]
 			rest = rest[lt+gt+1:]
+			// 跳过 <C>/</C> 居中控制符与空标签 (客户端 parseNpcDialog 同样特判,
+			// 否则 </C> 会被误收成标签 "C")。
+			if tag == "" || tag == "C" || tag == "/C" {
+				continue
+			}
 			if slash := strings.IndexByte(tag, '/'); slash >= 0 {
 				labels = append(labels, strings.TrimPrefix(tag[slash+1:], "@"))
 			}
@@ -2183,16 +2189,20 @@ func compareOp(a int, op string, b int) bool {
 func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer) {
 	npcID := msg.Param1
 	if p.envir == nil {
+		log.Logf(log.LevelDebug, "NPC", "%s click NPC #%d rejected: no envir", p.Name, npcID)
 		return
 	}
 
 	npc, ok := p.envir.getNpcByID(int32(npcID))
 	if !ok {
+		log.Logf(log.LevelDebug, "NPC", "%s click NPC #%d rejected: NPC not found on map %s", p.Name, npcID, p.MapName)
 		return
 	}
 
 	// 距离验证：玩家必须在NPC附近才能交互
 	if !p.isNearNpc(npc) {
+		log.Logf(log.LevelDebug, "NPC", "%s click NPC #%d rejected: too far player=(%d,%d) npc=%s(%d,%d)",
+			p.Name, npcID, p.CurrX, p.CurrY, npc.Name, npc.CurrX, npc.CurrY)
 		return
 	}
 

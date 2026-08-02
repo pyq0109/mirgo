@@ -1856,7 +1856,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		// 1. 鹤嘴锄挖矿（ClMain:2252-2267）
 		if w := s.State.UseItems[1]; w != nil && !my.OnHorse {
 			if def := s.State.ItemDefs[int(w.WIndex)]; def != nil && def.Shape == 19 {
-				target := s.findTargetActor(tx, ty, true)
+				target := s.findTargetActor(wx, wy, true)
 				if target == nil {
 					tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
 					fdx, fdy := dirOffset(tdir)
@@ -1897,7 +1897,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		}
 
 		// 3. 查找目标 Actor（ClMain:2248, liveonly=TRUE）
-		target := s.findTargetActor(tx, ty, true)
+		target := s.findTargetActor(wx, wy, true)
 
 		if target != nil || s.shiftDown {
 			// 攻击/交互路径
@@ -1960,29 +1960,72 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	}
 }
 
-// findTargetActor 在指定格子查找目标 Actor（PlayScn:1785-1818）。
-// liveonly=true 时仅返回存活 Actor（左键用）；false 时也可返回死亡 Actor。
-// dupSelection 用于同格多 Actor 时循环选择。
-func (s *PlayScene) findTargetActor(tx, ty int, liveOnly bool) *Actor {
+// findTargetActor 用精灵包围盒检测查找点击命中的目标 Actor（PlayScn:1785-1818）。
+// wx, wy 为点击处的世界坐标；liveOnly=true 时仅返回存活 Actor（左键用）。
+// dupSelection 用于重叠 Actor 时循环选择。
+//
+// Delphi 原版先做像素级 CheckSelect，失败后回退到 CharWidth×CharHeight 包围盒
+// （PlayScn.pas:1798-1812）。NPC/怪物精灵底部锚定、向上延伸，精确格子匹配会漏掉
+// 点在身体/头部的点击，故此处采用世界空间包围盒检测。
+func (s *PlayScene) findTargetActor(wx, wy float64, liveOnly bool) *Actor {
 	my := s.State.MySelf
+	// SortedByY 按 Ry 升序（渲染由后往前）；命中检测反序遍历，
+	// 让绘制在最上层（Y 最大）的 Actor 优先被选中。
+	actors := s.State.Actors.SortedByY()
 	var candidates []*Actor
-	for _, a := range s.State.Actors.All() {
+	for i := len(actors) - 1; i >= 0; i-- {
+		a := actors[i]
 		if a.RecogID == my.RecogID {
-			continue
-		}
-		if a.CurrX != tx || a.CurrY != ty {
 			continue
 		}
 		if liveOnly && a.Death {
 			continue
 		}
-		candidates = append(candidates, a)
+		if s.actorHitTest(a, wx, wy) {
+			candidates = append(candidates, a)
+		}
 	}
 	if len(candidates) == 0 {
 		return nil
 	}
 	idx := s.dupSelection % len(candidates)
 	return candidates[idx]
+}
+
+// actorHitTest 判断世界坐标 (wx, wy) 是否落在 Actor 精灵的包围盒内。
+// 包围盒由当前帧 body 图的宽高与热点推算，大精灵按 Delphi 规则裁去透明边距。
+func (s *PlayScene) actorHitTest(a *Actor, wx, wy float64) bool {
+	worldX := float64(a.Rx*engine.TileWidth) + a.ShiftX
+	worldY := float64(a.Ry*engine.TileHeight) + a.ShiftY
+
+	var w, h, hotX, hotY float64
+	if img := a.GetBodyImage(s.resources); img != nil {
+		w = float64(img.Width)
+		h = float64(img.Height)
+		hotX = float64(img.HotX)
+		hotY = float64(img.HotY)
+	} else {
+		// 取图失败时的兜底盒子（约一格宽、成人身高）。
+		w, h = engine.TileWidth, 70
+		hotX, hotY = -engine.TileWidth/2, -70
+	}
+
+	left := worldX + hotX
+	top := worldY + hotY
+	right := left + w
+	bottom := top + h
+
+	// Delphi PlayScn.pas:1803-1806：超出 40×70 的精灵裁去居中边距，
+	// 避免点中大片透明区域。
+	var centx, centy float64
+	if w > 40 {
+		centx = (w - 40) / 2
+	}
+	if h > 70 {
+		centy = (h - 70) / 2
+	}
+
+	return wx >= left+centx && wx <= right-centx && wy >= top+centy && wy <= bottom-centy
 }
 
 // shouldAttack 判断是否应攻击目标（ClMain:2300-2314）。

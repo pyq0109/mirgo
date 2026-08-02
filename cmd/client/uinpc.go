@@ -326,10 +326,14 @@ func (s *PlayScene) paintNpcDialog(c *UIControl, proj [16]float32) {
 
 // npcClick 命中检测链接并发送选择 (FState:5116-5135)。
 func (s *PlayScene) npcClick(x, y int) {
-	absX, absY := x+s.hudNpc.AbsX(), y+s.hudNpc.AbsY()
+	// x,y 为父空间坐标 (uicontrol.go:162); 点击区域以绝对坐标登记
+	// (paintNpcDialog 用 AbsX/AbsY), 用 ParentSpace 换算到父空间再命中检测,
+	// 避免依赖对话框恰好在原点。
 	now := time.Now().UnixMilli()
 	for _, cp := range s.npcClicks {
-		if absX < cp.x || absX >= cp.x+cp.w || absY < cp.y || absY >= cp.y+cp.h {
+		cx := s.hudNpc.ParentSpaceX(cp.x)
+		cy := s.hudNpc.ParentSpaceY(cp.y)
+		if x < cx || x >= cx+cp.w || y < cy || y >= cy+cp.h {
 			continue
 		}
 		if now < s.npcLastClickTick { // 5 秒防连点 (FState:5121)
@@ -430,10 +434,15 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 
 // menuRowClick 选择商品行 (FState:4969-5017)。
 func (s *PlayScene) menuRowClick(x, y int) {
-	if x < 14 || x > 279 || y < 32 {
+	// x,y 为父空间坐标 (uicontrol.go:162); 换算为菜单本地坐标
+	// (local = parent - Left/Top, 同 InRange 约定)。paintShopMenu
+	// 以本地 (14..279, 50+m*menuRowH) 绘制商品行。
+	lx := x - s.hudMenu.Left
+	ly := y - s.hudMenu.Top
+	if lx < 14 || lx > 279 || ly < 50 {
 		return
 	}
-	idx := (y-32)/menuRowH + s.menuTop
+	idx := (ly-50)/menuRowH + s.menuTop
 	if idx >= 0 && idx < len(s.State.ShopGoods) {
 		s.menuIndex = idx
 		gSound.PlaySound(sGlassButtonClick)
