@@ -201,6 +201,7 @@ type PlayScene struct {
 	showMinimap bool
 	deathGray   bool
 	focusActor  *Actor
+	hoverSelf   bool // Delphi g_boSelectMyself：鼠标悬停在自己身上
 
 	// Delphi 输入还原（ClMain.pas / MShare.pas）
 	targetCret         *Actor // 锁定攻击目标（g_TargetCret）
@@ -998,6 +999,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		my.RedrawPass = true
 		my.Draw(s.gl, s.resources, wx, wy, proj)
 		my.RedrawPass = false
+		s.drawActorLabel(my, wx, wy, proj)
 	}
 
 	if s.focusActor != nil && s.focusActor != s.State.MySelf && !s.focusActor.Death {
@@ -1005,6 +1007,7 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		fx := float32(float64(fa.Rx*engine.TileWidth) + fa.ShiftX)
 		fy := float32(float64(fa.Ry*engine.TileHeight) + fa.ShiftY)
 		fa.Draw(s.gl, s.resources, fx, fy, proj)
+		s.drawActorLabel(fa, fx, fy, proj)
 	}
 
 	for _, gi := range s.groundItems {
@@ -1060,14 +1063,10 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 }
 
 func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]float32) {
-	showName := false
-	if s.State.MySelf != nil {
-		if a.RecogID == s.State.MySelf.RecogID {
-			showName = true
-		} else if absInt(a.CurrX-s.State.MySelf.CurrX) <= 5 && absInt(a.CurrY-s.State.MySelf.CurrY) <= 5 {
-			showName = true
-		}
-	}
+	// Delphi DrawScrn.pas:307-325：名字仅绘制给鼠标悬停的角色（g_FocusCret）
+	// 或悬停在自己身上时（g_boSelectMyself），不再按距离常驻显示。
+	showName := s.focusActor == a ||
+		(s.hoverSelf && s.State.MySelf != nil && a.RecogID == s.State.MySelf.RecogID)
 	// Delphi SayY：存活 = tileRow + ShiftY - 47，死亡 = tileRow + ShiftY - 12
 	// （PlayScn.pas:1232-1235）。世界坐标下 tileRow ≈ worldY。
 	sayY := worldY - 47
@@ -1075,9 +1074,11 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 		sayY = worldY - 12
 	}
 	if showName && a.UserName != "" && s.text != nil {
+		// Delphi DrawScrn.pas:311-315：名字绘制在 SayY + 30 处。
+		nameY := sayY + 30
 		nameW := float32(s.text.MeasureText(a.UserName))
 		nameX := worldX + float32(engine.TileWidth)/2 - nameW/2
-		log.Logf(log.LevelTrace, "Render", "play actor name '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, sayY, a.Death)
+		log.Logf(log.LevelTrace, "Render", "play actor name '%s' pos=(%.0f,%.0f) death=%v", a.UserName, nameX, nameY, a.Death)
 		nr, ng, nb := 1.0, 1.0, 1.0
 		switch a.NameColor {
 		case 249: // 红名
@@ -1085,11 +1086,11 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 		case 251: // 黄名
 			nr, ng, nb = 1.0, 1.0, 0.2
 		}
-		s.text.DrawText(a.UserName, nameX-1, sayY, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX+1, sayY, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, sayY-1, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, sayY+1, 0, 0, 0, 1.0, proj)
-		s.text.DrawText(a.UserName, nameX, sayY, float32(nr), float32(ng), float32(nb), 1.0, proj)
+		s.text.DrawText(a.UserName, nameX-1, nameY, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX+1, nameY, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, nameY-1, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, nameY+1, 0, 0, 0, 1.0, proj)
+		s.text.DrawText(a.UserName, nameX, nameY, float32(nr), float32(ng), float32(nb), 1.0, proj)
 	}
 
 	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
@@ -1654,6 +1655,7 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 
 	// 基于格子的焦点检测（Delphi g_FocusCret, ClMain.pas:2085-2096）。
 	s.focusActor = nil
+	s.hoverSelf = false
 	s.hoverItemName = ""
 	if y >= MapSurfaceH || s.cam == nil || s.State.MySelf == nil {
 		return
@@ -1685,6 +1687,10 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 			break
 		}
 	}
+
+	// Delphi IsSelectMyself（ClMain.pas:2086）：鼠标悬停在自己身上
+	s.hoverSelf = s.State.MySelf != nil && !s.State.MySelf.Death &&
+		s.State.MySelf.CurrX == tx && s.State.MySelf.CurrY == ty
 
 	// 拖拽移动（ClMain:2115-2116）：按住 >300ms 重新触发移动
 	nowMs := time.Now().UnixMilli()
