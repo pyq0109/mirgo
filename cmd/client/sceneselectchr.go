@@ -190,23 +190,25 @@ func (s *SelectChrScene) buildUI() {
 	s.ui.Root.AddChild(cp)
 	s.createPanel = cp
 
-	s.editName = NewEditBox(s.gl, s.text, "EdChrName", 129, 21)
+	s.editName = NewEditBox(s.gl, s.text, "EdChrName", 128, 20)
 	s.editName.MaxLen = 14
-	s.editName.Ctrl.Left = 63
-	s.editName.Ctrl.Top = 79
+	s.editName.Ctrl.Left = 62
+	s.editName.Ctrl.Top = 104
 	cp.AddChild(s.editName.Ctrl)
 
-	jobXs := [3]int{36, 103, 168}
+	// 子控件坐标实测自运行资源 Prguse.wil #73 的烘焙布局 (300x417)；
+	// 职业/性别 left = #73 顶高光左-1，使选中高亮 (55-59) 与烘焙灰图逐像素对齐。
+	jobLefts := [3]int{47, 92, 137}
 	for i := 0; i < 3; i++ {
 		idx := i
 		jb := NewUIControl(fmt.Sprintf("BtnJob%d", i), KindButton)
 		if prg != nil {
 			jb.SetImgIndex(prg, ImgCreateJob1+i)
 		} else {
-			jb.Width, jb.Height = 60, 42
+			jb.Width, jb.Height = 44, 36
 		}
-		jb.Left = jobXs[i]
-		jb.Top = 139
+		jb.Left = jobLefts[i]
+		jb.Top = 156
 		jb.OnClick = func(c *UIControl, x, y int) { s.createJob = idx }
 		jb.OnDirectPaint = func(c *UIControl, proj [16]float32) {
 			if prg == nil {
@@ -216,15 +218,14 @@ func (s *SelectChrScene) buildUI() {
 				s.ui.BlitImage(prg, ImgCreateJob1+idx, c.AbsX(), c.AbsY(), proj)
 			} else if s.createJob == idx {
 				s.ui.BlitImage(prg, ImgClassHi1+idx, c.AbsX(), c.AbsY(), proj)
-			} else {
-				s.ui.BlitImage(prg, ImgCreateJob1+idx, c.AbsX(), c.AbsY(), proj)
 			}
+			// 普通态不绘制：灰色图标已烘焙在 ImgCreateBg(#73) 中 (FState:2725-2761)
 		}
 		cp.AddChild(jb)
 		s.jobBtns[i] = jb
 	}
 
-	sexXs := [2]int{70, 137}
+	sexLefts := [2]int{92, 137}
 	sexHi := [2]int{ImgGenderHiM, ImgGenderHiF}
 	for i := 0; i < 2; i++ {
 		idx := i
@@ -232,10 +233,10 @@ func (s *SelectChrScene) buildUI() {
 		if prg != nil {
 			sb.SetImgIndex(prg, ImgCreateMale+i)
 		} else {
-			sb.Width, sb.Height = 60, 42
+			sb.Width, sb.Height = 44, 35
 		}
-		sb.Left = sexXs[i]
-		sb.Top = 211
+		sb.Left = sexLefts[i]
+		sb.Top = 230
 		sb.OnClick = func(c *UIControl, x, y int) { s.createSex = idx }
 		sb.OnDirectPaint = func(c *UIControl, proj [16]float32) {
 			if prg == nil {
@@ -245,20 +246,26 @@ func (s *SelectChrScene) buildUI() {
 				s.ui.BlitImage(prg, ImgCreateMale+idx, c.AbsX(), c.AbsY(), proj)
 			} else if s.createSex == idx {
 				s.ui.BlitImage(prg, sexHi[idx], c.AbsX(), c.AbsY(), proj)
-			} else {
-				s.ui.BlitImage(prg, ImgCreateMale+idx, c.AbsX(), c.AbsY(), proj)
 			}
+			// 普通态不绘制：灰色图标已烘焙在 ImgCreateBg(#73) 中 (FState:2725-2761)
 		}
 		cp.AddChild(sb)
 		s.sexBtns[i] = sb
 	}
 
 	okBtn := NewUIControl("BtnCreateOk", KindButton)
-	okBtn.Width, okBtn.Height = 80, 30
-	okBtn.Left = 85
-	okBtn.Top = 275
+	okBtn.Width, okBtn.Height = 90, 29
+	okBtn.Left = 95
+	okBtn.Top = 359
 	okBtn.OnClick = func(c *UIControl, x, y int) { s.confirmCreate() }
 	cp.AddChild(okBtn)
+
+	closeBtn := NewUIControl("BtnCreateClose", KindButton)
+	closeBtn.Width, closeBtn.Height = 18, 20
+	closeBtn.Left = 246
+	closeBtn.Top = 30
+	closeBtn.OnClick = func(c *UIControl, x, y int) { s.createMode = false }
+	cp.AddChild(closeBtn)
 
 	// --- 删除确认面板 ---
 	dp := NewUIControl("DDeletePanel", KindWindow)
