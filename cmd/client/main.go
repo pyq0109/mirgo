@@ -132,7 +132,7 @@ func main() {
 		}
 	}()
 
-	textRenderer, err := engine.NewTextRenderer(glState, "", 16)
+	textRenderer, err := engine.NewTextRenderer(glState, "", 9)
 	if err != nil {
 		log.Logf(log.LevelWarn, "Client", "failed to load font: %v", err)
 	}
@@ -144,10 +144,10 @@ func main() {
 
 	sceneMgr := engine.NewSceneManager()
 
-	// 全局调试控制台 (跨场景可用)。使用 13px 小字体, 加载失败时退回 16px。
+	// 全局调试控制台 (跨场景可用)。使用 8pt 小字体 (Delphi 物品提示 8pt), 加载失败时退回主字体。
 	var consoleText *engine.TextRenderer
 	if textRenderer != nil {
-		if small, err := textRenderer.WithSize(13); err == nil {
+		if small, err := textRenderer.WithSize(8); err == nil {
 			consoleText = small
 		} else {
 			consoleText = textRenderer

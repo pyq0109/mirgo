@@ -312,10 +312,10 @@ func NewLoginScene(gl *engine.GLState, resources *engine.ResourceManager, text *
 		textSrv:     text,
 		showLoginUI: true,
 	}
-	if t, err := text.WithSize(13); err == nil {
+	if t, err := text.WithSize(8); err == nil {
 		s.textSmall = t
 	}
-	if t, err := text.WithSize(15); err == nil {
+	if t, err := text.WithSize(11); err == nil {
 		s.textSrv = t
 	}
 	return s

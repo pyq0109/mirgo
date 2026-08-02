@@ -56,7 +56,7 @@ var fontSearchPaths = []string{
 // NewTextRenderer 创建一个 TextRenderer。若 fontPath 为空，则尝试常见的 Windows 字体。
 func NewTextRenderer(glState *GLState, fontPath string, size float64) (*TextRenderer, error) {
 	if size <= 0 {
-		size = 16
+		size = 9
 	}
 
 	resolvedPath := fontPath

@@ -14,8 +14,8 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 )
 
-func widthBytes(w int) int {
-	return (((w * 8) + 31) / 32) * 4
+func widthBytes(w, bpp int) int {
+	return (((w * bpp) + 31) / 32) * 4
 }
 
 type Image struct {
@@ -129,10 +129,6 @@ func Load(wilPath string) (*File, error) {
 		}
 	}
 
-	if wf.colorCount > 256 {
-		log.Logf(log.LevelDebug, "WIL", "%s: colorCount=%d (ignored, always 8-bit)", filepath.Base(wilPath), wf.colorCount)
-	}
-
 	if wf.Count <= 0 || wf.Count > 100000 {
 		f.Close()
 		return nil, fmt.Errorf("invalid image count: %d", wf.Count)
@@ -241,22 +237,46 @@ func (wf *File) decodeImage(idx int) *Image {
 
 	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
 
-	rowBytes := widthBytes(w)
-	raw := make([]byte, rowBytes*h)
-	if _, err := io.ReadFull(wf.file, raw); err != nil {
-		log.Logf(log.LevelWarn, "WIL", "image %d: read %d bytes failed: %v", idx, len(raw), err)
-		return &Image{}
-	}
-	for y := 0; y < h; y++ {
-		rowOff := y * rowBytes
-		for x := 0; x < w; x++ {
-			pidx := raw[rowOff+x]
-			off := (y*w + x) * 4
-			c := wf.Palette[pidx]
-			rgba.Pix[off+0] = c.R
-			rgba.Pix[off+1] = c.G
-			rgba.Pix[off+2] = c.B
-			rgba.Pix[off+3] = c.A
+	if wf.colorCount > 256 {
+		rowBytes := widthBytes(w, 16)
+		raw := make([]byte, rowBytes*h)
+		if _, err := io.ReadFull(wf.file, raw); err != nil {
+			log.Logf(log.LevelWarn, "WIL", "image %d: read %d bytes failed: %v", idx, len(raw), err)
+			return &Image{}
+		}
+		for y := 0; y < h; y++ {
+			rowOff := y * rowBytes
+			for x := 0; x < w; x++ {
+				v := uint16(raw[rowOff+x*2]) | uint16(raw[rowOff+x*2+1])<<8
+				off := (y*w + x) * 4
+				if v == 0 {
+					rgba.Pix[off+3] = 0
+				} else {
+					rgba.Pix[off+0] = byte((v >> 11) << 3)
+					rgba.Pix[off+1] = byte(((v >> 5) & 0x3F) << 2)
+					rgba.Pix[off+2] = byte((v & 0x1F) << 3)
+					rgba.Pix[off+3] = 255
+				}
+			}
+		}
+	} else {
+		rowBytes := widthBytes(w, 8)
+		raw := make([]byte, rowBytes*h)
+		if _, err := io.ReadFull(wf.file, raw); err != nil {
+			log.Logf(log.LevelWarn, "WIL", "image %d: read %d bytes failed: %v", idx, len(raw), err)
+			return &Image{}
+		}
+		for y := 0; y < h; y++ {
+			rowOff := y * rowBytes
+			for x := 0; x < w; x++ {
+				pidx := raw[rowOff+x]
+				off := (y*w + x) * 4
+				c := wf.Palette[pidx]
+				rgba.Pix[off+0] = c.R
+				rgba.Pix[off+1] = c.G
+				rgba.Pix[off+2] = c.B
+				rgba.Pix[off+3] = c.A
+			}
 		}
 	}
 

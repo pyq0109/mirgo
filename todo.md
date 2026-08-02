@@ -32,5 +32,4 @@
 # 综合
 
 - [ ] 封包拆包逻辑是否和 Delphi 完全一致
-- [ ] 去掉 serverdata 这目录, 直接在 server 平级目录下 mir2.db
 - [ ] doc 目录文档整理
