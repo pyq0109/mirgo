@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"runtime"
+	"time"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
 	"github.com/go-gl/glfw/v3.4/glfw"
@@ -59,13 +60,18 @@ func NewWindow(width, height int, title string) (*Window, error) {
 }
 
 // Run 用给定的 update 和 render 函数启动主循环。
+//
+// 帧率限制策略：优先依赖 VSync (SwapInterval(1))；若驱动覆盖或高刷屏
+// 导致 VSync 失效，则用 time.Sleep 保底锁到 60 FPS，避免空转飙升到 200+。
+// 注意清屏由 renderFn 自行负责（客户端/查看器各自控制），此处不重复 gl.Clear。
 func (w *Window) Run(updateFn func(dt float64), renderFn func()) {
 	lastTime := glfw.GetTime()
+	const targetDt = 1.0 / 60.0
 
 	for !w.window.ShouldClose() {
-		currentTime := glfw.GetTime()
-		dt := currentTime - lastTime
-		lastTime = currentTime
+		frameStart := glfw.GetTime()
+		dt := frameStart - lastTime
+		lastTime = frameStart
 
 		glfw.PollEvents()
 
@@ -73,13 +79,15 @@ func (w *Window) Run(updateFn func(dt float64), renderFn func()) {
 			updateFn(dt)
 		}
 
-		gl.Clear(gl.COLOR_BUFFER_BIT)
-
 		if renderFn != nil {
 			renderFn()
 		}
 
 		w.window.SwapBuffers()
+
+		if elapsed := glfw.GetTime() - frameStart; elapsed < targetDt {
+			time.Sleep(time.Duration((targetDt - elapsed) * float64(time.Second)))
+		}
 	}
 }
 
