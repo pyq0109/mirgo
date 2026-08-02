@@ -102,7 +102,7 @@ func main() {
 		log.Logf(log.LevelError, "Client", "failed to create window: %v", err)
 		os.Exit(1)
 	}
-	window.SetResizable(false)
+	window.SetResizable(true)
 	defer window.Destroy()
 
 	glState, err := engine.NewGLState()
@@ -175,6 +175,13 @@ func main() {
 	glfwWindow := window.GetWindow()
 	dbgConsole.SetClipboard = glfwWindow.SetClipboardString
 	dbgConsole.GetClipboard = glfwWindow.GetClipboardString
+
+	winW, winH = glfwWindow.GetSize()
+	glfwWindow.SetSizeLimits(ScreenWidth, ScreenHeight, glfw.DontCare, glfw.DontCare)
+	glfwWindow.SetSizeCallback(func(_ *glfw.Window, w, h int) {
+		winW, winH = w, h
+		playScene.OnResize()
+	})
 
 	// 连接登录场景回调。
 	loginScene.SetLoginFunc(func(id, password string) {
@@ -382,7 +389,7 @@ func main() {
 		gl.ClearColor(0, 0, 0, 1)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 		glState.SetViewport(0, 0, int32(w), int32(h))
-		proj := engine.OrthoProj(800, 600)
+		proj := engine.OrthoProj(float32(winW), float32(winH))
 
 		// 统一线框录制: 对所有场景 blanket 录制 (分类 0)。PlayScene 在
 		// 内部做分段录制并置 wireHandled=true, 从而覆盖这里的设置。
@@ -399,7 +406,7 @@ func main() {
 		}
 
 		if a := globalFade.alpha(); a > 0 {
-			glState.DrawQuadColor(0, 0, 800, 600, 0, 0, 0, a, proj)
+			glState.DrawQuadColor(0, 0, float32(winW), float32(winH), 0, 0, 0, a, proj)
 		}
 
 		// 调试控制台叠加层 (场景之后渲染, 重置为完整 800×600 视口)。
@@ -2377,7 +2384,7 @@ func (s *DebugScene) Render(glState *engine.GLState, proj [16]float32) {
 	case "Login":
 		r, g, b = 0.1, 0.2, 0.3
 	}
-	glState.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, r, g, b, 1.0, proj)
+	glState.DrawQuadColor(0, 0, float32(winW), float32(winH), r, g, b, 1.0, proj)
 	glState.DrawQuadColor(350, 250, 100, 100, 1.0, 1.0, 1.0, 1.0, proj)
 }
 func (s *DebugScene) OnKey(key int, action int)                              {}

@@ -13,10 +13,11 @@ import (
 // (DlgConf MShare:474-494, 处理函数 :5409-5603, 提示 :6739-6770)
 // 以及腰带 (:1245-1273, :3836-3920).
 const (
-	chatBoardX   = 208                // FState:3693
-	chatBoardTop = ScreenHeight - 130 // FState:3694 = 470
-	chatLineH    = 12                 // FState:3703
+	chatBoardX = 208 // FState:3693 (bar-relative)
+	chatLineH  = 12  // FState:3703
 )
+
+func chatBoardTop() int { return winH - 130 }
 
 var beltLefts = [6]int{285, 328, 371, 414, 457, 500} // FState:1245-1273 (+43 steps)
 
@@ -25,7 +26,7 @@ func (s *PlayScene) buildHUD() {
 	prg := s.resources.Prguse
 
 	bottom := NewUIControl("DBottom", KindWindow)
-	bottom.Left = 0
+	bottom.Left = barOriginX()
 	if prg != nil {
 		bottom.SetImgIndex(prg, ImgBottomBar)
 		if img := prg.GetImage(ImgBottomBar); img != nil {
@@ -37,11 +38,11 @@ func (s *PlayScene) buildHUD() {
 		bottom.Width, bottom.Height = ScreenWidth, BottomBarImageH
 		log.Logf(log.LevelWarn, "UI", "DBottom: Prguse is nil")
 	}
-	// 底部锚定: Top = SCREENHEIGHT - 图像高度 (FState:1184-1189).
-	bottom.Top = ScreenHeight - bottom.Height
+	bottom.Top = winH - bottom.Height
 	log.Logf(log.LevelInfo, "UI", "DBottom: W=%d H=%d Top=%d", bottom.Width, bottom.Height, bottom.Top)
-	bottom.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintBottomBar(c.Top, proj) }
+	bottom.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintBottomBar(c.AbsX(), c.AbsY(), proj) }
 	bottom.OnMouseDown = func(c *UIControl, button, x, y int) { s.bottomMouseDown(x, y) }
+	s.hudBottom = bottom
 	ui.Root.AddChild(bottom)
 
 	// 4 个状态按钮 (DlgConf 坐标, 相对 DBottom). Delphi 只在按下时
@@ -189,25 +190,29 @@ func (s *PlayScene) buttonHint(text string) {
 }
 
 // paintBottomBar 绘制底板及 DBottomDirectPaint 内的全部内容
-// (FState.pas:3560-3708). barY 是底板控件的绝对顶边.
-func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
+// (FState.pas:3560-3708). barX/barY 是底板控件的绝对位置.
+func (s *PlayScene) paintBottomBar(barX, barY int, proj [16]float32) {
 	st := s.State
 	prg := s.resources.Prguse
+	bx := float32(barX)
 	by := float32(barY)
 
 	if s.hudPlusAbil != nil {
 		s.hudPlusAbil.Visible = st.BonusPoint > 0
 	}
 
+	// HUD 区全宽背景（底栏两侧可见）。
+	s.gl.DrawQuadColor(0, float32(mapViewH()), float32(winW), float32(hudZoneH), 0.04, 0.04, 0.06, 1, proj)
+
 	// 底板: 上 120px 做颜色键混合 (WIL 解码器已将黑色烘焙为 alpha=0,
 	// 因此 alpha 1.0 即可精确复现 DDBLTFAST_SRCCOLORKEY,
 	// FState:3577-3586), 下半部分不透明 (:3587-3593).
-	barH := float32(ScreenHeight - barY)
+	barH := float32(winH - barY)
 	if prg != nil {
 		img := prg.GetImage(ImgBottomBar)
 		tex := prg != nil && img != nil && img.RGBA != nil
 		if debugRenderFrame <= 2 {
-			log.Logf(log.LevelInfo, "UI", "paintBottomBar: barY=%d barH=%.0f img=%v rgba=%v tex=%v", barY, barH, img != nil, img != nil && img.RGBA != nil, tex)
+			log.Logf(log.LevelInfo, "UI", "paintBottomBar: barX=%d barY=%d barH=%.0f img=%v rgba=%v tex=%v", barX, barY, barH, img != nil, img != nil && img.RGBA != nil, tex)
 		}
 		if tex {
 			t := s.resources.GetTexture(prg, ImgBottomBar)
@@ -216,15 +221,15 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 			if blendH > h {
 				blendH = h
 			}
-			s.gl.DrawQuadSub(t, w, h, 0, 0, w, blendH, 0, by, w, blendH, 1, 1, 1, 1, proj)
+			s.gl.DrawQuadSub(t, w, h, 0, 0, w, blendH, bx, by, w, blendH, 1, 1, 1, 1, proj)
 			if h > blendH {
-				s.gl.DrawQuadSub(t, w, h, 0, blendH, w, h-blendH, 0, by+blendH, w, h-blendH, 1, 1, 1, 1, proj)
+				s.gl.DrawQuadSub(t, w, h, 0, blendH, w, h-blendH, bx, by+blendH, w, h-blendH, 1, 1, 1, 1, proj)
 			}
 		} else {
-			s.gl.DrawQuadColor(0, by, ScreenWidth, barH, 0.08, 0.08, 0.12, 0.95, proj)
+			s.gl.DrawQuadColor(bx, by, float32(ScreenWidth), barH, 0.08, 0.08, 0.12, 0.95, proj)
 		}
 	} else {
-		s.gl.DrawQuadColor(0, by, ScreenWidth, barH, 0.08, 0.08, 0.12, 0.95, proj)
+		s.gl.DrawQuadColor(bx, by, float32(ScreenWidth), barH, 0.08, 0.08, 0.12, 0.95, proj)
 	}
 
 	if prg != nil {
@@ -241,7 +246,7 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 			dayImg = ImgDayDusk
 		}
 		if dayImg != 0 {
-			s.ui.BlitImage(prg, dayImg, 748, barY+79, proj)
+			s.ui.BlitImage(prg, dayImg, barX+748, barY+79, proj)
 		}
 
 		// HP/MP 球 (FState:3606-3638).
@@ -252,7 +257,7 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 					t := s.resources.GetTexture(prg, ImgWarHPBase)
 					s.gl.DrawQuadSub(t, float32(base.Width), float32(base.Height),
 						0, 0, float32(base.Width)-2, float32(base.Height),
-						38, by+90, float32(base.Width)-2, float32(base.Height), 1, 1, 1, 1, proj)
+						bx+38, by+90, float32(base.Width)-2, float32(base.Height), 1, 1, 1, 1, proj)
 				}
 				if fill := prg.GetImage(ImgWarHPFill); fill != nil && fill.RGBA != nil {
 					t := s.resources.GetTexture(prg, ImgWarHPFill)
@@ -263,28 +268,24 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 					}
 					s.gl.DrawQuadSub(t, float32(fill.Width), fh,
 						0, crop, float32(fill.Width)-2, fh-crop,
-						38, by+90+crop, float32(fill.Width)-2, fh-crop, 1, 1, 1, 1, proj)
+						bx+38, by+90+crop, float32(fill.Width)-2, fh-crop, 1, 1, 1, 1, proj)
 				}
 			} else if orb := prg.GetImage(ImgHPMPBar); orb != nil && orb.RGBA != nil {
 				t := s.resources.GetTexture(prg, ImgHPMPBar)
 				w, h := float32(orb.Width), float32(orb.Height)
 				half := float32(int(w) / 2) // Delphi 整数除法 (FState:3627,3633)
-				// HP: 左半边 (宽 half-1), 按缺失比例从顶部裁剪
-				// (:3627-3630).
 				hpCrop := h / float32(st.MaxHP) * float32(st.MaxHP-st.HP)
 				if hpCrop < 0 {
 					hpCrop = 0
 				}
 				s.gl.DrawQuadSub(t, w, h, 0, hpCrop, half-1, h-hpCrop,
-					40, by+91+hpCrop, half-1, h-hpCrop, 1, 1, 1, 1, proj)
-				// MP: 右半边, rc.Left=half+1, rc.Right=w-1 → 宽
-				// half-2 (:3633-3636).
+					bx+40, by+91+hpCrop, half-1, h-hpCrop, 1, 1, 1, 1, proj)
 				mpCrop := h / float32(st.MaxMP) * float32(st.MaxMP-st.MP)
 				if mpCrop < 0 {
 					mpCrop = 0
 				}
 				s.gl.DrawQuadSub(t, w, h, half+1, mpCrop, half-2, h-mpCrop,
-					40+half+1, by+91+mpCrop, half-2, h-mpCrop, 1, 1, 1, 1, proj)
+					bx+40+half+1, by+91+mpCrop, half-2, h-mpCrop, 1, 1, 1, 1, proj)
 			}
 		}
 
@@ -297,24 +298,26 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 				if ew > sw {
 					ew = sw
 				}
-				s.gl.DrawQuadSub(t, sw, sh, 0, 0, ew, sh, 666, 527, ew, sh, 1, 1, 1, 1, proj)
+				s.gl.DrawQuadSub(t, sw, sh, 0, 0, ew, sh, bx+666, float32(winH-73), ew, sh, 1, 1, 1, 1, proj)
 			}
 			if st.MaxWeight > 0 {
 				ww := sw * float32(st.Weight) / float32(st.MaxWeight)
 				if ww > sw {
 					ww = sw
 				}
-				s.gl.DrawQuadSub(t, sw, sh, 0, 0, ww, sh, 666, 560, ww, sh, 1, 1, 1, 1, proj)
+				s.gl.DrawQuadSub(t, sw, sh, 0, 0, ww, sh, bx+666, float32(winH-40), ww, sh, 1, 1, 1, 1, proj)
 			}
 		}
 	}
 
 	if s.text != nil {
 		// 等级 (FState:3643, PomiTextOut 位于 (660, SCREENHEIGHT-104)).
-		s.text.DrawTextOutline(fmt.Sprintf("%d", st.Level), 660, ScreenHeight-104,
+		s.text.DrawTextOutline(fmt.Sprintf("%d", st.Level), float32(barX+660), float32(winH-104),
 			1, 1, 1, 1, 0, 0, 0, 1, proj)
 
 		// 聊天板: 9 行 × 12px (FState:3692-3706).
+		cbx := float32(barX + chatBoardX)
+		cbt := chatBoardTop()
 		total := len(s.chatMessages)
 		end := total - s.chatScroll
 		if end > total {
@@ -327,24 +330,21 @@ func (s *PlayScene) paintBottomBar(barY int, proj [16]float32) {
 		for i, row := start, 0; i < end; i, row = i+1, row+1 {
 			msg := s.chatMessages[i]
 			r, g, b := s.chatColor(msg.Text)
-			// 不透明黑色行背景 (Delphi SetBkMode OPAQUE 配黑色背景色,
-			// FState:3696-3703).
 			lw := s.text.MeasureText(msg.Text)
-			s.gl.DrawQuadColor(chatBoardX, float32(chatBoardTop+row*chatLineH),
+			s.gl.DrawQuadColor(cbx, float32(cbt+row*chatLineH),
 				float32(lw), chatLineH, 0, 0, 0, 1, proj)
-			s.text.DrawText(msg.Text, chatBoardX, float32(chatBoardTop+row*chatLineH), r, g, b, 1, proj)
+			s.text.DrawText(msg.Text, cbx, float32(cbt+row*chatLineH), r, g, b, 1, proj)
 		}
 
-		// 聊天输入行 — EdChat (208,581) 386×12, clSilver 背景、黑色文字,
-		// MaxLength 70 (PlayScn.pas:267-280). 模态对话框弹出时隐藏
-		// (HideAllControls 会隐藏 VCL TEdit, FState:2084).
+		// 聊天输入行 (PlayScn.pas:267-280).
 		if s.chatMode && s.ui.Modal == nil {
-			s.gl.DrawQuadColor(chatBoardX, 581, 386, 12, 0.75, 0.75, 0.75, 1, proj)
+			inputY := float32(winH - 19)
+			s.gl.DrawQuadColor(cbx, inputY, 386, 12, 0.75, 0.75, 0.75, 1, proj)
 			cursor := ""
 			if time.Now().UnixMilli()%1000 < 500 {
 				cursor = "|"
 			}
-			s.text.DrawText(s.chatInput+cursor, chatBoardX+2, 581, 0, 0, 0, 1, proj)
+			s.text.DrawText(s.chatInput+cursor, cbx+2, inputY, 0, 0, 0, 1, proj)
 		}
 	}
 }
@@ -463,11 +463,12 @@ func (s *PlayScene) beltHint(slot, ax, ay int) {
 // bottomMouseDown: 点击聊天行预填私聊 (FState:1896-1927).
 // 坐标相对 DBottom.
 func (s *PlayScene) bottomMouseDown(x, y int) {
-	absY := y + BottomBarTop
-	if x < chatBoardX || x > chatBoardX+474 || absY < chatBoardTop || absY >= chatBoardTop+chatLineH*ViewChatLine {
+	absY := y + (winH - BottomBarImageH)
+	cbt := chatBoardTop()
+	if x < chatBoardX || x > chatBoardX+474 || absY < cbt || absY >= cbt+chatLineH*ViewChatLine {
 		return
 	}
-	row := (absY - chatBoardTop) / chatLineH
+	row := (absY - cbt) / chatLineH
 	total := len(s.chatMessages)
 	end := total - s.chatScroll
 	start := end - ViewChatLine

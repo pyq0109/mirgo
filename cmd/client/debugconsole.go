@@ -343,7 +343,7 @@ func (dc *DebugConsole) OnMouseButton(x, y float64, button int, action int) bool
 	if button != 0 { // 仅左键
 		return false
 	}
-	baseY := float64(ScreenHeight - dc.panelH)
+	baseY := float64(winH - dc.panelH)
 
 	if action == 1 { // press
 		// 顶边拖拽手柄 (±5px)
@@ -407,7 +407,7 @@ func (dc *DebugConsole) OnMouseButton(x, y float64, button int, action int) bool
 // OnMouseMoveSelect 拖拽时更新选择范围。
 func (dc *DebugConsole) OnMouseMoveSelect(x, y float64) {
 	if dc.resizing {
-		newH := ScreenHeight - int(y)
+		newH := winH - int(y)
 		if newH < 150 {
 			newH = 150
 		}
@@ -420,7 +420,7 @@ func (dc *DebugConsole) OnMouseMoveSelect(x, y float64) {
 	if !dc.selDragging {
 		return
 	}
-	baseY := float32(ScreenHeight - dc.panelH)
+	baseY := float32(winH - dc.panelH)
 	outputTop := baseY + 8
 	lineH := float32(14)
 	if dc.text != nil {
@@ -876,8 +876,8 @@ func (dc *DebugConsole) renderPanel(proj [16]float32) {
 	gl := dc.gl
 	text := dc.text
 	consoleH := float32(dc.panelH)
-	baseY := float32(ScreenHeight) - consoleH
-	gl.DrawQuadColor(0, baseY, 800, consoleH, 0, 0, 0, 0.75, proj)
+	baseY := float32(winH) - consoleH
+	gl.DrawQuadColor(0, baseY, float32(winW), consoleH, 0, 0, 0, 0.75, proj)
 
 	// 顶边拖拽手柄 (悬停时高亮)
 	handleAlpha := float32(0.4)

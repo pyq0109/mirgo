@@ -135,8 +135,8 @@ func (s *PlayScene) buildGuildPanels() {
 	} else {
 		group.Width, group.Height = 320, 290
 	}
-	group.Left = (ScreenWidth - group.Width) / 2
-	group.Top = (ScreenHeight - group.Height) / 2
+	group.Left = (winW - group.Width) / 2
+	group.Top = (winH - group.Height) / 2
 	group.Visible = false
 	group.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintGroupPanel(c, proj) }
 	ui.Root.AddChild(group)
@@ -404,8 +404,8 @@ func (s *PlayScene) openGuildNoticeEditor() {
 	} else {
 		win.Width, win.Height = 603, 330
 	}
-	win.Left = (ScreenWidth - win.Width) / 2
-	win.Top = (ScreenHeight - win.Height) / 2
+	win.Left = (winW - win.Width) / 2
+	win.Top = (winH - win.Height) / 2
 
 	memo := NewMemoBox(s.gl, s.text, "DGENMemo", 571, 246)
 	memo.MaxLen = 4000
@@ -457,8 +457,8 @@ func (s *PlayScene) openGuildRankEditor() {
 	} else {
 		win.Width, win.Height = 603, 330
 	}
-	win.Left = (ScreenWidth - win.Width) / 2
-	win.Top = (ScreenHeight - win.Height) / 2
+	win.Left = (winW - win.Width) / 2
+	win.Top = (winH - win.Height) / 2
 
 	memo := NewMemoBox(s.gl, s.text, "DGEGMemo", 571, 246)
 	memo.MaxLen = 5000

@@ -201,8 +201,8 @@ func showDialog(scene *PlayScene, size int, msg string, buttons []ModalResult, i
 	}
 
 	// 居中并显示 (FState.pas:2050-2051)。
-	win.Left = (ScreenWidth - win.Width) / 2
-	win.Top = (ScreenHeight - win.Height) / 2
+	win.Left = (winW - win.Width) / 2
+	win.Top = (winH - win.Height) / 2
 
 	scene.ui.ShowModal(win)
 	if d.edit != nil {

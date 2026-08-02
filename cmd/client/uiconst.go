@@ -14,10 +14,8 @@ const (
 	BottomBarTop    = ScreenHeight - BottomBarImageH // 349
 
 	// 窗口拖动边界钳制 (Share.pas:33-36).
-	WinLeft   = 60
-	WinTop    = 60
-	WinRight  = ScreenWidth - 60
-	WinBottom = ScreenHeight - 30
+	WinLeft = 60
+	WinTop  = 60
 )
 
 // HUD / 聊天常量 (FState.pas:10-16).

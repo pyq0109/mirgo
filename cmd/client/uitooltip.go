@@ -71,11 +71,9 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 		}
 	}
 
-	// 定位提示框, 限制在屏幕边缘内且坐标非负
-	// (DrawScrn.pas:430-434; drawUp 可能使 y 为负)。
 	x := t.x
-	if x+w > ScreenWidth {
-		x = ScreenWidth - w
+	if x+w > winW {
+		x = winW - w
 	}
 	if x < 0 {
 		x = 0

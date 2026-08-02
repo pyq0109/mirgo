@@ -18,7 +18,7 @@ func (s *PlayScene) buildDealPanels() {
 	} else {
 		remote.Width, remote.Height = 236, 200
 	}
-	remote.Left = ScreenWidth - 236 - 100
+	remote.Left = winW - 236 - 100
 	remote.Top = 0
 	remote.Visible = false
 	remote.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintDealRemote(c, proj) }
@@ -32,7 +32,7 @@ func (s *PlayScene) buildDealPanels() {
 	} else {
 		own.Width, own.Height = 236, 200
 	}
-	own.Left = ScreenWidth - 236 - 100
+	own.Left = winW - 236 - 100
 	own.Top = remote.Height - 15
 	own.Visible = false
 	own.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintDealOwn(c, proj) }

@@ -117,8 +117,7 @@ func (mm *Minimap) DrawActorDots(gl *engine.GLState, actors []*Actor, selfX, sel
 	const radarRange = 50
 	const radarSize = 120.0
 	scale := float32(radarSize / (radarRange * 2)) // 120/100 = 1.2
-	// 小地图绘制在屏幕右上角 (ScreenWidth-120, 0)，点坐标相应偏移以叠加其上。
-	originX := float32(ScreenWidth) - radarSize
+	originX := float32(winW) - radarSize
 	for _, a := range actors {
 		if a == nil {
 			continue

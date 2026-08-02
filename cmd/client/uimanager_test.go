@@ -105,10 +105,11 @@ func TestWindowDragAndClamp(t *testing.T) {
 	if win.Left != 250 || win.Top != 130 {
 		t.Fatalf("window did not follow drag: %d,%d", win.Left, win.Top)
 	}
-	// 拖到远超右边界限制处（WinRight=740）。
+	// 拖到远超右边界限制处。
 	m.RouteMouseMove(2000, 140)
-	if win.Left > WinRight {
-		t.Fatalf("window Left %d exceeds WinRight %d", win.Left, WinRight)
+	maxLeft := m.Root.Width - 60
+	if win.Left > maxLeft {
+		t.Fatalf("window Left %d exceeds max %d", win.Left, maxLeft)
 	}
 }
 
