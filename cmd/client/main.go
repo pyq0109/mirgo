@@ -78,7 +78,7 @@ var globalFade fadeState
 
 // 固定分辨率预设。
 var resolutions = [][2]int{{800, 600}, {1024, 768}, {1400, 1050}, {1600, 1200}}
-var resIdx = 0
+var resIdx = 2 // 默认 1400×1050
 
 func applyResolution(w *glfw.Window, idx int) {
 	if idx < 0 || idx >= len(resolutions) {
@@ -92,6 +92,10 @@ func applyResolution(w *glfw.Window, idx int) {
 
 func cycleResolution(w *glfw.Window) {
 	applyResolution(w, (resIdx+1)%len(resolutions))
+}
+
+func scaleTextRenderers() {
+	engine.SetTextScale(float64(winW) / float64(ScreenWidth))
 }
 
 const (
@@ -114,8 +118,7 @@ func main() {
 	log.Logf(log.LevelInfo, "Client", "starting MIR2 client...")
 	log.Logf(log.LevelInfo, "Client", "server: %s", *serverAddr)
 
-	// Delphi 固定运行在 800×600（SWH800, Share.pas:22-24）。
-	window, err := engine.NewWindow(800, 600, "MIR2 Client")
+	window, err := engine.NewWindow(resolutions[resIdx][0], resolutions[resIdx][1], "MIR2 Client")
 	if err != nil {
 		log.Logf(log.LevelError, "Client", "failed to create window: %v", err)
 		os.Exit(1)
@@ -150,6 +153,9 @@ func main() {
 		}
 	}()
 
+	if resIdx != 0 {
+		engine.TextScale = float64(resolutions[resIdx][0]) / float64(ScreenWidth)
+	}
 	textRenderer, err := engine.NewTextRenderer(glState, "", 9)
 	if err != nil {
 		log.Logf(log.LevelWarn, "Client", "failed to load font: %v", err)
@@ -201,6 +207,7 @@ func main() {
 			idx, _ := strconv.Atoi(args[0])
 			if idx >= 1 && idx <= len(resolutions) {
 				applyResolution(glfwWindow, idx-1)
+				scaleTextRenderers()
 				dbgConsole.Printf("分辨率: %dx%d", resolutions[resIdx][0], resolutions[resIdx][1])
 				return
 			}
@@ -211,6 +218,7 @@ func main() {
 			for i, r := range resolutions {
 				if r[0] == w && r[1] == h {
 					applyResolution(glfwWindow, i)
+					scaleTextRenderers()
 					dbgConsole.Printf("分辨率: %dx%d", w, h)
 					return
 				}
@@ -344,6 +352,7 @@ func main() {
 		// Alt+Enter 循环切换分辨率。
 		if action == glfw.Press && key == glfw.KeyEnter && mods == glfw.ModAlt {
 			cycleResolution(glfwWindow)
+			scaleTextRenderers()
 			return
 		}
 		// 控制台打开时所有按键交给控制台, 不再转发给场景。
@@ -672,7 +681,7 @@ func (h *NetHandler) Reconnect(addr string) error {
 	h.conn = conn
 	h.done = make(chan struct{})
 	h.errCh = make(chan error, 1)
-	h.code = 0
+	h.code = 1 // Delphi ClMain.pas:2807 初始值为 1
 
 	// 启动新的读循环
 	log.Logf(log.LevelInfo, "Client", "reconnect: starting new ReadLoop")
@@ -723,6 +732,13 @@ func (h *NetHandler) ReadLoop() {
 			for _, payload := range payloads {
 				if len(payload) > 0 && payload[0] == '+' {
 					h.enqueue(netEvent{isCtrl: true, ctrl: payload})
+					continue
+				}
+				// 短消息（<16 字符）：仅处理 '=' 前缀（Delphi ClMain.pas:3656-3663）
+				if len(payload) > 0 && payload[0] == '=' {
+					if payload == "=DIG" {
+						h.enqueue(netEvent{isCtrl: true, ctrl: payload})
+					}
 					continue
 				}
 				if len(payload) >= protocol.DefBlockSize {
@@ -792,6 +808,8 @@ func (h *NetHandler) handleControlMsg(payload string) {
 		ps.canStnHit = true
 	case strings.HasPrefix(payload, "+USTN"):
 		ps.canStnHit = false
+	case payload == "=DIG":
+		ps.digFragment = true
 	}
 }
 
@@ -1130,8 +1148,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.parseFriendList(body)
 
 	case protocol.SMAddFriendOK:
-		name := protocol.DecodeString(body)
-		h.playScene.AddChatMessage("已添加好友: " + name)
+		h.playScene.AddChatMessage("已添加好友: " + body)
 		if h.playScene.sendQueryFriends != nil {
 			h.playScene.sendQueryFriends()
 		}
@@ -1140,8 +1157,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.AddChatMessage("添加好友失败")
 
 	case protocol.SMDelFriendOK:
-		name := protocol.DecodeString(body)
-		h.playScene.AddChatMessage("已删除好友: " + name)
+		h.playScene.AddChatMessage("已删除好友: " + body)
 		if h.playScene.sendQueryFriends != nil {
 			h.playScene.sendQueryFriends()
 		}
@@ -1150,18 +1166,16 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.AddChatMessage("删除好友失败")
 
 	case protocol.SMFriendOnline:
-		name := protocol.DecodeString(body)
 		for i := range h.playScene.State.Friends {
-			if h.playScene.State.Friends[i].Name == name {
+			if h.playScene.State.Friends[i].Name == body {
 				h.playScene.State.Friends[i].Online = true
 			}
 		}
-		h.playScene.AddChatMessage(name + " 上线了")
+		h.playScene.AddChatMessage(body + " 上线了")
 
 	case protocol.SMFriendOffline:
-		name := protocol.DecodeString(body)
 		for i := range h.playScene.State.Friends {
-			if h.playScene.State.Friends[i].Name == name {
+			if h.playScene.State.Friends[i].Name == body {
 				h.playScene.State.Friends[i].Online = false
 			}
 		}
@@ -1254,7 +1268,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMUsername:
 		actor := h.playScene.State.Actors.Get(msg.Recog)
 		if actor != nil {
-			actor.UserName = protocol.DecodeString(body)
+			actor.UserName = body
 			log.Logf(log.LevelDebug, "Client", "actor name: %s", actor.UserName)
 		}
 
@@ -2026,7 +2040,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMMonsterSay:
 		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
-			actor.Say(protocol.DecodeString(body))
+			actor.Say(body)
 		}
 
 	default:
@@ -2136,6 +2150,7 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 
 	handler := &NetHandler{
 		conn:           conn,
+		code:           1, // Delphi ClMain.pas:2807 初始值为 1
 		loginScene:     loginScene,
 		playScene:      playScene,
 		selectChrScene: selectChrScene,
@@ -2454,7 +2469,7 @@ func (h *NetHandler) parseTradeItem(body string) *BagItem {
 }
 
 func (h *NetHandler) parseFriendList(body string) {
-	text := protocol.DecodeString(body)
+	text := body
 	h.playScene.State.Friends = h.playScene.State.Friends[:0]
 	if text == "" {
 		return

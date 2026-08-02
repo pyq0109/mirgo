@@ -122,6 +122,7 @@ type PlayScene struct {
 
 	ActionLock     bool
 	ActionLockTime int64
+	digFragment    bool // =DIG 挖掘僵尸碎片标志（Delphi m_boDigFragment）
 
 	actionFailLockUntil int64
 

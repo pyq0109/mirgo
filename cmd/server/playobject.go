@@ -3,12 +3,19 @@ package main
 import (
 	"encoding/binary"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
+
+// sendCtrl 发送控制消息（+GOOD/+FAIL），附带时间戳（Delphi ObjBase.pas:4730,4737）。
+// 技能标记（+PWR/+LNG 等）不附时间戳，直接使用 SendRaw。
+func sendCtrl(server *netserver.TCPServer, sessionID int64, tag string) {
+	server.SendRaw(sessionID, "#+"+tag+"/"+strconv.FormatInt(time.Now().UnixMilli(), 10)+"!")
+}
 
 // PendingMagic 延迟魔法（火球等弹道技能的飞行时间）。
 type PendingMagic struct {
@@ -467,13 +474,13 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	p.TurnTo(dir)
-	server.SendRaw(p.Session.ID, "#+GOOD!")
+	sendCtrl(server, p.Session.ID, "GOOD")
 }
 
 func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
 		log.Logf(log.LevelDebug, "Move", "%s walk rejected: status effect (posion/stone) at (%d,%d)", p.Name, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -494,7 +501,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		log.Logf(log.LevelDebug, "Move", "%s walk rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	// F11: GM 穿墙（仅检查地形）
@@ -507,14 +514,14 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 			p.Dir = dir
 			p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 			p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
-			server.SendRaw(p.Session.ID, "#+GOOD!")
+			sendCtrl(server, p.Session.ID, "GOOD")
 			p.CheckMapRoute(server)
 			return
 		}
 	}
 	if p.WalkTo(dir) {
 		p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
-		server.SendRaw(p.Session.ID, "#+GOOD!")
+		sendCtrl(server, p.Session.ID, "GOOD")
 		p.CheckMapRoute(server)
 	} else {
 		dx, dy := dirToOffset(dir)
@@ -526,7 +533,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
 		log.Logf(log.LevelDebug, "Move", "%s run rejected: status effect (poison/stone) at (%d,%d)", p.Name, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -537,7 +544,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	// F10: 仅步行模式
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		log.Logf(log.LevelDebug, "Move", "%s run rejected: walk-only mode at (%d,%d)", p.Name, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	interval := p.Engine.Config.GetRunInterval()
@@ -552,7 +559,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		log.Logf(log.LevelDebug, "Move", "%s run rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	dx, dy := dirToOffset(dir)
@@ -577,20 +584,20 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	p.Dir = dir
 	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
-	server.SendRaw(p.Session.ID, "#+GOOD!")
+	sendCtrl(server, p.Session.ID, "GOOD")
 	p.CheckMapRoute(server)
 }
 
 func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
 		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: status effect at (%d,%d)", p.Name, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	// F10: 仅步行模式
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: walk-only mode at (%d,%d)", p.Name, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -605,7 +612,7 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	if !p.OnHorse {
@@ -635,7 +642,7 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	p.Dir = dir
 	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.SendRefMsg(RM_HORSERUN, dir, p.CurrX, p.CurrY, "")
-	server.SendRaw(p.Session.ID, "#+GOOD!")
+	sendCtrl(server, p.Session.ID, "GOOD")
 	p.CheckMapRoute(server)
 }
 
@@ -661,7 +668,7 @@ func (p *PlayObject) checkActionSpeed(now, interval int64, tick *int64, server *
 			server.CloseSession(p.Session.ID)
 			return false
 		}
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return false
 	}
 	*tick = now
@@ -698,7 +705,7 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 
 	// Delphi: 受击硬直阻止攻击 (ObjBase.pas:25234)
 	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
-		server.SendRaw(p.Session.ID, "#+FAIL!")
+		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 
@@ -714,14 +721,14 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	// Delphi: FireHit 是激活模型，不是直接攻击 (ObjBase.pas:9782)
 	if msg.Ident == protocol.CMFireHit {
 		if now-p.FireHitTick < 10000 {
-			server.SendRaw(p.Session.ID, "#+FAIL!")
+			sendCtrl(server, p.Session.ID, "FAIL")
 			return
 		}
 		p.FireHitActive = true
 		p.FireHitActivateTick = now
 		p.FireHitTick = now
 		p.SendSpecialAttackFlags(server)
-		server.SendRaw(p.Session.ID, "#+GOOD!")
+		sendCtrl(server, p.Session.ID, "GOOD")
 		return
 	}
 	// Delphi: TwinHit 同理 (ObjBase.pas:9797)
@@ -787,7 +794,7 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		rmIdent = RM_TWINHIT
 	}
 	p.SendRefMsg(rmIdent, dir, p.CurrX, p.CurrY, "")
-	server.SendRaw(p.Session.ID, "#+GOOD!")
+	sendCtrl(server, p.Session.ID, "GOOD")
 
 	// Delphi: WideHit/CRS 消耗 MP (ObjBase.pas:18788-18811)
 	if msg.Ident == protocol.CMWideHit || msg.Ident == protocol.CMCrsHit {

@@ -12,6 +12,23 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+// TextScale 是全局文字光栅化缩放倍率。切换分辨率时调用 SetTextScale，
+// 所有已创建的 TextRenderer 会立即重新缩放，之后新建的也自动应用。
+var TextScale float64 = 1
+
+var allRenderers []*TextRenderer
+
+// SetTextScale 更新全局缩放倍率并立即应用到所有已注册的 TextRenderer。
+func SetTextScale(s float64) {
+	if s <= 0 {
+		s = 1
+	}
+	TextScale = s
+	for _, tr := range allRenderers {
+		tr.SetScale(s)
+	}
+}
+
 // glyphEntry 是缓存的字形纹理。
 type glyphEntry struct {
 	tex     uint32 // GL 纹理 ID
@@ -23,13 +40,15 @@ type glyphEntry struct {
 
 // TextRenderer 使用 TTF 字体渲染文本，并缓存字形纹理。
 type TextRenderer struct {
-	gl       *GLState
-	face     font.Face
-	ascent   int // 从基线到行顶的像素数
-	cache    map[rune]*glyphEntry
-	cacheMu  sync.RWMutex
-	size     float64
-	fontData []byte // 保存以便 WithSize 复用
+	gl         *GLState
+	face       font.Face   // 逻辑尺寸 face（度量/布局）
+	renderFace font.Face   // 高分辨率 face（光栅化），nil 时 == face
+	ascent     int         // 从基线到行顶的逻辑像素数
+	scale      float64     // 光栅化倍率（1.0 = 不缩放）
+	cache      map[rune]*glyphEntry
+	cacheMu    sync.RWMutex
+	size       float64
+	fontData   []byte // 保存以便 WithSize 复用
 }
 
 // fontSearchPaths 列出常见系统的中文字体路径。
@@ -105,14 +124,20 @@ func NewTextRenderer(glState *GLState, fontPath string, size float64) (*TextRend
 	metrics := face.Metrics()
 	ascent := metrics.Ascent.Ceil()
 
-	return &TextRenderer{
+	tr := &TextRenderer{
 		gl:       glState,
 		face:     face,
 		ascent:   ascent,
+		scale:    1,
 		cache:    make(map[rune]*glyphEntry),
 		size:     size,
 		fontData: fontData,
-	}, nil
+	}
+	allRenderers = append(allRenderers, tr)
+	if TextScale != 1 {
+		tr.SetScale(TextScale)
+	}
+	return tr, nil
 }
 
 // WithSize 用相同字体、不同字号创建一个新的 TextRenderer。
@@ -138,14 +163,63 @@ func (tr *TextRenderer) WithSize(size float64) (*TextRenderer, error) {
 		return nil, fmt.Errorf("create face: %w", err)
 	}
 
-	return &TextRenderer{
+	child := &TextRenderer{
 		gl:       tr.gl,
 		face:     face,
 		ascent:   face.Metrics().Ascent.Ceil(),
+		scale:    1,
 		cache:    make(map[rune]*glyphEntry),
 		size:     size,
 		fontData: tr.fontData,
-	}, nil
+	}
+	allRenderers = append(allRenderers, child)
+	if TextScale != 1 {
+		child.SetScale(TextScale)
+	}
+	return child, nil
+}
+
+// SetScale 设置光栅化倍率。scale > 1 时以更高 DPI 光栅化字形使文字清晰，
+// 但保持逻辑度量不变（布局/定位不受影响）。切换分辨率后调用。
+func (tr *TextRenderer) SetScale(s float64) {
+	if s <= 0 {
+		s = 1
+	}
+	if s == tr.scale {
+		return
+	}
+	tr.scale = s
+	if s == 1 {
+		tr.renderFace = nil
+	} else {
+		f, parseErr := opentype.Parse(tr.fontData)
+		if parseErr != nil {
+			col, _ := opentype.ParseCollection(tr.fontData)
+			f, _ = col.Font(0)
+		}
+		if f != nil {
+			face, err := opentype.NewFace(f, &opentype.FaceOptions{
+				Size:    tr.size,
+				DPI:     96 * s,
+				Hinting: font.HintingFull,
+			})
+			if err == nil {
+				tr.renderFace = face
+			}
+		}
+	}
+	tr.clearCache()
+}
+
+func (tr *TextRenderer) clearCache() {
+	tr.cacheMu.Lock()
+	for _, g := range tr.cache {
+		if g.tex != 0 {
+			gl.DeleteTextures(1, &g.tex)
+		}
+	}
+	tr.cache = make(map[rune]*glyphEntry)
+	tr.cacheMu.Unlock()
 }
 
 // getGlyph 返回某个 rune 缓存的字形，缓存未命中时进行光栅化。
@@ -157,10 +231,9 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 	}
 	tr.cacheMu.RUnlock()
 
-	// 光栅化字形。
+	// 逻辑度量（用于布局/quad 尺寸）。
 	advance, ok := tr.face.GlyphAdvance(ch)
 	if !ok {
-		// 字体中无此字形——返回一个空格宽度、无纹理的条目。
 		spaceAdv, _ := tr.face.GlyphAdvance(' ')
 		return &glyphEntry{advance: spaceAdv.Ceil()}
 	}
@@ -171,29 +244,45 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 		return &glyphEntry{advance: spaceAdv.Ceil()}
 	}
 
-	minX := bounds.Min.X.Floor()
-	maxX := bounds.Max.X.Ceil()
-	minY := bounds.Min.Y.Floor()
-	maxY := bounds.Max.Y.Ceil()
+	logMinX := bounds.Min.X.Floor()
+	logMaxX := bounds.Max.X.Ceil()
+	logMinY := bounds.Min.Y.Floor()
+	logMaxY := bounds.Max.Y.Ceil()
 
-	gw := maxX - minX
-	gh := maxY - minY
+	gw := logMaxX - logMinX
+	gh := logMaxY - logMinY
 
 	if gw <= 0 || gh <= 0 {
 		return &glyphEntry{advance: advance.Ceil()}
 	}
 
-	// 创建一张 RGBA 图像并绘制字形。
-	img := image.NewRGBA(image.Rect(0, 0, gw, gh))
-	d := &font.Drawer{
-		Dst: img,
-		Src: image.White,
-		Face: tr.face,
-		Dot: fixed.P(-minX, -minY),
+	// 光栅化：scale > 1 时用 renderFace 生成高分辨率位图。
+	rf := tr.renderFace
+	if rf == nil {
+		rf = tr.face
 	}
-	d.DrawString(string(ch))
+	var img *image.RGBA
+	if rf == tr.face {
+		img = image.NewRGBA(image.Rect(0, 0, gw, gh))
+		d := &font.Drawer{Dst: img, Src: image.White, Face: rf, Dot: fixed.P(-logMinX, -logMinY)}
+		d.DrawString(string(ch))
+	} else {
+		// 高分辨率光栅化。
+		rBounds, _, _ := rf.GlyphBounds(ch)
+		rMinX := rBounds.Min.X.Floor()
+		rMaxX := rBounds.Max.X.Ceil()
+		rMinY := rBounds.Min.Y.Floor()
+		rMaxY := rBounds.Max.Y.Ceil()
+		rw := rMaxX - rMinX
+		rh := rMaxY - rMinY
+		if rw <= 0 || rh <= 0 {
+			return &glyphEntry{advance: advance.Ceil()}
+		}
+		img = image.NewRGBA(image.Rect(0, 0, rw, rh))
+		d := &font.Drawer{Dst: img, Src: image.White, Face: rf, Dot: fixed.P(-rMinX, -rMinY)}
+		d.DrawString(string(ch))
+	}
 
-	// 上传到 GL。
 	tex := tr.gl.UploadTexture(img)
 
 	g := &glyphEntry{
@@ -201,8 +290,8 @@ func (tr *TextRenderer) getGlyph(ch rune) *glyphEntry {
 		w:        gw,
 		h:        gh,
 		advance:  advance.Ceil(),
-		bearingX: minX,
-		bearingY: -minY, // 从图像顶部到基线的距离
+		bearingX: logMinX,
+		bearingY: -logMinY,
 	}
 
 	tr.cacheMu.Lock()
@@ -285,7 +374,7 @@ func (tr *TextRenderer) LineHeight() int {
 	return (metrics.Ascent + metrics.Descent).Ceil()
 }
 
-// Destroy 释放所有缓存的 GL 纹理。
+// Destroy 释放所有缓存的 GL 纹理并从全局注册表移除。
 func (tr *TextRenderer) Destroy() {
 	tr.cacheMu.Lock()
 	for _, g := range tr.cache {
@@ -295,6 +384,12 @@ func (tr *TextRenderer) Destroy() {
 	}
 	tr.cache = make(map[rune]*glyphEntry)
 	tr.cacheMu.Unlock()
+	for i, r := range allRenderers {
+		if r == tr {
+			allRenderers = append(allRenderers[:i], allRenderers[i+1:]...)
+			break
+		}
+	}
 }
 
 
