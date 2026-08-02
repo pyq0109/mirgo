@@ -123,8 +123,7 @@ type PlayScene struct {
 	ActionLock     bool
 	ActionLockTime int64
 
-	moveFailCount         int
-	moveFailCooldownUntil int64
+	actionFailLockUntil int64
 
 	lastHitTick int64
 
@@ -235,6 +234,7 @@ type PlayScene struct {
 	// PlayScene 专有的调试开关 (由控制台命令切换, 经 StatusExtra 汇报)
 	ShowGrid     bool
 	ShowLabel    bool
+	ShowPath     bool
 	DisableLight bool
 	DisableHPBar bool
 }
@@ -894,6 +894,9 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	if s.ShowLabel {
 		s.renderDebugInfo(proj)
 	}
+	if s.ShowPath {
+		s.renderDebugPath(proj)
+	}
 
 	// UI 层使用完整的 800×600 逻辑视口。
 	s.gl.SetViewport(0, 0, fbW, fbH)
@@ -1318,10 +1321,14 @@ func (s *PlayScene) tryOpenDoor(x, y int) bool {
 }
 
 func (s *PlayScene) ServerAcceptNextAction() bool {
+	now := time.Now().UnixMilli()
+	if now < s.actionFailLockUntil {
+		return false
+	}
 	if !s.ActionLock {
 		return true
 	}
-	if time.Now().UnixMilli()-s.ActionLockTime > 10000 {
+	if now-s.ActionLockTime > 10000 {
 		s.ActionLock = false
 		return true
 	}
@@ -1690,9 +1697,7 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 
 	// 拖拽移动（ClMain:2115-2116）：按住 >300ms 重新触发移动
 	nowMs := time.Now().UnixMilli()
-	if nowMs < s.moveFailCooldownUntil {
-		// 连续移动失败后的冷却期，不重新寻路
-	} else if s.leftHeld && nowMs-s.mouseDownTick > 300 {
+	if nowMs >= s.actionFailLockUntil && s.leftHeld && nowMs-s.mouseDownTick > 300 {
 		if s.State.MySelf != nil && !s.State.MySelf.Death && s.sendMove != nil {
 			my := s.State.MySelf
 			if tx != my.CurrX || ty != my.CurrY {
@@ -1701,8 +1706,7 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 			}
 		}
 	}
-	if nowMs < s.moveFailCooldownUntil {
-	} else if s.rightHeld && nowMs-s.mouseDownTick > 300 {
+	if nowMs >= s.actionFailLockUntil && s.rightHeld && nowMs-s.mouseDownTick > 300 {
 		if s.State.MySelf != nil && !s.State.MySelf.Death && s.sendMove != nil {
 			my := s.State.MySelf
 			if absInt(my.CurrX-tx) > 2 || absInt(my.CurrY-ty) > 2 {

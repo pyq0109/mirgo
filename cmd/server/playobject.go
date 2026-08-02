@@ -472,12 +472,14 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		log.Logf(log.LevelDebug, "Move", "%s walk rejected: status effect (posion/stone) at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	now := time.Now().UnixMilli()
 	// Delphi: 受击硬直 (ObjBase.pas:25234)
 	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+		log.Logf(log.LevelDebug, "Move", "%s walk rejected: struck cooldown (%dms left) at (%d,%d)", p.Name, p.Engine.Config.GetStruckTime()-(now-p.StruckTick), p.CurrX, p.CurrY)
 		return
 	}
 	interval := p.Engine.Config.GetWalkInterval()
@@ -485,11 +487,13 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 		interval *= 2
 	}
 	if !p.checkActionSpeed(now, interval, &p.WalkTick, server) {
+		log.Logf(log.LevelDebug, "Move", "%s walk rejected: speed limit (interval=%dms) at (%d,%d)", p.Name, interval, p.CurrX, p.CurrY)
 		return
 	}
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
+		log.Logf(log.LevelDebug, "Move", "%s walk rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -513,21 +517,26 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 		server.SendRaw(p.Session.ID, "#+GOOD!")
 		p.CheckMapRoute(server)
 	} else {
+		dx, dy := dirToOffset(dir)
+		log.Logf(log.LevelDebug, "Move", "%s walk rejected: blocked dir=%d target=(%d,%d) from (%d,%d)", p.Name, dir, p.CurrX+dx, p.CurrY+dy, p.CurrX, p.CurrY)
 		p.sendMoveFail(server)
 	}
 }
 
 func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		log.Logf(log.LevelDebug, "Move", "%s run rejected: status effect (poison/stone) at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	now := time.Now().UnixMilli()
 	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+		log.Logf(log.LevelDebug, "Move", "%s run rejected: struck cooldown (%dms left) at (%d,%d)", p.Name, p.Engine.Config.GetStruckTime()-(now-p.StruckTick), p.CurrX, p.CurrY)
 		return
 	}
 	// F10: 仅步行模式
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
+		log.Logf(log.LevelDebug, "Move", "%s run rejected: walk-only mode at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -536,11 +545,13 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 		interval *= 2
 	}
 	if !p.checkActionSpeed(now, interval, &p.RunTick, server) {
+		log.Logf(log.LevelDebug, "Move", "%s run rejected: speed limit (interval=%dms) at (%d,%d)", p.Name, interval, p.CurrX, p.CurrY)
 		return
 	}
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
+		log.Logf(log.LevelDebug, "Move", "%s run rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -556,6 +567,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	} else {
 		ignore := p.runIgnoreEntities()
 		if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) {
+			log.Logf(log.LevelDebug, "Move", "%s run rejected: blocked dir=%d path=(%d,%d)->(%d,%d) from (%d,%d)", p.Name, dir, x1, y1, x2, y2, p.CurrX, p.CurrY)
 			p.sendMoveFail(server)
 			return
 		}
@@ -571,11 +583,13 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 
 func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer) {
 	if !p.CanMoveCheck() {
+		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: status effect at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
 	// F10: 仅步行模式
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
+		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: walk-only mode at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -585,10 +599,12 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 		interval *= 2
 	}
 	if !p.checkActionSpeed(now, interval, &p.HorseRunTick, server) {
+		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: speed limit (interval=%dms) at (%d,%d)", p.Name, interval, p.CurrX, p.CurrY)
 		return
 	}
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
+		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
 		server.SendRaw(p.Session.ID, "#+FAIL!")
 		return
 	}
@@ -609,6 +625,7 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	} else {
 		ignore := p.runIgnoreEntities()
 		if p.envir == nil || !p.envir.CanWalkEx(x1, y1, ignore) || !p.envir.CanWalkEx(x2, y2, ignore) || !p.envir.CanWalkEx(x3, y3, ignore) {
+			log.Logf(log.LevelDebug, "Move", "%s horserun rejected: blocked dir=%d path=(%d,%d)->(%d,%d)->(%d,%d) from (%d,%d)", p.Name, dir, x1, y1, x2, y2, x3, y3, p.CurrX, p.CurrY)
 			p.sendMoveFail(server)
 			return
 		}

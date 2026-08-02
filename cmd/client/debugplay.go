@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/engine"
 	"github.com/pyq0109/mirgo/internal/log"
@@ -22,6 +23,10 @@ func (s *PlayScene) registerDebugCmds() {
 	dc.Register("label", "toggle actor #ID type name", func(args []string) {
 		s.ShowLabel = !s.ShowLabel
 		dc.Printf("label %s", onOff(s.ShowLabel))
+	})
+	dc.Register("path", "toggle auto-path overlay", func(args []string) {
+		s.ShowPath = !s.ShowPath
+		dc.Printf("path %s", onOff(s.ShowPath))
 	})
 	dc.Register("light", "toggle lighting/fog off", func(args []string) {
 		s.DisableLight = !s.DisableLight
@@ -59,7 +64,7 @@ func (s *PlayScene) registerDebugCmds() {
 // unregisterDebugCmds 在场景变为非活动时注销命令。
 func (s *PlayScene) unregisterDebugCmds() {
 	dc := s.dbg
-	for _, name := range []string{"grid", "label", "light", "hpbar", "kill", "nomob", "panel", "key", "itemmove"} {
+	for _, name := range []string{"grid", "label", "path", "light", "hpbar", "kill", "nomob", "panel", "key", "itemmove"} {
 		dc.Unregister(name)
 	}
 	dc.StatusExtra = nil
@@ -73,6 +78,26 @@ func (s *PlayScene) debugStatusExtra() string {
 	}
 	if s.ShowLabel {
 		parts = append(parts, "LABEL")
+	}
+	if s.ShowPath {
+		parts = append(parts, "PATH")
+	}
+	if s.ShowPath && s.State.MySelf != nil {
+		my := s.State.MySelf
+		lock := "-"
+		if s.ActionLock {
+			lock = "LOCK"
+		} else if time.Now().UnixMilli() < s.actionFailLockUntil {
+			lock = "FAIL"
+		}
+		pathInfo := "no-path"
+		if len(s.autoPath) > 0 {
+			pathInfo = fmt.Sprintf("path:%d/%d", s.autoPathIdx, len(s.autoPath))
+		} else if s.targetX >= 0 {
+			pathInfo = fmt.Sprintf("tgt:(%d,%d)", s.targetX, s.targetY)
+		}
+		parts = append(parts, fmt.Sprintf("pos:(%d,%d) act:%d %s %s",
+			my.CurrX, my.CurrY, my.CurrentAction, lock, pathInfo))
 	}
 	if s.DisableLight {
 		parts = append(parts, "NO-LIGHT")
@@ -376,6 +401,83 @@ func (s *PlayScene) renderDebugGrid(proj [16]float32) {
 		y := float32(ty * engine.TileHeight)
 		s.gl.DrawQuadColor(float32(wx0), y, float32(wx1-wx0), 1, r, g, b, a, proj)
 	}
+}
+
+func (s *PlayScene) renderDebugPath(proj [16]float32) {
+	hw := float32(engine.TileWidth) / 2
+	hh := float32(engine.TileHeight) / 2
+	const dotSize = 6
+
+	path := s.autoPath
+	if len(path) > 0 {
+		// 路径线段（黄色半透明）
+		for i := 0; i+1 < len(path); i++ {
+			x0 := float32(path[i][0]*engine.TileWidth) + hw
+			y0 := float32(path[i][1]*engine.TileHeight) + hh
+			x1 := float32(path[i+1][0]*engine.TileWidth) + hw
+			y1 := float32(path[i+1][1]*engine.TileHeight) + hh
+			dx, dy := x1-x0, y1-y0
+			if dx == 0 {
+				s.gl.DrawQuadColor(x0-1, minF32(y0, y1), 2, absF32(dy), 1, 1, 0, 0.6, proj)
+			} else if dy == 0 {
+				s.gl.DrawQuadColor(minF32(x0, x1), y0-1, absF32(dx), 2, 1, 1, 0, 0.6, proj)
+			} else {
+				// 对角线：L 形折线（先水平后垂直）
+				s.gl.DrawQuadColor(minF32(x0, x1), y0-1, absF32(dx), 2, 1, 1, 0, 0.6, proj)
+				s.gl.DrawQuadColor(x1-1, minF32(y0, y1), 2, absF32(dy), 1, 1, 0, 0.6, proj)
+			}
+		}
+		// 路径点（青色小方块）
+		for i := range path {
+			cx := float32(path[i][0]*engine.TileWidth) + hw
+			cy := float32(path[i][1]*engine.TileHeight) + hh
+			s.gl.DrawQuadColor(cx-dotSize/2, cy-dotSize/2, dotSize, dotSize, 0, 1, 1, 0.8, proj)
+		}
+		// 终点（绿色大方块）
+		last := path[len(path)-1]
+		lx := float32(last[0]*engine.TileWidth) + hw
+		ly := float32(last[1]*engine.TileHeight) + hh
+		s.gl.DrawQuadColor(lx-5, ly-5, 10, 10, 0, 1, 0, 0.9, proj)
+		// 起点（红色大方块）
+		first := path[0]
+		fx := float32(first[0]*engine.TileWidth) + hw
+		fy := float32(first[1]*engine.TileHeight) + hh
+		s.gl.DrawQuadColor(fx-5, fy-5, 10, 10, 1, 0, 0, 0.9, proj)
+	} else if s.targetX >= 0 && s.State.MySelf != nil {
+		// 直走目标模式（右键点击）：画玩家→目标的连线
+		my := s.State.MySelf
+		x0 := float32(my.CurrX*engine.TileWidth) + hw
+		y0 := float32(my.CurrY*engine.TileHeight) + hh
+		x1 := float32(s.targetX*engine.TileWidth) + hw
+		y1 := float32(s.targetY*engine.TileHeight) + hh
+		dx, dy := x1-x0, y1-y0
+		if dx == 0 {
+			s.gl.DrawQuadColor(x0-1, minF32(y0, y1), 2, absF32(dy), 1, 0.5, 0, 0.6, proj)
+		} else if dy == 0 {
+			s.gl.DrawQuadColor(minF32(x0, x1), y0-1, absF32(dx), 2, 1, 0.5, 0, 0.6, proj)
+		} else {
+			s.gl.DrawQuadColor(minF32(x0, x1), y0-1, absF32(dx), 2, 1, 0.5, 0, 0.6, proj)
+			s.gl.DrawQuadColor(x1-1, minF32(y0, y1), 2, absF32(dy), 1, 0.5, 0, 0.6, proj)
+		}
+		// 目标点（绿色大方块）
+		s.gl.DrawQuadColor(x1-5, y1-5, 10, 10, 0, 1, 0, 0.9, proj)
+		// 玩家位置（红色大方块）
+		s.gl.DrawQuadColor(x0-5, y0-5, 10, 10, 1, 0, 0, 0.9, proj)
+	}
+}
+
+func absF32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func minF32(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // --- actor 标签 (世界视口) ---

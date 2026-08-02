@@ -699,18 +699,13 @@ func (h *NetHandler) handleControlMsg(payload string) {
 	case strings.HasPrefix(payload, "+GOOD"):
 		log.Logf(log.LevelDebug, "Client", "<<< +GOOD")
 		ps.ActionLock = false
-		ps.moveFailCount = 0
 	case strings.HasPrefix(payload, "+FAIL"):
 		log.Logf(log.LevelDebug, "Client", "<<< +FAIL")
 		ps.ActionLock = false
-		ps.moveFailCount++
-		if ps.moveFailCount >= 3 {
-			ps.targetX = -1
-			ps.targetY = -1
-			ps.clearAutoPath()
-			ps.moveFailCount = 0
-			ps.moveFailCooldownUntil = time.Now().UnixMilli() + 1000
-		}
+		ps.targetX = -1
+		ps.targetY = -1
+		ps.clearAutoPath()
+		ps.actionFailLockUntil = time.Now().UnixMilli() + 1000
 		if ps.State.MySelf != nil {
 			ps.State.MySelf.MoveFail()
 		}
@@ -1000,14 +995,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body string) {
 	case protocol.SMMoveFail:
 		log.Logf(log.LevelDebug, "Client", "server returned move failure")
 		h.playScene.ActionLock = false
-		h.playScene.moveFailCount++
-		if h.playScene.moveFailCount >= 3 {
-			h.playScene.targetX = -1
-			h.playScene.targetY = -1
-			h.playScene.clearAutoPath()
-			h.playScene.moveFailCount = 0
-			h.playScene.moveFailCooldownUntil = time.Now().UnixMilli() + 1000
-		}
+		h.playScene.targetX = -1
+		h.playScene.targetY = -1
+		h.playScene.clearAutoPath()
+		h.playScene.actionFailLockUntil = time.Now().UnixMilli() + 1000
 		if h.playScene.State.MySelf != nil {
 			h.playScene.State.MySelf.MoveFail()
 			my := h.playScene.State.MySelf

@@ -127,7 +127,7 @@ func (m *MapManager) ProcessMineRegen(now int64) {
 	}
 }
 
-// InitRoutes 从配置文件加载地图传送路线，文件不存在时使用默认路线。
+// InitRoutes 从配置文件加载地图传送路线。
 func (m *MapManager) InitRoutes(configDir string) {
 	routesPath := filepath.Join(configDir, "maps", "map_routes.jsonc")
 	if data, err := os.ReadFile(routesPath); err == nil {
@@ -149,12 +149,8 @@ func (m *MapManager) InitRoutes(configDir string) {
 			log.Logf(log.LevelInfo, "MapManager", "loaded %d map routes from %s", len(raw.Routes), routesPath)
 			return
 		}
-		log.Logf(log.LevelWarn, "MapManager", "failed to parse %s, using defaults", routesPath)
+		log.Logf(log.LevelWarn, "MapManager", "failed to parse %s, no routes loaded", routesPath)
+		return
 	}
-	// 默认路线
-	if m.FindMap("0") != nil && m.FindMap("3") != nil {
-		m.AddRoute("0", 289, 618, "3", 330, 330)
-		m.AddRoute("3", 330, 331, "0", 289, 619)
-	}
-	log.Logf(log.LevelInfo, "MapManager", "initialized %d map routes", len(m.routes))
+	log.Logf(log.LevelWarn, "MapManager", "map routes file not found: %s, no routes loaded", routesPath)
 }
