@@ -238,7 +238,7 @@ func (s *PlayScene) updateHover() {
 	if dc.WireMode == wireOff {
 		return
 	}
-	if s.mouseY >= float64(mapViewH()) {
+	if s.mouseY >= float64(MapSurfaceH) {
 		return
 	}
 	wx, wy := s.cam.ScreenToWorld(s.mouseX, s.mouseY)
@@ -309,10 +309,10 @@ func (s *PlayScene) renderHoverInfo(proj [16]float32) {
 
 func (s *PlayScene) clickInspect(sx, sy float64) bool {
 	dc := s.dbg
-	if sy >= float64(winH-220) {
+	if sy >= float64(ScreenHeight-220) {
 		return false
 	}
-	if sy >= float64(mapViewH()) {
+	if sy >= float64(MapSurfaceH) {
 		return false
 	}
 	if dc.WireMode == wireOff {

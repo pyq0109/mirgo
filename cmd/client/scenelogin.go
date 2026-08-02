@@ -433,8 +433,8 @@ func (s *LoginScene) buildLoginUI() {
 	} else {
 		lp.Width, lp.Height = 296, 254
 	}
-	lp.Left = (winW - lp.Width) / 2
-	lp.Top = (winH - lp.Height) / 2
+	lp.Left = (ScreenWidth - lp.Width) / 2
+	lp.Top = (ScreenHeight - lp.Height) / 2
 	lp.Visible = false
 	s.ui.Root.AddChild(lp)
 	s.loginPanel = lp
@@ -478,8 +478,8 @@ func (s *LoginScene) buildLoginUI() {
 	} else {
 		rp.Width, rp.Height = 640, 472
 	}
-	rp.Left = (winW - rp.Width) / 2
-	rp.Top = (winH - rp.Height) / 2
+	rp.Left = (ScreenWidth - rp.Width) / 2
+	rp.Top = (ScreenHeight - rp.Height) / 2
 	rp.Visible = false
 	s.ui.Root.AddChild(rp)
 	s.regPanel = rp
@@ -558,8 +558,8 @@ func (s *LoginScene) buildLoginUI() {
 	} else {
 		cp.Width, cp.Height = 420, 300
 	}
-	cp.Left = (winW - cp.Width) / 2
-	cp.Top = (winH - cp.Height) / 2
+	cp.Left = (ScreenWidth - cp.Width) / 2
+	cp.Top = (ScreenHeight - cp.Height) / 2
 	cp.Visible = false
 	s.ui.Root.AddChild(cp)
 	s.chgPanel = cp
@@ -622,8 +622,8 @@ func (s *LoginScene) buildLoginUI() {
 	} else {
 		sp.Width, sp.Height = 300, 450
 	}
-	sp.Left = (winW - sp.Width) / 2
-	sp.Top = (winH - sp.Height) / 2
+	sp.Left = (ScreenWidth - sp.Width) / 2
+	sp.Top = (ScreenHeight - sp.Height) / 2
 	sp.Visible = false
 	s.ui.Root.AddChild(sp)
 	s.srvPanel = sp
@@ -1089,8 +1089,8 @@ func (s *LoginScene) showModal(msg string, size int, btnImgs []int) {
 	} else {
 		win.Width, win.Height = 300, 170
 	}
-	win.Left = (winW - win.Width) / 2
-	win.Top = (winH - win.Height) / 2
+	win.Left = (ScreenWidth - win.Width) / 2
+	win.Top = (ScreenHeight - win.Height) / 2
 
 	lines := strings.Split(msg, "\\")
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) {

@@ -472,3 +472,65 @@ func TestDecodeTurnName(t *testing.T) {
 		t.Errorf("decodeTurnName(charDesc only) = %q, want empty", got)
 	}
 }
+
+// TestReadyActionCMToSM 验证本地预测的 CM→SM 消息映射（Delphi Actor.pas:1479-1529）。
+// 原始协议 CM/SM 编号不对称（CM_FIREHIT=3025 但 SM_FIREHIT=8），烈火/十字斩/双龙斩
+// 必须显式映射；若一律 ident-3000，本地玩家这三招的攻击动画/特效会错乱或缺失。
+func TestReadyActionCMToSM(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   int
+		sm   int
+	}{
+		{"throw", protocol.CMThrow, protocol.SMThrow},
+		{"hit", protocol.CMHit, protocol.SMHit},
+		{"heavyhit", protocol.CMHeavyHit, protocol.SMHeavyHit},
+		{"bighit", protocol.CMBigHit, protocol.SMBigHit},
+		{"spell", protocol.CMSpell, protocol.SMSpell},
+		{"powerhit", protocol.CMPowerHit, protocol.SMPowerHit},
+		{"longhit", protocol.CMLongHit, protocol.SMLongHit},
+		{"widehit", protocol.CMWideHit, protocol.SMWideHit},
+		{"firehit", protocol.CMFireHit, protocol.SMFireHit},
+		{"crshit", protocol.CMCrsHit, protocol.SMCrsHit},
+		{"twinhit", protocol.CMTwinHit, protocol.SMTwinHit},
+		{"horserun", protocol.CMHorseRun, protocol.SMHorseRun},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Actor{}
+			a.ReadyAction(ActorMsg{Ident: tt.cm})
+			if a.CurrentAction != tt.sm {
+				t.Errorf("ReadyAction(CM=%d): CurrentAction = %d, want SM=%d", tt.cm, a.CurrentAction, tt.sm)
+			}
+		})
+	}
+}
+
+// TestHitEffectLifecycle 验证攻击特效在切换动作与动画播完时被清除
+// （Delphi m_boHitEffect := FALSE，Actor.pas:3152 / 3627），否则会残留在角色身上。
+func TestHitEffectLifecycle(t *testing.T) {
+	// 攻杀剑术应置 HitEffectNumber=1。
+	a := &Actor{}
+	a.ReadyAction(ActorMsg{Ident: protocol.CMPowerHit})
+	if a.HitEffectNumber != 1 {
+		t.Fatalf("攻杀剑术后 HitEffectNumber = %d, want 1", a.HitEffectNumber)
+	}
+	// 切换到非攻击动作应立即清除（calcHumanFrame 开头复位）。
+	a.ReadyAction(ActorMsg{Ident: protocol.CMWalk})
+	if a.HitEffectNumber != 0 {
+		t.Errorf("切换行走后 HitEffectNumber = %d, want 0（特效残留）", a.HitEffectNumber)
+	}
+
+	// 攻击动画播完（Run 动作结束分支）也应清除。
+	b := &Actor{}
+	b.CurrentAction = protocol.SMPowerHit
+	b.HitEffectNumber = 1
+	b.FrameTime = 85
+	b.EndFrame = 5
+	b.CurrentFrame = 5 // 已到末帧
+	b.Run(1000)        // now-LastFrameTick(0) >= 85 → 触发动作结束
+	if b.HitEffectNumber != 0 || b.CurrentAction != 0 {
+		t.Errorf("攻击动画结束后 HitEffectNumber=%d CurrentAction=%d, want 0/0（特效残留）",
+			b.HitEffectNumber, b.CurrentAction)
+	}
+}

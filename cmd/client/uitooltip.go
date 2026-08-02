@@ -72,8 +72,8 @@ func (t *Tooltip) Render(s *PlayScene, proj [16]float32) {
 	}
 
 	x := t.x
-	if x+w > winW {
-		x = winW - w
+	if x+w > ScreenWidth {
+		x = ScreenWidth - w
 	}
 	if x < 0 {
 		x = 0

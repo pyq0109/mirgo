@@ -121,7 +121,7 @@ func (s *PlayScene) buildAbilPanel() {
 	} else {
 		inspect.Width, inspect.Height = 240, 300
 	}
-	inspect.Left = winW - 2*inspect.Width
+	inspect.Left = ScreenWidth - 2*inspect.Width
 	inspect.Top = 0
 	inspect.Visible = false
 	inspect.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintInspect(c, proj) }

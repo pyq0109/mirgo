@@ -76,6 +76,24 @@ func (f *fadeState) alpha() float32 {
 
 var globalFade fadeState
 
+// 固定分辨率预设。
+var resolutions = [][2]int{{800, 600}, {1024, 768}, {1400, 1050}, {1600, 1200}}
+var resIdx = 0
+
+func applyResolution(w *glfw.Window, idx int) {
+	if idx < 0 || idx >= len(resolutions) {
+		return
+	}
+	resIdx = idx
+	rw, rh := resolutions[idx][0], resolutions[idx][1]
+	w.SetSize(rw, rh)
+	winW, winH = rw, rh
+}
+
+func cycleResolution(w *glfw.Window) {
+	applyResolution(w, (resIdx+1)%len(resolutions))
+}
+
 const (
 	clientVersion = 120040918
 	runLoginCode  = 9
@@ -102,7 +120,7 @@ func main() {
 		log.Logf(log.LevelError, "Client", "failed to create window: %v", err)
 		os.Exit(1)
 	}
-	window.SetResizable(true)
+	window.SetResizable(false)
 	defer window.Destroy()
 
 	glState, err := engine.NewGLState()
@@ -177,10 +195,30 @@ func main() {
 	dbgConsole.GetClipboard = glfwWindow.GetClipboardString
 
 	winW, winH = glfwWindow.GetSize()
-	glfwWindow.SetSizeLimits(ScreenWidth, ScreenHeight, glfw.DontCare, glfw.DontCare)
-	glfwWindow.SetSizeCallback(func(_ *glfw.Window, w, h int) {
-		winW, winH = w, h
-		playScene.OnResize()
+
+	dbgConsole.Register("res", "切换分辨率: /res 1-4 或 /res <W> <H>", func(args []string) {
+		if len(args) == 1 {
+			idx, _ := strconv.Atoi(args[0])
+			if idx >= 1 && idx <= len(resolutions) {
+				applyResolution(glfwWindow, idx-1)
+				dbgConsole.Printf("分辨率: %dx%d", resolutions[resIdx][0], resolutions[resIdx][1])
+				return
+			}
+		}
+		if len(args) == 2 {
+			w, _ := strconv.Atoi(args[0])
+			h, _ := strconv.Atoi(args[1])
+			for i, r := range resolutions {
+				if r[0] == w && r[1] == h {
+					applyResolution(glfwWindow, i)
+					dbgConsole.Printf("分辨率: %dx%d", w, h)
+					return
+				}
+			}
+			dbgConsole.Printf("不支持的分辨率 %dx%d", w, h)
+			return
+		}
+		dbgConsole.Printf("当前: %dx%d (预设: 800x600, 1024x768, 1400x1050, 1600x1200)", winW, winH)
 	})
 
 	// 连接登录场景回调。
@@ -303,6 +341,11 @@ func main() {
 			dbgConsole.Toggle()
 			return
 		}
+		// Alt+Enter 循环切换分辨率。
+		if action == glfw.Press && key == glfw.KeyEnter && mods == glfw.ModAlt {
+			cycleResolution(glfwWindow)
+			return
+		}
 		// 控制台打开时所有按键交给控制台, 不再转发给场景。
 		if dbgConsole.Visible {
 			dbgConsole.OnKey(int(key), int(action), int(mods))
@@ -332,7 +375,8 @@ func main() {
 	glfwWindow.SetMouseButtonCallback(func(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
 		switch action {
 		case glfw.Press:
-			x, y := w.GetCursorPos()
+			wx, wy := w.GetCursorPos()
+			x, y := wx*float64(ScreenWidth)/float64(winW), wy*float64(ScreenHeight)/float64(winH)
 			log.Logf(log.LevelTrace, "Mouse", "press button=%d mods=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), int(mods), x, y, sceneMgr.CurrentType())
 			dbgConsole.SetMouse(x, y)
@@ -341,15 +385,14 @@ func main() {
 					return
 				}
 			}
-			// 非游戏场景的线框点击锁定 (屏幕空间)。游戏场景由
-			// PlayScene 自行在世界空间处理。
 			if button == glfw.MouseButtonLeft && dbgConsole.WireMode > 0 &&
 				sceneMgr.CurrentType() != engine.ScenePlayGame && dbgConsole.ClickInspectScreen() {
 				return
 			}
 			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
-			x, y := w.GetCursorPos()
+			wx, wy := w.GetCursorPos()
+			x, y := wx*float64(ScreenWidth)/float64(winW), wy*float64(ScreenHeight)/float64(winH)
 			log.Logf(log.LevelTrace, "Mouse", "release button=%d pos=(%.0f,%.0f) scene=%s",
 				int(button), x, y, sceneMgr.CurrentType())
 			if dbgConsole.Visible {
@@ -360,11 +403,13 @@ func main() {
 	})
 
 	glfwWindow.SetCursorPosCallback(func(w *glfw.Window, xpos, ypos float64) {
-		dbgConsole.SetMouse(xpos, ypos)
+		x := xpos * float64(ScreenWidth) / float64(winW)
+		y := ypos * float64(ScreenHeight) / float64(winH)
+		dbgConsole.SetMouse(x, y)
 		if dbgConsole.Visible {
-			dbgConsole.OnMouseMoveSelect(xpos, ypos)
+			dbgConsole.OnMouseMoveSelect(x, y)
 		}
-		sceneMgr.OnMouseMove(xpos, ypos)
+		sceneMgr.OnMouseMove(x, y)
 	})
 
 	glfwWindow.SetScrollCallback(func(w *glfw.Window, xoff, yoff float64) {
@@ -389,7 +434,7 @@ func main() {
 		gl.ClearColor(0, 0, 0, 1)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 		glState.SetViewport(0, 0, int32(w), int32(h))
-		proj := engine.OrthoProj(float32(winW), float32(winH))
+		proj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 
 		// 统一线框录制: 对所有场景 blanket 录制 (分类 0)。PlayScene 在
 		// 内部做分段录制并置 wireHandled=true, 从而覆盖这里的设置。
@@ -406,7 +451,7 @@ func main() {
 		}
 
 		if a := globalFade.alpha(); a > 0 {
-			glState.DrawQuadColor(0, 0, float32(winW), float32(winH), 0, 0, 0, a, proj)
+			glState.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, a, proj)
 		}
 
 		// 调试控制台叠加层 (场景之后渲染, 重置为完整 800×600 视口)。
@@ -2384,7 +2429,7 @@ func (s *DebugScene) Render(glState *engine.GLState, proj [16]float32) {
 	case "Login":
 		r, g, b = 0.1, 0.2, 0.3
 	}
-	glState.DrawQuadColor(0, 0, float32(winW), float32(winH), r, g, b, 1.0, proj)
+	glState.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, r, g, b, 1.0, proj)
 	glState.DrawQuadColor(350, 250, 100, 100, 1.0, 1.0, 1.0, 1.0, proj)
 }
 func (s *DebugScene) OnKey(key int, action int)                              {}

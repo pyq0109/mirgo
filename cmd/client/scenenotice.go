@@ -26,7 +26,7 @@ func (s *NoticeScene) Close() {
 func (s *NoticeScene) Update(dt float64) {}
 
 func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
-	gl.DrawQuadColor(0, 0, float32(winW), float32(winH), 0, 0, 0, 1, proj)
+	gl.DrawQuadColor(0, 0, float32(ScreenWidth), float32(ScreenHeight), 0, 0, 0, 1, proj)
 }
 
 func (s *NoticeScene) OnKey(key int, action int) {}

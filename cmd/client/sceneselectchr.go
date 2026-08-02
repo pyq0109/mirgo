@@ -274,11 +274,11 @@ func (s *SelectChrScene) buildUI() {
 	} else {
 		dp.Width, dp.Height = 380, 180
 	}
-	dp.Left = (winW - dp.Width) / 2
-	dp.Top = (winH - dp.Height) / 2
+	dp.Left = (ScreenWidth - dp.Width) / 2
+	dp.Top = (ScreenHeight - dp.Height) / 2
 	dp.Visible = false
 	dp.OnDirectPaint = func(c *UIControl, proj [16]float32) {
-		s.gl.DrawQuadColor(0, 0, float32(winW), float32(winH), 0, 0, 0, 0.5, proj)
+		s.gl.DrawQuadColor(0, 0, float32(ScreenWidth), float32(ScreenHeight), 0, 0, 0, 0.5, proj)
 		if prg != nil {
 			s.ui.BlitImage(prg, ImgModalNormal, c.AbsX(), c.AbsY(), proj)
 		} else {
@@ -424,7 +424,7 @@ func (s *SelectChrScene) paintBackground(proj [16]float32) {
 			return
 		}
 	}
-	s.gl.DrawQuadColor(0, 0, float32(winW), float32(winH), 0.1, 0.15, 0.1, 1.0, proj)
+	s.gl.DrawQuadColor(0, 0, float32(ScreenWidth), float32(ScreenHeight), 0.1, 0.15, 0.1, 1.0, proj)
 }
 
 func (s *SelectChrScene) paintCharSlot(proj [16]float32, idx int) {
@@ -588,7 +588,7 @@ func (s *SelectChrScene) paintInfoText(proj [16]float32) {
 	}
 
 	if s.ServerName != "" {
-		x := float32(winW)/2 - float32(s.text.MeasureText(s.ServerName))/2
+		x := float32(ScreenWidth)/2 - float32(s.text.MeasureText(s.ServerName))/2
 		s.text.DrawTextOutline(s.ServerName, x, oy+8, 1, 1, 1, 1, 0, 0, 0, 1, proj)
 	}
 

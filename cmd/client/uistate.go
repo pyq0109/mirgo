@@ -66,7 +66,7 @@ func (s *PlayScene) buildState() {
 	} else {
 		win.Width, win.Height = 240, 300
 	}
-	win.Left = winW - win.Width
+	win.Left = ScreenWidth - win.Width
 	win.Top = 0
 	win.Visible = false
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) { s.paintStatePage(c, proj) }
@@ -493,8 +493,8 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 	} else {
 		win.Width, win.Height = 320, 170
 	}
-	win.Left = (winW - win.Width) / 2
-	win.Top = (winH - win.Height) / 2
+	win.Left = (ScreenWidth - win.Width) / 2
+	win.Top = (ScreenHeight - win.Height) / 2
 	win.OnDirectPaint = func(c *UIControl, proj [16]float32) {
 		if prg != nil {
 			s.ui.BlitImage(prg, ImgKeyDlg, c.AbsX(), c.AbsY(), proj)

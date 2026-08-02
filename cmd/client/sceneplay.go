@@ -131,7 +131,6 @@ type PlayScene struct {
 	ui            *UIManager
 	itemMove      ItemMoveState
 	tooltip       Tooltip
-	hudBottom     *UIControl
 	hudPlusAbil   *UIControl
 	hudBag        *UIControl
 	bagHoverItem  *BagItem // 背包窗口内信息区当前悬停的物品（FState:4465）
@@ -492,9 +491,7 @@ func (s *PlayScene) LoadMap(mapName string) error {
 	s.mapData = m
 	s.clearAutoPath()
 	if s.cam == nil {
-		s.cam = engine.NewCamera(winW, winH)
-	} else {
-		s.cam.SetViewport(winW, winH)
+		s.cam = engine.NewCamera(ScreenWidth, ScreenHeight)
 	}
 	s.cam.CenterOn(float64(m.Width)*engine.TileWidth/2, float64(m.Height)*engine.TileHeight/2)
 	s.State.MapName = mapName
@@ -515,18 +512,7 @@ func (s *PlayScene) LoadMap(mapName string) error {
 	return nil
 }
 
-func (s *PlayScene) OnResize() {
-	if s.cam != nil {
-		s.cam.SetViewport(winW, winH)
-	}
-	if s.ui != nil && s.ui.Root != nil {
-		s.ui.Root.Width, s.ui.Root.Height = winW, winH
-	}
-	if s.hudBottom != nil {
-		s.hudBottom.Left = barOriginX()
-		s.hudBottom.Top = winH - s.hudBottom.Height
-	}
-}
+func (s *PlayScene) OnResize() {}
 
 func (s *PlayScene) Open() {
 	gActiveUI = s.ui
@@ -592,10 +578,9 @@ func (s *PlayScene) Update(dt float64) {
 		my := s.State.MySelf
 		wx := float64(my.Rx)*engine.TileWidth + my.ShiftX + engine.TileWidth/2
 		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
-		// 玩家居中在无遮挡可视区（底栏不透明部分上方）。
-		// 底栏不透明起始 y = winH - (251-120) = winH - 131。
-		s.cam.X = wx - float64(winW)/(2*s.cam.Zoom)
-		s.cam.Y = wy - float64(winH-131)/(2*s.cam.Zoom)
+		// 玩家居中在无遮挡可视区中心 (800/2=400, (600-131)/2≈234→取174匹配底栏blend区)。
+		s.cam.X = wx - 400/s.cam.Zoom
+		s.cam.Y = wy - 174/s.cam.Zoom
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
@@ -908,9 +893,9 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	// UI 层使用完整窗口逻辑视口。
 	s.gl.SetViewport(0, 0, fbW, fbH)
 	if verbose {
-		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, winW, winH)
+		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, ScreenWidth, ScreenHeight)
 	}
-	uiProj := engine.OrthoProj(float32(winW), float32(winH))
+	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 	if s.showMinimap {
 		mmapDrawn := false
 		mmIdx := s.State.MinimapIndex
@@ -919,13 +904,13 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 			if mmImg != nil && mmImg.RGBA != nil {
 				mmTex := s.resources.GetTexture(s.resources.Mmap, mmIdx)
 				if mmTex != 0 {
-					s.gl.DrawQuad(mmTex, float32(winW-120), 0, 120, 120, uiProj)
+					s.gl.DrawQuad(mmTex, ScreenWidth - 120, 0, 120, 120, uiProj)
 					mmapDrawn = true
 				}
 			}
 		}
 		if !mmapDrawn && s.minimap != nil {
-			glState.DrawQuad(s.minimap.GetTexture(), float32(winW-120), 0, 120, 120, uiProj)
+			glState.DrawQuad(s.minimap.GetTexture(), ScreenWidth - 120, 0, 120, 120, uiProj)
 		}
 		// 在小地图上叠加周边角色雷达点（以自身为中心）。
 		if s.minimap != nil && s.State.MySelf != nil {
@@ -1669,7 +1654,7 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 	// 基于格子的焦点检测（Delphi g_FocusCret, ClMain.pas:2085-2096）。
 	s.focusActor = nil
 	s.hoverItemName = ""
-	if y >= float64(mapViewH()) || s.cam == nil || s.State.MySelf == nil {
+	if y >= MapSurfaceH || s.cam == nil || s.State.MySelf == nil {
 		return
 	}
 	wx, wy := s.cam.ScreenToWorld(x, y)
@@ -1781,7 +1766,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		if mods == 0 {
 			s.dupSelection++
 		}
-		if y >= float64(mapViewH()) {
+		if y >= MapSurfaceH {
 			return
 		}
 		if s.State.MySelf == nil || s.sendMove == nil || s.State.MySelf.Death {
@@ -1836,7 +1821,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			return
 		}
 	}
-	if y >= float64(mapViewH()) {
+	if y >= MapSurfaceH {
 		return
 	}
 	if s.State.MySelf == nil || s.sendMove == nil {
@@ -2205,10 +2190,8 @@ func (s *PlayScene) OnScroll(offX, offY float64) {
 		}
 	}
 	// 滚轮在聊天板上滚动聊天记录。
-	cbx := barOriginX() + chatBoardX
-	cbt := chatBoardTop()
-	if s.mouseX >= float64(cbx) && s.mouseX <= float64(cbx+474) &&
-		s.mouseY >= float64(cbt) && s.mouseY < float64(cbt+chatLineH*ViewChatLine) {
+	if s.mouseX >= chatBoardX && s.mouseX <= chatBoardX+474 &&
+		s.mouseY >= float64(chatBoardTop) && s.mouseY < float64(chatBoardTop+chatLineH*ViewChatLine) {
 		maxScroll := len(s.chatMessages) - ViewChatLine
 		if maxScroll < 0 {
 			maxScroll = 0
@@ -2254,7 +2237,7 @@ func (s *PlayScene) RenderUI(proj [16]float32) {
 
 	if s.State.MapTitle != "" && s.State.MySelf != nil {
 		title := fmt.Sprintf("%s %d:%d", s.State.MapTitle, s.State.MySelf.CurrX, s.State.MySelf.CurrY)
-		s.text.DrawText(title, 8, float32(winH-20), 1, 1, 1, 1, proj)
+		s.text.DrawText(title, 8, 580, 1, 1, 1, 1, proj)
 	}
 
 	// 底栏、HP/MP 球、按钮、腰带、聊天、背包、状态面板——全部由

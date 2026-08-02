@@ -51,7 +51,7 @@ func NewUIManager(gl *engine.GLState, resources *engine.ResourceManager, text *e
 	root.Background = true
 	root.Visible = true
 	root.Left, root.Top = 0, 0
-	root.Width, root.Height = winW, winH
+	root.Width, root.Height = ScreenWidth, ScreenHeight
 	return &UIManager{
 		gl:        gl,
 		resources: resources,
@@ -913,8 +913,8 @@ func (ctx *boundsCtx) drawLabel(name string, x, y, w, h, r, g, b float32, proj [
 	const padX = 3.0
 	chipW := float32(text.MeasureText(name)) + padX*2
 	chipH := lineH + 3
-	screenW := float32(winW)
-	screenH := float32(winH)
+	screenW := float32(ScreenWidth)
+	screenH := float32(ScreenHeight)
 	cx := x
 	if cx+chipW > screenW {
 		cx = screenW - chipW

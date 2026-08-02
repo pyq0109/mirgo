@@ -219,9 +219,21 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 		a.OldX = a.CurrX
 		a.OldY = a.CurrY
 		a.OldDir = a.Dir
-		if msg.Ident == protocol.CMHorseRun {
+		// CM→SM 显式映射（对应 Delphi Actor.pas:1479-1529）。
+		// 原始协议 CM/SM 编号不对称（CM_FIREHIT=3025 但 SM_FIREHIT=8），
+		// 烈火/十字斩/双龙斩/骑马/投掷必须特殊处理，其余 CM 减 3000 恰好等于对应 SM。
+		switch msg.Ident {
+		case protocol.CMHorseRun:
 			msg.Ident = protocol.SMHorseRun
-		} else {
+		case protocol.CMThrow:
+			msg.Ident = protocol.SMThrow
+		case protocol.CMFireHit:
+			msg.Ident = protocol.SMFireHit
+		case protocol.CMCrsHit:
+			msg.Ident = protocol.SMCrsHit
+		case protocol.CMTwinHit:
+			msg.Ident = protocol.SMTwinHit
+		default:
 			msg.Ident = msg.Ident - 3000
 		}
 	}
@@ -326,6 +338,9 @@ func (a *Actor) CalcActorFrame() {
 }
 
 func (a *Actor) calcHumanFrame() {
+	// 每次重算动作先清除上一动作的命中特效，攻击 case 再按需置位
+	// （对应 Delphi m_boHitEffect := FALSE，Actor.pas:3152）
+	a.HitEffectNumber = 0
 	var action ActionInfo
 	switch a.CurrentAction {
 	case protocol.SMTurn:
@@ -667,6 +682,7 @@ func (a *Actor) Run(now int64) {
 				a.UseMagic = false
 				a.SpellConfirmed = false
 				a.CurEffFrame = 0
+				a.HitEffectNumber = 0 // 动作结束清除命中特效（对应 Delphi m_boHitEffect := FALSE，Actor.pas:3627）
 			}
 		}
 		return
@@ -1286,27 +1302,17 @@ func (a *Actor) drawHuman(glState *engine.GLState, resources *engine.ResourceMan
 		}
 	}
 
-	// D2 Layer 9: 攻击特效（方向性火花）
+	// D2 Layer 9: 攻击特效（方向性火花）（对应 Delphi Actor.pas:3914-3924，GetEffectBase mtype=1 路由）
 	if a.HitEffectNumber > 0 {
-		hitEffectBase := []int{800, 1410, 1700, 3480, 3390, 40, 220, 740}
-		mag := a.HitEffectNumber - 1
-		if mag >= 0 && mag < len(hitEffectBase) {
-			var wilFile *wil.File
-			if mag >= 5 {
-				wilFile = resources.Magic2
-			} else {
-				wilFile = resources.Magic
-			}
-			if wilFile != nil {
-				hitIdx := hitEffectBase[mag] + a.Dir*10 + (a.CurrentFrame - a.StartFrame)
-				if hitIdx >= 0 && hitIdx < wilFile.Count {
-					if img := wilFile.GetImage(hitIdx); img != nil && img.RGBA != nil {
-						if tex := resources.GetTexture(wilFile, hitIdx); tex != 0 {
-							gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-							glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
-								float32(img.Width), float32(img.Height), proj)
-							gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-						}
+		if wilFile, base := getEffectBase(resources, a.HitEffectNumber-1, 1); wilFile != nil {
+			hitIdx := base + a.Dir*10 + (a.CurrentFrame - a.StartFrame)
+			if hitIdx >= 0 && hitIdx < wilFile.Count {
+				if img := wilFile.GetImage(hitIdx); img != nil && img.RGBA != nil {
+					if tex := resources.GetTexture(wilFile, hitIdx); tex != 0 {
+						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+						glState.DrawQuad(tex, screenX+float32(img.HotX), screenY+float32(img.HotY),
+							float32(img.Width), float32(img.Height), proj)
+						gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 					}
 				}
 			}

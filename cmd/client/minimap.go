@@ -117,7 +117,7 @@ func (mm *Minimap) DrawActorDots(gl *engine.GLState, actors []*Actor, selfX, sel
 	const radarRange = 50
 	const radarSize = 120.0
 	scale := float32(radarSize / (radarRange * 2)) // 120/100 = 1.2
-	originX := float32(winW) - radarSize
+	originX := float32(ScreenWidth) - radarSize
 	for _, a := range actors {
 		if a == nil {
 			continue
