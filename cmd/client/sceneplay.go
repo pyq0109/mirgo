@@ -123,7 +123,8 @@ type PlayScene struct {
 	ActionLock     bool
 	ActionLockTime int64
 
-	moveFailCount int
+	moveFailCount         int
+	moveFailCooldownUntil int64
 
 	lastHitTick int64
 
@@ -1688,7 +1689,10 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 	}
 
 	// 拖拽移动（ClMain:2115-2116）：按住 >300ms 重新触发移动
-	if s.leftHeld && time.Now().UnixMilli()-s.mouseDownTick > 300 {
+	nowMs := time.Now().UnixMilli()
+	if nowMs < s.moveFailCooldownUntil {
+		// 连续移动失败后的冷却期，不重新寻路
+	} else if s.leftHeld && nowMs-s.mouseDownTick > 300 {
 		if s.State.MySelf != nil && !s.State.MySelf.Death && s.sendMove != nil {
 			my := s.State.MySelf
 			if tx != my.CurrX || ty != my.CurrY {
@@ -1697,7 +1701,8 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 			}
 		}
 	}
-	if s.rightHeld && time.Now().UnixMilli()-s.mouseDownTick > 300 {
+	if nowMs < s.moveFailCooldownUntil {
+	} else if s.rightHeld && nowMs-s.mouseDownTick > 300 {
 		if s.State.MySelf != nil && !s.State.MySelf.Death && s.sendMove != nil {
 			my := s.State.MySelf
 			if absInt(my.CurrX-tx) > 2 || absInt(my.CurrY-ty) > 2 {
