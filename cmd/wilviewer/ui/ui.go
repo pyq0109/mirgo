@@ -29,11 +29,12 @@ const (
 
 // UIState 持有 UI 和主循环之间的共享状态。
 type UIState struct {
-	DataDir    string // 根资源目录
-	WILFile    *wil.File
-	Renderer   *renderer.WILRenderer
-	CurrentIdx int
-	Mode       string // "browse" 或 "animation"
+	DataDir        string // 根资源目录
+	WILFile        *wil.File
+	CurrentWILName string // 当前打开的 .wil 文件名
+	Renderer       *renderer.WILRenderer
+	CurrentIdx     int
+	Mode           string // "browse" 或 "animation"
 
 	// 网格状态
 	GridScrollTo int // 滚动到网格中此图片索引（-1 = 不滚动）
@@ -171,7 +172,7 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 
 	ig.BeginChildStr("filetree")
 	for _, name := range wilFiles {
-		selected := state.WILFile != nil && strings.EqualFold(state.WILFile.Title, strings.TrimSuffix(name, filepath.Ext(name)))
+		selected := strings.EqualFold(state.CurrentWILName, name)
 		cat := wilCategory(name)
 		var c color.RGBA
 		switch cat {
@@ -196,6 +197,7 @@ func RenderLeftPanel(state *UIState, glfwW, glfwH int32) {
 			}
 			mlog.Logf(mlog.LevelInfo, "UI", "加载成功: title=%s, images=%d", newFile.Title, newFile.Count)
 			state.WILFile = newFile
+			state.CurrentWILName = name
 			state.CurrentIdx = 0
 			state.GridScrollTo = 0
 			state.Renderer.SetWILFile(newFile)
