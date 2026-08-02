@@ -289,13 +289,13 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 
 	switch magID {
 	case 1, 5, 44:
-		// Delphi: 弹道魔法 600ms 飞行延迟 (Magic.pas:285-292, ObjBase.pas:4565-4582)
+		// Delphi: 弹道魔法飞行延迟 (Magic.pas:285-292, ObjBase.pas:4565-4582)
 		p.PendingMagics = append(p.PendingMagics, PendingMagic{
 			MagID:    magID,
 			Power:    power,
 			TargetX:  tx,
 			TargetY:  ty,
-			FireTick: time.Now().UnixMilli() + 600,
+			FireTick: time.Now().UnixMilli() + p.Engine.Config.GetProjectileDelay(),
 		})
 	case 10, 11:
 		p.doSpellDamageAt(server, power, tx, ty)
@@ -342,7 +342,7 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 			}
 		}
 	case 22:
-		const fireDuration = int64(8000)
+		fireDuration := p.Engine.Config.GetFireWallDuration()
 		perTick := power / int(fireDuration/100)
 		if perTick < 1 {
 			perTick = 1
@@ -391,7 +391,7 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 				clone.WAbil.DC = p.WAbil.DC / 2
 				clone.WAbil.MaxHP = uint16(cloneHP)
 				clone.WAbil.HP = uint16(cloneHP)
-				clone.initAITimers(time.Now().UnixMilli())
+				clone.initAITimers(time.Now().UnixMilli(), p.Engine.Config)
 				clone.PlayerMasterID = p.ID
 				p.envir.AddObject(cloneX, cloneY, OS_MOVINGOBJECT, clone)
 				p.Engine.Monsters = append(p.Engine.Monsters, clone)
@@ -485,11 +485,12 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			petX = p.CurrX - 1
 		}
 		if p.envir.CanWalk(petX, petY) {
+			cfg := p.Engine.Config
 			petName := "骷髅"
 			if magID == 30 {
 				petName = "神兽"
 			}
-			petHP := 50 + int(p.WAbil.Level)*5
+			petHP := cfg.GetSummonPetHPBase() + int(p.WAbil.Level)*cfg.GetSummonPetHPPerLv()
 			pet := NewMonsterObject(petName, p.Engine.nextMonsterID, 19, 11, 160, petHP, 400, 1000, 0)
 			p.Engine.nextMonsterID++
 			pet.MapName = p.MapName
@@ -497,10 +498,10 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			pet.CurrY = petY
 			pet.envir = p.envir
 			pet.WAbil.Level = p.WAbil.Level
-			pet.WAbil.DC = uint32(5 + int(p.WAbil.Level)/2)
+			pet.WAbil.DC = uint32(cfg.GetSummonPetDCBase() + int(p.WAbil.Level)/cfg.GetSummonPetDCPerLv())
 			pet.WAbil.MaxHP = uint16(petHP)
 			pet.WAbil.HP = uint16(petHP)
-			pet.initAITimers(time.Now().UnixMilli())
+			pet.initAITimers(time.Now().UnixMilli(), cfg)
 			pet.PlayerMasterID = p.ID
 			p.envir.AddObject(petX, petY, OS_MOVINGOBJECT, pet)
 			p.Engine.Monsters = append(p.Engine.Monsters, pet)
@@ -599,7 +600,8 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			petX = p.CurrX - 1
 		}
 		if p.envir.CanWalk(petX, petY) {
-			petHP := 80 + int(p.WAbil.Level)*8
+			cfg := p.Engine.Config
+			petHP := cfg.GetAngelHPBase() + int(p.WAbil.Level)*cfg.GetAngelHPPerLv()
 			pet := NewMonsterObject("天使", p.Engine.nextMonsterID, 19, 11, 160, petHP, 400, 1000, 0)
 			p.Engine.nextMonsterID++
 			pet.MapName = p.MapName
@@ -607,11 +609,11 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 			pet.CurrY = petY
 			pet.envir = p.envir
 			pet.WAbil.Level = p.WAbil.Level
-			pet.WAbil.DC = uint32(8 + int(p.WAbil.Level))
+			pet.WAbil.DC = uint32(cfg.GetAngelDCBase() + int(p.WAbil.Level)*cfg.GetAngelDCPerLv())
 			pet.WAbil.MAC = uint32(3 + int(p.WAbil.Level)/3)
 			pet.WAbil.MaxHP = uint16(petHP)
 			pet.WAbil.HP = uint16(petHP)
-			pet.initAITimers(time.Now().UnixMilli())
+			pet.initAITimers(time.Now().UnixMilli(), cfg)
 			pet.PlayerMasterID = p.ID
 			p.envir.AddObject(petX, petY, OS_MOVINGOBJECT, pet)
 			p.Engine.Monsters = append(p.Engine.Monsters, pet)
@@ -668,10 +670,10 @@ func (p *PlayObject) doSpellDamageAreaAt(server *netserver.TCPServer, damage, cx
 
 func (p *PlayObject) healTarget(server *netserver.TCPServer, amount, tx, ty int) {
 	if tx == p.CurrX && ty == p.CurrY {
-		// 治疗术加入渐进池（Delphi: RM_MAGHEALING, ObjBase.pas:4527，上限 300）
+		cap := p.Engine.Config.GetHealingPoolCap()
 		p.IncHealing += amount
-		if p.IncHealing > 300 {
-			p.IncHealing = 300
+		if p.IncHealing > cap {
+			p.IncHealing = cap
 		}
 	}
 }
@@ -835,15 +837,16 @@ func (p *PlayObject) sendSpellToClient(server *netserver.TCPServer, msg SendMess
 }
 
 func (p *PlayObject) trainSkill(magID int) {
+	cfg := p.Engine.Config
 	for _, pm := range p.LearnedMagics {
 		if pm.MagID == magID && pm.Level < 3 {
 			pm.TrainPoint++
-			threshold := 20
+			threshold := cfg.GetTrainThreshold0()
 			if pm.Level == 1 {
-				threshold = 50
+				threshold = cfg.GetTrainThreshold1()
 			}
 			if pm.Level == 2 {
-				threshold = 100
+				threshold = cfg.GetTrainThreshold2()
 			}
 			if pm.TrainPoint >= threshold {
 				pm.TrainPoint = 0
@@ -951,8 +954,8 @@ func (p *PlayObject) magCanHitTarget(tx, ty int) bool {
 	if dy > steps {
 		steps = dy
 	}
-	if steps > 13 {
-		steps = 13
+	if steps > p.Engine.Config.GetMaxLOSCheck() {
+		steps = p.Engine.Config.GetMaxLOSCheck()
 	}
 	if steps <= 1 {
 		return true

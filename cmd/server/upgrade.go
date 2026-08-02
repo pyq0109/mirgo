@@ -10,12 +10,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const (
-	upgradeWeaponPrice    = 10000
-	upgradeGetBackTime    = 3600000 // 1小时（ms）
-	upgradeBlackIronName  = "黑铁矿"
-	upgradeMaxPoints      = 7 // 最大升级总点数
-)
+
 
 func (p *PlayObject) HandleUpgradeWeapon(npc *NpcObject, server *netserver.TCPServer) {
 	if npc == nil || !npc.CanUpgrade {
@@ -34,16 +29,18 @@ func (p *PlayObject) HandleUpgradeWeapon(npc *NpcObject, server *netserver.TCPSe
 		return
 	}
 
+	cfg := p.Engine.Config
+
 	// 检查金币
-	if p.Gold < upgradeWeaponPrice {
+	if p.Gold < cfg.GetUpgradeFee() {
 		p.execScriptLabel(npc, "upgrade_fail", server)
 		return
 	}
 
-	// 检查黑铁矿
+	// 检查升级材料
 	ironIdx := -1
 	if p.ItemDB != nil {
-		def := p.ItemDB.GetByName(upgradeBlackIronName)
+		def := p.ItemDB.GetByName(cfg.GetUpgradeMaterial())
 		if def != nil {
 			ironIdx = p.findBagItemByWIndex(uint16(def.Idx))
 		}
@@ -54,7 +51,7 @@ func (p *PlayObject) HandleUpgradeWeapon(npc *NpcObject, server *netserver.TCPSe
 	}
 
 	// 扣金币
-	p.Gold -= upgradeWeaponPrice
+	p.Gold -= cfg.GetUpgradeFee()
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
@@ -135,7 +132,7 @@ func (p *PlayObject) HandleGetBackupWeapon(npc *NpcObject, server *netserver.TCP
 		return
 	}
 
-	if len(p.ItemList) >= MaxBagItems {
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
 		p.execScriptLabel(npc, "upgrade_fail", server)
 		return
 	}
@@ -160,7 +157,7 @@ func (p *PlayObject) HandleGetBackupWeapon(npc *NpcObject, server *netserver.TCP
 	now := time.Now().UnixMilli()
 
 	// 等待时间检查（GM 可跳过）
-	if p.Permission < 10 && now-info.Tick < upgradeGetBackTime {
+	if p.Permission < 10 && now-info.Tick < p.Engine.Config.GetUpgradeWaitTime() {
 		npc.mu.Unlock()
 		p.execScriptLabel(npc, "upgrade_fail", server)
 		return
@@ -226,8 +223,8 @@ func (p *PlayObject) HandleGetBackupWeapon(npc *NpcObject, server *netserver.TCP
 	} else {
 		// 失败：设置破碎编码（攻击时触发 CheckWeaponUpgradeStatus）
 		weapon.BtValue[10] = 1
-		// 诅咒概率 30%
-		if rand.Intn(100) < 30 && weapon.BtValue[12] < 7 {
+		// 诅咒概率
+		if rand.Intn(100) < p.Engine.Config.GetUpgradeCurseChance() && weapon.BtValue[12] < 7 {
 			weapon.BtValue[12]++
 		}
 	}
@@ -311,7 +308,7 @@ func (p *PlayObject) CheckWeaponUpgradeStatus(server *netserver.TCPServer) {
 
 	// 检查总升级点数上限
 	totalUpgrades := int(weapon.BtValue[0]) + int(weapon.BtValue[1]) + int(weapon.BtValue[2])
-	if totalUpgrades+int(points) > upgradeMaxPoints {
+	if totalUpgrades+int(points) > p.Engine.Config.GetUpgradeMaxPoints() {
 		// 超限：武器破碎
 		p.UseItems[protocol.UWeapon] = nil
 		p.RecalcAbilitys()

@@ -132,16 +132,16 @@ func (e *Environment) AddHolyCurtainEvent(server *netserver.TCPServer, x, y, dam
 	e.broadcastShowEvent(server, ev)
 }
 
-// AddPileStonesEvent 创建碎石堆视觉事件（5分钟过期，无游戏逻辑）。
-func (e *Environment) AddPileStonesEvent(server *netserver.TCPServer, x, y int) {
+// AddPileStonesEvent 创建碎石堆视觉事件（无游戏逻辑）。
+func (e *Environment) AddPileStonesEvent(server *netserver.TCPServer, x, y int, durationMs int64) {
 	e.eventIDSeq++
 	ev := &MapEvent{
 		ServerID: e.eventIDSeq,
 		Type:     protocol.ETPileStones,
 		X:        x,
 		Y:        y,
-		Duration: 300000,
-		EndTick:  time.Now().UnixMilli() + 300000,
+		Duration: durationMs,
+		EndTick:  time.Now().UnixMilli() + durationMs,
 	}
 	e.Events = append(e.Events, ev)
 	e.broadcastShowEvent(server, ev)

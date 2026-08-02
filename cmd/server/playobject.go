@@ -247,12 +247,13 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	p.processPendingMagics(server, now)
 
 	if p.Death {
-		if p.deathTick > 0 && now-p.deathTick > 10000 && !p.skeletonSent {
+		cfg := p.Engine.Config
+		if p.deathTick > 0 && now-p.deathTick > cfg.GetDeathSkeletonDelay() && !p.skeletonSent {
 			p.skeletonSent = true
 			// 非新鲜死亡：SM_DEATH 直接显示尸体/骨架。
 			p.envir.broadcastDeathMsg(p.BaseObject, p.ID, p.CurrX, p.CurrY, p.Dir, false)
 		}
-		if now-p.deathTick > 180000 {
+		if now-p.deathTick > cfg.GetAutoReviveDelay() {
 			p.resurrect(server)
 		}
 		return
@@ -262,7 +263,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	p.processIncHealth(server, now)
 
 	// Delphi: FireHit 20s 过期 (ObjBase.pas:6427)
-	if p.FireHitActive && now-p.FireHitActivateTick > 20000 {
+	if p.FireHitActive && now-p.FireHitActivateTick > p.Engine.Config.GetFireHitWindow() {
 		p.FireHitActive = false
 	}
 
@@ -655,7 +656,7 @@ func (p *PlayObject) runIgnoreEntities() bool {
 // 返回 true 表示允许动作，false 表示拒绝（速度过快）。
 func (p *PlayObject) checkActionSpeed(now, interval int64, tick *int64, server *netserver.TCPServer) bool {
 	// E5: 超速计数衰减 — 10秒无违规则 -1
-	if p.OverSpeedCount > 0 && now-p.LastSpeedViolationTick > 10000 {
+	if p.OverSpeedCount > 0 && now-p.LastSpeedViolationTick > p.Engine.Config.GetSpeedDecayInterval() {
 		p.OverSpeedCount--
 		p.LastSpeedViolationTick = now
 	}
@@ -720,7 +721,7 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 
 	// Delphi: FireHit 是激活模型，不是直接攻击 (ObjBase.pas:9782)
 	if msg.Ident == protocol.CMFireHit {
-		if now-p.FireHitTick < 10000 {
+		if now-p.FireHitTick < p.Engine.Config.GetFireHitCooldown() {
 			sendCtrl(server, p.Session.ID, "FAIL")
 			return
 		}
@@ -733,7 +734,7 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	}
 	// Delphi: TwinHit 同理 (ObjBase.pas:9797)
 	if msg.Ident == protocol.CMTwinHit {
-		if now-p.TwinHitTick < 60000 {
+		if now-p.TwinHitTick < p.Engine.Config.GetTwinHitCooldown() {
 			return
 		}
 		p.TwinHitTick = now
@@ -763,7 +764,7 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 
 	// Delphi: FireHit 激活窗口内自动触发 (ObjBase.pas:6427)
 	fireHitTriggered := false
-	if p.FireHitActive && now-p.FireHitActivateTick < 20000 {
+	if p.FireHitActive && now-p.FireHitActivateTick < p.Engine.Config.GetFireHitWindow() {
 		fireHitTriggered = true
 		p.FireHitActive = false
 	}
@@ -1109,6 +1110,7 @@ func (p *PlayObject) calcDamage(target *BaseObject) int {
 }
 
 func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject, damage int, dir int) {
+	cfg := p.Engine.Config
 	// 安全区守卫不可被玩家伤害
 	if mon := p.envir.getMonsterByBase(target); mon != nil && mon.IsSafeZoneGuard {
 		return
@@ -1116,7 +1118,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 
 	// Delphi: 魔法盾 1.5x MP 消耗完全吸收 (ObjBase.pas:2455-2469)
 	if tp := p.envir.getPlayerByBase(target); tp != nil && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
-		mpCost := damage + damage/2 // 1.5x
+		mpCost := damage + damage*cfg.GetMagicShieldRatio()/100
 		mp := int(tp.WAbil.MP)
 		if mp >= mpCost {
 			tp.WAbil.MP -= uint16(mpCost)
@@ -1135,7 +1137,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 
 	// Delphi: 红毒增幅最终伤害 (ObjBase.pas:22472): damage * (nPosionDamagarmor/10)
 	if target.StatusTimeArr[POISON_DAMAGEARMOR] > 0 {
-		damage = damage + damage/5 // 默认 +20%
+		damage = damage + damage/cfg.GetRedPoisonBonus()
 	}
 
 	// Delphi: 不死系易伤 (ObjBase.pas:22428-22431)
@@ -1152,11 +1154,12 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		if antiPoison < 0 {
 			antiPoison = 0
 		}
-		if rand.Intn(antiPoison+5) == 0 {
+		if rand.Intn(antiPoison+cfg.GetParalysisDenom()) == 0 {
+			paraDuration := int16(cfg.GetParalysisDuration())
 			if tp := p.envir.getPlayerByBase(target); tp != nil {
-				tp.MakePoison(POISON_STONE, 50, 0)
+				tp.MakePoison(POISON_STONE, paraDuration, 0)
 			} else if mon := p.envir.getMonsterByBase(target); mon != nil {
-				mon.StatusTimeArr[POISON_STONE] = 50
+				mon.StatusTimeArr[POISON_STONE] = paraDuration
 			}
 		}
 	}
@@ -1171,7 +1174,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	// 攻击方武器磨损（Delphi: DoDamageWeapon, ObjBase.pas:18967）
 	if damage > 0 {
 		if wp := p.UseItems[protocol.UWeapon]; wp != nil && wp.Dura > 0 {
-			wear := damage / 5
+			wear := damage / cfg.GetDuraWearDivisor()
 			if wear < 1 {
 				wear = 1
 			}
@@ -1213,7 +1216,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		}
 		for i := 1; i < 13; i++ {
 			if it := tp.UseItems[i]; it != nil && it.Dura > 0 {
-				if rand.Intn(8) == 0 {
+				if rand.Intn(cfg.GetEquipWearChance()) == 0 {
 					it.Dura--
 					if it.Dura == 0 {
 						tp.UseItems[i] = nil
@@ -1234,7 +1237,7 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	if hp <= 0 {
 		if tp := p.envir.getPlayerByBase(target); tp != nil && tp.HasRevival {
 			tp.HasRevival = false
-			tp.WAbil.HP = tp.WAbil.MaxHP / 2
+			tp.WAbil.HP = tp.WAbil.MaxHP / uint16(cfg.GetReviveHPRatio())
 			tp.sendHealthSpell(server)
 		} else {
 			target.Death = true
@@ -1323,7 +1326,7 @@ func (p *PlayObject) sendDeathToClient(server *netserver.TCPServer, msg SendMess
 func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 	exp := mon.Exp
 	if exp <= 0 {
-		exp = 10
+		exp = p.Engine.Config.GetFallbackExp()
 	}
 
 	// Delphi: 经验倍率 (ObjBase.pas:1828-1842)
@@ -1380,7 +1383,7 @@ func (p *PlayObject) addExp(server *netserver.TCPServer, exp int) {
 		levelMsg := protocol.MakeDefaultMsg(protocol.SMLevelUp, int32(p.WAbil.Level), 0, 0, 0)
 		server.Send(p.Session.ID, levelMsg, "")
 
-		p.BonusPoint += 3
+		p.BonusPoint += p.Engine.Config.GetBonusPerLevel()
 
 		log.Logf(log.LevelInfo, "Combat", "%s leveled up to %d", p.Name, p.WAbil.Level)
 		leveledUp = true
@@ -1412,7 +1415,8 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 	if p.Death {
 		return
 	}
-	if now-p.lastRegenTick < 10000 {
+	cfg := p.Engine.Config
+	if now-p.lastRegenTick < cfg.GetHPRegenInterval() {
 		return
 	}
 	p.lastRegenTick = now
@@ -1426,7 +1430,7 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 		if regen < 1 {
 			regen = 1
 		}
-		if base := maxHP / 20; base > regen {
+		if base := maxHP / cfg.GetHPRegenRatio(); base > regen {
 			regen = base
 		}
 		hp := int(p.WAbil.HP) + regen
@@ -1442,7 +1446,7 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 		if regen < 1 {
 			regen = 1
 		}
-		if base := maxMP / 15; base > regen {
+		if base := maxMP / cfg.GetMPRegenRatio(); base > regen {
 			regen = base
 		}
 		mp := int(p.WAbil.MP) + regen
@@ -1540,9 +1544,10 @@ func (p *PlayObject) DropDeathItems(server *netserver.TCPServer) {
 	now := time.Now().UnixMilli()
 
 	// Delphi DropUseItems (ObjBase.pas:15487): 红名 1/15，普通 1/30。
-	equipRate := 30
+	cfg := p.Engine.Config
+	equipRate := cfg.GetDropEquipRate()
 	if p.PkPoint >= 200 {
-		equipRate = 15
+		equipRate = cfg.GetDropEquipRateRed()
 	}
 	equipChanged := false
 	for i := 0; i < 13; i++ {
@@ -1558,7 +1563,7 @@ func (p *PlayObject) DropDeathItems(server *netserver.TCPServer) {
 
 	var remaining []*protocol.UserItem
 	for _, item := range p.ItemList {
-		if rand.Intn(10) == 0 {
+		if rand.Intn(cfg.GetDropBagRate()) == 0 {
 			p.dropItemToGround(item, server, now)
 		} else {
 			remaining = append(remaining, item)
@@ -1599,7 +1604,7 @@ func (p *PlayObject) dropItemToGround(item *protocol.UserItem, server *netserver
 	}
 	p.envir.AddGroundItem(gi)
 	resp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))
-	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
+	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, p.ViewRange)
 	for _, obj := range objs {
 		if other, ok := obj.(*PlayObject); ok && !other.Ghost {
 			server.Send(other.Session.ID, resp, protocol.EncodeString(gi.Name))
@@ -1610,7 +1615,7 @@ func (p *PlayObject) dropItemToGround(item *protocol.UserItem, server *netserver
 func (p *PlayObject) resurrect(server *netserver.TCPServer) {
 	p.Death = false
 	p.skeletonSent = false
-	p.WAbil.HP = p.WAbil.MaxHP / 2
+	p.WAbil.HP = p.WAbil.MaxHP / uint16(p.Engine.Config.GetReviveHPRatio())
 	p.WAbil.MP = p.WAbil.MaxMP / 2
 
 	if p.envir != nil {
@@ -1685,7 +1690,7 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 	} else {
 		added := false
 		if item.UserItem != nil {
-			if len(p.ItemList) < MaxBagItems {
+			if len(p.ItemList) < p.Engine.Config.GetMaxBagSlots() {
 				// 负重检查（Delphi: IsAddWeightAvailable, ObjBase.pas:2085）
 				if p.ItemDB != nil {
 					if def := p.ItemDB.GetByIdx(int(item.UserItem.WIndex)); def != nil {
@@ -1719,7 +1724,7 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 	p.envir.RemoveGroundItem(item.ID)
 
 	hideResp := protocol.MakeDefaultMsg(protocol.SMItemHide, item.ID, 0, 0, 0)
-	objs := p.envir.GetRangeObjects(item.X, item.Y, viewRange)
+	objs := p.envir.GetRangeObjects(item.X, item.Y, p.ViewRange)
 	for _, obj := range objs {
 		op, ok := obj.(*PlayObject)
 		if !ok || op.Ghost {
@@ -1813,7 +1818,7 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 		entry.Flag = 0
 	}
 
-	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
+	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, p.ViewRange)
 	for _, obj := range objs {
 		var id int32
 		var skip bool
@@ -1870,7 +1875,7 @@ func (p *PlayObject) SearchViewRange(server *netserver.TCPServer) {
 	for _, item := range p.envir.GroundItems {
 		dx := abs(item.X - p.CurrX)
 		dy := abs(item.Y - p.CurrY)
-		if dx <= viewRange && dy <= viewRange {
+		if dx <= p.ViewRange && dy <= p.ViewRange {
 			if !p.knownItems[item.ID] {
 				p.knownItems[item.ID] = true
 				resp := protocol.MakeDefaultMsg(protocol.SMItemShow, item.ID, uint16(item.X), uint16(item.Y), uint16(item.Looks))
@@ -2107,7 +2112,7 @@ const MaxSlaveCount = 2
 
 func (p *PlayObject) addSlave(id int32) bool {
 	p.cleanSlaveList()
-	if len(p.SlaveIDs) >= MaxSlaveCount {
+	if len(p.SlaveIDs) >= p.Engine.Config.GetMaxSlaves() {
 		return false
 	}
 	p.SlaveIDs = append(p.SlaveIDs, id)
@@ -2140,7 +2145,7 @@ func (p *PlayObject) cleanSlaveList() {
 }
 
 func (p *PlayObject) gainSlaveExp() {
-	if p.SlaveLevel < 7 {
+	if p.SlaveLevel < p.Engine.Config.GetMaxSlaveLevel() {
 		p.SlaveLevel++
 		for _, mon := range p.Engine.Monsters {
 			if mon.PlayerMasterID == p.ID && !mon.Death {
@@ -2200,7 +2205,8 @@ func (p *PlayObject) isNearNpc(npc *NpcObject) bool {
 	if npc == nil || p.MapName != npc.MapName {
 		return false
 	}
+	dist := p.Engine.Config.GetNPCInteractDist()
 	dx := p.CurrX - npc.CurrX
 	dy := p.CurrY - npc.CurrY
-	return dx >= -15 && dx <= 15 && dy >= -15 && dy <= 15
+	return dx >= -dist && dx <= dist && dy >= -dist && dy <= dist
 }

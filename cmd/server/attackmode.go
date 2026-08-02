@@ -13,12 +13,6 @@ const (
 	AttackModeGuild  = 2
 	AttackModeAll    = 3
 	AttackModePK     = 4
-
-	// Delphi: PK 保护配置 (ObjBase.pas:21258-21330)
-	pkProtectLevel    = 7  // 等级保护：目标 <= 此等级且攻方高出 10 级以上时受保护
-	pkProtectDiff     = 10 // 等级差阈值
-	redPKProtectLevel = 15 // 红名保护：红名玩家不可攻击 <= 此等级的玩家
-	mapEnterProtect   = int64(3000) // 切图保护时间(ms)
 )
 
 func (p *PlayObject) HandleChangeAttackMode(msg SendMessage, server *netserver.TCPServer) {
@@ -32,9 +26,10 @@ func (p *PlayObject) HandleChangeAttackMode(msg SendMessage, server *netserver.T
 // IsProtectTarget 玩家保护判定（Delphi ObjBase.pas:21258-21330）。
 func (p *PlayObject) IsProtectTarget(target *PlayObject) bool {
 	now := time.Now().UnixMilli()
+	cfg := p.Engine.Config
 
-	// 切图 3 秒保护
-	if target.EnterMapTick > 0 && now-target.EnterMapTick < mapEnterProtect {
+	// 切图保护
+	if target.EnterMapTick > 0 && now-target.EnterMapTick < cfg.GetMapEnterProtect() {
 		return true
 	}
 
@@ -42,12 +37,12 @@ func (p *PlayObject) IsProtectTarget(target *PlayObject) bool {
 	attackerLevel := int(p.WAbil.Level)
 
 	// 红名保护：红名玩家不可攻击低等级玩家
-	if p.PKLevel() >= 2 && targetLevel <= redPKProtectLevel {
+	if p.PKLevel() >= 2 && targetLevel <= cfg.GetPKRedProtectLevel() {
 		return true
 	}
 
-	// 等级保护：低等级玩家受保护（攻方高出 10 级以上）
-	if targetLevel <= pkProtectLevel && attackerLevel-targetLevel > pkProtectDiff {
+	// 等级保护：低等级玩家受保护
+	if targetLevel <= cfg.GetPKProtectLevel() && attackerLevel-targetLevel > cfg.GetPKProtectDiff() {
 		return true
 	}
 

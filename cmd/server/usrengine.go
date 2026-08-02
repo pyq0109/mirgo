@@ -108,7 +108,7 @@ func (e *UserEngine) ProcessDoors(currentTick int64) {
 	e.mapMgr.mu.RLock()
 	defer e.mapMgr.mu.RUnlock()
 	for _, env := range e.mapMgr.maps {
-		ProcessDoors(env, currentTick)
+		ProcessDoors(env, currentTick, e.Config)
 	}
 }
 

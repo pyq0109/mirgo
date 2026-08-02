@@ -8,7 +8,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const maxFriends = 50
+
 
 // HandleAddFriend 添加好友（CMAddFriend, body=目标玩家名）。
 func (p *PlayObject) HandleAddFriend(msg SendMessage, server *netserver.TCPServer) {
@@ -17,7 +17,7 @@ func (p *PlayObject) HandleAddFriend(msg SendMessage, server *netserver.TCPServe
 		p.sendAddFriendFail(server)
 		return
 	}
-	if len(p.Friends) >= maxFriends {
+	if len(p.Friends) >= p.Engine.Config.GetMaxFriends() {
 		p.sendAddFriendFail(server)
 		return
 	}

@@ -23,55 +23,56 @@ func getDropPosition(envir *Environment, cx, cy, scatterRange int) (int, int) {
 }
 
 // randomUpgradeItem 随机生成装备附加属性（Delphi: RandomUpgradeItem, ItmUnit.pas:179）。
-func randomUpgradeItem(ui *protocol.UserItem, def *ItemDef) {
+func randomUpgradeItem(ui *protocol.UserItem, def *ItemDef, chances []int) {
+	c0, c1, c2, c3, c4 := chances[0], chances[1], chances[2], chances[3], chances[4]
 	switch {
 	case def.StdMode >= 5 && def.StdMode <= 6: // 武器
-		if rand.Intn(15) == 0 {
+		if rand.Intn(c0) == 0 {
 			ui.BtValue[0]++ // DC
 		}
-		if rand.Intn(15) == 0 {
+		if rand.Intn(c0) == 0 {
 			ui.BtValue[1]++ // MC
 		}
-		if rand.Intn(15) == 0 {
+		if rand.Intn(c0) == 0 {
 			ui.BtValue[2]++ // SC
 		}
-		if rand.Intn(24) == 0 {
+		if rand.Intn(c1) == 0 {
 			ui.BtValue[5]++ // AC
 		}
-		if rand.Intn(20) == 0 {
+		if rand.Intn(c2) == 0 {
 			ui.BtValue[6]++ // MAC
 		}
 	case def.StdMode == 10 || def.StdMode == 11: // 衣服
-		if rand.Intn(30) == 0 {
+		if rand.Intn(c3) == 0 {
 			ui.BtValue[0]++ // AC
 		}
-		if rand.Intn(30) == 0 {
+		if rand.Intn(c3) == 0 {
 			ui.BtValue[1]++ // MAC
 		}
-		if rand.Intn(40) == 0 {
+		if rand.Intn(c4) == 0 {
 			ui.BtValue[2]++ // DC
 		}
-		if rand.Intn(40) == 0 {
+		if rand.Intn(c4) == 0 {
 			ui.BtValue[3]++ // MC
 		}
-		if rand.Intn(40) == 0 {
+		if rand.Intn(c4) == 0 {
 			ui.BtValue[4]++ // SC
 		}
 	case def.StdMode >= 15 && def.StdMode <= 26: // 首饰
-		if rand.Intn(15) == 0 {
+		if rand.Intn(c0) == 0 {
 			ui.BtValue[0]++ // DC
 		}
-		if rand.Intn(15) == 0 {
+		if rand.Intn(c0) == 0 {
 			ui.BtValue[1]++ // MC
 		}
-		if rand.Intn(15) == 0 {
+		if rand.Intn(c0) == 0 {
 			ui.BtValue[2]++ // SC
 		}
 	}
 }
 
 // createDropItem 创建掉落物品实例，含随机耐久和随机属性。
-func createDropItem(itemDB *ItemDB, name string, nextItemID *int32) (int, *protocol.UserItem) {
+func createDropItem(itemDB *ItemDB, name string, nextItemID *int32, cfg *ServerConfig) (int, *protocol.UserItem) {
 	looks := 0
 	var ui *protocol.UserItem
 	if itemDB != nil {
@@ -79,13 +80,13 @@ func createDropItem(itemDB *ItemDB, name string, nextItemID *int32) (int, *proto
 			looks = int(def.Looks)
 			ui = itemDB.CreateUserItem(def.Idx)
 			if ui != nil {
-				// 装备类随机耐久 20%-99%（Delphi: MonGetRandomItems, UsrEngn.pas:1576）
+				// 装备类随机耐久（Delphi: MonGetRandomItems, UsrEngn.pas:1576）
 				if def.StdMode >= 5 && ui.DuraMax > 0 {
-					ui.Dura = uint16(int(ui.DuraMax) * (20 + rand.Intn(80)) / 100)
+					ui.Dura = uint16(int(ui.DuraMax) * (cfg.GetEquipDuraMin() + rand.Intn(cfg.GetEquipDuraRand())) / 100)
 				}
-				// 1/10 概率随机附加属性（Delphi: nMonRandomAddValue=10）
-				if def.StdMode >= 5 && rand.Intn(10) == 0 {
-					randomUpgradeItem(ui, def)
+				// 随机附加属性（Delphi: nMonRandomAddValue）
+				if def.StdMode >= 5 && rand.Intn(cfg.GetAddValueChance()) == 0 {
+					randomUpgradeItem(ui, def, cfg.GetEquipUpgChances())
 				}
 				ui.MakeIndex = *nextItemID
 			}
@@ -94,21 +95,21 @@ func createDropItem(itemDB *ItemDB, name string, nextItemID *int32) (int, *proto
 	return looks, ui
 }
 
-func (m *MonsterObject) DropLoot(envir *Environment, nextItemID *int32, server *netserver.TCPServer, itemDB *ItemDB) {
-	m.DropLootWithTable(envir, nextItemID, server, nil, itemDB)
+func (m *MonsterObject) DropLoot(envir *Environment, nextItemID *int32, server *netserver.TCPServer, itemDB *ItemDB, cfg *ServerConfig) {
+	m.DropLootWithTable(envir, nextItemID, server, nil, itemDB, cfg)
 }
 
-func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32, server *netserver.TCPServer, dt *DropTable, itemDB *ItemDB) {
+func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32, server *netserver.TCPServer, dt *DropTable, itemDB *ItemDB, cfg *ServerConfig) {
 	now := time.Now().UnixMilli()
 	ownerID := m.LastHiterID
 	var dropped []*GroundItem
 
 	addGold := func(totalGold int) {
-		// 分堆：每堆最多 2000，最多 17 堆（Delphi: ScatterGolds, ObjBase.pas:20655）
-		for totalGold > 0 && len(dropped) < 17 {
+		// 分堆（Delphi: ScatterGolds, ObjBase.pas:20655）
+		for totalGold > 0 && len(dropped) < cfg.GetMaxGoldPiles() {
 			pile := totalGold
-			if pile > 2000 {
-				pile = 2000
+			if pile > cfg.GetMaxGoldPerPile() {
+				pile = cfg.GetMaxGoldPerPile()
 			}
 			totalGold -= pile
 			x, y := getDropPosition(envir, m.CurrX, m.CurrY, 3)
@@ -131,7 +132,7 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 
 	addItem := func(name string) {
 		x, y := getDropPosition(envir, m.CurrX, m.CurrY, 3)
-		looks, ui := createDropItem(itemDB, name, nextItemID)
+		looks, ui := createDropItem(itemDB, name, nextItemID, cfg)
 		gi := &GroundItem{
 			ID:        *nextItemID,
 			Name:      name,
@@ -164,10 +165,10 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 			}
 		}
 	} else {
-		if rand.Intn(100) < 30 {
+		if rand.Intn(100) < cfg.GetFallbackGoldRate() {
 			addGold(10 + rand.Intn(41))
 		}
-		if rand.Intn(100) < 10 {
+		if rand.Intn(100) < cfg.GetFallbackItemRate() {
 			addItem("金创药(小量)")
 		}
 	}

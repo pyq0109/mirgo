@@ -8,14 +8,10 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const (
-	doorCloseDelay = 5000
-)
-
-func ProcessDoors(envir *Environment, currentTick int64) {
+func ProcessDoors(envir *Environment, currentTick int64, cfg *ServerConfig) {
 	for i := range envir.Doors {
 		door := &envir.Doors[i]
-		if door.State == 1 && currentTick-door.OpenTick > doorCloseDelay {
+		if door.State == 1 && currentTick-door.OpenTick > cfg.GetDoorCloseDelay() {
 			door.State = 0
 			log.Logf(log.LevelDebug, "Doors", "door %d auto-closed at (%d,%d)", door.ID, door.X, door.Y)
 			if envir.rawMap != nil {

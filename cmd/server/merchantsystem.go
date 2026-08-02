@@ -320,9 +320,9 @@ func (p *PlayObject) calcBuyPrice(npc *NpcObject, def *ItemDef, item *protocol.U
 		rate := npc.PriceRate
 		if npc.Castle && p.Engine != nil && p.Engine.Castle != nil &&
 			p.Engine.Castle.IsDefendingGuild(p.GuildName) {
-			rate = rate * 80 / 100 // nCastleMemberPriceRate=80
-			if rate < 60 {
-				rate = 60
+			rate = rate * p.Engine.Config.GetCastleDiscount() / 100
+			if rate < p.Engine.Config.GetCastleMinRate() {
+				rate = p.Engine.Config.GetCastleMinRate()
 			}
 		}
 		price = price * rate / 100
@@ -350,7 +350,7 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 		p.sendBuyFail(server)
 		return
 	}
-	if len(p.ItemList) >= MaxBagItems {
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
 		p.sendBuyFail(server)
 		return
 	}
@@ -407,7 +407,7 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 	p.Gold -= price
 	// 城堡税（Delphi Castle.pas:1022-1061）
 	if npc != nil && npc.Castle && p.Engine != nil && p.Engine.Castle != nil {
-		p.Engine.Castle.CollectTax(int64(price * 5 / 100))
+		p.Engine.Castle.CollectTax(int64(price * p.Engine.Config.GetCastleTaxRate() / 100))
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
@@ -563,9 +563,9 @@ func (p *PlayObject) HandleRepairItem(msg SendMessage, server *netserver.TCPServ
 		// 特殊修理：不降低 DuraMax
 		item.Dura = item.DuraMax
 	} else {
-		// 普通修理：永久降低 DuraMax（Delphi nRepairItemDecDura=30）
+		// 普通修理：永久降低 DuraMax（Delphi nRepairItemDecDura）
 		lostDura := int(item.DuraMax) - int(item.Dura)
-		decay := lostDura / 30
+		decay := lostDura / p.Engine.Config.GetRepairDuraDivisor()
 		if decay > 0 && int(item.DuraMax) > decay {
 			item.DuraMax -= uint16(decay)
 		}
@@ -615,6 +615,7 @@ func (p *PlayObject) calcRepairCost(def *ItemDef, item *protocol.UserItem, isSpe
 	if item.DuraMax == 0 {
 		return 0
 	}
+	cfg := p.Engine.Config
 	// Delphi 公式: price / 3 / DuraMax * (DuraMax - Dura)
 	lostDura := int(item.DuraMax) - int(item.Dura)
 	cost := int(def.Price) / 3 * lostDura / int(item.DuraMax)
@@ -622,7 +623,7 @@ func (p *PlayObject) calcRepairCost(def *ItemDef, item *protocol.UserItem, isSpe
 		cost = 1
 	}
 	if isSpecial {
-		cost *= 3 // 特殊修理费用为普通的 3 倍
+		cost *= cfg.GetSpecialRepairMult()
 	}
 	return cost
 }

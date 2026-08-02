@@ -8,7 +8,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/netserver"
 )
 
-const MaxApprenticeCount = 3
+
 
 func (p *PlayObject) HasMaster() bool {
 	return p.MasterName != ""
@@ -39,7 +39,7 @@ func (p *PlayObject) TakeMaster(server *netserver.TCPServer, masterName string) 
 		p.sysMsg(server, "师傅的等级必须高于你")
 		return false
 	}
-	if len(master.ApprenticeNames) >= MaxApprenticeCount {
+	if len(master.ApprenticeNames) >= p.Engine.Config.GetMaxApprentices() {
 		p.sysMsg(server, masterName+" 的徒弟数量已满")
 		return false
 	}

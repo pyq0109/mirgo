@@ -223,6 +223,10 @@ func main() {
 		player.ItemDB = itemDB
 		player.MagicDB = magicDB
 		player.Engine = userEngine
+		player.WalkSpeed = config.GetDefaultWalkSpeed()
+		player.RunSpeed = config.GetDefaultWalkSpeed()
+		player.visionInterval = config.GetVisionInterval() + rand.Int63n(config.GetVisionRand())
+		player.ViewRange = config.GetViewRange()
 		player.MapName = charData.Map
 		player.CurrX = charData.X
 		player.CurrY = charData.Y
@@ -392,7 +396,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	ticker := time.NewTicker(time.Second / time.Duration(10))
+	ticker := time.NewTicker(time.Duration(config.GetTickInterval()) * time.Millisecond)
 	defer ticker.Stop()
 
 	sigChan := make(chan os.Signal, 1)
@@ -415,11 +419,11 @@ func main() {
 			if userEngine.Castle != nil {
 				userEngine.Castle.ProcessCastleTick(userEngine, server, now)
 			}
-			if tickCount%300 == 0 {
+			if tickCount%int64(config.GetSaveInterval()) == 0 {
 				userEngine.ProcessNpcs()
 				userEngine.SaveAllPlayers(db)
 			}
-			if tickCount%600 == 0 {
+			if tickCount%int64(config.GetGuildSaveInterval()) == 0 {
 				userEngine.SaveGuilds()
 			}
 		case sig := <-sigChan:
@@ -460,7 +464,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		password := ue.Password()
 		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] registration attempt: %s", username)
 		// Delphi SM_NEWID_FAIL Recog: 0=已存在, -2=系统繁忙, 其他=非法 (ClMain.pas:3694-3702)。
-		if len(username) < 3 || len(username) > 10 || len(password) < 3 || len(password) > 10 {
+		if len(username) < config.GetMinAcctLen() || len(username) > config.GetMaxAcctLen() || len(password) < config.GetMinPassLen() || len(password) > config.GetMaxPassLen() {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -1, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -518,7 +522,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		// 登录失败锁定检查（Delphi: 5次后锁定60秒，LoginSrv/LMain.pas:1218-1230）
 		loginAttempts.Lock()
 		attempt := loginAttempts.m[username]
-		if attempt != nil && attempt.count >= 5 && time.Since(attempt.lockTime) < 60*time.Second {
+		if attempt != nil && attempt.count >= config.GetLoginMaxAttempts() && time.Since(attempt.lockTime) < time.Duration(config.GetLoginLockoutSecs())*time.Second {
 			loginAttempts.Unlock()
 			log.Logf(log.LevelWarn, "Server", "account locked (too many attempts): %s", username)
 			resp := protocol.MakeDefaultMsg(protocol.SMPasswdFail, -2, 0, 0, 0)
@@ -544,7 +548,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 				loginAttempts.m[username] = &loginAttempt{}
 			}
 			loginAttempts.m[username].count++
-			if loginAttempts.m[username].count >= 5 {
+			if loginAttempts.m[username].count >= config.GetLoginMaxAttempts() {
 				loginAttempts.m[username].lockTime = time.Now()
 			}
 			loginAttempts.Unlock()
@@ -619,14 +623,14 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		log.Logf(log.LevelInfo, "Server", "[CMNewChr] name=%q job=%d sex=%d hair=%d account=%d",
 			charName, job, sex, hair, session.CharacterID)
 
-		if charName == "" || len([]rune(charName)) > 14 {
+		if charName == "" || len([]rune(charName)) > config.GetMaxNameLen() {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 
 		chars, err := db.GetCharactersByAccount(session.CharacterID)
-		if err == nil && len(chars) >= 2 {
+		if err == nil && len(chars) >= config.GetMaxCharsPerAcct() {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 3, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return

@@ -191,7 +191,7 @@ func (p *PlayObject) HandleAddGroupMember(msg SendMessage, server *netserver.TCP
 	}
 	targetName := strings.TrimSpace(msg.Msg)
 	target := p.Engine.GetPlayerByName(targetName)
-	if target == nil || !target.AllowGroup || target.partyOf() != nil || len(party.Members) >= 11 {
+	if target == nil || !target.AllowGroup || target.partyOf() != nil || len(party.Members) >= p.Engine.Config.GetGroupMembersMax() {
 		resp := protocol.MakeDefaultMsg(protocol.SMGroupAddMemFail, 0, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 		return

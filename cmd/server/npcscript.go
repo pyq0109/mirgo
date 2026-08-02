@@ -478,7 +478,7 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		}
 		return p.countItem(itemName) >= count
 	case "CHECKBAGGAGE":
-		return len(p.ItemList) < MaxBagItems
+		return len(p.ItemList) < p.Engine.Config.GetMaxBagSlots()
 	case "CHECKHP":
 		val, op := parseConditionValue(parts)
 		return compareOp(int(p.WAbil.HP), op, val)
@@ -870,7 +870,7 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 			return true
 		}
 		n, _ := strconv.Atoi(parts[1])
-		return len(p.ItemList)+n <= MaxBagItems
+		return len(p.ItemList)+n <= p.Engine.Config.GetMaxBagSlots()
 
 	// Delphi ObjNpc.pas:10384-10400 CHECKOFGUILD guildName
 	case "CHECKOFGUILD":

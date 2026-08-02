@@ -7,7 +7,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const MaxStorageItems = 39
+
 
 // sendStorageMenu 打开仓库界面（Delphi BoStorageMenu）：先发送模式消息，
 // 再发送完整物品列表。
@@ -43,7 +43,7 @@ func (p *PlayObject) HandleStorageItem(msg SendMessage, server *netserver.TCPSer
 	if bagIdx < 0 {
 		return
 	}
-	if len(p.StorageItems) >= MaxStorageItems {
+	if len(p.StorageItems) >= p.Engine.Config.GetMaxStorageSlots() {
 		resp := protocol.MakeDefaultMsg(protocol.SMStorageFull, 0, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 		return
@@ -73,7 +73,7 @@ func (p *PlayObject) HandleTakeBackStorageItem(msg SendMessage, server *netserve
 		server.Send(p.Session.ID, resp, "")
 		return
 	}
-	if len(p.ItemList) >= MaxBagItems {
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
 		resp := protocol.MakeDefaultMsg(protocol.SMTakeBackStorageItemFullBag, 0, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 		return

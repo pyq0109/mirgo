@@ -100,10 +100,16 @@ func (o *MonsterObject) runBaseAI(server *netserver.TCPServer, target *PlayObjec
 }
 
 func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	burrowTriggerDist := 3
+	reburrowDist := 4
+	if o.engine != nil && o.engine.Config != nil {
+		burrowTriggerDist = o.engine.Config.GetBurrowTriggerDist()
+		reburrowDist = o.engine.Config.GetReburrowDist()
+	}
 	// Delphi TStickMonster/TDigOutZombi: 使用 FixedHide（m_boFixedHideMode）
 	if o.FixedHide {
 		// 潜地中：目标进入 4 格内出现（Delphi nComeOutValue=4，|dx|<4 && |dy|<4）
-		if dist <= 3 {
+		if dist <= burrowTriggerDist {
 			o.FixedHide = false
 			o.SendRefMsg(RM_DIGUP, o.Dir, o.CurrX, o.CurrY, o.Name)
 			log.Logf(log.LevelInfo, "Monster", "%s emerged from underground", o.Name)
@@ -120,7 +126,7 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 		// 目标超出 nAttackRange=4 → ComeDown 回潜
 		if dist <= 1 {
 			o.meleeAttack(server, target, now)
-		} else if dist > 4 {
+		} else if dist > reburrowDist {
 			o.FixedHide = true
 			o.TargetID = 0
 			o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
@@ -138,7 +144,7 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 	} else {
 		o.chaseTarget(target.BaseObject, now)
 		// 远距离低概率回潜
-		if rand.Intn(30) == 0 && dist > 4 {
+		if rand.Intn(30) == 0 && dist > reburrowDist {
 			o.FixedHide = true
 			o.SendRefMsg(RM_DIGDOWN, 0, o.CurrX, o.CurrY, "")
 		}
@@ -146,8 +152,12 @@ func (o *MonsterObject) runBurrowAI(server *netserver.TCPServer, target *PlayObj
 }
 
 func (o *MonsterObject) runExplodeAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	explodeTimer := int64(60000)
+	if o.engine != nil && o.engine.Config != nil {
+		explodeTimer = o.engine.Config.GetExplodeTimer()
+	}
 	// Delphi: 60秒自毁计时器（ObjMon2.pas:804-814）
-	if o.spawnTick > 0 && now-o.spawnTick > 60000 {
+	if o.spawnTick > 0 && now-o.spawnTick > explodeTimer {
 		o.explode(server, target, now)
 		return
 	}
@@ -167,9 +177,15 @@ func (o *MonsterObject) explode(server *netserver.TCPServer, target *PlayObject,
 	}
 	o.HitTick = now
 	// Delphi: 50% 物理 + 50% 魔法（GetHitStruckDamage + GetMagStruckDamage）
-	power := o.MaxHP / 2
-	if power < 50 {
-		power = 50
+	explodePowerDiv := 2
+	explodePowerMin := 50
+	if o.engine != nil && o.engine.Config != nil {
+		explodePowerDiv = o.engine.Config.GetExplodePowerDiv()
+		explodePowerMin = o.engine.Config.GetExplodePowerMin()
+	}
+	power := o.MaxHP / explodePowerDiv
+	if power < explodePowerMin {
+		power = explodePowerMin
 	}
 	for dy := -1; dy <= 1; dy++ {
 		for dx := -1; dx <= 1; dx++ {
@@ -270,12 +286,18 @@ func (o *MonsterObject) runCloneAI(server *netserver.TCPServer, e *UserEngine, t
 	if e == nil || o.envir == nil {
 		return
 	}
-	if int(o.WAbil.HP) < o.MaxHP/3 && e.countLiveChildren(o.ID) < 2 && now-o.lastSummonTick > 20000 {
+	cloneThreshold := 3
+	cloneCooldown := int64(20000)
+	if e.Config != nil {
+		cloneThreshold = e.Config.GetCloneThreshold()
+		cloneCooldown = e.Config.GetCloneCooldown()
+	}
+	if int(o.WAbil.HP) < o.MaxHP/cloneThreshold && e.countLiveChildren(o.ID) < 2 && now-o.lastSummonTick > cloneCooldown {
 		o.lastSummonTick = now
 		cx := o.CurrX + rand.Intn(3) - 1
 		cy := o.CurrY + rand.Intn(3) - 1
 		if clone := e.spawnChild(o, "", cx, cy, now); clone != nil {
-			clone.MaxHP = o.MaxHP / 3
+			clone.MaxHP = o.MaxHP / cloneThreshold
 			clone.WAbil.MaxHP = uint16(clone.MaxHP)
 			clone.WAbil.HP = uint16(clone.MaxHP)
 			log.Logf(log.LevelInfo, "Monster", "%s spawned clone at (%d,%d)", o.Name, cx, cy)
@@ -378,7 +400,11 @@ func (o *MonsterObject) runDualAxeAI(server *netserver.TCPServer, target *PlayOb
 		o.meleeAttack(server, target, now)
 		return
 	}
-	if dist <= 7 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+	dualAxeRange := 7
+	if o.engine != nil && o.engine.Config != nil {
+		dualAxeRange = o.engine.Config.GetDualAxeRange()
+	}
+	if dist <= dualAxeRange && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick > o.AttackSpeed {
 			o.HitTick = now
 			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -439,7 +465,13 @@ func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObje
 		o.chaseTarget(target.BaseObject, now)
 		return
 	}
-	if dist <= 2 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+	leechRange := 2
+	leechBoostRatio := 150
+	if o.engine != nil && o.engine.Config != nil {
+		leechRange = o.engine.Config.GetLeechRange()
+		leechBoostRatio = o.engine.Config.GetLeechBoostRatio()
+	}
+	if dist <= leechRange && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick < o.AttackSpeed {
 			return
 		}
@@ -447,7 +479,7 @@ func (o *MonsterObject) runLeechAI(server *netserver.TCPServer, target *PlayObje
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 		damage := o.calcMonsterMagicDamage(target.BaseObject)
 		if int(o.WAbil.HP) < o.MaxHP/2 {
-			damage = damage * 3 / 2
+			damage = damage * leechBoostRatio / 100
 		}
 		o.applyMonsterDamageToPlayer(server, target, damage, now)
 		divisor := o.leechDivisor
@@ -476,7 +508,13 @@ func (o *MonsterObject) runCriticalAI(server *netserver.TCPServer, target *PlayO
 		o.meleeAttack(server, target, now)
 		return
 	}
-	if dist <= 7 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+	critRange := 7
+	critChance := 4
+	if o.engine != nil && o.engine.Config != nil {
+		critRange = o.engine.Config.GetCritRange()
+		critChance = o.engine.Config.GetCritChance()
+	}
+	if dist <= critRange && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick > o.AttackSpeed {
 			o.HitTick = now
 			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -486,7 +524,7 @@ func (o *MonsterObject) runCriticalAI(server *netserver.TCPServer, target *PlayO
 			}
 			if rand.Intn(spd) < o.HitPoint {
 				damage := o.calcMonsterDamage(target.BaseObject)
-				if rand.Intn(4) == 0 {
+				if rand.Intn(critChance) == 0 {
 					damage *= 2
 				}
 				o.applyMonsterDamageToPlayer(server, target, damage, now)
@@ -510,7 +548,11 @@ func (o *MonsterObject) runFireballAI(server *netserver.TCPServer, target *PlayO
 		o.chaseTarget(target.BaseObject, now)
 		return
 	}
-	if dist <= 8 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+	fireballRange := 8
+	if o.engine != nil && o.engine.Config != nil {
+		fireballRange = o.engine.Config.GetFireballRange()
+	}
+	if dist <= fireballRange && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick > o.AttackSpeed {
 			o.HitTick = now
 			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -547,7 +589,11 @@ func (o *MonsterObject) runSpitAI(server *netserver.TCPServer, target *PlayObjec
 		o.meleeAttack(server, target, now)
 		return
 	}
-	if dist <= 2 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+	spitRange := 2
+	if o.engine != nil && o.engine.Config != nil {
+		spitRange = o.engine.Config.GetSpitRange()
+	}
+	if dist <= spitRange && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 		if now-o.HitTick > o.AttackSpeed {
 			o.HitTick = now
 			o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -593,7 +639,11 @@ func (o *MonsterObject) runSpawnHiveAI(server *netserver.TCPServer, e *UserEngin
 	if e == nil || o.envir == nil {
 		return
 	}
-	if e.countLiveChildren(o.ID) >= 15 {
+	hiveMaxChildren := 15
+	if e.Config != nil {
+		hiveMaxChildren = e.Config.GetHiveMaxChildren()
+	}
+	if e.countLiveChildren(o.ID) >= hiveMaxChildren {
 		return
 	}
 	x, y := o.CurrX, o.CurrY
@@ -612,9 +662,15 @@ func (o *MonsterObject) runSpawnHiveAI(server *netserver.TCPServer, e *UserEngin
 // 潜地 → 目标进入 4 格且距上次动作 >10s → 出土（回满血）→ 每 3s+ 对 6 格内
 // 所有玩家魔法 AoE + 25% 中毒 → 10s 无法攻击则回潜。
 func (o *MonsterObject) runCentiKingAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	centipedeCooldown := int64(10000)
+	centipedeAoEInterval := int64(3000)
+	if o.engine != nil && o.engine.Config != nil {
+		centipedeCooldown = o.engine.Config.GetCentipedeCooldown()
+		centipedeAoEInterval = o.engine.Config.GetCentipedeAoEInterval()
+	}
 	if o.FixedHide {
 		// 潜地中：|dx|<4 && |dy|<4（切比雪夫 ≤3）且距上次动作超过 10 秒 → 出土
-		if now-o.attickTick > 10000 && dist <= 3 {
+		if now-o.attickTick > centipedeCooldown && dist <= 3 {
 			o.FixedHide = false
 			o.WAbil.HP = uint16(o.MaxHP) // Delphi ComeOut: HP 回满
 			o.attickTick = now
@@ -623,7 +679,7 @@ func (o *MonsterObject) runCentiKingAI(server *netserver.TCPServer, target *Play
 		}
 		return
 	}
-	if o.envir != nil && now-o.attickTick > 3000 && dist <= 6 {
+	if o.envir != nil && now-o.attickTick > centipedeAoEInterval && dist <= 6 {
 		o.attickTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 		o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
@@ -650,7 +706,7 @@ func (o *MonsterObject) runCentiKingAI(server *netserver.TCPServer, target *Play
 		return
 	}
 	// 出土后 10 秒未能攻击 → 回潜
-	if now-o.attickTick > 10000 {
+	if now-o.attickTick > centipedeCooldown {
 		o.FixedHide = true
 		o.TargetID = 0
 		o.attickTick = now
@@ -662,6 +718,16 @@ func (o *MonsterObject) runCentiKingAI(server *netserver.TCPServer, target *Play
 // 血量阶段：HP 每跌破一个 1/7 档（档 ≥ 2）→ 停滞 8 秒（停攻）→ 狂暴 8 秒
 // （AttackSpeed=500, WalkSpeed=400）→ 恢复。
 func (o *MonsterObject) runCowKingAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	cowKingStunSpeed := int64(10000)
+	cowKingRageDuration := int64(8000)
+	cowKingBerserkAtk := int64(500)
+	cowKingBerserkWalk := int64(400)
+	if o.engine != nil && o.engine.Config != nil {
+		cowKingStunSpeed = o.engine.Config.GetCowKingStunSpeed()
+		cowKingRageDuration = o.engine.Config.GetCowKingRageDuration()
+		cowKingBerserkAtk = o.engine.Config.GetCowKingBerserkAtk()
+		cowKingBerserkWalk = o.engine.Config.GetCowKingBerserkWalk()
+	}
 	if o.MaxHP > 7 {
 		bracket := 7 - int(o.WAbil.HP)*7/o.MaxHP
 		if bracket >= 2 && bracket != o.hpBracket {
@@ -670,19 +736,19 @@ func (o *MonsterObject) runCowKingAI(server *netserver.TCPServer, target *PlayOb
 			o.rageTick = now
 			o.saveAttackSpeed = o.AttackSpeed
 			o.saveWalkSpeed = o.WalkSpeed
-			o.AttackSpeed = 10000 // 停滞阶段
+			o.AttackSpeed = cowKingStunSpeed
 		}
 	}
 	switch o.rageState {
 	case 1: // 停滞 → 狂暴
-		if now-o.rageTick > 8000 {
+		if now-o.rageTick > cowKingRageDuration {
 			o.rageState = 2
 			o.rageTick = now
-			o.AttackSpeed = 500
-			o.WalkSpeed = 400
+			o.AttackSpeed = cowKingBerserkAtk
+			o.WalkSpeed = cowKingBerserkWalk
 		}
 	case 2: // 狂暴 → 恢复
-		if now-o.rageTick > 8000 {
+		if now-o.rageTick > cowKingRageDuration {
 			o.rageState = 0
 			o.AttackSpeed = o.saveAttackSpeed
 			o.WalkSpeed = o.saveWalkSpeed
@@ -725,10 +791,14 @@ func (o *MonsterObject) runPulseAI(server *netserver.TCPServer, now int64) {
 	if o.envir == nil || now-o.HitTick <= o.AttackSpeed {
 		return
 	}
+	pulseRange := 16
+	if o.engine != nil && o.engine.Config != nil {
+		pulseRange = o.engine.Config.GetPulseRange()
+	}
 	o.HitTick = now
 	o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
-	for dy := -16; dy <= 16; dy++ {
-		for dx := -16; dx <= 16; dx++ {
+	for dy := -pulseRange; dy <= pulseRange; dy++ {
+		for dx := -pulseRange; dx <= pulseRange; dx++ {
 			obj := o.envir.GetMovingObject(o.CurrX+dx, o.CurrY+dy)
 			p, ok := obj.(*PlayObject)
 			if !ok || p.Death || p.Ghost {
@@ -751,11 +821,15 @@ func (o *MonsterObject) runLightningAI(server *netserver.TCPServer, target *Play
 		o.chaseTarget(target.BaseObject, now)
 		return
 	}
-	if dist <= 8 && now-o.HitTick > o.AttackSpeed {
+	lightningRange := 8
+	if o.engine != nil && o.engine.Config != nil {
+		lightningRange = o.engine.Config.GetLightningRange()
+	}
+	if dist <= lightningRange && now-o.HitTick > o.AttackSpeed {
 		o.HitTick = now
 		o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 		dx, dy := dirToOffset(o.Dir)
-		for i := 1; i <= 8; i++ {
+		for i := 1; i <= lightningRange; i++ {
 			lx, ly := o.CurrX+dx*i, o.CurrY+dy*i
 			if o.envir == nil {
 				break
@@ -779,12 +853,16 @@ func (o *MonsterObject) runLightningAI(server *netserver.TCPServer, target *Play
 // runFireAuraAI — TFireMonster: 火焰光环，十字形 9 格地图事件（20s, 10 dmg/tick）
 // Delphi ObjMon3.pas:1064-1143: 持续区域封锁，非定向攻击
 func (o *MonsterObject) runFireAuraAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	fireAuraDuration := int64(20000)
+	if o.engine != nil && o.engine.Config != nil {
+		fireAuraDuration = o.engine.Config.GetFireAuraDuration()
+	}
 	if o.envir != nil && now-o.lastAuraTick > o.AttackSpeed {
 		o.lastAuraTick = now
 		o.SendRefMsg(RM_SPELL, o.Dir, o.CurrX, o.CurrY, "")
 		offsets := [][2]int{{0, 0}, {0, -1}, {0, -2}, {0, 1}, {0, 2}, {-1, 0}, {-2, 0}, {1, 0}, {2, 0}}
 		for _, pos := range offsets {
-			o.envir.AddFireEvent(server, o.CurrX+pos[0], o.CurrY+pos[1], 10, 20000, o.ID)
+			o.envir.AddFireEvent(server, o.CurrX+pos[0], o.CurrY+pos[1], 10, fireAuraDuration, o.ID)
 		}
 	}
 	// 有目标时仍近战/追击
@@ -798,11 +876,15 @@ func (o *MonsterObject) runFireAuraAI(server *netserver.TCPServer, target *PlayO
 // runTransformAI — TElfMonster (Race 113): 双形态切换
 // Delphi ObjMon.pas:207: HP < 50% 切换形态，改变外观和属性
 func (o *MonsterObject) runTransformAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	transformCooldown := int64(5000)
+	if o.engine != nil && o.engine.Config != nil {
+		transformCooldown = o.engine.Config.GetTransformCooldown()
+	}
 	shouldBeForm := 0
 	if int(o.WAbil.HP) < o.MaxHP/2 {
 		shouldBeForm = 1
 	}
-	if o.transformForm != shouldBeForm && now-o.transformTick > 5000 {
+	if o.transformForm != shouldBeForm && now-o.transformTick > transformCooldown {
 		o.transformForm = shouldBeForm
 		o.transformTick = now
 		if shouldBeForm == 1 {
@@ -865,7 +947,13 @@ func (o *MonsterObject) runBoneKingAI(server *netserver.TCPServer, e *UserEngine
 	if e == nil || o.envir == nil {
 		return
 	}
-	if now-o.lastSummonTick > 15000 && e.countLiveChildren(o.ID) < 8 {
+	boneKingCooldown := int64(15000)
+	boneKingMaxChildren := 8
+	if e.Config != nil {
+		boneKingCooldown = e.Config.GetBoneKingCooldown()
+		boneKingMaxChildren = e.Config.GetBoneKingMaxChildren()
+	}
+	if now-o.lastSummonTick > boneKingCooldown && e.countLiveChildren(o.ID) < boneKingMaxChildren {
 		o.lastSummonTick = now
 		names := []string{"骷髅战士", "骷髅精灵"}
 		for i := 0; i < 3; i++ {

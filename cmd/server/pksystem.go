@@ -10,12 +10,8 @@ import (
 )
 
 const (
-	pkKillAddPoints   = 100
-	pkDecayInterval   = int64(120000)
-	pkDecayAmount     = 1
 	pkLevel1Threshold = 100
 	pkLevel2Threshold = 200
-	pkFlagDuration    = int64(60000) // 60 秒正当防卫窗口
 )
 
 func (p *PlayObject) PKLevel() int {
@@ -42,12 +38,12 @@ func (p *PlayObject) SetPKFlag(attacker *PlayObject) {
 
 // IsGoodKilling 正当防卫判定：死者带 PK 旗则击杀者无罪（Delphi ObjBase.pas:21251-21255）。
 func (p *PlayObject) IsGoodKilling(victim *PlayObject) bool {
-	return victim.PKFlag && time.Now().UnixMilli()-victim.PKFlagTick < pkFlagDuration
+	return victim.PKFlag && time.Now().UnixMilli()-victim.PKFlagTick < p.Engine.Config.GetSelfDefenseDuration()
 }
 
 // CheckPKStatus 清除过期 PK 旗（Delphi ObjBase.pas:18868-18875）。
 func (p *PlayObject) CheckPKStatus(now int64) {
-	if p.PKFlag && now-p.PKFlagTick >= pkFlagDuration {
+	if p.PKFlag && now-p.PKFlagTick >= p.Engine.Config.GetSelfDefenseDuration() {
 		p.PKFlag = false
 	}
 }
@@ -61,12 +57,13 @@ func (p *PlayObject) BroadcastNameColor(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) DecayPkPoint(now int64) {
-	if now-p.LastPkDecayTick < pkDecayInterval {
+	cfg := p.Engine.Config
+	if now-p.LastPkDecayTick < cfg.GetPKDecayInterval() {
 		return
 	}
 	p.LastPkDecayTick = now
 	if p.PkPoint > 0 {
-		p.PkPoint -= pkDecayAmount
+		p.PkPoint -= cfg.GetPKDecayAmount()
 		if p.PkPoint < 0 {
 			p.PkPoint = 0
 		}
@@ -89,22 +86,24 @@ func (p *PlayObject) OnPlayerKilled(server *netserver.TCPServer, victim *PlayObj
 		return
 	}
 
+	cfg := p.Engine.Config
+
 	// Delphi: 正当防卫 — 死者带 PK 旗则击杀者无罪 (ObjBase.pas:21251-21255)
 	if p.IsGoodKilling(victim) {
 		log.Logf(log.LevelInfo, "PK", "%s killed %s (self-defense, no PK points)", p.Name, victim.Name)
 	} else {
-		p.IncPkPoint(pkKillAddPoints)
+		p.IncPkPoint(cfg.GetPKPointsPerKill())
 		p.BroadcastNameColor(server)
 	}
 
 	if victim.WAbil.Exp > 0 {
-		penalty := victim.WAbil.Exp / 20
+		penalty := victim.WAbil.Exp / uint32(cfg.GetExpPenaltyRatio())
 		victim.WAbil.Exp -= penalty
 	}
 
 	if p.PKLevel() >= 1 && rand.Intn(5) == 0 {
 		if it := p.UseItems[protocol.UWeapon]; it != nil && it.Dura > 0 {
-			it.Dura -= 100
+			it.Dura -= uint16(cfg.GetPKWeaponDuraLoss())
 			if it.Dura > it.DuraMax {
 				it.Dura = 0
 			}

@@ -8,7 +8,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const MaxDealItems = 12
+
 
 func absInt(v int) int {
 	if v < 0 {
@@ -87,7 +87,7 @@ func (p *PlayObject) HandleDealAddItem(msg SendMessage, server *netserver.TCPSer
 		server.Send(p.Session.ID, resp, "")
 		return
 	}
-	if len(p.Deal.Items) >= MaxDealItems {
+	if len(p.Deal.Items) >= p.Engine.Config.GetMaxTradeItems() {
 		return
 	}
 	item := p.ItemList[bagIdx]
@@ -165,8 +165,9 @@ func (p *PlayObject) HandleDealEnd(server *netserver.TCPServer) {
 	if partner.Deal == nil || !partner.Deal.Confirmed {
 		return
 	}
-	if len(p.ItemList)+len(partner.Deal.Items) > MaxBagItems ||
-		len(partner.ItemList)+len(p.Deal.Items) > MaxBagItems {
+	maxBag := p.Engine.Config.GetMaxBagSlots()
+	if len(p.ItemList)+len(partner.Deal.Items) > maxBag ||
+		len(partner.ItemList)+len(p.Deal.Items) > maxBag {
 		p.CancelDeal(server)
 		return
 	}

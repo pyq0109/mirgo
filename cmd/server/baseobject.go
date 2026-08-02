@@ -43,10 +43,11 @@ type BaseObject struct {
 	ID   int32
 
 	// 位置
-	MapName string
-	CurrX   int
-	CurrY   int
-	Dir     int
+	MapName   string
+	CurrX     int
+	CurrY     int
+	Dir       int
+	ViewRange int
 
 	// 外观
 	Gender    byte
@@ -120,8 +121,9 @@ type SendMessage struct {
 // NewBaseObject 创建一个新的基础对象。
 func NewBaseObject(name string, id int32) *BaseObject {
 	return &BaseObject{
-		Name: name,
-		ID:   id,
+		Name:      name,
+		ID:        id,
+		ViewRange: viewRange,
 	}
 }
 
@@ -164,7 +166,7 @@ func (o *BaseObject) SendRefMsg(ident, param1, param2, param3 int, msg string) {
 	if o.envir == nil {
 		return
 	}
-	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, viewRange)
+	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, o.ViewRange)
 	sent := make(map[int32]bool)
 	for _, obj := range objs {
 		if p, ok := obj.(*PlayObject); ok {

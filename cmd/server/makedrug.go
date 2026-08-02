@@ -10,7 +10,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const makeDrugPrice = 500
+
 
 type DrugRecipe struct {
 	Product   string         `json:"product"`
@@ -45,7 +45,7 @@ func LoadDrugRecipes(configDir string) {
 	for i := range raw.Recipes {
 		r := &raw.Recipes[i]
 		if r.GoldCost <= 0 {
-			r.GoldCost = makeDrugPrice
+			r.GoldCost = 500
 		}
 		drugRecipes[r.Product] = r
 	}
@@ -67,7 +67,7 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 		return
 	}
 
-	if len(p.ItemList) >= MaxBagItems {
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
 		p.sendMakeDrugFail(server)
 		return
 	}
@@ -75,11 +75,12 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 	recipe := drugRecipes[def.Name]
 	if recipe == nil {
 		// 无配方：金币模式
-		if p.Gold < makeDrugPrice {
+		drugPrice := p.Engine.Config.GetDrugBasePrice()
+		if p.Gold < drugPrice {
 			p.sendMakeDrugFail(server)
 			return
 		}
-		p.Gold -= makeDrugPrice
+		p.Gold -= drugPrice
 		p.GiveItem(itemIdx)
 		p.SendBagItemsFull(server)
 		goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)

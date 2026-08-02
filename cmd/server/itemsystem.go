@@ -12,10 +12,10 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
-const MaxBagItems = 46
+
 
 func (p *PlayObject) GiveItem(itemIdx int) bool {
-	if len(p.ItemList) >= MaxBagItems {
+	if p.Engine != nil && len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
 		return false
 	}
 	if p.ItemDB == nil {
@@ -69,8 +69,8 @@ func (p *PlayObject) HandleAdjustBonus(msg SendMessage, server *netserver.TCPSer
 	p.WAbil.SC += uint32(deltas[2]) << 16
 	p.WAbil.AC += uint32(deltas[3]) << 16
 	p.WAbil.MAC += uint32(deltas[4]) << 16
-	p.WAbil.MaxHP += uint16(deltas[5] * 5)
-	p.WAbil.MaxMP += uint16(deltas[6] * 5)
+	p.WAbil.MaxHP += uint16(deltas[5] * p.Engine.Config.GetBonusHPPerPoint())
+	p.WAbil.MaxMP += uint16(deltas[6] * p.Engine.Config.GetBonusMPPerPoint())
 	p.HitPoint += deltas[7]
 	p.SpeedPoint += deltas[8]
 	p.RecalcAbilitys()
@@ -244,7 +244,7 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 		p.sendTakeOffFail(server)
 		return
 	}
-	if len(p.ItemList) >= MaxBagItems {
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
 		p.sendTakeOffFail(server)
 		return
 	}

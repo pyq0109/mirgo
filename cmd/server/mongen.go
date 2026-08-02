@@ -163,10 +163,16 @@ func (e *UserEngine) loadSafeZoneGuards() {
 			mon.IsSafeZoneGuard = true
 			mon.StickMode = true
 			mon.AIBehavior = AIGuard
-			mon.ViewRange = 7
-			mon.MaxHP = 65535
-			mon.WAbil.HP = 65535
-			mon.WAbil.MaxHP = 65535
+			guardViewRange := 7
+			guardMaxHP := 65535
+			if e.Config != nil {
+				guardViewRange = e.Config.GetGuardViewRange()
+				guardMaxHP = e.Config.GetGuardMaxHP()
+			}
+			mon.ViewRange = guardViewRange
+			mon.MaxHP = guardMaxHP
+			mon.WAbil.HP = uint16(guardMaxHP)
+			mon.WAbil.MaxHP = uint16(guardMaxHP)
 			count++
 		}
 	}
@@ -342,7 +348,7 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 			if !m.LootDropped {
 				m.LootDropped = true
 				if m.envir != nil {
-					m.DropLootWithTable(m.envir, &e.nextItemID, server, e.DropTables, e.ItemDB)
+					m.DropLootWithTable(m.envir, &e.nextItemID, server, e.DropTables, e.ItemDB, e.Config)
 				}
 				// Delphi TZilKinZombi: 死亡分裂
 				if m.AIBehavior == AISplit && m.envir != nil {
@@ -350,7 +356,11 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 				}
 			}
 			// Delphi 两阶段清理：3 min → ghost（从地图消失），+5 min → 从列表移除
-			if m.ghostTick == 0 && m.DeathTick > 0 && now-m.DeathTick > 180000 {
+			corpseDelay := int64(180000)
+			if e.Config != nil {
+				corpseDelay = e.Config.GetCorpseDelay()
+			}
+			if m.ghostTick == 0 && m.DeathTick > 0 && now-m.DeathTick > corpseDelay {
 				m.Ghost = true
 				m.ghostTick = now
 				if m.envir != nil {
@@ -360,7 +370,11 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 			}
 			continue
 		}
-		if now-m.runTick < 250 {
+		aiTickInterval := int64(250)
+		if e.Config != nil {
+			aiTickInterval = e.Config.GetAITickInterval()
+		}
+		if now-m.runTick < aiTickInterval {
 			continue
 		}
 		m.runTick = now
@@ -368,9 +382,13 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 	}
 
 	// Delphi: ghost + 5 min → 从 Monsters 切片彻底移除
+	ghostDelay := int64(300000)
+	if e.Config != nil {
+		ghostDelay = e.Config.GetGhostDelay()
+	}
 	alive := e.Monsters[:0]
 	for _, m := range e.Monsters {
-		if m.ghostTick > 0 && now-m.ghostTick > 300000 {
+		if m.ghostTick > 0 && now-m.ghostTick > ghostDelay {
 			continue
 		}
 		alive = append(alive, m)
@@ -419,9 +437,13 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	}
 
 	// Delphi AddBaseObject (UsrEngn.pas:1819)：CanWalk 含占用检查，31 次失败则放弃生成。
+	spawnMaxTries := 31
+	if e.Config != nil {
+		spawnMaxTries = e.Config.GetSpawnMaxTries()
+	}
 	x, y := 0, 0
 	placed := false
-	for tries := 0; tries < 31; tries++ {
+	for tries := 0; tries < spawnMaxTries; tries++ {
 		tx := entry.X + rand.Intn(entry.Range*2+1) - entry.Range
 		ty := entry.Y + rand.Intn(entry.Range*2+1) - entry.Range
 		if env.CanWalk(tx, ty) {
@@ -463,15 +485,27 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 // 从数据库定义加载完整属性，设置 AI 计时器与特殊 Race 初始状态。
 func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now int64) {
 	// Delphi: m_nWalkSpeed 从 DB wWalkSpeed 列读取，默认 1400，min 200
+	defaultWalkSpeed := int64(1400)
+	minWalkSpeed := int64(200)
+	attackSpeedOffset := int64(900)
+	defaultWalkStep := 3
+	defaultWalkWait := int64(1000)
+	if e.Config != nil {
+		defaultWalkSpeed = e.Config.GetDefaultWalkSpeed()
+		minWalkSpeed = e.Config.GetMinWalkSpeed()
+		attackSpeedOffset = e.Config.GetAttackSpeedOffset()
+		defaultWalkStep = e.Config.GetDefaultWalkStep()
+		defaultWalkWait = e.Config.GetDefaultWalkWait()
+	}
 	if def.WalkSpeed > 0 {
 		mon.WalkSpeed = int64(def.WalkSpeed)
 	} else {
-		mon.WalkSpeed = 1400
+		mon.WalkSpeed = defaultWalkSpeed
 	}
-	if mon.WalkSpeed < 200 {
-		mon.WalkSpeed = 200
+	if mon.WalkSpeed < minWalkSpeed {
+		mon.WalkSpeed = minWalkSpeed
 	}
-	mon.AttackSpeed = mon.WalkSpeed + 900
+	mon.AttackSpeed = mon.WalkSpeed + attackSpeedOffset
 	mon.HitPoint = def.Hit
 	mon.SpeedPoint = def.Speed
 	mon.WAbil.Level = uint16(def.Lvl)
@@ -488,11 +522,15 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 	mon.slaveName = def.Slave
 	if def.WalkStep > 0 {
 		mon.WalkStep = def.WalkStep
+	} else {
+		mon.WalkStep = defaultWalkStep
 	}
 	if def.WalkWait > 0 {
 		mon.WalkWait = int64(def.WalkWait)
+	} else {
+		mon.WalkWait = defaultWalkWait
 	}
-	mon.initAITimers(now)
+	mon.initAITimers(now, e.Config)
 
 	// Delphi 对齐：不死属性
 	if def.Undead > 0 {
@@ -506,7 +544,11 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 		mon.Animal = true
 	case 52: // Delphi: 1/30 概率为逃跑鹿（TChickenDeer），29/30 为被动鹿
 		mon.Animal = true
-		if rand.Intn(30) == 0 {
+		fleeChance := 30
+		if e.Config != nil {
+			fleeChance = e.Config.GetFleeChance()
+		}
+		if rand.Intn(fleeChance) == 0 {
 			mon.AIBehavior = AIFlee
 		} else {
 			mon.AIBehavior = AIPassive
@@ -658,7 +700,7 @@ func (e *UserEngine) spawnChild(parent *MonsterObject, childName string, x, y in
 	child.envir = env
 	child.MasterID = parent.ID
 	child.TargetID = parent.TargetID
-	child.initAITimers(now)
+	child.initAITimers(now, e.Config)
 
 	env.AddObject(x, y, OS_MOVINGOBJECT, child)
 	e.mu.Lock()
@@ -697,7 +739,7 @@ func (e *UserEngine) spawnSplitZombies(parent *MonsterObject, server *netserver.
 		child.WAbil.MaxHP = uint16(child.MaxHP)
 		child.WAbil.HP = uint16(child.MaxHP)
 		child.AIBehavior = AIMelee // 分裂体为普通近战
-		child.initAITimers(now)
+		child.initAITimers(now, e.Config)
 		parent.envir.AddObject(cx, cy, OS_MOVINGOBJECT, child)
 		e.Monsters = append(e.Monsters, child)
 		child.SendRefMsg(RM_TURN, child.Dir, cx, cy, child.Name)

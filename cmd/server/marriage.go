@@ -6,7 +6,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/netserver"
 )
 
-const dearRecallCooldown = 60000
+
 
 func (p *PlayObject) IsMarried() bool {
 	return p.DearName != ""
@@ -63,7 +63,7 @@ func (p *PlayObject) DearRecall(server *netserver.TCPServer) {
 		return
 	}
 	now := time.Now().UnixMilli()
-	if now-p.DearRecallTick < dearRecallCooldown {
+	if now-p.DearRecallTick < p.Engine.Config.GetSpouseRecallCooldown() {
 		p.sysMsg(server, "夫妻传送冷却中")
 		return
 	}

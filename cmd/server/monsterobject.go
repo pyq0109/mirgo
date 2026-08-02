@@ -244,15 +244,24 @@ func (o *MonsterObject) OnStruck(attackerID int32, now int64, userEngine *UserEn
 	o.LastHiterID = attackerID
 	o.LastHiterTick = now
 	// Delphi: 攻击延迟惩罚 m_dwHitTick += 150 - min(130, Level*4)
-	penalty := int64(150)
-	if lvl := int64(o.WAbil.Level) * 4; lvl < 130 {
-		penalty = 150 - lvl
+	penaltyBase, penaltyLevel, penaltyMin := 150, 130, 20
+	targetSwitchChance := 6
+	if userEngine != nil && userEngine.Config != nil {
+		cfg := userEngine.Config
+		penaltyBase = cfg.GetStruckPenaltyBase()
+		penaltyLevel = cfg.GetStruckPenaltyLevel()
+		penaltyMin = cfg.GetStruckPenaltyMin()
+		targetSwitchChance = cfg.GetTargetSwitchChance()
+	}
+	penalty := int64(penaltyBase)
+	if lvl := int64(o.WAbil.Level) * 4; lvl < int64(penaltyLevel) {
+		penalty = int64(penaltyBase) - lvl
 	} else {
-		penalty = 20
+		penalty = int64(penaltyMin)
 	}
 	o.HitTick += penalty
 	// Delphi: 无目标 OR 当前目标相邻 OR 1/6随机 → 切换目标
-	switchTarget := o.TargetID == 0 || rand.Intn(6) == 0
+	switchTarget := o.TargetID == 0 || rand.Intn(targetSwitchChance) == 0
 	if !switchTarget && o.TargetID != 0 && userEngine != nil {
 		if cur := userEngine.GetPlayer(o.TargetID); cur != nil {
 			dx := abs(cur.CurrX - o.CurrX)
@@ -328,9 +337,15 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 	}
 
 	if int(o.WAbil.HP) < o.MaxHP {
-		if now-o.lastRegenTick >= 6000 {
+		regenInterval := int64(6000)
+		regenDivisor := 75
+		if o.engine != nil && o.engine.Config != nil {
+			regenInterval = o.engine.Config.GetMonHPRegenInterval()
+			regenDivisor = o.engine.Config.GetMonHPRegenDivisor()
+		}
+		if now-o.lastRegenTick >= regenInterval {
 			o.lastRegenTick = now
-			regen := o.MaxHP/75 + 1
+			regen := o.MaxHP/regenDivisor + 1
 			hp := int(o.WAbil.HP) + regen
 			if hp > o.MaxHP {
 				hp = o.MaxHP
@@ -339,7 +354,11 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		}
 	}
 
-	if now-o.lastThinkTick >= 3000 {
+	overlapInterval := int64(3000)
+	if o.engine != nil && o.engine.Config != nil {
+		overlapInterval = o.engine.Config.GetOverlapThinkInterval()
+	}
+	if now-o.lastThinkTick >= overlapInterval {
 		o.lastThinkTick = now
 		// Delphi dup mode (ObjMon.pas:359-381)：本格 GetXYObjCount >= 2 → 随机方向逃逸。
 		if o.envir != nil {
@@ -398,9 +417,13 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.chaseTarget(target.BaseObject, now)
 			}
 		case AIRanged:
+			rangedDist := 5
+			if o.engine != nil && o.engine.Config != nil {
+				rangedDist = o.engine.Config.GetRangedDistance()
+			}
 			if dist <= 1 {
 				o.meleeAttack(server, target, now)
-			} else if dist <= 5 && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
+			} else if dist <= rangedDist && o.envir.CanFlyLine(o.CurrX, o.CurrY, target.CurrX, target.CurrY) {
 				if now-o.HitTick > o.AttackSpeed {
 					o.HitTick = now
 					o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
@@ -454,7 +477,11 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			if o.envir == nil {
 				return
 			}
-			if dist <= 6 && now-o.HitTick > o.AttackSpeed {
+			areaDist := 6
+			if o.engine != nil && o.engine.Config != nil {
+				areaDist = o.engine.Config.GetAreaDistance()
+			}
+			if dist <= areaDist && now-o.HitTick > o.AttackSpeed {
 				o.HitTick = now
 				for a_dy := -1; a_dy <= 1; a_dy++ {
 					for a_dx := -1; a_dx <= 1; a_dx++ {
@@ -472,7 +499,7 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 				o.Dir = dirToward(o.CurrX, o.CurrY, target.CurrX, target.CurrY)
 				o.FocusTick = now
 				o.SendRefMsg(RM_HIT, o.Dir, o.CurrX, o.CurrY, "")
-			} else if dist > 6 {
+			} else if dist > areaDist {
 				o.chaseTarget(target.BaseObject, now)
 			}
 		case AISummoner:
@@ -481,12 +508,15 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			} else {
 				o.chaseTarget(target.BaseObject, now)
 			}
-			const maxMinions = 3
+			summonMaxMinions := 3
+			if o.engine != nil && o.engine.Config != nil {
+				summonMaxMinions = o.engine.Config.GetSummonMaxMinions()
+			}
 			if o.slaveName != "" && now-o.lastSummonTick > 10000 {
 				live := userEngine.countLiveChildren(o.ID)
-				if live < maxMinions {
+				if live < summonMaxMinions {
 					o.lastSummonTick = now
-					for i := live; i < maxMinions; i++ {
+					for i := live; i < summonMaxMinions; i++ {
 						x := o.CurrX + rand.Intn(5) - 2
 						y := o.CurrY + rand.Intn(5) - 2
 						if child := userEngine.SpawnMonsterByName(o.MapName, x, y, o.slaveName, now); child != nil {
@@ -639,11 +669,15 @@ func (o *MonsterObject) callSlave(e *UserEngine, now int64) {
 	if e == nil || o.envir == nil {
 		return
 	}
+	zumaMaxSlaves := 30
+	if e.Config != nil {
+		zumaMaxSlaves = e.Config.GetZumaMaxSlaves()
+	}
 	names := []string{"祖玛雕像", "祖玛卫士", "祖玛弓箭手"}
 	count := 6 + rand.Intn(6)
 	fdx, fdy := dirToOffset(o.Dir)
 	for i := 0; i < count; i++ {
-		if e.countLiveChildren(o.ID) >= 30 {
+		if e.countLiveChildren(o.ID) >= zumaMaxSlaves {
 			break
 		}
 		x, y := o.CurrX+fdx, o.CurrY+fdy
@@ -669,7 +703,7 @@ func (o *MonsterObject) callSlave(e *UserEngine, now int64) {
 
 // initAITimers — 初始化 AI 计时器为 now 附近（Delphi 出生错峰：
 // m_dwHitTick/m_dwWalkTick := GetTickCount - Random(3000)，防止首 tick 齐射）。
-func (o *MonsterObject) initAITimers(now int64) {
+func (o *MonsterObject) initAITimers(now int64, cfg *ServerConfig) {
 	o.spawnTick = now
 	o.SearchTick = now
 	o.WalkTick = now - rand.Int63n(3000)
@@ -678,7 +712,13 @@ func (o *MonsterObject) initAITimers(now int64) {
 	o.lastThinkTick = now
 	o.lastSummonTick = now
 	o.attickTick = now
-	o.searchInterval = 3000 + rand.Int63n(2000) // Delphi: 3000 + Random(2000)
+	searchInterval := int64(3000)
+	searchRand := int64(2000)
+	if cfg != nil {
+		searchInterval = cfg.GetSearchInterval()
+		searchRand = cfg.GetSearchRand()
+	}
+	o.searchInterval = searchInterval + rand.Int63n(searchRand)
 }
 
 func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, target *PlayObject, damage int, now int64) {
@@ -824,12 +864,17 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 	}
 
 	hasTarget := o.TargetID != 0
-	interval := int64(1000) // 无目标时 1 秒搜索
+	searchNoTarget := int64(1000)
+	searchHasTarget := int64(8000)
+	if o.engine != nil && o.engine.Config != nil {
+		searchNoTarget = o.engine.Config.GetSearchNoTarget()
+		searchHasTarget = o.engine.Config.GetSearchHasTarget()
+	}
+	interval := searchNoTarget
 	if hasTarget {
-		// Delphi: m_dwSearchTime = 3000 + Random(2000)
 		interval = o.searchInterval
 		if interval <= 0 {
-			interval = 8000
+			interval = searchHasTarget
 		}
 	}
 	if now-o.SearchTick <= interval {
@@ -844,6 +889,9 @@ func (o *MonsterObject) searchTarget(now int64, userEngine *UserEngine) {
 	vr := o.ViewRange
 	if vr <= 0 {
 		vr = 5
+		if o.engine != nil && o.engine.Config != nil {
+			vr = o.engine.Config.GetDefaultViewRange()
+		}
 	}
 	vr += o.CoolEye
 	objs := o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr)
@@ -900,7 +948,13 @@ func (o *MonsterObject) validateTarget(now int64, userEngine *UserEngine) {
 	if o.TargetID == 0 {
 		return
 	}
-	if o.FocusTick > 0 && now-o.FocusTick > 30000 {
+	focusTimeout := int64(30000)
+	targetLossDist := 15
+	if o.engine != nil && o.engine.Config != nil {
+		focusTimeout = o.engine.Config.GetTargetFocusTimeout()
+		targetLossDist = o.engine.Config.GetTargetLossDist()
+	}
+	if o.FocusTick > 0 && now-o.FocusTick > focusTimeout {
 		o.TargetID = 0
 		return
 	}
@@ -916,7 +970,7 @@ func (o *MonsterObject) validateTarget(now int64, userEngine *UserEngine) {
 	// Delphi: 曼哈顿距离 > 15 格则丢失目标
 	dx := abs(target.CurrX - o.CurrX)
 	dy := abs(target.CurrY - o.CurrY)
-	if dx+dy > 15 {
+	if dx+dy > targetLossDist {
 		o.TargetID = 0
 	}
 }
@@ -934,6 +988,10 @@ func (o *MonsterObject) slaveFollow(e *UserEngine, now int64) {
 		o.TargetID = 0
 		return
 	}
+	slaveFollowDist := 3
+	if o.engine != nil && o.engine.Config != nil {
+		slaveFollowDist = o.engine.Config.GetSlaveFollowDist()
+	}
 	if master.MapName == o.MapName {
 		dx := abs(master.CurrX - o.CurrX)
 		dy := abs(master.CurrY - o.CurrY)
@@ -941,7 +999,7 @@ func (o *MonsterObject) slaveFollow(e *UserEngine, now int64) {
 		if dy > dist {
 			dist = dy
 		}
-		if dist <= 3 {
+		if dist <= slaveFollowDist {
 			return
 		}
 	}
@@ -957,7 +1015,11 @@ func (o *MonsterObject) slaveFollow(e *UserEngine, now int64) {
 		if dy > dist {
 			dist = dy
 		}
-		needTeleport = dist > 20
+		slaveTeleportDist := 20
+		if o.engine != nil && o.engine.Config != nil {
+			slaveTeleportDist = o.engine.Config.GetSlaveTeleportDist()
+		}
+		needTeleport = dist > slaveTeleportDist
 	}
 	if !needTeleport {
 		return
@@ -998,11 +1060,17 @@ func (o *MonsterObject) slaveFollow(e *UserEngine, now int64) {
 // 优先攻击主人的 LastHiter，不攻击同主人奴隶，不攻击安全区目标。
 func (o *MonsterObject) searchTargetAsSlave(now int64, userEngine *UserEngine) {
 	hasTarget := o.TargetID != 0
-	interval := int64(1000)
+	searchNoTarget := int64(1000)
+	searchHasTarget := int64(8000)
+	if o.engine != nil && o.engine.Config != nil {
+		searchNoTarget = o.engine.Config.GetSearchNoTarget()
+		searchHasTarget = o.engine.Config.GetSearchHasTarget()
+	}
+	interval := searchNoTarget
 	if hasTarget {
 		interval = o.searchInterval
 		if interval <= 0 {
-			interval = 8000
+			interval = searchHasTarget
 		}
 	}
 	if now-o.SearchTick <= interval {
@@ -1030,6 +1098,9 @@ func (o *MonsterObject) searchTargetAsSlave(now int64, userEngine *UserEngine) {
 	vr := o.ViewRange
 	if vr <= 0 {
 		vr = 5
+		if o.engine != nil && o.engine.Config != nil {
+			vr = o.engine.Config.GetDefaultViewRange()
+		}
 	}
 	vr += o.CoolEye
 	for _, obj := range o.envir.GetRangeObjects(o.CurrX, o.CurrY, vr) {

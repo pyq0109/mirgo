@@ -11,11 +11,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/storage"
 )
 
-const (
-	guildBuildCost = 1000000
-	guildWarCost   = 500000
-	guildWarTime   = int64(10800000)
-)
+
 
 type GuildWar struct {
 	GuildName string
@@ -237,12 +233,12 @@ func (p *PlayObject) HandleBuildGuild(msg SendMessage, server *netserver.TCPServ
 		server.Send(p.Session.ID, resp, "")
 		return
 	}
-	if p.Gold < guildBuildCost {
+	if p.Gold < p.Engine.Config.GetGuildCreateCost() {
 		resp := protocol.MakeDefaultMsg(protocol.SMBuildGuildFail, 3, 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 		return
 	}
-	p.Gold -= guildBuildCost
+	p.Gold -= p.Engine.Config.GetGuildCreateCost()
 	guild := &Guild{
 		Name:    guildName,
 		Leader:  p.Name,
@@ -462,14 +458,16 @@ func (p *PlayObject) HandleGuildWar(msg SendMessage, server *netserver.TCPServer
 	if targetGuild == nil {
 		return
 	}
-	if p.Gold < guildWarCost {
+	cfg := p.Engine.Config
+	if p.Gold < cfg.GetGuildWarFee() {
 		return
 	}
-	p.Gold -= guildWarCost
+	p.Gold -= cfg.GetGuildWarFee()
 	now := time.Now().UnixMilli()
-	war := GuildWar{GuildName: targetGuildName, StartTick: now, EndTick: now + guildWarTime}
+	warDuration := cfg.GetGuildWarDuration()
+	war := GuildWar{GuildName: targetGuildName, StartTick: now, EndTick: now + warDuration}
 	guild.WarGuilds = append(guild.WarGuilds, war)
-	targetGuild.WarGuilds = append(targetGuild.WarGuilds, GuildWar{GuildName: guild.Name, StartTick: now, EndTick: now + guildWarTime})
+	targetGuild.WarGuilds = append(targetGuild.WarGuilds, GuildWar{GuildName: guild.Name, StartTick: now, EndTick: now + warDuration})
 
 	sysMsg := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
 	text := "行会战争开始: " + guild.Name + " vs " + targetGuildName

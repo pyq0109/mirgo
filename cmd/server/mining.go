@@ -33,11 +33,8 @@ var defaultOreTable = []MineOre{
 }
 
 const (
-	mineRegenTime    = 600000 // 10分钟再生
-	mineMaxCount     = 200    // 初始可采次数
-	mineHitRate      = 4      // 1/4 概率产出石头
-	mineOreRate      = 12     // 1/12 概率产出矿石
-	mineDuraLoss     = 100    // 每次采矿武器耐久损耗
+	mineRegenTime = 600000 // 10分钟再生
+	mineMaxCount  = 200    // 初始可采次数
 )
 
 // InitMineEvents 在采矿地图上初始化矿石节点。
@@ -114,8 +111,10 @@ func (p *PlayObject) HandleMineDig(server *netserver.TCPServer) {
 	p.SendRefMsg(RM_DIGUP, p.Dir, p.CurrX, p.CurrY, "")
 
 	// 扣武器耐久
-	if weapon.Dura > mineDuraLoss {
-		weapon.Dura -= mineDuraLoss
+	cfg := p.Engine.Config
+	duraLoss := uint16(cfg.GetMiningDuraLoss())
+	if weapon.Dura > duraLoss {
+		weapon.Dura -= duraLoss
 	} else {
 		weapon.Dura = 0
 	}
@@ -127,10 +126,10 @@ func (p *PlayObject) HandleMineDig(server *netserver.TCPServer) {
 	}
 
 	// 产矿判定
-	if rand.Intn(mineOreRate) == 0 {
+	if rand.Intn(cfg.GetMiningOreRate()) == 0 {
 		// 产出矿石
 		ore := defaultOreTable[rand.Intn(len(defaultOreTable))]
-		if p.ItemDB != nil && len(p.ItemList) < MaxBagItems {
+		if p.ItemDB != nil && len(p.ItemList) < cfg.GetMaxBagSlots() {
 			def := p.ItemDB.GetByName(ore.ItemName)
 			if def != nil {
 				makeIndex := int32(def.Idx)
@@ -150,12 +149,12 @@ func (p *PlayObject) HandleMineDig(server *netserver.TCPServer) {
 				p.ItemList = append(p.ItemList, item)
 				p.SendBagItemsFull(server)
 				p.sysMsg(server, "你挖到了"+ore.ItemName+"！")
-				p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY)
+				p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY, cfg.GetPileStonesDuration())
 				return
 			}
 		}
-	} else if rand.Intn(mineHitRate) == 0 {
+	} else if rand.Intn(cfg.GetMiningStoneRate()) == 0 {
 		// 产出普通石头（简化：给一个碎石物品或仅视觉）
-		p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY)
+		p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY, cfg.GetPileStonesDuration())
 	}
 }
