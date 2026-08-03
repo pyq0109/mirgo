@@ -32,7 +32,7 @@ void main() {
     if (u_use_tex) {
         vec4 t = texture(u_tex, v_uv);
         if (t.a < 0.01) discard;
-        frag_color = vec4(t.rgb * u_color.rgb, t.a);
+        frag_color = vec4(t.rgb * u_color.rgb, t.a * u_color.a);
     } else {
         frag_color = u_color;
     }
