@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
-	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
 )
@@ -36,11 +34,10 @@ func LoadNpcList(path string) []NpcDef {
 		return nil
 	}
 
-	clean := stripJSONCComments(string(data))
 	var raw struct {
 		Npcs []NpcDef `json:"npcs"`
 	}
-	if err := json.Unmarshal([]byte(clean), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		log.Logf(log.LevelWarn, "NpcList", "failed to parse %s: %v", path, err)
 		return nil
 	}
@@ -56,11 +53,10 @@ func LoadMerchantList(path string) []MerchantDef {
 		return nil
 	}
 
-	clean := stripJSONCComments(string(data))
 	var raw struct {
 		Merchants []MerchantDef `json:"merchants"`
 	}
-	if err := json.Unmarshal([]byte(clean), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		log.Logf(log.LevelWarn, "MerchantList", "failed to parse %s: %v", path, err)
 		return nil
 	}
@@ -69,15 +65,3 @@ func LoadMerchantList(path string) []MerchantDef {
 	return raw.Merchants
 }
 
-func stripJSONCComments(data string) string {
-	lines := strings.Split(data, "\n")
-	var clean []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-		clean = append(clean, line)
-	}
-	return strings.Join(clean, "\n")
-}

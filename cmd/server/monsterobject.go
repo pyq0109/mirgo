@@ -763,7 +763,8 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 	}
 	target.WAbil.HP = uint16(hp)
 
-	if o.envir != nil {
+	// Delphi 仅当伤害>0 才下发 SM_STRUCK（ObjBase.pas:5470）。
+	if damage > 0 && o.envir != nil {
 		o.envir.broadcastRefMsg(target.BaseObject, RM_STRUCK, target.ID, damage, target.CurrY, o.Dir)
 	}
 

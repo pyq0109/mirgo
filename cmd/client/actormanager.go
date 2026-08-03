@@ -58,7 +58,7 @@ func (m *ActorManager) Update(now int64, moveTick bool) {
 	defer m.mu.RUnlock()
 	for _, actor := range m.actors {
 		// Delphi 只对非自身角色设置消息积压加速标志（Actor.pas:2667）
-		actor.MsgMuch = !actor.IsSelf && len(actor.MsgList) >= 2
+		actor.MsgMuch = !actor.IsSelf && actor.MsgCount() >= 2
 		if moveTick {
 			actor.LockEndFrame = false
 		}

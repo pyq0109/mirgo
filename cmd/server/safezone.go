@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
-	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
 )
@@ -31,16 +29,6 @@ func LoadSafeZones(path string) {
 		return
 	}
 
-	lines := strings.Split(string(data), "\n")
-	var clean []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-		clean = append(clean, line)
-	}
-
 	var raw struct {
 		StartPoints []struct {
 			MapName string `json:"mapName"`
@@ -49,7 +37,7 @@ func LoadSafeZones(path string) {
 			Range   int    `json:"range"`
 		} `json:"startPoints"`
 	}
-	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		log.Logf(log.LevelWarn, "SafeZone", "failed to parse %s: %v", path, err)
 		return
 	}

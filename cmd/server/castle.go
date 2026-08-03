@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,16 +69,7 @@ func LoadCastleConfig(configDir string) (*CastleConfig, error) {
 		return cfg, nil // 配置文件不存在时使用默认值
 	}
 
-	var cleanLines []string
-	for _, line := range splitLines(string(data)) {
-		trimmed := trimSpace(line)
-		if len(trimmed) >= 2 && trimmed[:2] == "//" {
-			continue
-		}
-		cleanLines = append(cleanLines, line)
-	}
-
-	if err := json.Unmarshal([]byte(joinLines(cleanLines)), cfg); err != nil {
+	if err := parseJSONC(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse castle config: %w", err)
 	}
 	return cfg, nil

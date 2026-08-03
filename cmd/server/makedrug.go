@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -34,11 +33,10 @@ func LoadDrugRecipes(configDir string) {
 		log.Logf(log.LevelInfo, "MakeDrug", "no recipe file at %s, using gold-only mode", path)
 		return
 	}
-	clean := stripJSONCComments(string(data))
 	var raw struct {
 		Recipes []DrugRecipe `json:"recipes"`
 	}
-	if err := json.Unmarshal([]byte(clean), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		log.Logf(log.LevelWarn, "MakeDrug", "failed to parse %s: %v", path, err)
 		return
 	}

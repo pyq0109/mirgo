@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
@@ -255,20 +254,10 @@ func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {
 		return false
 	}
 
-	lines := strings.Split(string(data), "\n")
-	var clean []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-		clean = append(clean, line)
-	}
-
 	var raw struct {
 		Spawns []monGenSpawn `json:"spawns"`
 	}
-	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		log.Logf(log.LevelWarn, "MonGen", "failed to parse %s: %v", e.monGenPath, err)
 		return false
 	}

@@ -23,5 +23,6 @@ require (
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f // indirect
 	golang.org/x/sys v0.36.0 // indirect
 )

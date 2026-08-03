@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/go-gl/gl/v3.3-core/gl"
@@ -77,6 +78,9 @@ type Actor struct {
 	RushDir int
 
 	MsgList []ActorMsg
+	// msgMu 保护 MsgList：网络读协程 SendMsg/UpdateMsg 入队，
+	// 渲染协程 ProcMsg/GetMessage 出队（参考服务端 BaseObject.msgMu）。
+	msgMu sync.Mutex
 
 	RealActionMsg ActorMsg
 	HasRealAction bool
@@ -167,6 +171,13 @@ func NewActor(recogID int32, x, y, dir int) *Actor {
 }
 
 func (a *Actor) SendMsg(ident, x, y, dir, feature, state int) {
+	a.msgMu.Lock()
+	a.sendMsgLocked(ident, x, y, dir, feature, state)
+	a.msgMu.Unlock()
+}
+
+// sendMsgLocked 要求调用方已持有 msgMu。
+func (a *Actor) sendMsgLocked(ident, x, y, dir, feature, state int) {
 	a.MsgList = append(a.MsgList, ActorMsg{
 		Ident:   ident,
 		X:       x,
@@ -178,6 +189,8 @@ func (a *Actor) SendMsg(ident, x, y, dir, feature, state int) {
 }
 
 func (a *Actor) GetMessage() (ActorMsg, bool) {
+	a.msgMu.Lock()
+	defer a.msgMu.Unlock()
 	if len(a.MsgList) == 0 {
 		return ActorMsg{}, false
 	}
@@ -186,25 +199,25 @@ func (a *Actor) GetMessage() (ActorMsg, bool) {
 	return msg, true
 }
 
+// MsgCount 返回队列长度（线程安全）。
+func (a *Actor) MsgCount() int {
+	a.msgMu.Lock()
+	defer a.msgMu.Unlock()
+	return len(a.MsgList)
+}
+
 func (a *Actor) ProcMsg() {
-	for {
-		if len(a.MsgList) == 0 {
-			break
-		}
-		next := a.MsgList[0]
-		isStruck := next.Ident == protocol.SMStruck
-		if a.CurrentAction != 0 && !isStruck {
-			break
-		}
-		if a.LockEndFrame && !isStruck {
-			break
-		}
-		msg, _ := a.GetMessage()
-		a.ReadyAction(msg)
-		if !isStruck {
-			break
-		}
+	// Delphi 只在空闲时消费消息（while m_nCurrentAction = 0，Actor.pas:1622），
+	// 受击同样排队等待当前动作结束。ReadyAction 总是置非零 CurrentAction，
+	// 故每次只消费一条。输入侧由 IsIdle 门控（sceneplay.go），入队即阻断新输入。
+	if a.CurrentAction != 0 || a.LockEndFrame {
+		return
 	}
+	msg, ok := a.GetMessage()
+	if !ok {
+		return
+	}
+	a.ReadyAction(msg)
 }
 
 func (a *Actor) ReadyAction(msg ActorMsg) {
@@ -238,9 +251,13 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 		}
 	}
 
-	a.CurrX = msg.X
-	a.CurrY = msg.Y
-	a.Dir = msg.Dir
+	// 受击不更新位置和朝向，动画按当前朝向播放
+	// （Delphi ReadyAction 的 SM_STRUCK 分支跳过 else 的坐标/朝向赋值，Actor.pas:1534-1569）。
+	if msg.Ident != protocol.SMStruck {
+		a.CurrX = msg.X
+		a.CurrY = msg.Y
+		a.Dir = msg.Dir
+	}
 
 	a.CurrentAction = msg.Ident
 	if msg.Ident == protocol.SMStruck {
@@ -257,7 +274,7 @@ func (a *Actor) ReadyAction(msg ActorMsg) {
 }
 
 func (a *Actor) IsIdle() bool {
-	return a.CurrentAction == 0 && len(a.MsgList) == 0
+	return a.CurrentAction == 0 && a.MsgCount() == 0
 }
 
 func (a *Actor) MoveFail() {
@@ -274,6 +291,8 @@ func (a *Actor) MoveFail() {
 }
 
 func (a *Actor) CleanUserMsgs() {
+	a.msgMu.Lock()
+	defer a.msgMu.Unlock()
 	filtered := a.MsgList[:0]
 	for _, m := range a.MsgList {
 		if m.Ident >= 3000 && m.Ident <= 3099 {
@@ -285,6 +304,8 @@ func (a *Actor) CleanUserMsgs() {
 }
 
 func (a *Actor) UpdateMsg(ident, x, y, dir, feature, state int) {
+	a.msgMu.Lock()
+	defer a.msgMu.Unlock()
 	filtered := a.MsgList[:0]
 	for _, m := range a.MsgList {
 		if m.Ident >= 3000 && m.Ident <= 3099 {
@@ -296,7 +317,7 @@ func (a *Actor) UpdateMsg(ident, x, y, dir, feature, state int) {
 		filtered = append(filtered, m)
 	}
 	a.MsgList = filtered
-	a.SendMsg(ident, x, y, dir, feature, state)
+	a.sendMsgLocked(ident, x, y, dir, feature, state)
 }
 
 func (a *Actor) updateFeature(feature int) {
@@ -657,6 +678,13 @@ func (a *Actor) Run(now int64) {
 	}
 
 	if a.CurrentAction != 0 {
+		// LastFrameTick==0 是 calcXxxFrame 设置的哨兵：动作刚建立，
+		// 首帧需完整显示一个 FrameTime（Delphi m_dwStartTime := GetTickCount，
+		// Actor.pas:3416）。否则同一次 Update 中 Run 会立即跳帧。
+		if a.LastFrameTick == 0 {
+			a.LastFrameTick = now
+			return
+		}
 		ft := a.FrameTime
 		if !a.IsSelf && a.UseMagic {
 			ft = ft * 10 / 18

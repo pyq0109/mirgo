@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
-	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
 )
@@ -32,20 +30,10 @@ func LoadMagicDB(path string) (*MagicDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(data), "\n")
-	var clean []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-		clean = append(clean, line)
-	}
-
 	var raw struct {
 		Magics []MagicDef `json:"magic"`
 	}
-	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		return nil, err
 	}
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,14 +135,13 @@ func (m *MapManager) InitMiniMaps(configDir string) {
 		log.Logf(log.LevelWarn, "MapManager", "mini map file not found: %s, no minimaps loaded", path)
 		return
 	}
-	clean := stripJSONCComments(string(data))
 	var raw struct {
 		MiniMaps []struct {
 			MapName   string `json:"mapName"`
 			MiniMapID int    `json:"miniMapId"`
 		} `json:"miniMaps"`
 	}
-	if err := json.Unmarshal([]byte(clean), &raw); err != nil {
+	if err := parseJSONC(data, &raw); err != nil {
 		log.Logf(log.LevelWarn, "MapManager", "failed to parse %s: %v, no minimaps loaded", path, err)
 		return
 	}
@@ -163,7 +161,6 @@ func (m *MapManager) InitMiniMaps(configDir string) {
 func (m *MapManager) InitRoutes(configDir string) {
 	routesPath := filepath.Join(configDir, "maps", "map_routes.jsonc")
 	if data, err := os.ReadFile(routesPath); err == nil {
-		clean := stripJSONCComments(string(data))
 		var raw struct {
 			Routes []struct {
 				SrcMap string `json:"srcMap"`
@@ -174,7 +171,7 @@ func (m *MapManager) InitRoutes(configDir string) {
 				DstY   int    `json:"dstY"`
 			} `json:"routes"`
 		}
-		if err := json.Unmarshal([]byte(clean), &raw); err == nil && len(raw.Routes) > 0 {
+		if err := parseJSONC(data, &raw); err == nil && len(raw.Routes) > 0 {
 			for _, r := range raw.Routes {
 				m.AddRoute(r.SrcMap, r.SrcX, r.SrcY, r.DstMap, r.DstX, r.DstY)
 			}

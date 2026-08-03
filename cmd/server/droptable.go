@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,18 +72,8 @@ func (dt *DropTable) loadFile(path string) error {
 		return err
 	}
 
-	lines := strings.Split(string(data), "\n")
-	var clean []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-		clean = append(clean, line)
-	}
-
 	var df dropFile
-	if err := json.Unmarshal([]byte(strings.Join(clean, "\n")), &df); err != nil {
+	if err := parseJSONC(data, &df); err != nil {
 		return err
 	}
 

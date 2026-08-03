@@ -1093,6 +1093,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		}
 		h.playScene.State.MySelf = actor
 		actor.IsSelf = true
+		actor.Level = h.playScene.State.Level
 		actor.MapRef = h.playScene.mapData
 		h.playScene.State.Sex = actor.Sex
 		h.playScene.State.Hair = actor.Hair
@@ -1174,6 +1175,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 			st.ParseAbility(body)
 		} else {
 			st.Level = int(msg.Recog)
+		}
+		// 受击动画时长按等级缩短（Delphi m_Abil.Level，Actor.pas:1543）。
+		if st.MySelf != nil {
+			st.MySelf.Level = st.Level
 		}
 		log.Logf(log.LevelInfo, "Client", "stats: level=%d hp=%d/%d mp=%d/%d exp=%d/%d weight=%d/%d",
 			st.Level, st.HP, st.MaxHP, st.MP, st.MaxMP, st.Exp, st.MaxExp, st.Weight, st.MaxWeight)
@@ -1373,6 +1378,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		actor.Type = ActorHuman
 		h.playScene.State.MySelf = actor
 		actor.IsSelf = true
+		actor.Level = h.playScene.State.Level
 		actor.MapRef = h.playScene.mapData
 		h.playScene.State.Actors.Add(actor)
 		actor.SendMsg(protocol.SMTurn, newX, newY, 0, 0, 0)
@@ -1424,7 +1430,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 			if damage > 0 {
 				h.playScene.addFloatingText(actor.CurrX, actor.CurrY, strconv.Itoa(int(damage)), 1.0, 0.3, 0.3)
 			}
-			actor.SendMsg(protocol.SMStruck, actor.CurrX, actor.CurrY, int(msg.Series)&0xFF, 0, int(hiterID))
+			// UpdateMsg 合并队列中已有的受击消息并清掉本地预测指令
+			//（Delphi ClMain.pas:4260 用 UpdateMsg 而非 SendMsg）。
+			// 受击不读坐标/朝向（ReadyAction 跳过），dir 传 0。
+			actor.UpdateMsg(protocol.SMStruck, actor.CurrX, actor.CurrY, 0, 0, int(hiterID))
 		}
 
 	case protocol.SMDeath, protocol.SMNowDeath:
@@ -1456,6 +1465,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMLevelUp:
 		h.playScene.State.Level = int(msg.Recog)
+		if h.playScene.State.MySelf != nil {
+			h.playScene.State.MySelf.Level = int(msg.Recog)
+		}
 		log.Logf(log.LevelInfo, "Client", "level up: %d", msg.Recog)
 
 	case protocol.SMItemShow:

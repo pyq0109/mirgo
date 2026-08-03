@@ -1171,7 +1171,11 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	}
 	target.WAbil.HP = uint16(hp)
 
-	p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, damage, target.CurrY, dir)
+	// Delphi 仅当伤害>0 才下发 SM_STRUCK（ObjBase.pas:5470）；
+	// 魔法盾完全吸收（damage=0）时客户端不应播放受击动画。
+	if damage > 0 {
+		p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, damage, target.CurrY, dir)
+	}
 
 	// 攻击方武器磨损（Delphi: DoDamageWeapon, ObjBase.pas:18967）
 	if damage > 0 {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -258,62 +257,12 @@ func LoadConfig(configDir string) (*ServerConfig, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	// 移除 JSONC 注释（以 // 开头的行）
-	lines := string(data)
-	var cleanLines []string
-	for _, line := range splitLines(lines) {
-		trimmed := trimSpace(line)
-		if len(trimmed) >= 2 && trimmed[:2] == "//" {
-			continue
-		}
-		cleanLines = append(cleanLines, line)
-	}
-	cleanData := joinLines(cleanLines)
-
 	config := DefaultConfig()
-	if err := json.Unmarshal([]byte(cleanData), config); err != nil {
+	if err := parseJSONC(data, config); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
 	return config, nil
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}
-
-func joinLines(lines []string) string {
-	result := ""
-	for i, line := range lines {
-		if i > 0 {
-			result += "\n"
-		}
-		result += line
-	}
-	return result
-}
-
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }
 
 // --- Existing getters ---

@@ -528,9 +528,74 @@ func TestHitEffectLifecycle(t *testing.T) {
 	b.FrameTime = 85
 	b.EndFrame = 5
 	b.CurrentFrame = 5 // 已到末帧
-	b.Run(1000)        // now-LastFrameTick(0) >= 85 → 触发动作结束
+	b.Run(1000)        // 首帧懒初始化 LastFrameTick，不推进
+	b.Run(1085)        // now-LastFrameTick >= 85 → 触发动作结束
 	if b.HitEffectNumber != 0 || b.CurrentAction != 0 {
 		t.Errorf("攻击动画结束后 HitEffectNumber=%d CurrentAction=%d, want 0/0（特效残留）",
 			b.HitEffectNumber, b.CurrentAction)
 	}
+}
+
+// TestStruckAnimation 验证受击动画的 Delphi 语义。
+func TestStruckAnimation(t *testing.T) {
+	// 1. 受击不改变位置和朝向（Delphi Actor.pas:1534-1569）。
+	t.Run("struck keeps pos and dir", func(t *testing.T) {
+		a := &Actor{CurrX: 100, CurrY: 200, Dir: 3}
+		a.ReadyAction(ActorMsg{Ident: protocol.SMStruck, X: 50, Y: 60, Dir: 7})
+		if a.CurrX != 100 || a.CurrY != 200 || a.Dir != 3 {
+			t.Errorf("受击后 pos=(%d,%d) dir=%d, want (100,200) dir=3", a.CurrX, a.CurrY, a.Dir)
+		}
+		if a.CurrentAction != protocol.SMStruck {
+			t.Errorf("CurrentAction = %d, want SMStruck", a.CurrentAction)
+		}
+	})
+
+	// 2. 排队语义：当前动作未结束时 ProcMsg 不消费受击消息。
+	t.Run("struck waits in queue", func(t *testing.T) {
+		a := &Actor{}
+		a.CurrentAction = protocol.SMWalk
+		a.SendMsg(protocol.SMStruck, 0, 0, 0, 0, 0)
+		a.ProcMsg()
+		if a.CurrentAction != protocol.SMWalk {
+			t.Errorf("ProcMsg 打断了当前动作: CurrentAction = %d, want SMWalk", a.CurrentAction)
+		}
+		if a.MsgCount() != 1 {
+			t.Errorf("受击消息被消费: MsgCount = %d, want 1", a.MsgCount())
+		}
+		a.CurrentAction = 0
+		a.ProcMsg()
+		if a.CurrentAction != protocol.SMStruck {
+			t.Errorf("空闲后未消费受击: CurrentAction = %d, want SMStruck", a.CurrentAction)
+		}
+	})
+
+	// 3. UpdateMsg 合并连续受击为一条（Delphi Actor.pas:1303-1326）。
+	t.Run("update msg dedups struck", func(t *testing.T) {
+		a := &Actor{}
+		a.UpdateMsg(protocol.SMStruck, 0, 0, 0, 0, 111)
+		a.UpdateMsg(protocol.SMStruck, 0, 0, 0, 0, 222)
+		if a.MsgCount() != 1 {
+			t.Fatalf("连续受击未合并: MsgCount = %d, want 1", a.MsgCount())
+		}
+		msg, _ := a.GetMessage()
+		if msg.State != 222 {
+			t.Errorf("合并后应保留最新一条: State = %d, want 222", msg.State)
+		}
+	})
+
+	// 4. 首帧完整显示：ReadyAction 后第一次 Run 不推进帧。
+	t.Run("first frame not skipped", func(t *testing.T) {
+		a := &Actor{Dir: 0}
+		a.ReadyAction(ActorMsg{Ident: protocol.SMStruck})
+		start := a.CurrentFrame
+		a.Run(1000) // 懒初始化 LastFrameTick
+		if a.CurrentFrame != start {
+			t.Errorf("第一次 Run 推进了帧: %d -> %d（首帧被跳过）", start, a.CurrentFrame)
+		}
+		ft := int64(a.FrameTime)
+		a.Run(1000 + ft) // 一个 FrameTime 后才推进
+		if a.CurrentFrame != start+1 {
+			t.Errorf("一个 FrameTime 后帧 = %d, want %d", a.CurrentFrame, start+1)
+		}
+	})
 }
