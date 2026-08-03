@@ -99,7 +99,7 @@ func (s *PlayScene) buildHUD() {
 		hint    string
 		onClick func()
 	}{
-		{"DBotMiniMap", ImgBotMinimap, 219, "小地图(M)", func() { s.showMinimap = !s.showMinimap }},
+		{"DBotMiniMap", ImgBotMinimap, 219, "小地图(M)", func() { s.toggleMinimap() }},
 		{"DBotTrade", ImgBotTrade, 249, "交易(W)", func() { s.tryDeal() }},
 		{"DBotGuild", ImgBotGuild, 279, "行会(G)", func() { s.toggleGuild() }},
 		{"DBotGroup", ImgBotGroup, 309, "组队(S)", func() { s.State.ShowGroupDlg = !s.State.ShowGroupDlg }},

@@ -47,8 +47,6 @@ type PlayScene struct {
 	mapDir        string
 	cam           *engine.Camera2D
 	mapData       *mapformat.MapData
-	minimap       *Minimap
-	minimapDirty  bool
 	lighting      *LightingSystem
 	lightingDirty bool
 
@@ -110,6 +108,7 @@ type PlayScene struct {
 	sendAddFriend         func(name string)
 	sendDelFriend         func(name string)
 	sendQueryFriends      func()
+	sendWantMinimap       func() // CMWantMinimap
 	lastMoveTick          int64
 	lastAniTick           int64
 	text                  *engine.TextRenderer
@@ -198,10 +197,15 @@ type PlayScene struct {
 	autoPath    [][2]int
 	autoPathIdx int
 
-	showMinimap bool
-	deathGray   bool
-	focusActor  *Actor
-	hoverSelf   bool // Delphi g_boSelectMyself：鼠标悬停在自己身上
+	deathGray  bool
+	focusActor *Actor
+	hoverSelf  bool // Delphi g_boSelectMyself：鼠标悬停在自己身上
+
+	// 小地图（Delphi PlayScn.pas DrawMiniMap 移植）。
+	minimapLv       int     // 0 隐藏 / 1 半透明 / 2 不透明（g_nViewMinMapLv）
+	mmBlinkOn       bool    // 标记闪烁状态（m_boViewBlink，300ms 翻转）
+	mmBlinkAcc      float64 // 闪烁累计时间（秒）
+	mmLastQueryTick int64   // CMWantMinimap 请求节流（g_dwQueryMsgTick，3 秒）
 
 	// Delphi 输入还原（ClMain.pas / MShare.pas）
 	targetCret         *Actor // 锁定攻击目标（g_TargetCret）
@@ -254,7 +258,6 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		groundItems:    make(map[int32]*GroundItemInfo),
 		targetX:        -1,
 		targetY:        -1,
-		showMinimap:    true,
 		effects:        NewEffectManager(),
 		events:         NewEventManager(),
 		ui:             NewUIManager(gl, resources, nil),
@@ -471,6 +474,32 @@ func (s *PlayScene) SetSendQueryFriends(fn func()) {
 	s.sendQueryFriends = fn
 }
 
+func (s *PlayScene) SetSendWantMinimap(fn func()) {
+	s.sendWantMinimap = fn
+}
+
+// toggleMinimap 小地图三态切换（M 键与底栏 DBotMiniMap 按钮共用）。
+// Delphi: ClMain.pas:1613-1628 / FState.pas:5409-5423 ——
+// 分支条件是 g_boViewMiniMap（服务端已确认显示），而非 Lv：
+// 未确认显示时（含请求在途）：3 秒节流重发 CMWantMinimap 并置 Lv=1；
+// 已显示时：Lv 1→2（半透明→不透明）→0（隐藏）循环。
+func (s *PlayScene) toggleMinimap() {
+	if s.minimapLv == 0 || s.State.MinimapIndex < 0 {
+		now := time.Now().UnixMilli()
+		if now >= s.mmLastQueryTick && s.sendWantMinimap != nil {
+			s.mmLastQueryTick = now + 3000
+			s.sendWantMinimap()
+			s.minimapLv = 1
+		}
+		return
+	}
+	if s.minimapLv >= 2 {
+		s.minimapLv = 0
+		return
+	}
+	s.minimapLv++
+}
+
 func (s *PlayScene) AddGroundItem(id int32, x, y, looks int, name string) {
 	s.groundItems[id] = &GroundItemInfo{ID: id, X: x, Y: y, Looks: looks, Name: name}
 }
@@ -498,11 +527,12 @@ func (s *PlayScene) LoadMap(mapName string) error {
 	s.cam.CenterOn(float64(m.Width)*engine.TileWidth/2, float64(m.Height)*engine.TileHeight/2)
 	s.State.MapName = mapName
 
-	if s.minimap != nil {
-		s.minimap.Destroy()
-		s.minimap = nil
+	// 换图：清空小地图索引，若小地图开着则重新请求
+	// （PlayScn.pas:2279-2283，不做节流检查——与 M 键路径不同）。
+	s.State.MinimapIndex = -1
+	if s.minimapLv > 0 && s.sendWantMinimap != nil {
+		s.sendWantMinimap()
 	}
-	s.minimapDirty = true
 	s.lightingDirty = true
 
 	if s.resources.Objects[0] != nil {
@@ -531,9 +561,11 @@ func (s *PlayScene) Close() {
 }
 
 func (s *PlayScene) Update(dt float64) {
-	if s.minimapDirty && s.mapData != nil {
-		s.minimap = NewMinimap(s.gl, s.mapData)
-		s.minimapDirty = false
+	// 小地图标记闪烁：每 300ms 翻转（PlayScn.pas:801-804）。
+	s.mmBlinkAcc += dt
+	if s.mmBlinkAcc >= 0.3 {
+		s.mmBlinkAcc = 0
+		s.mmBlinkOn = !s.mmBlinkOn
 	}
 
 	if s.lightingDirty {
@@ -854,10 +886,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		}
 	}
 
-	if s.showMinimap && s.minimap != nil {
-		s.minimap.Render(s.cam, s.mapData.Width, s.mapData.Height)
-	}
-
 	if s.deathGray {
 		// F6: 死亡灰度效果 — 使用 multiply blend 实现更自然的去饱和
 		gl.BlendFunc(gl.DST_COLOR, gl.ZERO)
@@ -898,27 +926,7 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, ScreenWidth, ScreenHeight)
 	}
 	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
-	if s.showMinimap {
-		mmapDrawn := false
-		mmIdx := s.State.MinimapIndex
-		if s.resources.Mmap != nil && mmIdx >= 0 && mmIdx < s.resources.Mmap.Count {
-			mmImg := s.resources.Mmap.GetImage(mmIdx)
-			if mmImg != nil && mmImg.RGBA != nil {
-				mmTex := s.resources.GetTexture(s.resources.Mmap, mmIdx)
-				if mmTex != 0 {
-					s.gl.DrawQuad(mmTex, ScreenWidth - 120, 0, 120, 120, uiProj)
-					mmapDrawn = true
-				}
-			}
-		}
-		if !mmapDrawn && s.minimap != nil {
-			glState.DrawQuad(s.minimap.GetTexture(), ScreenWidth - 120, 0, 120, 120, uiProj)
-		}
-		// 在小地图上叠加周边角色雷达点（以自身为中心）。
-		if s.minimap != nil && s.State.MySelf != nil {
-			s.minimap.DrawActorDots(s.gl, s.State.Actors.All(), s.State.MySelf.CurrX, s.State.MySelf.CurrY, uiProj)
-		}
-	}
+	s.renderMinimap(uiProj)
 	s.RenderUI(uiProj)
 	if s.ui.ShowBounds {
 		s.ui.RenderDebugBounds(uiProj)
@@ -1498,8 +1506,10 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.AddChatMessage("[系统] 攻击模式: " + modes[s.State.AttackMode])
 			}
 			return
-		case 77: // M — 小地图（ClMain:1613-1628；三态循环见 B5）
-			s.showMinimap = !s.showMinimap
+		case 77: // M — 小地图三态切换（ClMain:1613-1628，聊天框打开时不响应）
+			if !s.chatMode {
+				s.toggleMinimap()
+			}
 			return
 		case 78: // N — 属性加点（ClMain:1692-1695）
 			s.State.ShowPlusAbil = !s.State.ShowPlusAbil

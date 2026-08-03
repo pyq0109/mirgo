@@ -65,8 +65,9 @@ type GameState struct {
 	MapTitle   string
 	LightLevel int
 
-	// MinimapIndex 是 Mmap.wil 中当前地图的小地图图像索引，
-	// 由服务端 SMReadMinimapOK (Recog 字段) 下发。
+	// MinimapIndex 是 Mmap.wil 中当前地图的小地图图像索引（0-based），
+	// 由服务端 SMReadMinimapOK 的 Param 字段下发（1-based），客户端减 1 得到。
+	// -1 表示无小地图（未收到或 SMReadMinimapFail）。Delphi: g_nMiniMapIndex。
 	MinimapIndex int
 
 	// ServerName 是所选服务器的显示名称，绘制在选角场景顶部居中位置
@@ -162,12 +163,14 @@ func NewGameState() *GameState {
 		SoundEnabled: true,
 		BGMEnabled:   true,
 		MapMusic:     -1,
+		MinimapIndex: -1,
 	}
 }
 
 func (gs *GameState) Reset() {
 	gs.MySelf = nil
 	gs.Actors.Clear()
+	gs.MinimapIndex = -1
 }
 
 // ItemDef 将物品数据库索引解析为定义（未知则返回 nil）。

@@ -1,157 +1,116 @@
 package main
 
 import (
-	"unsafe"
-
-	"github.com/go-gl/gl/v3.3-core/gl"
-	"github.com/pyq0109/mirgo/internal/engine"
-	"github.com/pyq0109/mirgo/internal/mapformat"
+	"image/color"
 )
 
-const minimapSize = 200
-
-// Minimap 渲染碰撞概览小地图。
-type Minimap struct {
-	gl           *engine.GLState
-	mapData      *mapformat.MapData
-	fbo          uint32
-	fboTex       uint32
-	collisionTex uint32
-}
-
-// NewMinimap 创建新的小地图。
-func NewMinimap(glState *engine.GLState, mapData *mapformat.MapData) *Minimap {
-	mm := &Minimap{
-		gl:      glState,
-		mapData: mapData,
+// renderMinimap 绘制 mmap.wil 预渲染小地图与角色标记。
+// Delphi TPlayScene.DrawMiniMap 移植（PlayScn.pas:791-842）：
+// 以玩家为中心裁剪 120×120 视口，1:1 贴到屏幕右上角 (680,0)；
+// 小地图图上 X 方向每格 1.5 像素、Y 方向每格 1 像素；
+// 视口钳制到图像边界（玩家贴边时偏离中心），不做越界填充。
+func (s *PlayScene) renderMinimap(proj [16]float32) {
+	if s.minimapLv == 0 || s.State.MySelf == nil {
+		return
 	}
-	mm.createCollisionTexture()
-	mm.createFBO()
-	return mm
-}
-
-func (mm *Minimap) createCollisionTexture() {
-	data := make([]byte, minimapSize*minimapSize*4)
-
-	for y := 0; y < minimapSize; y++ {
-		for x := 0; x < minimapSize; x++ {
-			tx := int(float64(x) / minimapSize * float64(mm.mapData.Width))
-			ty := int(float64(y) / minimapSize * float64(mm.mapData.Height))
-
-			info := mm.mapData.InfoAt(tx, ty)
-			idx := (y*minimapSize + x) * 4
-
-			if info != nil && !info.Collision {
-				data[idx] = 34
-				data[idx+1] = 85
-				data[idx+2] = 34
-				data[idx+3] = 255
-			} else {
-				data[idx] = 60
-				data[idx+1] = 60
-				data[idx+2] = 60
-				data[idx+3] = 255
-			}
-		}
+	idx := s.State.MinimapIndex
+	if idx < 0 || s.resources.Mmap == nil {
+		return
+	}
+	img := s.resources.Mmap.GetImage(idx)
+	if img == nil || img.RGBA == nil {
+		return
+	}
+	tex := s.resources.GetTexture(s.resources.Mmap, idx)
+	if tex == 0 {
+		return
 	}
 
-	gl.GenTextures(1, &mm.collisionTex)
-	gl.BindTexture(gl.TEXTURE_2D, mm.collisionTex)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
-		minimapSize, minimapSize, 0,
-		gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&data[0]))
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-}
+	// 玩家在小地图图上的像素位置（PlayScn.pas:808-809）。
+	mx := s.State.MySelf.CurrX * 48 / 32
+	my := s.State.MySelf.CurrY
 
-func (mm *Minimap) createFBO() {
-	gl.GenFramebuffers(1, &mm.fbo)
-	gl.BindFramebuffer(gl.FRAMEBUFFER, mm.fbo)
+	// 视口矩形，钳制到图像边界（PlayScn.pas:810-813）。
+	left := mx - 60
+	if left < 0 {
+		left = 0
+	}
+	top := my - 60
+	if top < 0 {
+		top = 0
+	}
+	right := left + 120
+	if right > img.Width {
+		right = img.Width
+	}
+	bottom := top + 120
+	if bottom > img.Height {
+		bottom = img.Height
+	}
+	w := right - left
+	h := bottom - top
+	if w <= 0 || h <= 0 {
+		return
+	}
 
-	gl.GenTextures(1, &mm.fboTex)
-	gl.BindTexture(gl.TEXTURE_2D, mm.fboTex)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
-		minimapSize, minimapSize, 0,
-		gl.RGBA, gl.UNSIGNED_BYTE, nil)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	alpha := float32(1)
+	if s.minimapLv == 1 {
+		// Lv=1 半透明：近似 DrawBlendEx 的 50% 调色板混合（PlayScn.pas:815-816）。
+		alpha = 0.5
+	}
+	s.gl.DrawQuadSub(tex, float32(img.Width), float32(img.Height),
+		float32(left), float32(top), float32(w), float32(h),
+		ScreenWidth-120, 0, float32(w), float32(h),
+		1, 1, 1, alpha, proj)
 
-	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mm.fboTex, 0)
-	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-}
+	// 标记与图像同步闪烁：灭帧只画底图（PlayScn.pas:819）。
+	if !s.mmBlinkOn {
+		return
+	}
 
-// Render 根据当前相机位置更新小地图 FBO。
-func (mm *Minimap) Render(cam *engine.Camera2D, mapW, mapH int) {
-	var oldFBO int32
-	gl.GetIntegerv(gl.FRAMEBUFFER_BINDING, &oldFBO)
-	var oldViewport [4]int32
-	gl.GetIntegerv(gl.VIEWPORT, &oldViewport[0])
+	selfColor, monsterColor := s.minimapMarkerColors()
 
-	gl.BindFramebuffer(gl.FRAMEBUFFER, mm.fbo)
-	gl.Viewport(0, 0, minimapSize, minimapSize)
+	// 自己：1×1 白点，调色板 255（PlayScn.pas:820-822）。
+	s.gl.DrawQuadColor(ScreenWidth-120+float32(mx-left), float32(my-top),
+		1, 1, selfColor[0], selfColor[1], selfColor[2], 1, proj)
 
-	proj := engine.OrthoProj(minimapSize, minimapSize)
-	mm.gl.DrawQuad(mm.collisionTex, 0, 0, minimapSize, minimapSize, proj)
-
-	worldW := float32(mapW) * engine.TileWidth
-	worldH := float32(mapH) * engine.TileHeight
-
-	x0 := float32(cam.X) / worldW * minimapSize
-	y0 := float32(cam.Y) / worldH * minimapSize
-	viewW := float32(cam.ViewW) / float32(cam.Zoom) / worldW * minimapSize
-	viewH := float32(cam.ViewH) / float32(cam.Zoom) / worldH * minimapSize
-
-	mm.gl.DrawQuadColor(x0, y0, viewW, 1, 1, 1, 1, 1, proj)
-	mm.gl.DrawQuadColor(x0, y0+viewH, viewW, 1, 1, 1, 1, 1, proj)
-	mm.gl.DrawQuadColor(x0, y0, 1, viewH, 1, 1, 1, 1, proj)
-	mm.gl.DrawQuadColor(x0+viewW, y0, 1, viewH, 1, 1, 1, 1, proj)
-
-	gl.BindFramebuffer(gl.FRAMEBUFFER, uint32(oldFBO))
-	gl.Viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3])
-}
-
-// DrawActorDots 在小地图（屏幕右上 120×120 区域）上叠加周边角色雷达：
-// 以自身为中心，±50 格范围内的角色按类型着色绘制为 2×2 点。
-// 自身白色、玩家绿色、怪物红色、NPC 黄色。proj 为 UI 正交投影。
-func (mm *Minimap) DrawActorDots(gl *engine.GLState, actors []*Actor, selfX, selfY int, proj [16]float32) {
-	const radarRange = 50
-	const radarSize = 120.0
-	scale := float32(radarSize / (radarRange * 2)) // 120/100 = 1.2
-	originX := float32(ScreenWidth) - radarSize
-	for _, a := range actors {
-		if a == nil {
+	// 其他角色：仅玩家周围 ±10 格，2×2 色块（PlayScn.pas:824-838）。
+	selfX := s.State.MySelf.CurrX
+	selfY := s.State.MySelf.CurrY
+	for _, a := range s.State.Actors.All() {
+		if a == nil || a.IsSelf || a.Death {
 			continue
 		}
 		dx := a.CurrX - selfX
 		dy := a.CurrY - selfY
-		if dx < -radarRange || dx > radarRange || dy < -radarRange || dy > radarRange {
+		if dx < -10 || dx > 10 || dy < -10 || dy > 10 {
 			continue
 		}
-		dotX := originX + float32(dx+radarRange)*scale
-		dotY := float32(dy+radarRange) * scale
-		var r, g, b float32
-		switch {
-		case a.IsSelf:
-			r, g, b = 1, 1, 1
-		case a.Type == ActorMonster:
-			r, g, b = 1, 0, 0
-		case a.Type == ActorNPC:
-			r, g, b = 1, 1, 0
-		default:
-			r, g, b = 0, 1, 0
+		c := monsterColor
+		if a.Type == ActorHuman {
+			// race 0（其他玩家）→ 调色板 255。
+			c = selfColor
 		}
-		gl.DrawQuadColor(dotX, dotY, 2, 2, r, g, b, 1, proj)
+		s.gl.DrawQuadColor(ScreenWidth-120+float32(a.CurrX*48/32-left), float32(a.CurrY-top),
+			2, 2, c[0], c[1], c[2], 1, proj)
 	}
 }
 
-// GetTexture 返回 FBO 纹理。
-func (mm *Minimap) GetTexture() uint32 {
-	return mm.fboTex
+// minimapMarkerColors 从 Prguse.wil 屏幕调色板取标记色（ClMain.pas:996
+// 将 Prguse 的 MainPalette 设为全屏调色板）：
+// 255 = 自己/其他玩家（白），249 = 怪物/NPC。
+// Delphi 另有 218（race 50/45/12 动物/守卫，PlayScn.pas:832），
+// Go 客户端无 race 细分，怪物/NPC 统一用 249 —— 已知偏差。
+func (s *PlayScene) minimapMarkerColors() (self, monster [3]float32) {
+	self = [3]float32{1, 1, 1}
+	monster = [3]float32{1, 0, 0}
+	if s.resources.Prguse != nil {
+		self = paletteRGB(s.resources.Prguse.Palette[255])
+		monster = paletteRGB(s.resources.Prguse.Palette[249])
+	}
+	return
 }
 
-// Destroy 释放所有资源。
-func (mm *Minimap) Destroy() {
-	gl.DeleteTextures(1, &mm.collisionTex)
-	gl.DeleteTextures(1, &mm.fboTex)
-	gl.DeleteFramebuffers(1, &mm.fbo)
+func paletteRGB(c color.RGBA) [3]float32 {
+	return [3]float32{float32(c.R) / 255, float32(c.G) / 255, float32(c.B) / 255}
 }

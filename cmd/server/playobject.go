@@ -306,7 +306,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer) {
 	if p.Death {
 		switch msg.Ident {
-		case protocol.CMSay, protocol.CMQueryBagItems, protocol.CMTakeOnItem, protocol.CMTakeOffItem:
+		case protocol.CMSay, protocol.CMQueryBagItems, protocol.CMTakeOnItem, protocol.CMTakeOffItem, protocol.CMWantMinimap:
 		default:
 			return
 		}
@@ -420,6 +420,8 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleAdjustBonus(msg, server)
 	case protocol.CMQueryUserState:
 		p.HandleQueryUserState(msg, server)
+	case protocol.CMWantMinimap:
+		p.HandleWantMinimap(server)
 	case RM_WALK:
 		p.sendMovementToClient(server, protocol.SMWalk, msg)
 	case RM_RUN:
@@ -1917,6 +1919,21 @@ func (p *PlayObject) HandleQueryUserState(msg SendMessage, server *netserver.TCP
 	buf = append(buf, []byte(target.Name)...)
 	resp := protocol.MakeDefaultMsg(protocol.SMSendUserState, target.ID, 0, 0, 0)
 	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+}
+
+// HandleWantMinimap 响应 CM_WANTMINIMAP：下发当前地图的小地图图像号。
+// Delphi: TPlayObject.ClientGetMinMap（ObjBase.pas:17985-17998）——
+// 索引放在 Param 字段（SendDefMessage(SM_READMINIMAP_OK, 0, nMinMap, 0, 0, '')）。
+func (p *PlayObject) HandleWantMinimap(server *netserver.TCPServer) {
+	n := 0
+	if p.envir != nil {
+		n = p.envir.MinMap
+	}
+	if n > 0 {
+		server.Send(p.Session.ID, protocol.MakeDefaultMsg(protocol.SMReadMinimapOK, 0, uint16(n), 0, 0), "")
+	} else {
+		server.Send(p.Session.ID, protocol.MakeDefaultMsg(protocol.SMReadMinimapFail, 0, 0, 0, 0), "")
+	}
 }
 
 func (p *PlayObject) SendMapInfo(server *netserver.TCPServer) {

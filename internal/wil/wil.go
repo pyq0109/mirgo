@@ -178,7 +178,7 @@ func Load(wilPath string) (*File, error) {
 	wf.offsets = offsets
 	wf.Images = make([]*Image, wf.Count)
 
-	log.Logf(log.LevelDebug, "WIL", "已加载 %s：%d 张图片（懒加载）", filepath.Base(wilPath), wf.Count)
+	log.Logf(log.LevelTrace, "WIL", "已加载 %s：%d 张图片（懒加载）", filepath.Base(wilPath), wf.Count)
 	return wf, nil
 }
 

@@ -73,6 +73,10 @@ type Environment struct {
 
 	rawMap *mapformat.MapData
 	Castle *CastleObject // 沙巴克城堡引用（仅城堡地图非nil）
+
+	// MinMap 是 mmap.wil 中该地图的小地图图像号（1-based，来自 MiniMap.txt）。
+	// 0 表示无小地图。Delphi: TEnvirnoment.nMinMap（Envir.pas:50）。
+	MinMap int
 }
 
 // NewEnvironment 从地图文件创建环境。

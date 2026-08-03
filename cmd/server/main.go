@@ -65,6 +65,7 @@ func main() {
 		os.Exit(1)
 	}
 	mapMgr.InitRoutes(*configDir)
+	mapMgr.InitMiniMaps(*configDir)
 
 	var itemDB *ItemDB
 	itemDBPath := filepath.Join(*configDir, "items", "std_items.jsonc")
@@ -124,6 +125,8 @@ func main() {
 
 	LoadDrugRecipes(*configDir)
 
+	loadDenyChrNameList(*configDir)
+
 	server := netserver.NewTCPServer(listenAddr)
 
 	server.SetConnectHandler(func(session *netserver.Session) {
@@ -147,6 +150,7 @@ func main() {
 			}
 		}
 		sessionMgr.Remove(session.ID)
+		clearSessionThrottles(session.ID)
 		log.Logf(log.LevelInfo, "Server", "session %d disconnected (total: %d)", session.ID, sessionMgr.Count())
 	})
 
@@ -374,7 +378,7 @@ func main() {
 		case netserver.StateConnected:
 			handleConnectedMessage(server, session, msg, body, rawBody, config, db, sessionMgr)
 		case netserver.StateAuthenticated:
-			handleAuthenticatedMessage(server, session, msg, body, config, db, userEngine, mapMgr)
+			handleAuthenticatedMessage(server, session, msg, body, rawBody, config, db, userEngine, mapMgr)
 		case netserver.StateInGame:
 			if msg.Ident == protocol.CMLogout || msg.Ident == protocol.CMExitGame {
 				player := userEngine.GetPlayer(int32(session.CharacterID))
@@ -445,6 +449,12 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		log.Logf(log.LevelInfo, "Server", "protocol version: %d", msg.Recog)
 
 	case protocol.CMAddNewUser:
+		// Delphi 同一连接两次注册请求间隔必须 > 5000ms，否则静默丢弃并记日志
+		//（LoginSrv/LMain.pas:979-984）。
+		if !throttleOK(session.ID, "addnewuser", 5*time.Second) {
+			log.Logf(log.LevelWarn, "Server", "[非法操作] 新建帐号 (session %d)", session.ID)
+			return
+		}
 		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd): 两个
 		// 独立的 6Bit 段（ClMain.pas:2844）。在解码前按固定编码长度
 		// 分割原始载荷；一次性解码整个字符串会导致第二段错位。
@@ -459,12 +469,13 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		uaBuf := make([]byte, protocol.UserEntryAddSize)
 		protocol.DecodeBuffer(rawBody[protocol.UserEntryEncodedSize:protocol.UserEntryEncodedSize+protocol.UserEntryAddEncodedSize], uaBuf)
 		ue := protocol.UserEntryFromBytes(ueBuf)
-		_ = protocol.UserEntryAddFromBytes(uaBuf) // 附加信息，不持久化
+		ua := protocol.UserEntryAddFromBytes(uaBuf)
 		username := strings.ToLower(ue.Account())
 		password := ue.Password()
 		log.Logf(log.LevelInfo, "Server", "[CMAddNewUser] registration attempt: %s", username)
 		// Delphi SM_NEWID_FAIL Recog: 0=已存在, -2=系统繁忙, 其他=非法 (ClMain.pas:3694-3702)。
-		if len(username) < config.GetMinAcctLen() || len(username) > config.GetMaxAcctLen() || len(password) < config.GetMinPassLen() || len(password) > config.GetMaxPassLen() {
+		// 账号名字符集校验移植自 CheckAccountName (LoginSrv/LSShare.pas:169-192)。
+		if !checkAccountName(username) || len(username) < config.GetMinAcctLen() || len(username) > config.GetMaxAcctLen() || len(password) < config.GetMinPassLen() || len(password) > config.GetMaxPassLen() {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -1, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -477,7 +488,8 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 			return
 		}
 		hash := simpleHash(password)
-		_, err = db.CreateAccount(username, hash)
+		info := accountInfoFromEntry(&ue, &ua)
+		_, err = db.CreateAccountWithEntry(username, hash, info)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[CMAddNewUser] creation failed: %v", err)
 			resp := protocol.MakeDefaultMsg(protocol.SMNewIDFail, -2, 0, 0, 0)
@@ -489,6 +501,12 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMChangePassword:
+		// Delphi 同一连接两次改密请求间隔必须 > 5000ms，否则静默丢弃
+		//（LoginSrv/LMain.pas:987-996）。
+		if !throttleOK(session.ID, "changepw", 5*time.Second) {
+			log.Logf(log.LevelWarn, "Server", "[非法操作] 修改密码 (session %d)", session.ID)
+			return
+		}
 		// Body = id + #9 + passwd + #9 + newpasswd（ClMain.pas:2864-2870）。
 		parts := strings.Split(body, "\t")
 		if len(parts) != 3 {
@@ -498,8 +516,39 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		}
 		id, oldpw, newpw := parts[0], parts[1], parts[2]
 		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] change attempt: %s", id)
+		// Delphi 顺序（LMain.pas:1098-1123）：新密码 >=3 → 查账号 → 错误计数锁
+		//（5 次/180 秒，与登录共享 nErrorCount）→ 旧密码比对。
+		// 新密码过短与账号不存在都回 Recog=0。
+		if len(newpw) < config.GetMinPassLen() {
+			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
 		accountID, hash, err := db.GetAccountByUsername(id)
-		if err != nil || !verifyPassword(oldpw, hash) {
+		if err != nil {
+			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		loginAttempts.Lock()
+		attempt := loginAttempts.m[id]
+		if attempt != nil && attempt.count >= config.GetLoginMaxAttempts() && time.Since(attempt.lockTime) < 180*time.Second {
+			loginAttempts.Unlock()
+			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -2, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		loginAttempts.Unlock()
+		if !verifyPassword(oldpw, hash) {
+			loginAttempts.Lock()
+			if loginAttempts.m[id] == nil {
+				loginAttempts.m[id] = &loginAttempt{}
+			}
+			loginAttempts.m[id].count++
+			if loginAttempts.m[id].count >= config.GetLoginMaxAttempts() {
+				loginAttempts.m[id].lockTime = time.Now()
+			}
+			loginAttempts.Unlock()
 			resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdFail, -1, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -510,6 +559,9 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 			server.Send(session.ID, resp, "")
 			return
 		}
+		loginAttempts.Lock()
+		delete(loginAttempts.m, id)
+		loginAttempts.Unlock()
 		log.Logf(log.LevelInfo, "Server", "[CMChangePassword] password changed: %s", id)
 		resp := protocol.MakeDefaultMsg(protocol.SMChgPasswdSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
@@ -561,10 +613,32 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		delete(loginAttempts.m, username)
 		loginAttempts.Unlock()
 
-		// 重复登录检测：踢出旧会话（Delphi: LoginSrv/LMain.pas:1253-1268）
+		// 资料完整性检查（Delphi: 密码正确但 sUserName='' 或 sQuiz2='' 时
+		// 要求补全资料，LoginSrv/LMain.pas:1213-1216）。
+		needUpdate := false
+		if info, ierr := db.GetAccountInfo(username); ierr == nil && (info.UserName == "" || info.Quiz2 == "") {
+			needUpdate = true
+		}
+
+		// 重复登录检测（Delphi: LoginSrv/LMain.pas:1235-1238）。
+		// Delphi 语义：踢掉旧会话的游戏角色，但新连接登录失败并回 -3
+		//「这个账号已经登录」，而不是让新连接顶替成功。
 		if old := sessionMgr.GetByAccount(username); old != nil && old.ID != session.ID {
-			log.Logf(log.LevelInfo, "Server", "kicking duplicate session %d for account %s", old.ID, username)
+			log.Logf(log.LevelInfo, "Server", "account %s already logged in (session %d), rejecting session %d with -3",
+				username, old.ID, session.ID)
 			server.CloseSession(old.ID)
+			if needUpdate {
+				// Delphi 在发送 SM_PASSWD_FAIL 之前先发 SM_NEEDUPDATE_ACCOUNT
+				//（LMain.pas:1239-1244 在 nCode 分支之前执行）。
+				sendNeedUpdateAccount(server, session, db, username)
+			}
+			resp := protocol.MakeDefaultMsg(protocol.SMPasswdFail, -3, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+
+		if needUpdate {
+			sendNeedUpdateAccount(server, session, db, username)
 		}
 
 		session.State = netserver.StateAuthenticated
@@ -587,7 +661,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 }
 
 // handleAuthenticatedMessage 处理 Authenticated 状态（选角）的消息。
-func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body string, config *ServerConfig, db *storage.Database, userEngine *UserEngine, mapMgr *MapManager) {
+func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.Session, msg protocol.DefaultMessage, body, rawBody string, config *ServerConfig, db *storage.Database, userEngine *UserEngine, mapMgr *MapManager) {
 	switch msg.Ident {
 	case protocol.CMSelectServer:
 		log.Logf(log.LevelInfo, "Server", "[CMSelectServer] body=%q", body)
@@ -601,11 +675,70 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		server.Send(session.ID, resp, protocol.EncodeString(addrBody))
 		log.Logf(log.LevelInfo, "Server", "[CMSelectServer] sent SMSelectServerOK: %s (cert=%d)", addrBody, cert)
 
+	case protocol.CMUpdateUser:
+		// 补全账号资料（Delphi CM_UPDATEUSER，LoginSrv/LMain.pas:1422-1470）。
+		// Delphi 限流：同一连接两次请求间隔 > 5000ms（LMain.pas:997-1004）。
+		if !throttleOK(session.ID, "updateuser", 5*time.Second) {
+			log.Logf(log.LevelWarn, "Server", "[非法操作] 补全资料 (session %d)", session.ID)
+			return
+		}
+		// body 与注册同构：EncodeBuffer(TUserEntry)+EncodeBuffer(TUserEntryAdd)。
+		if len(rawBody) < protocol.UserEntryEncodedSize+protocol.UserEntryAddEncodedSize {
+			resp := protocol.MakeDefaultMsg(protocol.SMUpdateIDFail, -1, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		ueBuf := make([]byte, protocol.UserEntrySize)
+		protocol.DecodeBuffer(rawBody[:protocol.UserEntryEncodedSize], ueBuf)
+		uaBuf := make([]byte, protocol.UserEntryAddSize)
+		protocol.DecodeBuffer(rawBody[protocol.UserEntryEncodedSize:protocol.UserEntryEncodedSize+protocol.UserEntryAddEncodedSize], uaBuf)
+		ue := protocol.UserEntryFromBytes(ueBuf)
+		ua := protocol.UserEntryAddFromBytes(uaBuf)
+
+		// Delphi 要求会话账号与提交的账号一致且账号名合法（LMain.pas:1443）。
+		// 账号不匹配或非法 → Recog=-1；账号不存在 → Recog=0。
+		if !strings.EqualFold(session.AccountName, ue.Account()) || !checkAccountName(ue.Account()) {
+			resp := protocol.MakeDefaultMsg(protocol.SMUpdateIDFail, -1, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		if _, _, err := db.GetAccountByUsername(session.AccountName); err != nil {
+			resp := protocol.MakeDefaultMsg(protocol.SMUpdateIDFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		// 整条覆盖（含密码），Delphi LMain.pas:1449-1451。
+		info := accountInfoFromEntry(&ue, &ua)
+		if err := db.UpdateAccountInfo(session.AccountName, simpleHash(ue.Password()), info); err != nil {
+			log.Logf(log.LevelError, "Server", "[CMUpdateUser] update failed: %v", err)
+			resp := protocol.MakeDefaultMsg(protocol.SMUpdateIDFail, -1, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		log.Logf(log.LevelInfo, "Server", "[CMUpdateUser] account info updated: %s", session.AccountName)
+		resp := protocol.MakeDefaultMsg(protocol.SMUpdateIDSuccess, 0, 0, 0, 0)
+		server.Send(session.ID, resp, "")
+
 	case protocol.CMQueryChr:
+		// Delphi 限流：未查询过则放行；已查询过则要求距上次 chr 操作 >200ms
+		//（DBServer/UsrSoc.pas:536-540）。
+		if getChrQueried(session.ID) && !chrThrottleOK(session.ID, 200*time.Millisecond) {
+			log.Logf(log.LevelWarn, "Server", "[非法操作] 查询角色 (session %d)", session.ID)
+			return
+		}
+		chrThrottleOK(session.ID, 0) // 刷新共享 dwChrTick
 		log.Logf(log.LevelInfo, "Server", "[CMQueryChr] accountID=%d", session.CharacterID)
-		sendCharacterList(server, session, db)
+		if sendCharacterList(server, session, db) {
+			setChrQueried(session.ID, true) // Delphi: boChrQueryed:=True
+		}
 
 	case protocol.CMNewChr:
+		// Delphi 限流：距上次 chr 操作须 >1000ms，否则静默丢弃
+		//（DBServer/UsrSoc.pas:546-559）。
+		if !chrThrottleOK(session.ID, 1000*time.Millisecond) {
+			log.Logf(log.LevelWarn, "Server", "[非法操作] 创建角色 (session %d)", session.ID)
+			return
+		}
 		// body: "loginID/charName/hair/job/sex"
 		parts := strings.Split(body, "/")
 		if len(parts) < 5 {
@@ -614,7 +747,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			server.Send(session.ID, resp, "")
 			return
 		}
-		charName := parts[1]
+		charName := strings.TrimSpace(parts[1]) // Delphi: sChrName:=Trim(sChrName) (UsrSoc.pas:750)
 		var hair, job, sex int
 		fmt.Sscanf(parts[2], "%d", &hair)
 		fmt.Sscanf(parts[3], "%d", &job)
@@ -623,8 +756,21 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		log.Logf(log.LevelInfo, "Server", "[CMNewChr] name=%q job=%d sex=%d hair=%d account=%d",
 			charName, job, sex, hair, session.CharacterID)
 
-		if charName == "" || len([]rune(charName)) > config.GetMaxNameLen() {
+		// Delphi 校验顺序（UsrSoc.pas:750-796）：
+		// 1) 最小长度——原版按字节 length(sChrName) < 3 拒绝（UsrSoc.pas:751）。
+		//    UTF-8 语义移植：单汉字为 3 字节，需补 rune 数 >= 2 才能等价拒绝
+		//    （GBK 单汉字 2 字节 <3 被拒、双汉字 4 字节省放行）。
+		// 2) 字符集——checkChrName 仅允许数字/字母/汉字（DBShare.pas:265-304 +
+		//    UsrSoc.pas:757-789 禁止符号表）。
+		// 3) 禁止字黑名单——整名大小写不敏感匹配（UsrSoc.pas:981-996），命中 Recog=2。
+		tooShort := len(charName) < config.GetMinNameLen() || len([]rune(charName)) < 2
+		if tooShort || len([]rune(charName)) > config.GetMaxNameLen() || !checkChrName(charName) {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		if !checkDenyChrName(charName, denyChrNameList) {
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 2, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
@@ -636,8 +782,15 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 
-		_, err = db.GetCharacterByName(session.CharacterID, charName)
-		if err == nil {
+		// Delphi 做全局重名检查（UsrSoc.pas:794-796），而非仅同账号范围。
+		exists, err := db.CharacterNameExists(charName)
+		if err != nil {
+			log.Logf(log.LevelError, "Server", "[CMNewChr] name lookup failed: %v", err)
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 4, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
+		if exists {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 2, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
@@ -646,16 +799,23 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		_, err = db.CreateCharacter(session.CharacterID, charName, job, sex)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[CMNewChr] creation failed: %v", err)
-			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 0, 0, 0, 0)
+			// Delphi 写库失败 Recog=4（UsrSoc.pas:833）。
+			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 4, 0, 0, 0)
 			server.Send(session.ID, resp, "")
 			return
 		}
 
 		log.Logf(log.LevelInfo, "Server", "[CMNewChr] created character %q, account %d", charName, session.CharacterID)
+		setChrQueried(session.ID, false) // Delphi: 建角后须重新查角 (UsrSoc.pas:552)
 		resp := protocol.MakeDefaultMsg(protocol.SMNewChrSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMDelChr:
+		// Delphi 限流：距上次 chr 操作须 >1000ms（DBServer/UsrSoc.pas:561-574）。
+		if !chrThrottleOK(session.ID, 1000*time.Millisecond) {
+			log.Logf(log.LevelWarn, "Server", "[非法操作] 删除角色 (session %d)", session.ID)
+			return
+		}
 		charName := body
 		log.Logf(log.LevelInfo, "Server", "[CMDelChr] name=%q account=%d", charName, session.CharacterID)
 
@@ -675,10 +835,17 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		}
 
 		log.Logf(log.LevelInfo, "Server", "[CMDelChr] deleted character %q (id=%d)", charName, charData.ID)
+		setChrQueried(session.ID, false) // Delphi: 删角后须重新查角 (UsrSoc.pas:567)
 		resp := protocol.MakeDefaultMsg(protocol.SMDelChrSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMSelChr:
+		// Delphi 要求选角前必须先查角（boChrQueryed），防止重复提交
+		//（DBServer/UsrSoc.pas:576-590，原码条件写反，这里按合理语义实现）。
+		if !getChrQueried(session.ID) {
+			log.Logf(log.LevelWarn, "Server", "Double send _SELCHR (session %d)", session.ID)
+			return
+		}
 		// Fix 4: 从 body 解析角色名，而非 msg.Recog
 		// 客户端发送: "loginID/charName"
 		charName := body
@@ -696,6 +863,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 		log.Logf(log.LevelInfo, "Server", "[CMSelChr] character %q validated", charName)
+		setChrQueried(session.ID, false) // 选角完成，防止重复选角
 
 		// Fix 6: 发送 SMStartPlay，内容为 "addr/port"（同一服务器）
 		// 这里不创建 PlayObject —— 等待 **runlogin
@@ -819,6 +987,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMAdjustBonus, int(msg.Recog), 0, 0, body)
 	case protocol.CMQueryUserState:
 		player.SendMsg(protocol.CMQueryUserState, int(msg.Recog), 0, 0, "")
+	case protocol.CMWantMinimap:
+		player.SendMsg(protocol.CMWantMinimap, 0, 0, 0, "")
 	case protocol.CMLoginNoticeOK:
 		log.Logf(log.LevelInfo, "Server", "%s confirmed notice", player.Name)
 		player.SendLogon(server)
@@ -839,14 +1009,14 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 
 // sendCharacterList 向客户端发送角色列表。
 // Fix 3: 使用文本格式 "*name/job/hair/level/sex/..." 代替二进制。
-func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, db *storage.Database) {
+func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, db *storage.Database) bool {
 	log.Logf(log.LevelInfo, "Server", "[sendCharacterList] loading characters for account %d...", session.CharacterID)
 	chars, err := db.GetCharactersByAccount(session.CharacterID)
 	if err != nil {
 		log.Logf(log.LevelError, "Server", "[sendCharacterList] failed: %v", err)
 		resp := protocol.MakeDefaultMsg(protocol.SMQueryChrFail, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
-		return
+		return false
 	}
 
 	// 编码为文本: "*name1/job1/hair1/level1/sex1/name2/job2/hair2/level2/sex2"
@@ -875,6 +1045,7 @@ func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, 
 	server.Send(session.ID, resp, protocol.EncodeString(sb.String()))
 
 	log.Logf(log.LevelInfo, "Server", "sent %d characters to session %d", len(chars), session.ID)
+	return true
 }
 
 
@@ -1072,6 +1243,54 @@ func simpleHash(password string) string {
 // verifyPassword 验证密码与哈希是否匹配。
 func verifyPassword(password, hash string) bool {
 	return simpleHash(password) == hash
+}
+
+// accountInfoFromEntry 把客户端注册结构转为存储层资料。
+func accountInfoFromEntry(ue *protocol.UserEntry, ua *protocol.UserEntryAdd) *storage.AccountInfo {
+	return &storage.AccountInfo{
+		UserName:    ue.UserName(),
+		SSNo:        ue.SSNo(),
+		Phone:       ue.Phone(),
+		Quiz:        ue.Quiz(),
+		Answer:      ue.Answer(),
+		Email:       ue.EMail(),
+		Quiz2:       ua.Quiz2(),
+		Answer2:     ua.Answer2(),
+		BirthDay:    ua.BirthDay(),
+		MobilePhone: ua.MobilePhone(),
+		Memo:        ua.Memo(),
+		Memo2:       ua.Memo2(),
+	}
+}
+
+// userEntryFromInfo 用已存资料构建回发客户端的 TUserEntry（SM_NEEDUPDATE_ACCOUNT，
+// LoginSrv/LMain.pas:1239-1244）。密码列不下发——Go 只存哈希，客户端补全表单
+// 需重新输入密码。
+func userEntryFromInfo(username string, info *storage.AccountInfo) protocol.UserEntry {
+	var ue protocol.UserEntry
+	ue.SetAccount(username)
+	ue.SetUserName(info.UserName)
+	ue.SetSSNo(info.SSNo)
+	ue.SetPhone(info.Phone)
+	ue.SetQuiz(info.Quiz)
+	ue.SetAnswer(info.Answer)
+	ue.SetEMail(info.Email)
+	return ue
+}
+
+// sendNeedUpdateAccount 发送 SM_NEEDUPDATE_ACCOUNT + EncodeBuffer(TUserEntry)，
+// 要求客户端补全账号资料（LoginSrv/LMain.pas:1239-1244）。发送后登录流程照常
+//（LMain.pas:1245-1282 仍发 SM_PASSOK_SELECTSERVER）。
+func sendNeedUpdateAccount(server *netserver.TCPServer, session *netserver.Session, db *storage.Database, username string) {
+	info, err := db.GetAccountInfo(username)
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "[SMNeedUpdateAccount] load info failed for %s: %v", username, err)
+		return
+	}
+	ue := userEntryFromInfo(username, info)
+	resp := protocol.MakeDefaultMsg(protocol.SMNeedUpdateAccount, 0, 0, 0, 0)
+	server.Send(session.ID, resp, protocol.EncodeBuffer(ue.Bytes()))
+	log.Logf(log.LevelInfo, "Server", "[SMNeedUpdateAccount] sent to session %d (account %s)", session.ID, username)
 }
 
 // encodeCharacterInfo 编码角色信息用于网络传输。

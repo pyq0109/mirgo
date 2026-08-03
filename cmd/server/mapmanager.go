@@ -127,6 +127,38 @@ func (m *MapManager) ProcessMineRegen(now int64) {
 	}
 }
 
+// InitMiniMaps 从 mini_map.jsonc 加载地图 → 小地图图像号映射，
+// 写入对应 Environment.MinMap。Delphi: LocalDB.LoadMinMap（LocalDB.pas:1058-1085）。
+func (m *MapManager) InitMiniMaps(configDir string) {
+	path := filepath.Join(configDir, "maps", "mini_map.jsonc")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Logf(log.LevelWarn, "MapManager", "mini map file not found: %s, no minimaps loaded", path)
+		return
+	}
+	clean := stripJSONCComments(string(data))
+	var raw struct {
+		MiniMaps []struct {
+			MapName   string `json:"mapName"`
+			MiniMapID int    `json:"miniMapId"`
+		} `json:"miniMaps"`
+	}
+	if err := json.Unmarshal([]byte(clean), &raw); err != nil {
+		log.Logf(log.LevelWarn, "MapManager", "failed to parse %s: %v, no minimaps loaded", path, err)
+		return
+	}
+	matched := 0
+	for _, mm := range raw.MiniMaps {
+		if env := m.FindMap(mm.MapName); env != nil {
+			env.MinMap = mm.MiniMapID
+			matched++
+		} else {
+			log.Logf(log.LevelDebug, "MapManager", "minimap entry for unknown map %q skipped", mm.MapName)
+		}
+	}
+	log.Logf(log.LevelInfo, "MapManager", "loaded %d/%d minimap mappings from %s", matched, len(raw.MiniMaps), path)
+}
+
 // InitRoutes 从配置文件加载地图传送路线。
 func (m *MapManager) InitRoutes(configDir string) {
 	routesPath := filepath.Join(configDir, "maps", "map_routes.jsonc")

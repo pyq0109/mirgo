@@ -445,6 +445,12 @@ func (ue *UserEntry) SetEMail(s string)    { putShortString(ue.SEMail[:], s) }
 
 func (ue *UserEntry) Account() string  { return getShortString(ue.SAccount[:]) }
 func (ue *UserEntry) Password() string { return getShortString(ue.SPassword[:]) }
+func (ue *UserEntry) UserName() string { return getShortString(ue.SUserName[:]) }
+func (ue *UserEntry) SSNo() string     { return getShortString(ue.SSSNo[:]) }
+func (ue *UserEntry) Phone() string    { return getShortString(ue.SPhone[:]) }
+func (ue *UserEntry) Quiz() string     { return getShortString(ue.SQuiz[:]) }
+func (ue *UserEntry) Answer() string   { return getShortString(ue.SAnswer[:]) }
+func (ue *UserEntry) EMail() string    { return getShortString(ue.SEMail[:]) }
 
 func (ua *UserEntryAdd) SetQuiz2(s string)       { putShortString(ua.SQuiz2[:], s) }
 func (ua *UserEntryAdd) SetAnswer2(s string)     { putShortString(ua.SAnswer2[:], s) }
@@ -452,6 +458,13 @@ func (ua *UserEntryAdd) SetBirthDay(s string)    { putShortString(ua.SBirthDay[:
 func (ua *UserEntryAdd) SetMobilePhone(s string) { putShortString(ua.SMobilePhone[:], s) }
 func (ua *UserEntryAdd) SetMemo(s string)        { putShortString(ua.SMemo[:], s) }
 func (ua *UserEntryAdd) SetMemo2(s string)       { putShortString(ua.SMemo2[:], s) }
+
+func (ua *UserEntryAdd) Quiz2() string       { return getShortString(ua.SQuiz2[:]) }
+func (ua *UserEntryAdd) Answer2() string     { return getShortString(ua.SAnswer2[:]) }
+func (ua *UserEntryAdd) BirthDay() string    { return getShortString(ua.SBirthDay[:]) }
+func (ua *UserEntryAdd) MobilePhone() string { return getShortString(ua.SMobilePhone[:]) }
+func (ua *UserEntryAdd) Memo() string        { return getShortString(ua.SMemo[:]) }
+func (ua *UserEntryAdd) Memo2() string       { return getShortString(ua.SMemo2[:]) }
 
 // Bytes 返回固定大小的网络表示。
 func (ue *UserEntry) Bytes() []byte {

@@ -140,10 +140,11 @@ const (
 	srvDlgImg   = 256
 	srvBtnImg   = 286
 	srvCloseImg = 83
-	srvCloseDX  = float32(245)
-	srvCloseDY  = float32(31)
-	srvCloseW   = float32(20)
-	srvCloseH   = float32(20)
+	// 热区对齐 Prguse[256] 原画烘焙的 X 图案（约 (247,27)-(267,48)）。
+	srvCloseDX = float32(244)
+	srvCloseDY = float32(26)
+	srvCloseW  = float32(24)
+	srvCloseH  = float32(24)
 )
 
 func srvButtonTop(i, count int) float32 {
@@ -293,9 +294,14 @@ type LoginScene struct {
 	// 选服
 	servers []serverInfo
 
+	// 补全资料模式（SM_NEEDUPDATE_ACCOUNT 触发，复用注册表单，
+	// Delphi LoginScene.UpdateAccountInfos，ClMain.pas:5071-5076）
+	updateMode bool
+
 	// 回调
 	loginFunc        func(id, password string)
 	registerFunc     func(ue protocol.UserEntry, ua protocol.UserEntryAdd)
+	updateFunc       func(ue protocol.UserEntry, ua protocol.UserEntryAdd)
 	chgpwFunc        func(id, oldpw, newpw string)
 	selectFunc       func(serverName string)
 	closeFunc        func()
@@ -334,6 +340,7 @@ func (s *LoginScene) Open() {
 	s.doorFading = false
 	s.doorFrame = 0
 	s.connecting = false
+	s.updateMode = false
 	s.servers = nil
 	s.registerDebugCmds()
 	if s.editID != nil {
@@ -628,13 +635,11 @@ func (s *LoginScene) buildLoginUI() {
 	s.ui.Root.AddChild(sp)
 	s.srvPanel = sp
 
-	// 关闭按钮
+	// 关闭按钮：X 图案烘焙在对话框原画 Prguse[256] 里，Prguse[83] 是 1x1，
+	// 不能走 SetImgIndex（会把点击区域设成 1x1 导致点不中）——
+	// 按钮只做不可命中的透明热区，尺寸必须显式指定。
 	srvClose := NewUIControl("BtnSrvClose", KindButton)
-	if prg != nil {
-		srvClose.SetImgIndex(prg, srvCloseImg)
-	} else {
-		srvClose.Width, srvClose.Height = int(srvCloseW), int(srvCloseH)
-	}
+	srvClose.Width, srvClose.Height = int(srvCloseW), int(srvCloseH)
 	srvClose.Left = int(srvCloseDX)
 	srvClose.Top = int(srvCloseDY)
 	srvClose.OnClick = func(c *UIControl, x, y int) {
@@ -805,8 +810,16 @@ func (s *LoginScene) cycleFocus() {
 // ---------------------------------------------------------------------------
 
 func (s *LoginScene) backToLogin() {
+	wasUpdate := s.updateMode
 	s.mode = modeLogin
-	if s.editID != nil && s.ui != nil {
+	s.updateMode = false
+	if wasUpdate && len(s.servers) > 0 {
+		// 取消补全资料：回到被延迟的选服浮层（补全可跳过，
+		// Delphi 同样允许直接进入选服）。
+		s.mode = modeServerSelect
+		s.showLoginUI = true
+		s.layoutSrvButtons()
+	} else if s.editID != nil && s.ui != nil {
 		s.ui.SetFocus(s.editID.Ctrl)
 	}
 }
@@ -1000,10 +1013,6 @@ func (s *LoginScene) submitRegister() {
 		s.ui.SetFocus(s.regEdits[4].Ctrl)
 		return
 	}
-	if s.registerFunc == nil {
-		s.ShowMessage("未连接到服务器")
-		return
-	}
 
 	var ue protocol.UserEntry
 	var ua protocol.UserEntryAdd
@@ -1020,6 +1029,25 @@ func (s *LoginScene) submitRegister() {
 	ua.SetBirthDay(fields[5])
 	ua.SetMobilePhone(fields[11])
 
+	// 补全资料模式：发 CM_UPDATEUSER 而非 CM_ADDNEWUSER。
+	if s.updateMode {
+		if s.updateFunc == nil {
+			s.ShowMessage("未连接到服务器")
+			return
+		}
+		log.Logf(log.LevelInfo, "LoginScene", "submit account update: %s", ue.Account())
+		for i, f := range fields {
+			s.regCache[i] = f
+		}
+		s.connecting = true
+		s.updateFunc(ue, ua)
+		return
+	}
+
+	if s.registerFunc == nil {
+		s.ShowMessage("未连接到服务器")
+		return
+	}
 	log.Logf(log.LevelInfo, "LoginScene", "submit register: %s", ue.Account())
 	for i, f := range fields {
 		s.regCache[i] = f
@@ -1147,8 +1175,37 @@ func (s *LoginScene) closeModal(win *UIControl) {
 		s.ui.CloseModal(win)
 	}
 	s.connecting = false
-	if s.mode == modeLogin && s.editID != nil {
-		s.ui.SetFocus(s.editID.Ctrl)
+	// ShowModal 会把焦点抢到模态框上，CloseModal 不会归还焦点——
+	// 必须按当前模式恢复，否则键盘输入落在已隐藏的模态框上。
+	switch s.mode {
+	case modeLogin:
+		if s.editID != nil {
+			s.ui.SetFocus(s.editID.Ctrl)
+		}
+	case modeRegister:
+		// 聚焦第一个空输入框（补全模式下自然落在待重输的密码框）。
+		for _, eb := range s.regEdits {
+			if eb != nil && eb.Text == "" {
+				s.ui.SetFocus(eb.Ctrl)
+				return
+			}
+		}
+		if s.regEdits[0] != nil {
+			s.ui.SetFocus(s.regEdits[0].Ctrl)
+		}
+	case modeChgPw:
+		for _, eb := range s.chgEdits {
+			if eb != nil && eb.Text == "" {
+				s.ui.SetFocus(eb.Ctrl)
+				return
+			}
+		}
+		if s.chgEdits[0] != nil {
+			s.ui.SetFocus(s.chgEdits[0].Ctrl)
+		}
+	default:
+		// modeServerSelect 等鼠标驱动界面不需要键盘焦点。
+		s.ui.ReleaseFocus()
 	}
 }
 
@@ -1190,6 +1247,63 @@ func (s *LoginScene) RegistrationFailed(msg string) {
 	s.ShowMessage(msg)
 }
 
+// UpdateAccountInfos 处理 SM_NEEDUPDATE_ACCOUNT（Delphi
+// TfrmMain.ClientGetNeedUpdateAccount → LoginScene.UpdateAccountInfos，
+// ClMain.pas:5071-5076）：复用注册表单补全资料。服务端只回传 TUserEntry
+//（不含密码——Go 只存哈希），预填已知字段，其余由用户重新填写。
+func (s *LoginScene) UpdateAccountInfos(ue protocol.UserEntry) {
+	s.mode = modeRegister
+	s.updateMode = true
+	for _, eb := range s.regEdits {
+		eb.Clear()
+	}
+	s.regEdits[0].Text = ue.Account()  // 账号
+	s.regEdits[3].Text = ue.UserName() // 真实姓名
+	s.regEdits[4].Text = ue.SSNo()     // 身份证号
+	s.regEdits[6].Text = ue.Quiz()     // 问题1
+	s.regEdits[7].Text = ue.Answer()   // 答案1
+	s.regEdits[10].Text = ue.Phone()   // 电话
+	s.regEdits[12].Text = ue.EMail()   // 邮箱
+	if s.regEdits[1] != nil && s.ui != nil {
+		s.ui.SetFocus(s.regEdits[1].Ctrl)
+	}
+	s.ShowMessage("请重新确认您的帐号信息.")
+}
+
+// UpdateDone 处理 SM_UPDATEID_SUCCESS（ClMain.pas:3721-3727）。
+func (s *LoginScene) UpdateDone() {
+	s.updateMode = false
+	for _, eb := range s.regEdits {
+		eb.Clear()
+	}
+	// 补全期间被延迟的选服浮层现在显示（ servers 已在 ShowServerSelect 缓存）。
+	if len(s.servers) > 0 {
+		s.mode = modeServerSelect
+		s.showLoginUI = true
+		s.layoutSrvButtons()
+	} else {
+		s.mode = modeLogin
+	}
+	s.ShowMessage("您的帐号信息更新成功.\\请妥善保管您的帐号和密码.\\并且不要因任何原因把帐号和密码告诉任何其他人.")
+}
+
+// UpdateFailed 处理 SM_UPDATEID_FAIL（ClMain.pas:3729-3732）。Delphi 失败后
+// 也继续选服流程（ClientGetSelectServer）。
+func (s *LoginScene) UpdateFailed(msg string) {
+	s.updateMode = false
+	for _, eb := range s.regEdits {
+		eb.Clear()
+	}
+	if len(s.servers) > 0 {
+		s.mode = modeServerSelect
+		s.showLoginUI = true
+		s.layoutSrvButtons()
+	} else {
+		s.mode = modeLogin
+	}
+	s.ShowMessage(msg)
+}
+
 // ChgPwResult 显示修改密码结果对话框。
 func (s *LoginScene) ChgPwResult(msg string) {
 	s.ShowMessage(msg)
@@ -1203,6 +1317,9 @@ func (s *LoginScene) SetLoginFunc(fn func(id, password string))       { s.loginF
 func (s *LoginScene) SetRegisterFunc(fn func(ue protocol.UserEntry, ua protocol.UserEntryAdd)) {
 	s.registerFunc = fn
 }
+func (s *LoginScene) SetUpdateFunc(fn func(ue protocol.UserEntry, ua protocol.UserEntryAdd)) {
+	s.updateFunc = fn
+}
 func (s *LoginScene) SetChgPwFunc(fn func(id, oldpw, newpw string)) { s.chgpwFunc = fn }
 func (s *LoginScene) SetSelectFunc(fn func(serverName string))      { s.selectFunc = fn }
 func (s *LoginScene) SetCloseFunc(fn func())                        { s.closeFunc = fn }
@@ -1212,6 +1329,13 @@ func (s *LoginScene) SetDoorCompleteFunc(fn func())                 { s.doorComp
 func (s *LoginScene) ShowServerSelect(servers []serverInfo) {
 	log.Logf(log.LevelInfo, "LoginScene", "show server select: %d servers", len(servers))
 	s.servers = servers
+	if s.updateMode {
+		// 补全资料进行中：服务器先发 SM_NEEDUPDATE_ACCOUNT 再发
+		// SM_PASSOK_SELECTSERVER，选服浮层延迟到补全提交后再显示，
+		// 否则会覆盖注册表单（syncUI 按 mode 只显示一个面板）。
+		log.Logf(log.LevelInfo, "LoginScene", "update mode active, deferring server select")
+		return
+	}
 	s.mode = modeServerSelect
 	s.showLoginUI = true
 	s.layoutSrvButtons()

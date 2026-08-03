@@ -55,6 +55,18 @@ func (d *Database) initialize() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT UNIQUE NOT NULL,
 			password_hash TEXT NOT NULL,
+			user_name TEXT NOT NULL DEFAULT '',
+			ss_no TEXT NOT NULL DEFAULT '',
+			phone TEXT NOT NULL DEFAULT '',
+			quiz TEXT NOT NULL DEFAULT '',
+			answer TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			quiz2 TEXT NOT NULL DEFAULT '',
+			answer2 TEXT NOT NULL DEFAULT '',
+			birthday TEXT NOT NULL DEFAULT '',
+			mobile_phone TEXT NOT NULL DEFAULT '',
+			memo TEXT NOT NULL DEFAULT '',
+			memo2 TEXT NOT NULL DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS characters (
@@ -117,7 +129,53 @@ func (d *Database) initialize() error {
 		}
 	}
 
+	if err := d.migrateAccounts(); err != nil {
+		return err
+	}
 	return d.migrateGuilds()
+}
+
+// migrateAccounts 为早期创建的 accounts 表补齐注册资料列（Delphi
+// TUserEntry+TUserEntryAdd，Grobal2.pas:592-609）。新建库已由 initialize
+// 建好全部列，此处仅对缺列的旧库执行 ALTER TABLE。
+func (d *Database) migrateAccounts() error {
+	rows, err := d.db.Query(`PRAGMA table_info(accounts)`)
+	if err != nil {
+		return fmt.Errorf("migrateAccounts: %w", err)
+	}
+	have := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("migrateAccounts: %w", err)
+		}
+		have[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("migrateAccounts: %w", err)
+	}
+
+	want := []string{"user_name", "ss_no", "phone", "quiz", "answer", "email",
+		"quiz2", "answer2", "birthday", "mobile_phone", "memo", "memo2"}
+	for _, col := range want {
+		if have[col] {
+			continue
+		}
+		stmt := fmt.Sprintf("ALTER TABLE accounts ADD COLUMN %s TEXT NOT NULL DEFAULT ''", col)
+		if _, err := d.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrateAccounts: add %s: %w", col, err)
+		}
+	}
+	return nil
 }
 
 // migrateGuilds 将早期以 leader_id（角色 ID 外键）定义、从未写入数据的
@@ -175,6 +233,23 @@ func (d *Database) DB() *sql.DB {
 
 // 账号操作
 
+// AccountInfo 是账号注册资料，对应 Delphi TUserEntry+TUserEntryAdd
+//（Grobal2.pas:592-609）中除账号名/密码外的字段。
+type AccountInfo struct {
+	UserName    string
+	SSNo        string
+	Phone       string
+	Quiz        string
+	Answer      string
+	Email       string
+	Quiz2       string
+	Answer2     string
+	BirthDay    string
+	MobilePhone string
+	Memo        string
+	Memo2       string
+}
+
 // CreateAccount 创建一个新账号。
 func (d *Database) CreateAccount(username, passwordHash string) (int64, error) {
 	result, err := d.db.Exec(
@@ -185,6 +260,50 @@ func (d *Database) CreateAccount(username, passwordHash string) (int64, error) {
 		return 0, err
 	}
 	return result.LastInsertId()
+}
+
+// CreateAccountWithEntry 创建账号并持久化完整注册资料（Delphi 注册时把整个
+// TUserEntry+TUserEntryAdd 写入账号库）。
+func (d *Database) CreateAccountWithEntry(username, passwordHash string, info *AccountInfo) (int64, error) {
+	result, err := d.db.Exec(
+		`INSERT INTO accounts (username, password_hash, user_name, ss_no, phone, quiz, answer, email,
+			quiz2, answer2, birthday, mobile_phone, memo, memo2)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		username, passwordHash,
+		info.UserName, info.SSNo, info.Phone, info.Quiz, info.Answer, info.Email,
+		info.Quiz2, info.Answer2, info.BirthDay, info.MobilePhone, info.Memo, info.Memo2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+// GetAccountInfo 返回账号的注册资料。
+func (d *Database) GetAccountInfo(username string) (*AccountInfo, error) {
+	var info AccountInfo
+	err := d.db.QueryRow(
+		`SELECT user_name, ss_no, phone, quiz, answer, email, quiz2, answer2, birthday, mobile_phone, memo, memo2
+			FROM accounts WHERE username = ?`,
+		username,
+	).Scan(&info.UserName, &info.SSNo, &info.Phone, &info.Quiz, &info.Answer, &info.Email,
+		&info.Quiz2, &info.Answer2, &info.BirthDay, &info.MobilePhone, &info.Memo, &info.Memo2)
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// UpdateAccountInfo 整条更新账号的密码与注册资料（Delphi CM_UPDATEUSER 用客户端
+// 发来的整个 TUserEntry+TUserEntryAdd 覆盖原记录，LoginSrv/LMain.pas:1449-1451）。
+func (d *Database) UpdateAccountInfo(username, passwordHash string, info *AccountInfo) error {
+	_, err := d.db.Exec(
+		`UPDATE accounts SET password_hash=?, user_name=?, ss_no=?, phone=?, quiz=?, answer=?, email=?,
+			quiz2=?, answer2=?, birthday=?, mobile_phone=?, memo=?, memo2=? WHERE username=?`,
+		passwordHash, info.UserName, info.SSNo, info.Phone, info.Quiz, info.Answer, info.Email,
+		info.Quiz2, info.Answer2, info.BirthDay, info.MobilePhone, info.Memo, info.Memo2, username,
+	)
+	return err
 }
 
 // GetAccountByUsername 按用户名返回一个账号。
@@ -252,6 +371,23 @@ func (d *Database) GetCharacterByID(id int64) (*Character, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// CharacterNameExists 检查角色名是否已被全局占用（跨所有账号）。
+// Delphi 创建角色时做全局重名检查（DBServer/UsrSoc.pas:794-796）。
+func (d *Database) CharacterNameExists(name string) (bool, error) {
+	var one int
+	err := d.db.QueryRow(
+		"SELECT 1 FROM characters WHERE name = ? LIMIT 1",
+		name,
+	).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetCharacterByName 在某个账号下按名字返回一个角色。

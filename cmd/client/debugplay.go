@@ -150,7 +150,25 @@ func (s *PlayScene) cmdPanel(args []string) {
 	case "deal":
 		flag = &s.State.InDeal
 	case "minimap":
-		flag = &s.showMinimap
+		// 小地图为三态（minimapLv 0/1/2），单独处理：
+		// on 触发请求并置 Lv=1（不节流，调试用），off 直接隐藏。
+		if len(args) >= 2 {
+			switch strings.ToLower(args[1]) {
+			case "on":
+				if s.minimapLv == 0 {
+					if s.sendWantMinimap != nil {
+						s.sendWantMinimap()
+					}
+					s.minimapLv = 1
+				}
+			case "off":
+				s.minimapLv = 0
+			}
+		} else {
+			s.toggleMinimap()
+		}
+		dc.Printf("panel minimap lv = %d", s.minimapLv)
+		return
 	default:
 		dc.Printf("unknown panel: %s", name)
 		return

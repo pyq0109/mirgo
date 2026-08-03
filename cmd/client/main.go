@@ -233,7 +233,18 @@ func main() {
 	loginScene.SetLoginFunc(func(id, password string) {
 		log.Logf(log.LevelInfo, "Client", "[callback] LoginFunc called: id=%s", id)
 		if handler != nil {
-			log.Logf(log.LevelWarn, "Client", "[callback] LoginFunc: handler already exists, skipping")
+			// 复用已有连接（注册/改密流程留下的 Connected 会话）直接登录——
+			// Delphi 客户端在同一条连接上注册和登录（ClMain.pas:2827-2845）。
+			// 原实现跳过发送，导致注册后点登录无任何反应且 connecting 卡死。
+			log.Logf(log.LevelInfo, "Client", "[callback] LoginFunc: reusing existing connection")
+			if err := handler.SendLogin(id, password); err != nil {
+				log.Logf(log.LevelError, "Client", "[callback] LoginFunc: send on existing connection failed: %v", err)
+				handler.Close()
+				if handler.onFail != nil {
+					handler.onFail()
+				}
+				loginScene.SetError("连接服务器失败")
+			}
 			return
 		}
 		var err error
@@ -276,6 +287,15 @@ func main() {
 		regMsg := protocol.MakeDefaultMsg(protocol.CMAddNewUser, 0, 0, 0, 0)
 		// Body = EncodeBuffer(TUserEntry) + EncodeBuffer(TUserEntryAdd)（ClMain.pas:2844）。
 		handler.SendEncoded(regMsg, protocol.EncodeBuffer(ue.Bytes())+protocol.EncodeBuffer(ua.Bytes()))
+	})
+	// 补全资料（SM_NEEDUPDATE_ACCOUNT 触发的注册表单复用提交）。
+	loginScene.SetUpdateFunc(func(ue protocol.UserEntry, ua protocol.UserEntryAdd) {
+		log.Logf(log.LevelInfo, "Client", "[callback] UpdateFunc: id=%s", ue.Account())
+		if handler == nil {
+			log.Logf(log.LevelWarn, "Client", "[callback] UpdateFunc: handler is nil")
+			return
+		}
+		handler.SendUpdateAccount(ue, ua)
 	})
 	loginScene.SetChgPwFunc(func(id, oldpw, newpw string) {
 		log.Logf(log.LevelInfo, "Client", "[callback] ChgPwFunc: id=%s", id)
@@ -600,6 +620,13 @@ func (h *NetHandler) SendChgPw(id, passwd, newpasswd string) {
 	h.Send(msg, id+"\t"+passwd+"\t"+newpasswd)
 }
 
+// SendUpdateAccount 发送补全账号资料请求（Delphi SendUpdateAccount，
+// ClMain.pas:2845-2852）：body = EncodeBuffer(TUserEntry)+EncodeBuffer(TUserEntryAdd)。
+func (h *NetHandler) SendUpdateAccount(ue protocol.UserEntry, ua protocol.UserEntryAdd) {
+	msg := protocol.MakeDefaultMsg(protocol.CMUpdateUser, 0, 0, 0, 0)
+	h.SendEncoded(msg, protocol.EncodeBuffer(ue.Bytes())+protocol.EncodeBuffer(ua.Bytes()))
+}
+
 // SendRawString 发送不带 TDefaultMessage 头的原始字符串。
 func (h *NetHandler) SendRawString(s string) error {
 	log.Logf(log.LevelInfo, "Client", ">>> send RAW %q", s)
@@ -610,11 +637,11 @@ func (h *NetHandler) SendRawString(s string) error {
 }
 
 // SendLogin 发送登录凭据。
-func (h *NetHandler) SendLogin(id, password string) {
+func (h *NetHandler) SendLogin(id, password string) error {
 	h.loginID = id
 	h.password = password
 	loginMsg := protocol.MakeDefaultMsg(protocol.CMIDPassword, 0, 0, 0, 0)
-	h.Send(loginMsg, id+"/"+password)
+	return h.Send(loginMsg, id+"/"+password)
 }
 
 // SendSelectServer 发送选服请求。
@@ -893,6 +920,40 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 			}
 		}
 
+	case protocol.SMNeedUpdateAccount:
+		// body = EncodeBuffer(TUserEntry)（LoginSrv/LMain.pas:1239-1244）。
+		// 弹补全表单；随后服务器仍会发 SM_PASSOK_SELECTSERVER。
+		if h.reconnecting {
+			// 重连（选服后重新认证）期间不弹补全表单——此时即将播放开门
+			// 动画并切到选角场景，表单会残留/被覆盖造成 UI 混乱。补全可
+			// 跳过，用户下次完整登录时仍会再次提示。
+			log.Logf(log.LevelInfo, "Client", "[SMNeedUpdateAccount] suppressed during reconnect")
+			return
+		}
+		if len(rawBody) < protocol.UserEntryEncodedSize {
+			log.Logf(log.LevelWarn, "Client", "[SMNeedUpdateAccount] body too short (%d)", len(rawBody))
+			return
+		}
+		buf := make([]byte, protocol.UserEntrySize)
+		protocol.DecodeBuffer(rawBody[:protocol.UserEntryEncodedSize], buf)
+		ue := protocol.UserEntryFromBytes(buf)
+		log.Logf(log.LevelInfo, "Client", "[SMNeedUpdateAccount] account %s needs profile update", ue.Account())
+		if h.loginScene != nil {
+			h.loginScene.UpdateAccountInfos(ue)
+		}
+
+	case protocol.SMUpdateIDSuccess:
+		log.Logf(log.LevelInfo, "Client", "account info updated successfully")
+		if h.loginScene != nil {
+			h.loginScene.UpdateDone()
+		}
+
+	case protocol.SMUpdateIDFail:
+		log.Logf(log.LevelWarn, "Client", "account info update failed: code=%d", msg.Recog)
+		if h.loginScene != nil {
+			h.loginScene.UpdateFailed("更新帐号失败.")
+		}
+
 	case protocol.SMSelectServerOK:
 		// 消息体: "selChrAddr/selChrPort/certification"
 		log.Logf(log.LevelInfo, "Client", "[SMSelectServerOK] parsing body=%q", body)
@@ -949,6 +1010,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 				h.selectChrScene.SetError("名字已被使用")
 			case 3:
 				h.selectChrScene.SetError("最多创建2个角色")
+			case 4:
+				h.selectChrScene.SetError("创建角色时出现错误")
 			default:
 				h.selectChrScene.SetError("创建角色失败")
 			}
@@ -2032,11 +2095,23 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.AddChatMessage("屠宰成功")
 
 	case protocol.SMReadMinimapOK:
-		// Recog 携带 Mmap.wil 中本地图的小地图图像索引。
+		// Param 携带小地图图像号（1-based）；客户端减 1 作为 mmap.wil 索引
+		// （Delphi ClientGetReadMiniMap，ClMain.pas:6045-6051）。
 		if h.playScene != nil {
-			h.playScene.State.MinimapIndex = int(msg.Recog)
+			h.playScene.mmLastQueryTick = time.Now().UnixMilli()
+			if msg.Param >= 1 {
+				h.playScene.State.MinimapIndex = int(msg.Param) - 1
+			}
 		}
-		log.Logf(log.LevelDebug, "Client", "received minimap data: index=%d", msg.Recog)
+		log.Logf(log.LevelDebug, "Client", "received minimap data: index=%d", msg.Param)
+
+	case protocol.SMReadMinimapFail:
+		// 当前地图无小地图（Delphi ClMain.pas:4843-4847）。
+		if h.playScene != nil {
+			h.playScene.mmLastQueryTick = time.Now().UnixMilli()
+			h.playScene.State.MinimapIndex = -1
+			h.playScene.AddChatMessage("没有可用的小地图")
+		}
 
 	case protocol.SMMonsterSay:
 		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
@@ -2256,6 +2331,11 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 
 	playScene.SetSendQueryFriends(func() {
 		msg := protocol.MakeDefaultMsg(protocol.CMQueryFriends, 0, 0, 0, 0)
+		handler.Send(msg, "")
+	})
+
+	playScene.SetSendWantMinimap(func() {
+		msg := protocol.MakeDefaultMsg(protocol.CMWantMinimap, 0, 0, 0, 0)
 		handler.Send(msg, "")
 	})
 
