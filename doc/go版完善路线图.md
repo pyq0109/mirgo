@@ -67,27 +67,28 @@
 ### 3.1 服务端
 
 #### 魔法系统（Go 46/49 个 ID）
-| 缺失 | Delphi 证据 | 说明 |
+| 缺失 | Delphi 证据 | 状态 |
 |------|-------------|------|
-| 15 神圣战甲术 | Magic.pas DoSpell 分支 | Go magicsystem.go:120-625 无 case 15 |
-| 40 解毒术 | 同上 | 无 case 40 |
-| 47 火龙气焰 | 同上 | 无 case 47 |
-| 49 净化术 | 同上 | 无 case 49 |
-| 36 无极真气语义错位 | Delphi 36 与 50 MabMabe 是不同魔法 | Go case 36 实现的是 Delphi 50 的语义（magicsystem.go:574） |
+| 15 神圣战甲术 | Magic.pas:456-460 | ✅ 已实现（7×7 友方物防 buff） |
+| 47 火龙气焰 | Magic.pas:665-672 | ✅ 已实现（含 DB 条目） |
+| 49 净化术 | Magic.pas:678-680 | ✅ 已实现（Delphi 原样空实现） |
+| 36 无极真气语义错位 | Delphi 36 与 50 MabMabe 是不同魔法 | ✅ 已解决：无极真气按 DB ID 50 实装（Delphi 36 语义），死代码 case 36 删除 |
+| 40 解毒术 | Magic.pas:586-610 | ⚠️ 有意不做：Delphi ID 40 与 GEEM2 DB 的双龙斩冲突（byID 单键索引），不破坏现有内容；冰焰/MabMabe（Delphi 50）DB 无条目亦未实装 |
 
 #### 怪物 AI
-| 缺口 | 证据 |
-|------|------|
-| Race 20 弓箭警察（TArcherPolice） | ObjMon2.pas:96，Go 无 |
-| Race 120 足球（TSoccerBall，可推动物体） | ObjMon2.pas:134，Go 无 |
-| Race 206 TKhazard 特殊追击 | ObjMon3.pas:142，Go 退化 AIMelee |
-| Race 208 绿毒相邻攻击 | ObjMon3.pas:126,1269-1300，Go 无 |
-| Race 209 红毒同类变种 | ObjMon3.pas:134,1312，Go 无 |
-| Race 210 霜虎无目标隐身伏击 | ObjMon3.pas:118,1220-1252，Go 无 |
-| 训练师 Race 判定不一致 | Delphi Race=55（M2Share.pas:152），Go 判 Race==2（trainernpc.go:6-8） |
-| 刷怪无在线人数加速 | Delphi GetZenTime（UsrEngn.pas:1097-1160），Go mongen.go 未实现 |
+| 缺口 | 证据 | 状态 |
+|------|------|------|
+| Race 206 TKhazard 特殊追击 | ObjMon3.pas:142 | ✅ 已修复（AIKhazard） |
+| Race 208 绿毒相邻攻击 | ObjMon3.pas:126,1269-1300 | ✅ 已修复（AIGreenPoison） |
+| Race 209 红毒同类变种 | ObjMon3.pas:134,1312 | ✅ 已修复（AIRedPoison） |
+| Race 210 霜虎无目标隐身伏击 | ObjMon3.pas:118,1220-1252 | ✅ 已修复（AIFrostTiger） |
+| 训练师 Race 判定不一致 | Delphi Race=55（M2Share.pas:152） | ✅ 已修复（重写为 Race 55 沙袋+统计） |
+| Race 20 弓箭警察（TArcherPolice） | ObjMon2.pas:96 | 待实现 |
+| Race 120 足球（TSoccerBall，可推动物体） | ObjMon2.pas:134 | 待实现 |
+| 刷怪无在线人数加速 | Delphi GetZenTime（UsrEngn.pas:1097-1160） | 待实现 |
 
-> 注：Go 现有 29 个 AI 行为常量（monsterai.go:11-39），已覆盖 Delphi 工厂的绝大多数 Race；AGENTS.md 中"12 种"的说法已过时。
+> 注：Go 现有 34 个 AI 行为常量（AIMelee=0…AITrainer=33，monsterai.go:10-45），
+> 覆盖 Delphi 工厂 58 分支中的绝大多数；AGENTS.md 中"12 种"的说法已过时。
 
 #### NPC 脚本（Delphi ~100 条件 + ~230 动作 vs Go ~60 + ~90）
 缺失的重要命令类别（对照 M2Share.pas:190-1000 常量表）：
@@ -115,20 +116,20 @@ Go 已有：move/search/recall/slave/dearrecall/masterrecall/nomob/make/level/mo
 - **权限/信息族**：PrvMsg/AllowMsg/LetShout/LetTrade/MemberFunc/MobLevel/MobCount/HumanCount/ServerStatus
 
 #### 持久化字段缺失（Delphi THumData 3164B vs Go SQLite 列+JSON）
-| 缺失字段组 | Delphi 字段 | 后果 |
+| 缺失字段组 | Delphi 字段 | 状态 |
 |-----------|-------------|------|
-| 外观/朝向 | btDir/btHair | 重登后方向发型重置 |
-| 状态效果 | wStatusTimeArr | 下线清毒/清隐身 |
-| 回城点 | sHomeMap/wHomeX/wHomeY | Go 用全局安全区替代（playobject.go:1739） |
-| 加点 | BonusAbil/nBonusPoint | 运行时有点数（playobject.go:122）但不落盘 |
-| 声望/转生 | btCreditPoint/btReLevel | 运行时有字段不落盘 |
-| 仓库密码 | sStoragePwd | 无设置/解锁流程 |
-| 元宝/游戏点/充值点 | nGameGold/nGamePoint/nPayMentPoint | 只有 Gold |
-| 行为偏好 | btAllowGroup/btAttatckMode/btIncHealth* | 重登重置 |
+| 外观/朝向 | btDir/btHair | ✅ 已修复（hair 入库 + dir 入 meta） |
+| 加点 | BonusAbil/nBonusPoint | ✅ 已修复（入 meta） |
+| 声望/转生 | btCreditPoint/btReLevel | ✅ 已修复（入 meta） |
+| 行为偏好 | btAllowGroup/btAttatckMode | ✅ 已修复（入 meta） |
+| 状态效果 | wStatusTimeArr | 待实现（下线清毒/清隐身） |
+| 回城点 | sHomeMap/wHomeX/wHomeY | 设计决策：用全局安全区替代（playobject.go:1739） |
+| 仓库密码 | sStoragePwd | 待实现（无设置/解锁流程） |
+| 元宝/游戏点/充值点 | nGameGold/nGamePoint/nPayMentPoint | 待实现（只有 Gold） |
 | 贡献/饥饿/身体幸运 | wContribution/nHungerStatus/dBodyLuck | 系统本身未实现 |
 
 #### 其他服务端缺口
-- **仓库格数**：Go 默认 39 格（config.go:506）vs Delphi 50 格（Grobal2.pas:817-818）
+- **仓库格数**：~~Go 默认 39 格 vs Delphi 50 格~~ ✅ 已修复（config.go GetMaxStorageSlots 现为 50，对齐 Delphi TStorageItems[0..49]）
 - **城堡战**：缺预约战日期 WarDate、联盟行会判定 IsAttackAllyGuild/IsDefenseAllyGuild、皇宫/密道地图管理、TechLevel 效果（castle.go:94 仅字段）；对照 Castle.pas:39-127
 - **商人行为**：Delphi 商人移动/招揽（TMerchant.Run，UsrEngn.pas:1028-1092 ProcessMerchants）；Go 商人静止（usrengine.go:156-163 仅补货+存档）
 - **行会 Run 语义**：Delphi g_GuildManager.Run 每 10s（Guild.pas:261）；Go 仅周期存档（main.go:430-432），行会战到期自动结束依赖 WarGuilds.EndTick（guildsystem.go:18-20）需补 tick 检查
@@ -304,4 +305,4 @@ Delphi 用 5 个监控 GUI（ViewKernelInfo/ViewLevel/ViewList/ViewOnlineHuman/V
 - 服务端对比：对象模型映射（12 类）、玩法系统 36 项、怪物 AI 逐 Race 表（35 Race）、NPC 脚本规模（100+230 vs 60+90）、引擎 tick 12 环节、持久化字段组、CM 覆盖 66/85。
 - 协议/架构对比：常量族 9 组统计、结构布局 8 个逐字节核对、三份 EDcode.pas diff 一致、帧/流控 7 机制、8 进程职责表、地图/WIL 格式逐项、配置转换抽查（StdItems 686/Monster 378/Magic 104/mapinfo 357/routes 2460/mongen 3402/merchant 168 全对齐，2 行源脏数据合理跳过）、登录时序三段式对照。
 - 主要 Delphi 参考：ObjBase.pas(26821行)/ObjNpc.pas(11556)/M2Share.pas(11087)/UsrEngn.pas(3176)/ClMain.pas(6500)/FState.pas(6831)/Actor.pas(3944)/PlayScn.pas(2366)/Grobal2.pas(2739)。
-- 已知文档勘误（本次发现）：AGENTS.md 的 sceneserverselect.go 不存在；doc/技术参考.md "MA 39 种"实为 38 种（无 MA18）、TMsgHeader 实为 20 字节（非 packed）；AGENTS.md "怪物 AI 12 种"实为 29 种行为。
+- 已知文档勘误（本次发现，均已修正）：AGENTS.md 的 sceneserverselect.go 不存在；doc/技术参考.md "MA 39 种"实为 38 种（无 MA18）、TMsgHeader 实为 20 字节（非 packed）；AGENTS.md "怪物 AI 12 种"实为 34 种行为。

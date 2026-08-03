@@ -11,7 +11,7 @@ MIR2 服务端的怪物 AI 系统是**隐式状态机 + 继承多态 + Race 工�
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  引擎调度层 TUserEngine (UsrEngn.pas)                                     │
 │    ProcessMonsters()    每 tick 轮询所有 Mongen 刷怪器 + 驱动怪物 Run      │
-│    AddBaseObject()      Race ID → 类工厂（case 语句，~25 分支）            │
+│    AddBaseObject()      Race ID → 类工厂（case 语句，58 分支）             │
 │    MonInitialize()      从 TMonInfo 数据库加载属性                         │
 │    RegenMonsters()      在刷怪点范围内随机放置新怪物                        │
 ├──────────────────────────────────────────────────────────────────────────┤
@@ -31,7 +31,7 @@ MIR2 服务端的怪物 AI 系统是**隐式状态机 + 继承多态 + Race 工�
 │    ... 共 ~40 个类                                                        │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  数据驱动层                                                                │
-│    TMonInfo (Grobal2.pas:1558)    怪物属性表（race/hp/dc/ac/speed/hit）   │
+│    TMonInfo (Grobal2.pas:1555)    怪物属性表（race/hp/dc/ac/speed/hit）   │
 │    TMonGenInfo (Grobal2.pas:1540) 刷怪点定义（地图/坐标/范围/数量/间隔）   │
 │    g_Config                       全局配置（刷怪速率/视野/毒 tick 等）     │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -42,7 +42,7 @@ MIR2 服务端的怪物 AI 系统是**隐式状态机 + 继承多态 + Race 工�
 1. **隐式状态机**：无 FSM 枚举。怪物状态由 `m_boDeath`（死亡）、`m_boGhost`（销毁中）、`m_boFixedHideMode`（潜地）、`m_boRunAwayMode`（逃跑）、`m_boStoneMode`（石化）等布尔标志和 `m_TargetCret`（目标指针）的有无组合表达。
 2. **继承多态**：AI 差异通过覆写 `Run()`、`AttackTarget()`、`Attack()`、`Struck()`、`Die()` 等虚方法实现，而非 switch/case 行为码。
 3. **Race 工厂**：刷怪时由 `TUserEngine.AddBaseObject` 的 `case nMonRace of` 语句（`UsrEngn.pas:1819-1938`）选择实例化哪个子类。Race ID 来自怪物数据库 `TMonInfo.btRace`。
-4. **引擎驱动**：怪物不自行调度。`TUserEngine.ProcessMonsters`（`UsrEngn.pas:1119-1287`）每 tick 遍历所有怪物，按 `m_nRunTime` 间隔调用 `Run()`，按 `m_dwSearchTime` 间隔调用 `SearchViewRange()`。
+4. **引擎驱动**：怪物不自行调度。`TUserEngine.ProcessMonsters`（`UsrEngn.pas:1097-1287`）每 tick 遍历所有怪物，按 `m_nRunTime` 间隔调用 `Run()`，按 `m_dwSearchTime` 间隔调用 `SearchViewRange()`。
 5. **时间片预算**：刷怪有 `g_dwZenLimit` 时间预算防止单 tick 卡顿；怪物处理按 round-robin 轮询刷怪器列表。
 
 ---
@@ -134,7 +134,7 @@ end;
 
 ## 三、AI 主循环
 
-### 3.1 引擎调度：ProcessMonsters（UsrEngn.pas:1119-1287）
+### 3.1 引擎调度：ProcessMonsters（UsrEngn.pas:1097-1287）
 
 ```
 引擎 tick（每帧）
@@ -147,11 +147,11 @@ end;
   │         重置 dwStartTick
   │
   └── 怪物 AI 驱动（遍历所有存活怪物）
-        ObjBase.pas:1209  if (dwCurrentTick - m_dwRunTick) > m_nRunTime then
-        ObjBase.pas:1212    if (dwCurrentTick - m_dwSearchTick) > m_dwSearchTime then
-        ObjBase.pas:1216      SearchViewRange();     // 更新视野列表
-        ObjBase.pas:1221      Run();                 // 执行 AI
-        ObjBase.pas:1237-1242 如果 m_boGhost 且超过 5 分钟 → Free()
+        UsrEngn.pas:1209  if (dwCurrentTick - m_dwRunTick) > m_nRunTime then
+        UsrEngn.pas:1212    if (dwCurrentTick - m_dwSearchTick) > m_dwSearchTime then
+        UsrEngn.pas:1216      SearchViewRange();     // 更新视野列表
+        UsrEngn.pas:1221      Run();                 // 执行 AI
+        UsrEngn.pas:1237-1240 如果 m_boGhost 且超过 5 分钟 → Free()
 ```
 
 - **m_nRunTime**：TMonster 默认 250ms（`ObjMon.pas:256`）。
@@ -223,9 +223,10 @@ begin
             m_Master.GetBackPosition(nX, nY);
             m_nTargetX := nX; m_nTargetY := nY;
           end;
-          // 距离 > 20 格或跨图 → 瞬移
+          // 跨图或任一轴距离 > 20 格 → 瞬移（ObjMon.pas:488-491）
           if (m_PEnvir <> m_Master.m_PEnvir) or
-             (abs(m_nCurrX - m_Master.m_nCurrX) > 20) then
+             (abs(m_nCurrX - m_Master.m_nCurrX) > 20) or
+             (abs(m_nCurrY - m_Master.m_nCurrY) > 20) then
             SpaceMove(...);
         end;
       end else begin
@@ -341,7 +342,7 @@ if (m_TargetCret = nil) or                    // 无目标
 | `m_dwTargetFocusTick` 超过 30 秒 | 长时间未与目标交互 |
 | 目标 `m_boDeath` 或 `m_boGhost` | 目标已死/已销毁 |
 | 目标在不同地图 | 跨图不可追 |
-| 曼哈顿距离 > 15 格 | 超出追击范围 |
+| 任一轴距离 > 15 格（切比雪夫/逐轴判定，ObjBase.pas:3890-3891） | 超出追击范围 |
 
 ### 4.6 TATMonster 周期性搜索（ObjMon.pas:614-630）
 
@@ -367,43 +368,69 @@ end;
 
 ### 5.0 Race ID → 类映射表（UsrEngn.pas:1819-1938）
 
+完整工厂共 58 个分支（UsrEngn.pas:1831-1938），下表为全部映射：
+
 | Race | 类 | 行为概述 |
 |------|-----|----------|
+| 11 | TSuperGuard（ObjGuard.pas） | 卫士（攻击红名/敌对） |
+| 12 | TPetSuperGuard（ObjGuard.pas） | 宠物卫士 |
+| 20 | TArcherPolice（ObjMon2.pas:96） | 城堡弓箭警察 |
 | 51 | TMonster + m_boAnimal | 被动鸡（不主动攻击） |
 | 52 (1/30) | TChickenDeer | 逃跑鹿 |
 | 52 (29/30) | TMonster + m_boAnimal | 被动鹿 |
 | 53 | TATMonster + m_boAnimal | 近战狼 |
+| 55 | TTrainer（TRAINER，M2Share.pas:152） | 训练师（无敌沙袋+伤害统计，ObjNpc.pas:377） |
 | 80 | TMonster | 基础游荡（不主动搜索） |
 | 81 | TATMonster | 标准近战追击 |
 | 82 | TSpitSpider | 远程喷吐（2 格锥形） |
 | 83 | TSlowATMonster | 慢速近战 |
 | 84 | TScorpion | 近战（动物） |
 | 85 | TStickMonster | 固定潜地伏击 |
+| 86/88/89 | TATMonster | 近战追击（沃玛战士等变体） |
 | 87 | TDualAxeMonster | 远程飞斧（7 格） |
 | 90 | TGasAttackMonster | 毒气近战 |
 | 91 | TMagCowMonster | 魔法近战 |
-| 92 | TCowKingMonster | Boss（牛魔王） |
+| 92 | TCowKingMonster | Boss（牛魔王，AoE+狂暴阶段） |
 | 93 | TThornDarkMonster | 远程（飞斧变种） |
-| 94 | TLightingZombi | 远程闪电 |
+| 94 | TLightingZombi | 线性穿透闪电 |
 | 95 | TDigOutZombi | 潜地僵尸 |
 | 96 | TZilKinZombi | 死亡分裂 |
+| 97 | TCowMonster | 牛怪（近战） |
 | 100 | TWhiteSkeleton | 升级骷髅（奴隶） |
 | 101 | TScultureMonster | 石化伏击 |
-| 102 | TScultureKingMonster | Boss + 召唤 |
+| 102 | TScultureKingMonster | Boss + 危险等级召唤 |
+| 103 | TBeeQueen | 固定召唤蜂群 |
 | 104 | TArcherMonster | 远程弓箭 |
-| 107 | TCentipedeKingMonster | 固定 Boss |
-| 113 | TElfMonster | 变形精灵 |
+| 105 | TGasMothMonster | 毒气近战（楔蛾） |
+| 106 | TGasDungMonster | 毒气近战 |
+| 107 | TCentipedeKingMonster | 潜地毒 AoE Boss |
+| 110 | TCastleDoor | 城门（静态建筑） |
+| 111 | TWallStructure | 城墙（静态建筑） |
+| 112 | TArcherGuard | 弓箭守卫（固定炮台） |
+| 113 | TElfMonster | 变形精灵（HP 阈值切换形态） |
 | 114 | TElfWarriorMonster | 潜地战士 |
+| 115 | TBigHeartMonster | 固定 16 格脉冲 |
+| 116 | TSpiderHouseMonster | 固定召唤蜘蛛巢 |
 | 117 | TExplosionSpider | 自爆蜘蛛 |
 | 118 | THighRiskSpider | 非毒喷吐 |
+| 119 | TBigPoisionSpider | 毒喷吐 |
+| 120 | TSoccerBall（ObjMon2.pas:134） | 足球（可推动物体） |
 | 130 | TDoubleCriticalMonster | 远程双暴击 |
 | 131 | TRonObject | 范围攻击 |
 | 132 | TSandMobObject | 潜地沙怪 |
 | 133 | TMagicMonObject | 魔法攻击 |
+| 134 | TBoneKingMonster（ObjMon3.pas:54） | 骷髅王召唤 |
 | 200 | TElectronicScolpionMon | 闪电 + 吸血 |
+| 201 | TClone（ObjMon3.pas:178） | 分身 + 直线闪电 |
+| 203 | TTeleMonster | 瞬移 |
+| 206 | TKhazard（ObjMon3.pas:142） | 对角 2 格拖拽 + 绿毒 |
+| 208 | TGreenMonster（ObjMon3.pas:126） | 对角相邻施绿毒 |
+| 209 | TRedMonster（ObjMon3.pas:134） | 对角相邻施红毒 |
+| 210 | TFrostTiger（ObjMon3.pas:118） | 无目标隐身伏击 |
+| 214 | TFireMonster（ObjMon3.pas:110） | 火焰光环十字火 |
 | 215 | TFireBallMonster | 远程火球 |
 
-Race 常量定义于 `M2Share.pas:140-171`。
+Race 常量定义于 `M2Share.pas:140-171`（如 SUPREGUARD=11、TRAINER=55、MONSTER_OMA=80）。
 
 ### 5.1 基础游荡（TMonster, Race 80）
 
@@ -528,7 +555,7 @@ end;
 
 ### 5.14 死亡分裂（TZilKinZombi, Race 96）
 
-**Die**（`ObjMon.pas:147-158`）：死亡时生成额外僵尸。通过 `nZilKillCount` 控制分裂数量。
+**Die**（`ObjMon.pas:1285`；类声明在 :147-158）：死亡时生成额外僵尸。通过 `nZilKillCount` 控制分裂数量。
 
 ### 5.15 火焰光环（TFireMonster）
 
@@ -875,16 +902,7 @@ DisappearA();
 
 ### 11.2 方向常量
 
-| 常量 | 值 | 方向 |
-|------|-----|------|
-| `DR_UP` | 0 | 上 |
-| `DR_UPRIGHT` | 1 | 右上 |
-| `DR_RIGHT` | 2 | 右 |
-| `DR_DOWNRIGHT` | 3 | 右下 |
-| `DR_DOWN` | 4 | 下 |
-| `DR_DOWNLEFT` | 5 | 左下 |
-| `DR_LEFT` | 6 | 左 |
-| `DR_UPLEFT` | 7 | 左上 |
+DR_UP=0 … DR_UPLEFT=7 八字节方向常量，见 `技术参考.md` 第八章，此处不重复。
 
 ### 11.3 时间常量
 
@@ -900,8 +918,8 @@ DisappearA();
 | 幽灵→销毁 | 5 min | UsrEngn.pas:1237 | Free 延迟 |
 | 绿毒 tick | 2500ms | ObjBase.pas:4255 | dwPosionDecHealthTime |
 | Think 间隔 | 3000ms | ObjMon.pas:360 | 防卡检测 |
-| 搜索间隔（有目标） | 8000ms | ObjMon.pas:614 | TATMonster |
-| 搜索间隔（无目标） | 1000ms | ObjMon.pas:615 | TATMonster |
+| 搜索间隔（有目标） | 8000ms | ObjMon.pas:622 | TATMonster |
+| 搜索间隔（无目标） | 1000ms | ObjMon.pas:623 | TATMonster |
 | 自爆计时 | 60s | ObjMon2.pas:804 | TExplosionSpider |
 | 瞬移距离 | 20 格 | ObjMon.pas:494 | 主人跟随 |
 
@@ -967,13 +985,6 @@ ProcessMonsters (引擎 tick)
 
 ## 附录：源文件索引
 
-| 文件 | 行数 | 内容 |
-|------|------|------|
-| `M2Server/ObjBase.pas` | 25,370 | TBaseObject / TAnimalObject 基类 |
-| `M2Server/ObjMon.pas` | 1,692 | TMonster + 第一批特化子类 |
-| `M2Server/ObjMon2.pas` | 1,092 | 第二批特化（潜地/召唤/自爆/守卫） |
-| `M2Server/ObjMon3.pas` | 1,535 | 第三批特化（范围/魔法/火焰/克隆） |
-| `M2Server/ObjAxeMon.pas` | 186 | 远程飞斧 |
-| `M2Server/UsrEngn.pas` | ~3,000 | 引擎调度 / 工厂 / 属性加载 |
-| `M2Server/M2Share.pas` | 大 | Race 常量 / 全局配置 |
-| `Common/Grobal2.pas` | 2,739 | 消息定义 / 数据结构 / 阵营常量 |
+源文件行数与职责索引见 `技术参考.md` §1.4（本处旧表行数有误，已删除）。
+本文涉及的核心文件：ObjBase.pas（26821 行）、ObjMon.pas（1883）、ObjMon2.pas（1200）、
+ObjMon3.pas（1727）、ObjAxeMon.pas（客户端）、UsrEngn.pas（3176）、M2Share.pas（11087）。

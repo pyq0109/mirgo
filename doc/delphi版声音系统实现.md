@@ -248,7 +248,9 @@ procedure TSoundEngine.EffectFile(const Filename: string; Loop, Wait: Boolean);
 - **TAudioStream**（`DXSounds.pas:115-172`）：环形缓冲大小 `FBufferLength(ms) * nAvgBytesPerSec div 1000`（`:1257`），默认 `FBufferLength := 1000`ms（`:1017`）；缓冲标志比音效引擎多 `DSBCAPS_GETCURRENTPOSITION2`（`:1263`）；后台线程 `TAudioStreamNotify`（`:941-1009`）`WaitForSingleObject` 轮询，`FSleepTime := Min(BufferLength div 4, 1000 div 20)`（`:962`，≤50ms），醒来 `Synchronize(Update)` 回主线程填缓冲（`:988-989`）；尾部静音填充 8bit 用 `$80`、16bit 用 `0`（`:1414`）。
 - **TWaveCollectionItem**（`:358-396`）：`MaxPlayingCount` 复音池，达上限 `FBufferList.Move(0, Count-1)` 轮转最老缓冲（`:2315-2316`）。
 
-这两套设施是 Go 重制做流式 BGM / 复音上限时的现成设计参考，但 Delphi 原版并未使用。
+这两套设施是流式 BGM / 复音上限的设计参考，但 Delphi 原版并未使用。
+Go 已自行实现：`cmd/client/sound.go` 用 gopxl/beep 做解码缓存 + `maxPolyphony=32` 复音上限，
+sfx/music 双 mixer 分离（sound.go:34-35）。
 
 ### 3.7 异常路径总表
 
@@ -393,7 +395,7 @@ procedure TSoundEngine.EffectFile(const Filename: string; Loop, Wait: Boolean);
 | `IVideoWindow` | `DShow.pas:2098-2140` | `put_Owner` `:2123`、`SetWindowPosition` `:2133` |
 | `CLSID_FilterGraph` | `DShow.pas:5639` | FilterGraph 对象 GUID |
 
-Go 重制若走 MP3 播放，等价物是任意媒体播放后端（DirectShow COM 在 Go 侧可用 `go-ole`，或换用其它解码方案）。需保留的语义是：异步、不可循环、与 WAV 通道停止逻辑分离。
+Go 侧 MP3 播放已用 gopxl/beep 的 mp3 解码器实现（`cmd/client/sound.go:154-191`），未走 DirectShow COM。保留的语义：异步、不可循环、与 WAV 通道停止逻辑分离。
 
 ---
 
@@ -482,7 +484,7 @@ Go 重制若走 MP3 播放，等价物是任意媒体播放后端（DirectShow C
 
 `g_Sound.Clear`（`:289`）——释放 `FEffectList` 全部缓冲 = 所有音效与 WAV BGM 立停；**不影响 MP3**（MP3 走 DirectShow 独立通道）。调用点：`IntroScn.pas:527`（登录场景关）、`IntroScn.pas:1145`（选角场景关）、`PlayScn.pas:492`（游戏场景关）。
 
-**双通道停止语义（Go 重制须保留的边界）**：`CloseScene` 的 `SilenceSound` 只停 DirectSound 通道；地图 MP3 的停止靠切图时 `PlayMapMusic(True)` 内部先 `Stop` 再 `Play`（`SoundUtil.pas:279-280`），或 `g_nMapMusic < 0` 时显式 `PlayMp3('', False)`（`:215-218`）。
+**双通道停止语义（Go 重制已保留的边界）**：`CloseScene` 的 `SilenceSound` 只停 DirectSound 通道；地图 MP3 的停止靠切图时 `PlayMapMusic(True)` 内部先 `Stop` 再 `Play`（`SoundUtil.pas:279-280`），或 `g_nMapMusic < 0` 时显式 `PlayMp3('', False)`（`:215-218`）。Go 以独立的 sfxMixer/musicMixer 维持同样的双通道分离（sound.go:34-35）。
 
 ### 6.4 ItemClickSound / ItemUseSound — 物品音效映射
 
@@ -982,116 +984,6 @@ m_nDie2Sound   := 200 + m_wAppearance * 10 + 6;  // +6 死亡2
 
 ---
 
-## 十二、附录：发声调用点完整清单
+> 注：原有"十二、附录：发声调用点完整清单"（约 113 行）与 §七 7.3 硬编码索引表、
+> §九 触发点全景逐条重复，已删除。调用点汇总以 §七/§九 为准。
 
-**ClMain.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:1971` | `ItemUseSound(StdMode)` | EatItem 吃背包物品 |
-| `:1998` | `ItemUseSound(StdMode)` | EatItem 吃手持物品 |
-| `:4481` | `PlaySound(s_money)` | SM_GOLDCHANGED |
-| `:4831` | `PlaySound(s_money)` | SM_DEALREMOTECHGGOLD |
-| `:5223` | `PlayMapMusic(True)` | SM_MAPDESCRIPTION / ClientGetMapDescription |
-| `:6096` | `PlaySound(48)` | DrawEffectHum nType=3 |
-| `:6100` | `PlaySound(8301)` | DrawEffectHum nType=4 |
-| `:6105` | `PlaySound(8302)` | DrawEffectHum nType=5 |
-| `:6109` | `PlaySound(8207)` | DrawEffectHum nType=6 |
-| `:6113` | `PlaySound(8226)` | DrawEffectHum nType=7 |
-
-**IntroScn.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:518` | `PlayBGM(bmg_intro)` | TLoginScene.OpenScene |
-| `:527` | `SilenceSound` | TLoginScene.CloseScene |
-| `:801` | `PlaySound(s_rock_door_open)` | OpenLoginDoor 石门动画 |
-| `:1145` | `SilenceSound` | TSelectChrScene.CloseScene |
-| `:1152` | `PlayBGM(bmg_select)` | TSelectChrScene.SoundOnTimer |
-| `:1170` | `PlaySound(s_meltstone)` | SelChrSelect1Click |
-| `:1187` | `PlaySound(s_meltstone)` | SelChrSelect2Click |
-
-**FState.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:2380` | `PlaySound(s_norm_button_click)` | DLoginNewClickSound / csNorm |
-| `:2381` | `PlaySound(s_rock_button_click)` | csStone |
-| `:2382` | `PlaySound(s_glass_button_click)` | csGlass |
-| `:3358` | `ItemClickSound` | 装备入槽 |
-| `:3365` | `ItemClickSound` | 穿戴 |
-| `:3394` | `ItemClickSound` | 脱下 |
-| `:3877` | `ItemClickSound` | 腰带拾取 |
-| `:4571` | `ItemClickSound` | 背包拾取 |
-| `:4668` | `PlaySound(s_money)` | DGoldClick |
-| `:4981` | `PlaySound(s_glass_button_click)` | NPC 商店菜单 |
-| `:5129` | `PlaySound(s_glass_button_click)` | NPC 对话窗 |
-| `:5202 / :5211` | `ItemClickSound` | 卖出窗取/放 |
-| `:5737 / :5742` | `ItemClickSound` | 交易窗放/取 |
-| `:5837` | `PlaySound(s_money)` | 交易金币调整 |
-
-**Actor.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:1638 / :1643` | `PlaySound(s_spacemove_out)` | SM_SPACEMOVE_HIDE / HIDE2 |
-| `:1650 / :1657` | `PlaySound(s_spacemove_in)` | SM_SPACEMOVE_SHOW / SHOW2 |
-| `:2364-2366` | `PlaySound(StruckWeapon/Struck/Scream)` | RunSound / SM_STRUCK |
-| `:2371` | `PlaySound(m_nDieSound)` | RunSound / SM_NOWDEATH |
-| `:2374` | `PlayBGM(bmg_gameover)` | SM_NOWDEATH 且 Self = g_MySelf |
-| `:2379` | `PlaySound(m_nAttackSound)` | RunSound / SM_THROW,HIT,FLYAXE,LIGHTING,DIGDOWN |
-| `:2383` | `PlaySound(m_nAppearSound)` | RunSound / SM_ALIVE,DIGUP |
-| `:2387` | `PlaySound(m_nMagicStartSound)` | RunSound / SM_SPELL |
-| `:2399 / :2404` | `PlaySound(m_nWeaponSound)` | RunActSound 人形命中帧 frame=2 |
-| `:2406-2407` | `PlaySound(s_yedo_man / s_yedo_woman)` | SM_POWERHIT 按性别配音 |
-| `:2412-2413` | `WeaponSound + s_longhit` | SM_LONGHIT |
-| `:2418-2419` | `WeaponSound + s_widehit` | SM_WIDEHIT |
-| `:2424-2425 / :2430-2431 / :2436-2437` | `WeaponSound + s_firehit` | SM_FIREHIT / SM_CRSHIT / SM_TWINHIT |
-| `:2447` | `PlaySound(m_nNormalSound)` | 怪物 SM_WALK/TURN frame=1 且 Random(8)=1 |
-| `:2453` | `PlaySound(m_nWeaponSound)` | 怪物 SM_HIT frame=3 |
-| `:2462` | `PlaySound(m_nDie2Sound)` | appearance=80 SM_NOWDEATH frame=2 |
-| `:2586 / :2588` | `MagicFire / MagicExplosionSound` | TActor.Run 施法飞行/爆炸帧 |
-| `:2659-2660` | `PlaySound(FootStep / FootStep+1)` | 走/跑 frame 1/4 左右脚 |
-| `:2949` | `PlaySound(Random(7) + 146)` | TNpcActor SM_DIGUP appearance=52 |
-| `:3498` | `PlaySound(s_strike_stone)` | SM_HEAVYHIT 挖矿碎石 |
-| `:3647 / :3649` | `MagicFire / MagicExplosionSound` | THumActor.Run 施法（与 :2586/:2588 重复） |
-
-**AxeMon.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:1534` | `PlaySound(10112)` | TBanyaGuardMon SM_LIGHTING race 70/81 |
-| `:1538` | `PlaySound(10012)` | race 71 |
-| `:1542` | `PlaySound(2276)` | race 72 |
-| `:1546` | `PlaySound(2396)` | race 78 |
-| `:2496` | `PlaySound(8222)` | TDragonStatue SM_LIGHTING |
-| `:2682` | `PlaySound(8206)` | TFireDragon.AttackEff |
-| `:2778` | `PlaySound(8201)` | TFireDragon 出场 |
-| `:2815` | `PlaySound(8202)` | TFireDragon SM_HIT |
-| `:2821` | `PlaySound(8203)` | TFireDragon 动作 81/82/83 |
-
-**magiceff.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:630` | `PlaySound(8208)` | TMagicEff.Create bt80=1 |
-| `:797` | `PlaySound(MagOwner.m_nMagicExplosionSound)` | TMagicEff.Shift 命中爆炸 |
-| `:1344` | `PlaySound(MagOwner.m_nMagicExplosionSound)` | TBujaukGroundEffect.Run 爆炸 |
-
-**PlayScn.pas**
-
-| 行号 | 调用 | 场景 |
-|------|------|------|
-| `:423` | `PlaySound(s_main_theme)` | SoundOnTimer（定时器已在 `:485-486` 注释停用，运行时不触发） |
-| `:492` | `SilenceSound` | TPlayScene.CloseScene |
-
-**SoundUtil.pas（门面层内部，非业务触发点）**
-
-| 行号 | 调用 | 说明 |
-|------|------|------|
-| `:187` | `g_Sound.EffectFile(file, FALSE, FALSE)` | PlaySound 实现 |
-| `:216` | `PlayMp3('', False)` | PlayMapMusic 停止分支 |
-| `:220` | `PlayMp3('.\Music\' + g_nMapMusic + '.mp3')` | PlayMapMusic 播放分支 |
-| `:258-259` | `SilenceSound` + `EffectFile(wav, TRUE, FALSE)` | PlayBGM（循环） |
-| `:272 / :279-280` | `MP3.Stop` / `MP3.Stop + MP3.Play` | PlayMp3 |
-| `:289` | `g_Sound.Clear` | SilenceSound 实现 |

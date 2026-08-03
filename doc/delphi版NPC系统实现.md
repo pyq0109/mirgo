@@ -5,14 +5,17 @@
 
 ## 一、架构总览
 
-MIR2 的 NPC 系统是一套**脚本驱动 + 继承多态 + Race 工厂**结构：NPC 的对话和行为完全由外部脚本文件（`.txt`）定义，运行时由脚本引擎解释执行；不同 NPC 类型通过类继承和方法覆写实现特化；NPC 类由数据库 `btRace` 字段在创建时工厂选择。
+MIR2 的 NPC 系统是一套**脚本驱动 + 继承多态 + 双工厂创建**结构：NPC 的对话和行为完全由外部脚本文件（`.txt`）定义，运行时由脚本引擎解释执行；不同 NPC 类型通过类继承和方法覆写实现特化。创建途径有两条（见 §2.5a）：普通 NPC 由 `TFrmDB.LoadNpcs`（LocalDB.pas:1429-1481）按 `Npcs.txt` 的 race 列工厂选择（0=店主→TMerchant / 1=国王→TGuildOfficial / 2=城堡官员→TCastleOfficial）；训练师 `TTrainer` 虽继承 TNormNpc，却由**怪物工厂** `AddBaseObject` 以 Race=55 创建（M2Share.pas:152、UsrEngn.pas:1865-1868）。
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│  引擎调度层 TUserEngine (UsrEngn.pas)                                      │
-│    AddBaseObject()     Race ID → 类工厂（case 语句）                        │
-│    FindMerchant()      按对象引用查找商人                                   │
-│    FindNPC()           按对象引用查找 NPC                                   │
+│  创建/调度层                                                                  │
+│    TFrmDB.LoadNpcs()   NPC 工厂：Npcs.txt race 列 → 类                      │
+│                        （LocalDB.pas:1429-1481）                            │
+│    AddBaseObject()     怪物工厂（UsrEngn.pas:1819，58 分支；                │
+│                        TRAINER=55 → TTrainer 亦由此创建）                   │
+│    FindMerchant()      按对象引用查找商人（UsrEngn.pas）                    │
+│    FindNPC()           按对象引用查找 NPC（UsrEngn.pas）                    │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  对象基类层 (ObjBase.pas)                                                   │
 │    TBaseObject          消息队列、HP/MP、战斗公式、死亡                      │
@@ -26,8 +29,10 @@ MIR2 的 NPC 系统是一套**脚本驱动 + 继承多态 + Race 工厂**结构�
 │  脚本引擎层 (ObjNpc.pas)                                                    │
 │    LoadNpcScript()     加载脚本文件（Npc_def/ 或 Market_def/）              │
 │    GotoLable()         核心执行引擎：标签查找 → 条件求值 → 动作执行         │
-│    QuestCheckCondition()  #IF 条件求值（~66 种命令）                        │
-│    QuestActionProcess()   #ACT 动作执行（~73 种命令）                       │
+│    QuestCheckCondition()  #IF 条件求值（ObjNpc.pas 内 ~66 个 case 分支；     │
+│                           M2Share.pas:190-506 常量表口径 ~100 个）          │
+│    QuestActionProcess()   #ACT 动作执行（ObjNpc.pas 内 ~73 个 case 分支；   │
+│                           M2Share.pas:508-1000 常量表口径 ~230 个）         │
 │    GetVariableText()      <$VARIABLE> 文本替换                              │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  客户端渲染层 (Client/)                                                     │
@@ -41,7 +46,7 @@ MIR2 的 NPC 系统是一套**脚本驱动 + 继承多态 + Race 工厂**结构�
 
 1. **脚本驱动**：NPC 的对话内容、条件分支、动作效果全部由外部 `.txt` 脚本文件定义。服务端只负责解析和执行，不硬编码任何对话内容。脚本使用 `[@label]` 分段、`#IF/#ACT/#SAY` 结构化命令。
 2. **继承多态**：NPC 类型差异通过覆写 `Click()`、`UserSelect()`、`Run()`、`GetVariableText()` 等虚方法实现。`TMerchant` 在 `TNormNpc` 基础上增加商品管理，`TCastleOfficial` 在 `TMerchant` 基础上增加城堡管理。
-3. **Race 工厂**：NPC 创建时由 `TUserEngine.AddBaseObject` 的 `case` 语句根据 `btRace` 选择实例化哪个子类。`RC_NPC`（10）= 任务 NPC，`RCC_MERCHANT`（50）= 商人。
+3. **双工厂创建**：普通 NPC 由 `TFrmDB.LoadNpcs`（LocalDB.pas:1429-1481）解析 `Npcs.txt` 的 race 列选择子类（0→TMerchant 店主、1→TGuildOfficial 国王、2→TCastleOfficial 城堡官员，与 `asset/server/Envir/Npcs.txt` 表头注释一致）；`AddBaseObject`（UsrEngn.pas:1819）是**怪物工厂**，其中 Race=TRAINER=55 分支创建训练师。`RC_NPC`（10）只是 TNormNpc 构造时赋给 `m_btRaceServer` 的运行时标识（用于攻击模式判定，ObjBase.pas:21377-21471），不是工厂键；`RCC_MERCHANT`（50）= 商人。
 4. **三层商品架构**：商人商品分为配置层（`m_RefillGoodsList`，定义品种和补货周期）、库存层（`m_GoodsList`，当前实际库存）、价格层（`m_ItemPriceList`，动态价格），三层解耦。
 5. **双端协议对称**：每个 NPC 交互都有明确的 CM（客户端→服务端）和 SM（服务端→客户端）消息对，内部通过 RM 消息桥接。
 
@@ -135,10 +140,27 @@ TBaseObject          (ObjBase.pas — 基础游戏对象)
 
 ### 2.5 TTrainer（ObjNpc.pas:377）
 
+> ⚠️ **创建途径特殊**：`TTrainer` 虽继承 `TNormNpc`，但**不走** `Npcs.txt` 的 NPC 工厂，
+> 而是由**怪物工厂** `AddBaseObject` 以 Race=`TRAINER`=**55** 创建
+>（`M2Share.pas:152`、`UsrEngn.pas:1865-1868`）。它与 `Npcs.txt` 的 race 列无关，
+> 尤其**不是** race 2（race 2 = 沙巴克城堡官员）。本质是无敌沙袋 + DPS 统计器。
+> Go 版对应 `cmd/server/trainernpc.go`（Race 55 判定）。
+
 | 方法 | 行号 | 用途 |
 |------|------|------|
-| `Operate` | :2642 | 处理训练消息 |
-| `Run` | :2663 | 训练 tick 逻辑 |
+| `Create` | :2628 | 初始化计时与累计 |
+| `Operate` | :2642 | 处理 RM_STRUCK/RM_MAGSTRUCK，累加伤害并喊话 |
+| `Run` | :2663 | 3 秒无新命中 → 喊话总伤害/平均值并清零 |
+
+### 2.5a NPC 创建途径（双工厂模型）
+
+| 途径 | 位置 | 选择依据 | 产物 |
+|------|------|----------|------|
+| **NPC 工厂** | `TFrmDB.LoadNpcs`（LocalDB.pas:1429-1481） | `Npcs.txt` 的 race 列 | 0→`TMerchant`（店主）、1→`TGuildOfficial`（国王）、2→`TCastleOfficial`（城堡官员） |
+| **怪物工厂** | `AddBaseObject`（UsrEngn.pas:1819-1938，58 分支） | 怪物 DB 的 race 字段 | 各怪物类；其中 Race=55（TRAINER）→`TTrainer` |
+
+- `Npcs.txt` race 列语义与 `asset/server/Envir/Npcs.txt` 表头注释一致：0=店主、1=国王、2=沙巴克城堡官员。
+- `RC_NPC`（10）/`RCC_MERCHANT`（50）是运行时 `m_btRaceServer` 标识（攻击模式判定用，ObjBase.pas:21377-21471），**不是**工厂键。
 
 ### 2.6 TCastleOfficial（ObjNpc.pas:390，继承 TMerchant）
 
@@ -679,9 +701,12 @@ What would you like to buy?
 
 ### 6.4 TTrainer — 训练 NPC（ObjNpc.pas:377）
 
-- **Operate**（:2642）：处理训练消息
-- **Run**（:2663）：训练 tick 逻辑
-- **用途**：玩家战斗训练/对练
+- **创建**：由怪物工厂以 Race=TRAINER=55 创建（M2Share.pas:152、UsrEngn.pas:1865-1868），
+  不走 Npcs.txt，与 NPC race 列无关（见 §2.5a）
+- **Create**（:2628）：初始化计时与累计
+- **Operate**（:2642）：处理 RM_STRUCK/RM_MAGSTRUCK，累加伤害值与命中次数，喊话"破坏力/平均值"
+- **Run**（:2663）：3 秒无新命中 → 喊话总伤害与平均值并清零
+- **用途**：无敌沙袋 + DPS 统计（玩家战斗训练）
 
 ### 6.5 TCastleOfficial — 城堡管理 NPC（ObjNpc.pas:390，继承 TMerchant）
 
@@ -858,7 +883,9 @@ What would you like to buy?
 
 ### 8.3 容量限制
 
-仓库容量为 `STORAGEITEMCOUNT`（39 格），与 Go 实现的 `MaxStorageItems = 39` 一致。
+仓库容量为 **50 格**：`TStorageItems = array[0..49] of TUserItem`（Common/Grobal2.pas:811）。
+Go 实现同为 50 格（`cmd/server/config.go` `GetMaxStorageSlots`，注释明引 Delphi 出处）。
+（旧版文档误写 39 格/`STORAGEITEMCOUNT`，该常量在 Delphi 源码中不存在，已更正。）
 
 ---
 
@@ -1205,14 +1232,9 @@ end;
 
 ### 11.11 UI 框架（DWinCtl.pas）
 
-NPC 对话系统使用自建 DirectX UI 框架（非 VCL 窗体）：
-
-- **TDControl**（:26）：基类。`WLib: TWMImages`（精灵库）、`FaceIndex`（精灵索引）、`DControls`（子控件列表）、鼠标/键盘事件、`DirectPaint()` 渲染
-- **TDButton**（:98）：添加点击音效、`Downed` 状态、鼠标事件覆写
-- **TDWindow**（:146）：添加 `Floating`（可拖动）、`DialogResult`、`ShowModal`。继承 TDButton
-- **TDWinManager**（:166）：管理所有 DControl，分发输入，调用 `DirectPaint`
-
-`DMerchantDlg`、`DMenuDlg`、`DSellDlg` 均为 `TDWindow` 实例。子按钮（`DMerchantDlgClose`、`DMenuBuy`、`DSellDlgOk` 等）为 `TDButton` 实例。所有渲染通过 `OnDirectPaint` 回调绘制到 `TDirectDrawSurface`。
+NPC 对话系统使用自建 DirectX UI 框架（非 VCL 窗体）：TDControl/TDButton/TDWindow/TDWinManager
+四层控件体系，`DMerchantDlg`/`DMenuDlg`/`DSellDlg` 均为 `TDWindow` 实例。
+完整控件框架（类层次/事件分发/命中检测）见 `delphi版UI系统实现.md` 第二、三章，此处不再重复。
 
 ---
 
@@ -1256,32 +1278,11 @@ NPC 对话系统使用自建 DirectX UI 框架（非 VCL 窗体）：
 
 ---
 
-## 十三、Go 实现现状对照
+## 十三、Go 实现现状
 
-> 基于 `cmd/server/` 和 `cmd/client/` 当前代码的简要对照。详细完成度参见 `doc/客户端服务端开发计划.md` 第十章。
+Go 版 NPC 系统（npcobject.go/npcscript.go/merchantsystem.go/storagesystem.go/upgrade.go/
+makedrug.go/castlenpc.go/trainernpc.go + 客户端 uinpc.go）已实现脚本对话、商店买卖/修理、
+仓库（50 格）、武器升级、制药、城堡 NPC、训练师（Race 55）等主干功能。
 
-| 子系统 | Delphi | Go 现状 | 完成度 |
-|--------|--------|---------|--------|
-| NPC 对象 | 5 层类继承（TNormNpc/TMerchant/TGuildOfficial/TTrainer/TCastleOfficial） | `NpcObject` 仅 21 行，无子类 | ~5% |
-| NPC 生成 | 数据库驱动，数百 NPC 定义 | 硬编码 1 个 NPC | ~5% |
-| 脚本解析器 | 完整（[@label]/#IF/#ACT/#SAY/#ELACT/#ELSE） | 核心功能可用 | ~80% |
-| 脚本条件 | ~66 种命令 | 17 种 | ~26% |
-| 脚本动作 | ~73 种命令 | ~30 种（含 3 个空桩） | ~41% |
-| 变量系统 | P/G/D/M/A 五类变量 + 字符串 + 列表 + 持久化 | `[10]int` 数组 | ~20% |
-| 商店买卖 | 完整（库存/补货/动态定价/城堡税） | 核心买卖可用，无库存/补货/动态定价 | ~60% |
-| 修理 | 普通 + 特殊修理（耐久衰减） | 仅普通修理 | ~50% |
-| 仓库 | 39 格 + 密码锁 + 持久化 | 39 格，无密码/持久化 | ~30% |
-| 武器升级 | 完整（材料分析/概率/属性加成） | 未实现 | 0% |
-| 制药 | 完整（配方/材料/收费） | 未实现 | 0% |
-| 传送 NPC | 脚本 MAPMOVE/MAP | 完整 | 100% |
-| 任务脚本 | 完整任务系统集成 | 未实现 | 0% |
-| 行会 NPC | 创建/战争/攻城 | 基础创建 | ~30% |
-| 城堡 NPC | 完整城堡管理 | 未实现 | 0% |
-| 训练 NPC | 战斗训练 | 未实现 | 0% |
-| 婚姻/师徒 | 已注释移除 | 未实现 | 0% |
-| 协议消息 | 全部 CM/SM 定义 | 全部已定义并路由 | 100% |
-| 客户端对话 UI | 完整（脚本渲染/链接/居中） | 完整（559 行 uinpc.go） | ~90% |
-| 客户端商店 UI | 完整（买/卖/修/仓/制药） | 买/卖/修/仓可用 | ~70% |
-| 客户端 NPC 渲染 | 3 方向 + 特效 + Npc.wil | 3 方向 + Npc.wil | ~80% |
-
-**总体评估**：Go 实现形成了一个**可工作的垂直切片**——可以点击 NPC、查看脚本对话、导航到买/卖/修/仓、执行交易。但广度约为 Delphi 参考的 **15-25%**。最大差距在于脚本命令库（315 vs ~47）、变量系统、NPC 定义/生成基础设施、以及商人特有功能（库存、回购、费率、移动）。
+NPC 相关的**缺口清单与优先级**（脚本长尾命令、商人移动等）以活文档
+`doc/go版完善路线图.md` 第三节为准，本文不再维护静态对照表（旧表数字已过时）。

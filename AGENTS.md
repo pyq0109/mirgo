@@ -53,7 +53,7 @@ cmd/server/
 ├── baseobject.go     # 基础对象、RM_*常量、SendRefMsg、WalkTo
 ├── playobject.go     # 玩家：移动/战斗/视野/地图切换/消息分发
 ├── monsterobject.go  # 怪物：AI(搜索/追击/攻击/游荡)
-├── monsterai.go      # 怪物AI行为(12种:melee/ranged/flee/area/burrow/explode等)
+├── monsterai.go      # 怪物AI行为(34种:AIMelee=0..AITrainer=33)
 ├── monsterdb.go      # 怪物数据库加载(monster_db.jsonc)
 ├── npcobject.go      # NPC：固定位置、外观
 ├── mongen.go         # 刷怪系统、地面物品消失
@@ -97,8 +97,7 @@ cmd/client/
 ├── lighting.go       # 光照/迷雾(6级光罩+光源)
 ├── magiceffect.go    # 魔法特效管理(爆炸/飞行/地面)
 ├── eventman.go       # 地图事件渲染(SM_SHOWEVENT/火墙)
-├── scenelogin.go     # 登录/注册场景
-├── sceneserverselect.go  # 选服场景
+├── scenelogin.go     # 登录/注册场景(含选服对话框模式 modeServerSelect)
 ├── sceneselectchr.go # 选角/创角/删角场景
 └── scenenotice.go    # 公告场景
 ```

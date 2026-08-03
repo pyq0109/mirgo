@@ -407,7 +407,7 @@ end;
 > 源码：`IntroScn.pas:62-120`（类声明）、`:248-1097`（实现）
 > 对话框控件：`FState.pas:756-892`（Initialize）、`FState.dfm`（事件绑定）
 
-### 15.1 场景概述
+### 7.1 场景概述
 
 `TLoginScene` 是玩家看到的第一个有 UI 的场景。它管理三组输入表单（登录/注册/改密码）、一个开门过渡动画、以及与 `FrmDlg` 中对话框控件的交互。
 
@@ -417,7 +417,7 @@ end;
 - 注册重试缓存：`m_NewIdRetryUE: TUserEntry`、`m_NewIdRetryAdd: TUserEntryAdd`（`:88-89`）
 - 公共：`m_sLoginId`、`m_sLoginPasswd`、`m_boUpdateAccountMode`（`:99-101`）
 
-### 15.2 TEdit 控件清单
+### 7.2 TEdit 控件清单
 
 所有编辑框在构造函数中代码创建（`:248-481`），挂载到 `FrmMain`，全部 `BorderStyle=bsNone`、`Color=clBlack`、`Font.Color=clWhite`、`Visible=FALSE`。
 
@@ -465,7 +465,7 @@ end;
 
 全部 `Height=13, Width=104, MaxLength=10`（`:414-480`）。
 
-### 15.3 OpenScene / CloseScene
+### 7.3 OpenScene / CloseScene
 
 **OpenScene**（`:488-520`）：
 1. `m_nCurFrame := 0`，`m_nMaxFrame := 10`（门动画参数）
@@ -478,7 +478,7 @@ end;
 
 **CloseScene**（`:522-528`）：隐藏 `m_EdId`/`m_EdPasswd`/`DLogin`，`SilenceSound`。
 
-### 15.4 PlayScene 渲染（`:804-855`）
+### 7.4 PlayScene 渲染（`:804-855`）
 
 1. **首帧显示**（`:808-813`）：若 `m_boOpenFirst`，清除标志，显示 `m_EdId`+`m_EdPasswd`，聚焦 `m_EdId`
 2. **背景**（`:815-822`）：`g_WChrSelImages.Images[102-80]` = 索引 **22**，居中绘制 `((SCREENWIDTH-800)/2, (SCREENHEIGHT-600)/2)`
@@ -491,7 +491,7 @@ end;
 
 **门触发**：`OpenLoginDoor`（`:796-802`）— 设 `m_boNowOpening:=TRUE`，隐藏登录框，播放 `s_rock_door_open`=音效 100。
 
-### 11.5 子状态机 ChangeLoginState（`:857-927`）
+### 7.5 子状态机 ChangeLoginState（`:857-927`）
 
 | 状态 | Tag 过滤 | 对话框可见性 | 焦点 |
 |------|----------|-------------|------|
@@ -614,11 +614,11 @@ m_EdChgId → m_EdChgCurrentpw → m_EdChgNewPw → m_EdChgRepeat → 回到 m_E
 > 源码：`IntroScn.pas:122-154`（类声明）、`:1102-1548`（实现）
 > 对话框控件：`FState.pas:899-965`（Initialize）
 
-### 12.1 场景概述
+### 8.1 场景概述
 
 管理 2 个角色槽的选择、创建、删除。每个角色槽有冻结（石化）/解冻动画状态。
 
-### 12.2 TSelChar 记录（`:20-33`）
+### 8.2 TSelChar 记录（`:20-33`）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -633,17 +633,17 @@ m_EdChgId → m_EdChgCurrentpw → m_EdChgNewPw → m_EdChgRepeat → 回到 m_E
 | `EffIndex` | integer | 石化特效帧计数器 |
 | `StartTime/moretime/startefftime` | longword | 动画时间戳 |
 
-### 12.3 EdChrName（`:1109-1121`）
+### 8.3 EdChrName（`:1109-1121`）
 
 `Parent=FrmMain`，`Height=21`，`Width=129`，`BorderStyle=bsNone`，`Color=clBlack`，`Font.Color=clWhite`，**`ImeMode=LocalLanguage`**（整个文件中唯一设置 IME 的控件），`MaxLength=14`，`Visible=FALSE`。
 
-### 12.4 OpenScene / CloseScene
+### 8.4 OpenScene / CloseScene
 
 **OpenScene**（`:1136-1141`）：显示 `FrmDlg.DSelectChr`，启用 `SoundTimer`（Interval=1ms → 首次触发播放 `bmg_select`=`wav\sellect-loop2.wav`，然后禁用自身）。
 
 **CloseScene**（`:1143-1148`）：`SilenceSound`，隐藏 `DSelectChr`，禁用 `SoundTimer`。
 
-### 12.5 PlayScene 渲染（`:1363-1548`）
+### 8.5 PlayScene 渲染（`:1363-1548`）
 
 #### 背景
 
@@ -887,7 +887,7 @@ end;
 
 > 源码：`PlayScn.pas:145-243`（类声明）、`:252-2366`（实现）
 
-### 14.1 类结构
+### 10.1 类结构
 
 #### 私有字段（`:146-175`）
 
@@ -917,7 +917,7 @@ end;
 | `m_FlyList` | TList | 飞行弹道（箭/斧/火球） |
 | `m_dwBlinkTime/m_boViewBlink` | — | 小地图闪烁计时 |
 
-### 14.2 初始化
+### 10.2 初始化
 
 #### EdChat 创建（`:267-280`）
 
@@ -942,7 +942,7 @@ end;
 
 光罩加载（`LoadFog`, `:603-631`）：读取 `Data\lig0a.dat` ~ `lig0f.dat`，每个文件 4 字节宽 + 4 字节高 + w×h 字节 alpha 数据。
 
-### 14.3 OpenScene / CloseScene
+### 10.3 OpenScene / CloseScene
 
 **OpenScene**（`:478-487`）：
 1. `g_WMainImages.ClearCache` — 清主 UI 图像缓存
@@ -954,7 +954,7 @@ end;
 2. `EdChat.Visible := FALSE`
 3. `FrmDlg.ViewBottomBox(FALSE)` — 隐藏底部 HUD 栏
 
-### 14.4 PlayScene 12 步渲染管线（`:848-1419`）
+### 10.4 PlayScene 12 步渲染管线（`:848-1419`）
 
 #### 前置：计时 tick（`:885-896`）
 
@@ -1101,7 +1101,7 @@ Actor 屏幕位置：`((Rx-Left)*UNITX + defx, (Ry-Top-1)*UNITY + defy)`（Y 方
 
 ## 十一、主窗体结构（ClMain）
 
-### 15.1 DFM 声明（ClMain.dfm）
+### 11.1 DFM 声明（ClMain.dfm）
 
 `TfrmMain` / `frmMain`：`BorderStyle=bsNone`, `Caption='legend of mir'`, `Position=poDesktopCenter`, `KeyPreview=True`。
 
@@ -1122,7 +1122,7 @@ Actor 屏幕位置：`((Rx-Left)*UNITX + defx, (Ry-Top-1)*UNITY + defy)`（Y 方
 
 **DFM 中无按钮/编辑框/面板** — 所有 UI 要么自建控件，要么代码创建。
 
-### 15.2 FormCreate 初始化（ClMain.pas:435）
+### 11.2 FormCreate 初始化（ClMain.pas:435）
 
 1. 读取 `Lmir.ini`（服务器地址/端口、全屏、字体）`:454-467`
 2. 设 `DXDraw.Display.Width/Height := SCREENWIDTH/SCREENHEIGHT` `:495-496`
@@ -1133,7 +1133,7 @@ Actor 屏幕位置：`((Rx-Left)*UNITX + defx, (Ry-Top-1)*UNITY + defy)`（Y 方
 7. 设 socket 地址 + `CSocket.Active:=True` `:651-684`
 8. 挂 `Application.OnIdle := AppOnIdle` `:692`
 
-### 15.3 DXDrawInitialize（ClMain.pas:853）
+### 11.3 DXDrawInitialize（ClMain.pas:853）
 
 1. 设表面尺寸
 2. 分配字体到 `PlayScene.EdChat` `:873`
@@ -1143,7 +1143,7 @@ Actor 屏幕位置：`((Rx-Left)*UNITX + defx, (Ry-Top-1)*UNITY + defy)`（Y 方
 6. **`FrmDlg.Initialize` `:1009`**（所有对话框定位）
 7. 创建 `g_ImgMixSurface`（300×350）和 `g_MiniMapSurface`（540×360）`:1025-1030`
 
-### 15.4 输入路由
+### 11.4 输入路由
 
 所有输入事件**先过 `g_DWinMan`**，若返回 `True` 则 UI 已处理，跳过游戏逻辑：
 
@@ -1684,7 +1684,7 @@ U_BELT=10, U_BOOTS=11, U_CHARM=12
 |------|------|------|
 | `DWinCtl.pas` | ~1130 | 控件框架（TDControl/TDButton/TDWindow/TDGrid/TDWinManager） |
 | `DrawScrn.pas` | ~520 | 场景调度、屏幕合成、HUD 覆盖 |
-| `ClMain.pas` | ~4000+ | 主窗体、渲染循环、网络消息分发、输入路由 |
+| `ClMain.pas` | ~6500 | 主窗体、渲染循环、网络消息分发、输入路由 |
 | `ClMain.dfm` | 二进制 | 主窗体 DFM（DXDraw/Socket/Timer/WIL 库） |
 | `FState.pas` | ~6831 | 对话框系统（~230 控件、布局、交互） |
 | `FState.dfm` | 二进制 | 对话框 DFM（控件树、事件绑定） |
