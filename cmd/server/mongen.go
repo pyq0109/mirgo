@@ -561,6 +561,8 @@ func (e *UserEngine) initMonsterFromDef(mon *MonsterObject, def *MonsterDef, now
 		mon.StickMode = true
 	case 110, 111, 112: // TCastleDoor/TWallStructure/TArcherGuard — 固定
 		mon.StickMode = true
+	case 55: // TTrainer — 训练师沙袋，固定不动、无敌、仅统计伤害
+		mon.StickMode = true
 	case 115: // TBigHeartMonster — 固定脉冲，视野 16 格
 		mon.StickMode = true
 		if mon.ViewRange <= 0 {

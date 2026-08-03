@@ -27,13 +27,32 @@ type MapCellInfo struct {
 	ObjList []OSObject
 }
 
-// MapFlag 包含地图属性。
+// MapFlag 地图属性，对应 Delphi TMapFlag（Grobal2.pas:1369-1400），
+// 由 mapinfo.txt 的 props 解析而来（LocalDB.pas:560-850）。
 type MapFlag struct {
-	Safe     bool
-	Fight    bool
-	Dark     bool
-	NoDrug   bool
-	NoRecall bool
+	Safe           bool   // SAFE: 全图安全区
+	Dark           bool   // DARK: 黑暗（需迷雾）
+	DayLight       bool   // DAY: 恒白昼
+	Fight          bool   // FIGHT: 格斗区
+	Fight3         bool   // FIGHT3
+	Quiz           bool   // QUIZ
+	Mine           bool   // MINE: 可挖矿（矿石只在此类地图生成）
+	Mine2          bool   // MINE2
+	NoReconnect    bool   // NORECONNECT(map): 掉线重连到指定地图
+	ReconnectMap   string // NORECONNECT 的目标地图
+	NoRecall       bool   // NORECALL: 禁止回忆/召唤传送
+	NoRandomMove   bool   // NORANDOMMOVE: 禁止随机传送
+	NoPositionMove bool   // NOPOSITIONMOVE: 禁止坐标传送
+	NoDrug         bool   // NODRUG: 禁止使用药水
+	NeedHole       bool   // NEEDHOLE
+	NoDropItem     bool   // NODROPITEM
+	NoThrowItem    bool   // NOTHROWITEM
+	NoHorse        bool   // NOHORSE
+	NoChat         bool   // NOCHAT
+	ExpRate        int    // EXPRATE(n): 经验倍率（0/1=无加成）
+	MusicID        int    // MUSIC(n): 背景音乐编号（-1=无）
+	DecHPPoint     int    // DECHP(point/time): 周期扣血
+	DecHPTime      int
 }
 
 // Door 表示地图上的一扇门。

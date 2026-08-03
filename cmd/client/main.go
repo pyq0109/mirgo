@@ -1061,8 +1061,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	// =====================================================================
 
 	case protocol.SMSendNotice:
-		log.Logf(log.LevelInfo, "Client", "received notice, auto-confirming (Delphi empty scene)")
-		h.Send(protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0), "")
+		// Delphi: 公告以模态对话框显示，用户点 Ok 后才发 CM_LOGINNOTICEOK
+		//（ClMain.pas:5732-5749）。
+		log.Logf(log.LevelInfo, "Client", "received notice, showing modal")
+		h.noticeScene.SetNotice(body, func() {
+			h.Send(protocol.MakeDefaultMsg(protocol.CMLoginNoticeOK, 0, 0, 0, 0), "")
+		})
 
 	// =====================================================================
 	// 游戏阶段
@@ -1307,6 +1311,18 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		log.Logf(log.LevelInfo, "Client", "received magic list: count=%d", msg.Recog)
 		h.playScene.State.ParseMagics(body)
 
+	case protocol.SMMagicLvExp:
+		// Delphi ClientGetMagicLvExp（ClMain:5514-5525）：
+		// Recog=magid, Param=level, MakeLong(Tag,Series)=当前训练度。
+		magID := uint16(msg.Recog)
+		for i := range h.playScene.State.Magics {
+			if h.playScene.State.Magics[i].MagID == magID {
+				h.playScene.State.Magics[i].Level = byte(msg.Param)
+				h.playScene.State.Magics[i].CurTrain = uint16(uint32(msg.Tag) | uint32(msg.Series)<<16)
+				break
+			}
+		}
+
 	case protocol.SMHear:
 		log.Logf(log.LevelInfo, "Client", "chat: %s", body)
 		h.playScene.AddChatMessage(body)
@@ -1523,6 +1539,17 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.State.DealRemoteGold = int(msg.Recog)
 		gSound.PlaySound(sMoney)
 
+	case protocol.SMDealChgGoldFail:
+		// Delphi（ClMain:4824）：改金币失败，回滚己方出金币与背包金币。
+		h.playScene.State.DealGold = int(msg.Recog)
+		h.playScene.State.Gold = int(uint32(msg.Param) | uint32(msg.Tag)<<16)
+
+	case protocol.SMLampChangeDura:
+		// Delphi（ClMain:4042）：右手火把/油灯耐久更新。
+		if it := h.playScene.State.UseItems[protocol.URightHand]; it != nil {
+			it.Dura = uint16(msg.Recog)
+		}
+
 	case protocol.SMBuildGuildOK:
 		h.playScene.AddChatMessage("Guild created")
 
@@ -1530,6 +1557,31 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		log.Logf(log.LevelInfo, "Client", "guild chat: %s", body)
 		h.playScene.addGuildChat(body)
 		h.playScene.AddChatMessage("[行会] " + body)
+
+	case protocol.SMGuildRankUpdateFail:
+		// Delphi（ClMain:4877）：行会职务更新失败原因码。
+		var reason string
+		switch int(msg.Recog) {
+		case -2, -5:
+			reason = "[提示信息] 掌门人位置不能为空。"
+		case -3:
+			reason = "[提示信息] 新的行会掌门人已经被传位。"
+		case -4:
+			reason = "[提示信息] 一个行会最多只能有二个掌门人。"
+		case -6:
+			reason = "[提示信息] 不能添加成员/删除成员。"
+		case -7:
+			reason = "[提示信息] 职位重复或者出错。"
+		default:
+			reason = "[提示信息] 行会职务更新失败。"
+		}
+		ShowConfirm(h.playScene, reason, []ModalResult{MrOk}, DlgSmall, nil)
+
+	case protocol.SMDonateOK:
+		h.playScene.AddChatMessage("[行会] 捐献成功")
+
+	case protocol.SMDonateFail:
+		h.playScene.AddChatMessage("[行会] 捐献失败")
 
 	case protocol.SMStorageOK:
 		log.Logf(log.LevelInfo, "Client", "item stored")
@@ -1541,6 +1593,10 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMTakeBackStorageItemOK:
 		log.Logf(log.LevelInfo, "Client", "item retrieved from storage")
+
+	case protocol.SMTakeBackStorageItemFullBag:
+		// Delphi（ClMain:4624-4628）：背包已满，取回失败。
+		ShowConfirm(h.playScene, "背包已满.", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMSysMessage:
 		log.Logf(log.LevelInfo, "Client", "system message: %s", body)

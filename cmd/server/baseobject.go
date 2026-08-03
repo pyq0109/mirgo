@@ -33,6 +33,7 @@ const (
 	RM_CHANGENAMECOLOR = 10024
 	RM_CRSHIT    = 10025
 	RM_TWINHIT   = 10026
+	RM_CHARSTATUSCHANGED = 10139 // Grobal2.pas:1153
 )
 
 const viewRange = 12

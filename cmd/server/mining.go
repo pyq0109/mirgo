@@ -79,82 +79,107 @@ func (e *Environment) ProcessMineRegen(now int64) {
 	}
 }
 
-// HandleMineDig 处理玩家采矿动作。
+// mineHitRate Delphi g_Config.nMakeMineHitRate 默认 4：每镐 1/4 概率松动矿石
+//（ObjBase.pas:21895 Random(g_Config.nMakeMineHitRate)=0）。
+const mineHitRate = 4
+
+// tryMineAt Delphi PileStones（ObjBase.pas:21881-21929）：对目标格矿脉挥镐。
+// 返回 true 表示发生了有效挖掘（命中矿脉且松动成功），调用方应发送 =DIG；
+// 返回 false 表示目标格无矿脉，调用方应回退为普通重击。
+func (p *PlayObject) tryMineAt(server *netserver.TCPServer, fx, fy int) bool {
+	if p.envir == nil {
+		return false
+	}
+	now := time.Now().UnixMilli()
+	if !p.checkActionSpeed(now, p.Engine.Config.GetDigUpInterval(), &p.DigUpTick, server) {
+		return true // 限流：本次挥镐被消费，不回退普通攻击
+	}
+	me := p.envir.GetMineEventAt(fx, fy)
+	if me == nil {
+		return false
+	}
+
+	mined := false
+	if me.OreCount > 0 {
+		if rand.Intn(mineHitRate) == 0 {
+			me.OreCount--
+			if me.OreCount <= 0 {
+				me.RegenTick = now + mineRegenTime
+			}
+			mined = true
+			cfg := p.Engine.Config
+			p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY, cfg.GetPileStonesDuration())
+			// Delphi: 1/nMakeMineRate 概率产矿（Go 用 GetMiningOreRate）
+			if rand.Intn(cfg.GetMiningOreRate()) == 0 {
+				p.giveOre(server)
+			} else if rand.Intn(cfg.GetMiningStoneRate()) == 0 {
+				// 只出碎石（仅视觉事件，已在上方添加）
+			}
+		}
+	} else if me.RegenTick == 0 {
+		// Delphi: 采空后 10 分钟补充（TStoneMineEvent.AddStoneMine，ObjBase.pas:21922-21925）
+		me.RegenTick = now + mineRegenTime
+	}
+
+	if !mined {
+		return false
+	}
+
+	// Delphi: 挖掘成功广播重击动画（ObjBase.pas:21929 SendRefMsg RM_HEAVYHIT）
+	p.SendRefMsg(RM_HEAVYHIT, p.Dir, p.CurrX, p.CurrY, "")
+
+	// 武器耐久损耗（Delphi DoDamageWeapon(Random(15)+5)，Go 用配置值）
+	if weapon := p.UseItems[protocol.UWeapon]; weapon != nil {
+		duraLoss := uint16(p.Engine.Config.GetMiningDuraLoss())
+		if weapon.Dura > duraLoss {
+			weapon.Dura -= duraLoss
+		} else {
+			weapon.Dura = 0
+		}
+	}
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
+		p.sysMsg(server, "背包已满！无法携带更多的东西")
+	}
+	return true
+}
+
+// giveOre Delphi MakeMine（ObjBase.pas:21912）：产出一块矿石入包。
+func (p *PlayObject) giveOre(server *netserver.TCPServer) {
+	cfg := p.Engine.Config
+	if p.ItemDB == nil || len(p.ItemList) >= cfg.GetMaxBagSlots() {
+		return
+	}
+	ore := defaultOreTable[rand.Intn(len(defaultOreTable))]
+	def := p.ItemDB.GetByName(ore.ItemName)
+	if def == nil {
+		return
+	}
+	makeIndex := int32(def.Idx)
+	if p.Engine != nil {
+		p.Engine.mu.Lock()
+		makeIndex = int32(p.Engine.nextItemID)
+		p.Engine.nextItemID++
+		p.Engine.mu.Unlock()
+	}
+	dura := uint16(ore.MinDura + rand.Intn(ore.MaxDura-ore.MinDura))
+	item := &protocol.UserItem{
+		MakeIndex: makeIndex,
+		WIndex:    uint16(def.Idx),
+		Dura:      dura,
+		DuraMax:   dura,
+	}
+	p.ItemList = append(p.ItemList, item)
+	p.SendBagItemsFull(server)
+	p.sysMsg(server, "你挖到了"+ore.ItemName+"！")
+}
+
+// HandleMineDig 处理 CMMineDig 备用路径（客户端实际走 CMHeavyHit+鹤嘴锄，见 HandleHit）。
 func (p *PlayObject) HandleMineDig(server *netserver.TCPServer) {
 	if p.envir == nil {
 		return
 	}
-	now := time.Now().UnixMilli()
-	if !p.checkActionSpeed(now, p.Engine.Config.GetDigUpInterval(), &p.DigUpTick, server) {
-		return
-	}
-
-	// 检查是否装备了镐（简化：任何武器都可以采矿）
-	weapon := p.UseItems[protocol.UWeapon]
-	if weapon == nil {
-		p.sysMsg(server, "你需要装备武器才能采矿")
-		return
-	}
-
-	// 查找附近矿点
-	me := p.envir.GetMineEventAt(p.CurrX, p.CurrY)
-	if me == nil {
-		p.sysMsg(server, "这里没有矿脉")
-		return
-	}
-	if me.OreCount <= 0 {
-		p.sysMsg(server, "矿石已经采完了")
-		return
-	}
-
-	// 播放采矿动画
-	p.SendRefMsg(RM_DIGUP, p.Dir, p.CurrX, p.CurrY, "")
-
-	// 扣武器耐久
-	cfg := p.Engine.Config
-	duraLoss := uint16(cfg.GetMiningDuraLoss())
-	if weapon.Dura > duraLoss {
-		weapon.Dura -= duraLoss
-	} else {
-		weapon.Dura = 0
-	}
-
-	// 消耗矿点
-	me.OreCount--
-	if me.OreCount <= 0 {
-		me.RegenTick = time.Now().UnixMilli() + mineRegenTime
-	}
-
-	// 产矿判定
-	if rand.Intn(cfg.GetMiningOreRate()) == 0 {
-		// 产出矿石
-		ore := defaultOreTable[rand.Intn(len(defaultOreTable))]
-		if p.ItemDB != nil && len(p.ItemList) < cfg.GetMaxBagSlots() {
-			def := p.ItemDB.GetByName(ore.ItemName)
-			if def != nil {
-				makeIndex := int32(def.Idx)
-				if p.Engine != nil {
-					p.Engine.mu.Lock()
-					makeIndex = int32(p.Engine.nextItemID)
-					p.Engine.nextItemID++
-					p.Engine.mu.Unlock()
-				}
-				dura := uint16(ore.MinDura + rand.Intn(ore.MaxDura-ore.MinDura))
-				item := &protocol.UserItem{
-					MakeIndex: makeIndex,
-					WIndex:    uint16(def.Idx),
-					Dura:      dura,
-					DuraMax:   dura,
-				}
-				p.ItemList = append(p.ItemList, item)
-				p.SendBagItemsFull(server)
-				p.sysMsg(server, "你挖到了"+ore.ItemName+"！")
-				p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY, cfg.GetPileStonesDuration())
-				return
-			}
-		}
-	} else if rand.Intn(cfg.GetMiningStoneRate()) == 0 {
-		// 产出普通石头（简化：给一个碎石物品或仅视觉）
-		p.envir.AddPileStonesEvent(server, p.CurrX, p.CurrY, cfg.GetPileStonesDuration())
+	fdx, fdy := dirToOffset(p.Dir)
+	if p.tryMineAt(server, p.CurrX+fdx, p.CurrY+fdy) {
+		server.SendRaw(p.Session.ID, "#=DIG!")
 	}
 }

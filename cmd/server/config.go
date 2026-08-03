@@ -503,7 +503,7 @@ func (c *ServerConfig) GetMaxStorageSlots() int {
 	if c.Player.MaxStorageSlots > 0 {
 		return c.Player.MaxStorageSlots
 	}
-	return 39
+	return 50 // Delphi TStorageItems=array[0..49]（Grobal2.pas:811）
 }
 
 func (c *ServerConfig) GetMaxTradeItems() int {

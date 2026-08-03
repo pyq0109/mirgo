@@ -75,6 +75,10 @@ func (p *PlayObject) DearRecall(server *netserver.TCPServer) {
 		p.sysMsg(server, p.DearName+" 不在线")
 		return
 	}
+	if !recallAllowed(p.envir) || !recallAllowed(spouse.envir) {
+		p.sysMsg(server, "这张地图禁止召回")
+		return
+	}
 	tx, ty, ok := p.adjacentTile()
 	if !ok {
 		p.sysMsg(server, "身边没有可用的位置")

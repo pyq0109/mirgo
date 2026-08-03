@@ -75,6 +75,7 @@ func (d *Database) initialize() error {
 			name TEXT UNIQUE NOT NULL,
 			job INTEGER NOT NULL DEFAULT 0,
 			sex INTEGER NOT NULL DEFAULT 0,
+			hair INTEGER NOT NULL DEFAULT 0,
 			level INTEGER NOT NULL DEFAULT 1,
 			map TEXT NOT NULL DEFAULT '0',
 			x INTEGER NOT NULL DEFAULT 289,
@@ -132,7 +133,47 @@ func (d *Database) initialize() error {
 	if err := d.migrateAccounts(); err != nil {
 		return err
 	}
-	return d.migrateGuilds()
+	if err := d.migrateGuilds(); err != nil {
+		return err
+	}
+	return d.migrateCharacters()
+}
+
+// migrateCharacters 为早期创建的 characters 表补齐 hair 列。
+func (d *Database) migrateCharacters() error {
+	rows, err := d.db.Query(`PRAGMA table_info(characters)`)
+	if err != nil {
+		return fmt.Errorf("migrateCharacters: %w", err)
+	}
+	hasHair := false
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("migrateCharacters: %w", err)
+		}
+		if name == "hair" {
+			hasHair = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("migrateCharacters: %w", err)
+	}
+	if hasHair {
+		return nil
+	}
+	if _, err := d.db.Exec(`ALTER TABLE characters ADD COLUMN hair INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("migrateCharacters: add hair: %w", err)
+	}
+	return nil
 }
 
 // migrateAccounts 为早期创建的 accounts 表补齐注册资料列（Delphi
@@ -327,10 +368,10 @@ func (d *Database) UpdateAccountPassword(accountID int64, passwordHash string) e
 }
 
 // CreateCharacter 创建一个新角色。
-func (d *Database) CreateCharacter(accountID int64, name string, job, sex int) (int64, error) {
+func (d *Database) CreateCharacter(accountID int64, name string, job, sex, hair int) (int64, error) {
 	result, err := d.db.Exec(
-		"INSERT INTO characters (account_id, name, job, sex) VALUES (?, ?, ?, ?)",
-		accountID, name, job, sex,
+		"INSERT INTO characters (account_id, name, job, sex, hair) VALUES (?, ?, ?, ?, ?)",
+		accountID, name, job, sex, hair,
 	)
 	if err != nil {
 		return 0, err
@@ -341,7 +382,7 @@ func (d *Database) CreateCharacter(accountID int64, name string, job, sex int) (
 // GetCharactersByAccount 返回某个账号下的所有角色。
 func (d *Database) GetCharactersByAccount(accountID int64) ([]CharacterInfo, error) {
 	rows, err := d.db.Query(
-		"SELECT id, name, job, sex, level FROM characters WHERE account_id = ?",
+		"SELECT id, name, job, sex, hair, level FROM characters WHERE account_id = ?",
 		accountID,
 	)
 	if err != nil {
@@ -352,7 +393,7 @@ func (d *Database) GetCharactersByAccount(accountID int64) ([]CharacterInfo, err
 	var chars []CharacterInfo
 	for rows.Next() {
 		var c CharacterInfo
-		if err := rows.Scan(&c.ID, &c.Name, &c.Job, &c.Sex, &c.Level); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Job, &c.Sex, &c.Hair, &c.Level); err != nil {
 			return nil, err
 		}
 		chars = append(chars, c)
@@ -364,9 +405,9 @@ func (d *Database) GetCharactersByAccount(accountID int64) ([]CharacterInfo, err
 func (d *Database) GetCharacterByID(id int64) (*Character, error) {
 	var c Character
 	err := d.db.QueryRow(
-		"SELECT id, account_id, name, job, sex, level, map, x, y, hp, mp, exp, gold FROM characters WHERE id = ?",
+		"SELECT id, account_id, name, job, sex, hair, level, map, x, y, hp, mp, exp, gold FROM characters WHERE id = ?",
 		id,
-	).Scan(&c.ID, &c.AccountID, &c.Name, &c.Job, &c.Sex, &c.Level, &c.Map, &c.X, &c.Y, &c.HP, &c.MP, &c.Exp, &c.Gold)
+	).Scan(&c.ID, &c.AccountID, &c.Name, &c.Job, &c.Sex, &c.Hair, &c.Level, &c.Map, &c.X, &c.Y, &c.HP, &c.MP, &c.Exp, &c.Gold)
 	if err != nil {
 		return nil, err
 	}
@@ -394,9 +435,9 @@ func (d *Database) CharacterNameExists(name string) (bool, error) {
 func (d *Database) GetCharacterByName(accountID int64, name string) (*Character, error) {
 	var c Character
 	err := d.db.QueryRow(
-		"SELECT id, account_id, name, job, sex, level, map, x, y, hp, mp, exp, gold FROM characters WHERE account_id = ? AND name = ?",
+		"SELECT id, account_id, name, job, sex, hair, level, map, x, y, hp, mp, exp, gold FROM characters WHERE account_id = ? AND name = ?",
 		accountID, name,
-	).Scan(&c.ID, &c.AccountID, &c.Name, &c.Job, &c.Sex, &c.Level, &c.Map, &c.X, &c.Y, &c.HP, &c.MP, &c.Exp, &c.Gold)
+	).Scan(&c.ID, &c.AccountID, &c.Name, &c.Job, &c.Sex, &c.Hair, &c.Level, &c.Map, &c.X, &c.Y, &c.HP, &c.MP, &c.Exp, &c.Gold)
 	if err != nil {
 		return nil, err
 	}
@@ -516,6 +557,7 @@ type CharacterInfo struct {
 	Name  string
 	Job   int
 	Sex   int
+	Hair  int
 	Level int
 }
 
@@ -526,6 +568,7 @@ type Character struct {
 	Name      string
 	Job       int
 	Sex       int
+	Hair      int
 	Level     int
 	Map       string
 	X         int

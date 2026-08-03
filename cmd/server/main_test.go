@@ -121,11 +121,11 @@ func TestSendCharacterListFormat(t *testing.T) {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 
-	_, err = db.CreateCharacter(accountID, "Warrior", 0, 0)
+	_, err = db.CreateCharacter(accountID, "Warrior", 0, 0, 0)
 	if err != nil {
 		t.Fatalf("CreateCharacter Warrior: %v", err)
 	}
-	_, err = db.CreateCharacter(accountID, "Wizard", 1, 1)
+	_, err = db.CreateCharacter(accountID, "Wizard", 1, 1, 0)
 	if err != nil {
 		t.Fatalf("CreateCharacter Wizard: %v", err)
 	}
@@ -545,8 +545,8 @@ func TestIntegration_QueryChrTextFormat(t *testing.T) {
 
 	// 直接在数据库中创建角色
 	accID, _, _ := ts.db.GetAccountByUsername("charlie")
-	ts.db.CreateCharacter(accID, "Fighter", 0, 0)
-	ts.db.CreateCharacter(accID, "Mage", 1, 1)
+	ts.db.CreateCharacter(accID, "Fighter", 0, 0, 0)
+	ts.db.CreateCharacter(accID, "Mage", 1, 1, 0)
 
 	// 查询角色 (Fix 3: 应返回文本格式)
 	c.send(protocol.MakeDefaultMsg(protocol.CMQueryChr, 0, 0, 0, 0), "charlie/54321")
@@ -592,7 +592,7 @@ func TestIntegration_SelChrAndStartPlay(t *testing.T) {
 	c.recv() // SMSelectServerOK
 
 	accID, _, _ := ts.db.GetAccountByUsername("dave")
-	ts.db.CreateCharacter(accID, "Hero", 0, 0)
+	ts.db.CreateCharacter(accID, "Hero", 0, 0, 0)
 
 	// 选角 (Fix 4: 从 body 解析名字, Fix 6: SMStartPlay 带 body)
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0), "dave/Hero")
@@ -629,7 +629,7 @@ func TestIntegration_RunLoginAndNotice(t *testing.T) {
 	c.recv() // SMSelectServerOK
 
 	accID, _, _ := ts.db.GetAccountByUsername("eve")
-	ts.db.CreateCharacter(accID, "Rogue", 0, 0)
+	ts.db.CreateCharacter(accID, "Rogue", 0, 0, 0)
 
 	c.send(protocol.MakeDefaultMsg(protocol.CMSelChr, 0, 0, 0, 0), "eve/Rogue")
 	c.recv() // SMStartPlay
@@ -675,7 +675,7 @@ func TestIntegration_FullLoginFlow(t *testing.T) {
 
 	// 第4步: 在数据库中创建角色
 	accID, _, _ := ts.db.GetAccountByUsername("frank")
-	ts.db.CreateCharacter(accID, "Warrior", 0, 0)
+	ts.db.CreateCharacter(accID, "Warrior", 0, 0, 0)
 
 	// 第5步: 查询角色
 	c.send(protocol.MakeDefaultMsg(protocol.CMQueryChr, 0, 0, 0, 0), "frank/54321")

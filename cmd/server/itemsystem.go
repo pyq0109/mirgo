@@ -295,6 +295,12 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 	used := false
 	switch def.StdMode {
 	case 0: // 药水（Delphi EatItems, ObjBase.pas:23324）：AC=HP, MAC=MP。
+		// Delphi: NODRUG 地图禁止使用药水（MapFlag.boNODRUG）
+		if p.envir != nil && p.envir.Flag.NoDrug {
+			p.sysMsg(server, "这张地图禁止使用药品")
+			p.sendEatFail(server)
+			return
+		}
 		if def.Shape == 1 {
 			// 太阳水：即时回复（Delphi IncHealthSpell）
 			if def.AC > 0 {

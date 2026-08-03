@@ -299,7 +299,8 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	// TIMERECALL 到期检查
 	if p.TimeRecall && now >= p.TimeRecallTick {
 		p.TimeRecall = false
-		if p.MapMgr != nil {
+		// Delphi: NORECALL 地图禁止召回传送
+		if recallAllowed(p.envir) && p.MapMgr != nil {
 			if env := p.MapMgr.FindMap(p.RecallMap); env != nil {
 				p.EnterAnotherMap(server, env, p.RecallX, p.RecallY)
 			}
@@ -473,6 +474,10 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 	case RM_CHANGENAMECOLOR:
 		colorMsg := protocol.MakeDefaultMsg(protocol.SMChangeNameColor, msg.SourceID, uint16(msg.Param1), 0, 0)
 		server.Send(p.Session.ID, colorMsg, "")
+	case RM_CHARSTATUSCHANGED:
+		// 客户端重组 State = Param<<16 | Tag（main.go SMCharStatusChanged）
+		statusMsg := protocol.MakeDefaultMsg(protocol.SMCharStatusChanged, msg.SourceID, uint16(msg.Param1), uint16(msg.Param2), 0)
+		server.Send(p.Session.ID, statusMsg, "")
 	}
 }
 
@@ -870,6 +875,22 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 
+	// Delphi: CM_HEAVYHIT + 鹤嘴锄(Shape=19) + 前方格不可通行 → 挖矿
+	// (ObjBase.pas:8823-8856)；挖矿失败（无矿脉）则回退普通重击。
+	if msg.Ident == protocol.CMHeavyHit {
+		if weapon := p.UseItems[protocol.UWeapon]; weapon != nil && weapon.Dura > 0 && p.ItemDB != nil {
+			if def := p.ItemDB.GetByIdx(int(weapon.WIndex)); def != nil && def.Shape == 19 {
+				fdx, fdy := dirToOffset(dir)
+				fx, fy := p.CurrX+fdx, p.CurrY+fdy
+				if !p.envir.CanWalk(fx, fy) && p.tryMineAt(server, fx, fy) {
+					server.SendRaw(p.Session.ID, "#=DIG!")
+					sendCtrl(server, p.Session.ID, "GOOD")
+					return
+				}
+			}
+		}
+	}
+
 	// Delphi: PowerHit 自动蓄力 (ObjBase.pas:8862-8875)
 	p.advancePowerHitCharge(msg.Ident, server)
 
@@ -1226,6 +1247,11 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	if mon := p.envir.getMonsterByBase(target); mon != nil && mon.IsSafeZoneGuard {
 		return
 	}
+	// Delphi TTrainer（ObjNpc.pas:2628-2676）：训练师为无敌沙袋，仅累计伤害统计
+	if mon := p.envir.getMonsterByBase(target); mon != nil && isTrainer(mon) {
+		mon.addTrainingDamage(server, p.ID, damage)
+		return
+	}
 
 	// Delphi: 魔法盾 1.5x MP 消耗完全吸收 (ObjBase.pas:2455-2469)
 	if tp := p.envir.getPlayerByBase(target); tp != nil && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
@@ -1481,6 +1507,10 @@ func (p *PlayObject) awardExp(server *netserver.TCPServer, mon *MonsterObject) {
 }
 
 func (p *PlayObject) addExp(server *netserver.TCPServer, exp int) {
+	// Delphi: 地图 EXPRATE(n) 经验倍率（MapFlag.nEXPRATE）
+	if p.envir != nil && p.envir.Flag.ExpRate > 1 {
+		exp *= p.envir.Flag.ExpRate
+	}
 	p.WAbil.Exp += uint32(exp)
 
 	expMsg := protocol.MakeDefaultMsg(protocol.SMWinExp, int32(exp), 0, 0, 0)
@@ -1760,7 +1790,16 @@ func IsSafeZone(envir *Environment, x, y int) bool {
 	if envir == nil {
 		return false
 	}
+	// Delphi: 地图级 SAFE 标志全图为安全区（ObjBase.pas:4473,21533 消费 boSAFE）
+	if envir.Flag.Safe {
+		return true
+	}
 	return CheckSafeZone(envir.Name, x, y)
+}
+
+// recallAllowed Delphi: NORECALL 地图禁止作为召回来源（MapFlag.boNORECALL）。
+func recallAllowed(env *Environment) bool {
+	return env == nil || !env.Flag.NoRecall
 }
 
 func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) {
@@ -2050,12 +2089,18 @@ func (p *PlayObject) HandleWantMinimap(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) SendMapInfo(server *netserver.TCPServer) {
-	darkness := uint16(0)
-	if p.envir != nil && p.envir.Flag.Dark {
-		darkness = 1
-	}
-	mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, int32(p.CurrX), uint16(p.CurrY), darkness, 0)
+	mapResp := protocol.MakeDefaultMsg(protocol.SMNewMap, int32(p.CurrX), uint16(p.CurrY), uint16(p.dayBright()), 0)
 	server.Send(p.Session.ID, mapResp, protocol.EncodeString(p.MapName))
+}
+
+// dayBright Delphi TPlayObject.DayBright（ObjBase.pas:4283-4296）：
+// 返回 0=明亮 1=黑暗 2=中等。DARK 地图恒暗，DAYLIGHT 地图恒亮；
+// Go 无全局昼夜（Delphi m_btBright 时间系统），非 DARK 地图默认白天。
+func (p *PlayObject) dayBright() int {
+	if p.envir != nil && p.envir.Flag.Dark {
+		return 1
+	}
+	return 0
 }
 
 func (p *PlayObject) SendLogon(server *netserver.TCPServer) {
@@ -2176,7 +2221,16 @@ func (p *PlayObject) SendUseItems(server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) SendDayChanging(server *netserver.TCPServer) {
-	resp := protocol.MakeDefaultMsg(protocol.SMDayChanging, 3, 0, 0, 0)
+	// 客户端 dayBrightToDarkness 用"亮度"语义（0=最暗, 3=最亮），
+	// 由 Delphi DayBright（0=亮, 1=暗, 2=中）换算而来。
+	bright := 3
+	switch p.dayBright() {
+	case 1:
+		bright = 0
+	case 2:
+		bright = 1
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMDayChanging, int32(bright), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 
@@ -2228,11 +2282,7 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 
 	newEnvir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 
-	darkness := uint16(0)
-	if newEnvir.Flag.Dark {
-		darkness = 1
-	}
-	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, p.ID, uint16(p.CurrX), uint16(p.CurrY), darkness)
+	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, p.ID, uint16(p.CurrX), uint16(p.CurrY), uint16(p.dayBright()))
 	server.Send(p.Session.ID, changeMsg, protocol.EncodeString(p.MapName))
 
 	p.VisibleActors = make(map[int32]*VisibleEntry)

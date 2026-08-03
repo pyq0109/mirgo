@@ -118,6 +118,12 @@ type MonsterObject struct {
 	CrazyMode bool // 攻击一切对象
 	NastyMode bool // 攻击所有非NPC对象
 
+	// 训练师（Delphi TTrainer Race 55，ObjNpc.pas:2628-2676）伤害统计
+	trainDmgTotal    int
+	trainHitCount    int
+	trainLastTick    int64
+	trainLastHiterID int32
+
 	// 运行时缓存（Run 期间有效）
 	engine *UserEngine
 
@@ -134,6 +140,8 @@ func getAIBehavior(race byte) int {
 		return AIPassive
 	case 53: // 狼 — TATMonster + 动物（主动搜索）
 		return AIMelee
+	case 55: // 训练师（Delphi TRAINER，M2Share.pas:152，怪物工厂 UsrEngn.pas:1865-1868）
+		return AITrainer
 	case 80: // TMonster — 基础游荡（不主动搜索）
 		return AIPassive
 	case 82: // TSpitSpider — 2格锥形喷吐
@@ -202,12 +210,24 @@ func getAIBehavior(race byte) int {
 		return AIBurrow
 	case 133: // TMagicMonObject — 魔法攻击
 		return AIMagicCast
+	case 134: // TBoneKingMonster — 骷髅王召唤（ObjMon3.pas:54）
+		return AIBoneKing
 	case 200: // TElectronicScolpionMon — 闪电吸血
 		return AILeech
 	case 201: // TClone — 分身怪（DB 未使用）
 		return AIClone
 	case 203: // TTeleMonster — 瞬移怪（DB 未使用）
 		return AITeleport
+	case 206: // TKhazard — 对角2格拖拽+绿毒（ObjMon3.pas:1354-1403）
+		return AIKhazard
+	case 208: // TGreenMonster — 对角相邻施绿毒（ObjMon3.pas:1269-1296）
+		return AIGreenPoison
+	case 209: // TRedMonster — 对角相邻施红毒（ObjMon3.pas:1312-1339）
+		return AIRedPoison
+	case 210: // TFrostTiger — 无目标隐身伏击（ObjMon3.pas:1220-1253）
+		return AIFrostTiger
+	case 214: // TFireMonster — 火焰光环十字火（ObjMon3.pas:110）
+		return AIFireAura
 	case 215: // TFireBallMonster — 远程火球
 		return AIFireball
 	default:
@@ -380,8 +400,9 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 	}
 
 	// AIPassive（Race 51/80）不主动搜索目标，仅通过 OnStruck 获得；
-	// AIGuard（Race 112）使用自己的目标规则（红名/攻击者），不走通用搜索
-	if o.AIBehavior != AIPassive && o.AIBehavior != AIGuard {
+	// AIGuard（Race 112）使用自己的目标规则（红名/攻击者），不走通用搜索；
+	// AITrainer（Race 55）为沙袋，不搜索不攻击。
+	if o.AIBehavior != AIPassive && o.AIBehavior != AIGuard && o.AIBehavior != AITrainer {
 		o.searchTarget(now, userEngine)
 	}
 	o.validateTarget(now, userEngine)
@@ -546,6 +567,19 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 			o.runExtendedAI(server, userEngine, target, dist, now)
 		}
 	} else {
+		// Delphi TFrostTiger（ObjMon3.pas:1231-1235）：无目标→进入隐身伏击；
+		// 隐身中原地不动（Delphi 移动会破隐，ObjBase.pas:2061）。
+		if o.AIBehavior == AIFrostTiger {
+			if o.StatusTimeArr[STATE_TRANSPARENT] == 0 {
+				o.enterAmbush(server)
+			}
+			return
+		}
+		// 训练师：无目标时周期汇报伤害统计（Delphi TTrainer.Run，ObjNpc.pas:2663-2676）
+		if o.AIBehavior == AITrainer {
+			o.checkTrainingReport(server, now)
+			return
+		}
 		// 潜地/固定/定身怪物无目标时不闲逛
 		if o.FixedHide || o.StickMode || o.StatusTimeArr[POISON_DONTMOVE] > 0 {
 			// Delphi TStickMonster/TCentipedeKingMonster：出土状态下丢失目标 → 回潜

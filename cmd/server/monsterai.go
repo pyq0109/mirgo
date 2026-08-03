@@ -5,6 +5,7 @@ import (
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
+	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
 const (
@@ -37,6 +38,11 @@ const (
 	AITransform        = 26 // 变形（Race 113 TElfMonster）
 	AILevelingSkeleton = 27 // 升级骷髅（Race 100 TWhiteSkeleton）
 	AIBoneKing         = 28 // 骷髅王召唤（TBoneKingMonster）
+	AIGreenPoison      = 29 // 绿毒触碰（Race 208 TGreenMonster）
+	AIRedPoison        = 30 // 红毒触碰（Race 209 TRedMonster）
+	AIKhazard          = 31 // 对角2格拖拽+绿毒（Race 206 TKhazard）
+	AIFrostTiger       = 32 // 隐身伏击（Race 210 TFrostTiger）
+	AITrainer          = 33 // 训练师沙袋（Race 55 TRAINER）
 )
 
 func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, e *UserEngine, target *PlayObject, dist int, now int64) {
@@ -85,6 +91,17 @@ func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, e *UserEngine
 		o.runLevelingSkeletonAI(server, target, dist, now)
 	case AIBoneKing:
 		o.runBoneKingAI(server, e, target, dist, now)
+	case AIGreenPoison:
+		o.runTouchPoisonAI(server, target, dist, now, POISON_DECHEALTH)
+	case AIRedPoison:
+		o.runTouchPoisonAI(server, target, dist, now, POISON_DAMAGEARMOR)
+	case AIKhazard:
+		o.runKhazardAI(server, target, dist, now)
+	case AIFrostTiger:
+		o.runFrostTigerAI(server, target, dist, now)
+	case AITrainer:
+		// Delphi TTrainer：不搜索不攻击，仅累计伤害（ObjNpc.pas:2642-2676）
+		o.checkTrainingReport(server, now)
 	default:
 		o.runBaseAI(server, target, dist, now)
 	}
@@ -999,4 +1016,172 @@ func halfPhysHalfMag(target *BaseObject, power int) int {
 		damage = 1
 	}
 	return damage
+}
+
+// runTouchPoisonAI — Delphi TGreenMonster/TRedMonster（ObjMon3.pas:1269-1339）：
+// 与目标严格对角相邻（|dx|=1 且 |dy|=1，正交贴脸不触发——原版语义忠实还原）时，
+// 按 7/(AntiPoison+7) 概率施毒。RedMonster 原版前置检查的是绿毒位
+//（ObjMon3.pas:1325，原版固有行为），此处忠实还原。
+// kind: POISON_DECHEALTH（绿）/ POISON_DAMAGEARMOR（红）。
+func (o *MonsterObject) runTouchPoisonAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64, kind int) {
+	dx := abs(target.CurrX-o.CurrX)
+	dy := abs(target.CurrY-o.CurrY)
+	if dx == 1 && dy == 1 && target.StatusTimeArr[POISON_DECHEALTH] == 0 {
+		anti := target.AntiPoison
+		if anti < 0 {
+			anti = 0
+		}
+		if rand.Intn(anti+7) <= 6 {
+			// Delphi 30s；Go 玩家状态每 100ms -1 → ×10。
+			// 注：Go 绿毒每 tick 结算与 Delphi 每 2.5s 结算的速率差异是既有问题。
+			if kind == POISON_DECHEALTH {
+				target.MakePoison(POISON_DECHEALTH, 300, 1)
+			} else {
+				target.MakePoison(POISON_DAMAGEARMOR, 300, 0)
+			}
+		}
+	}
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target.BaseObject, now)
+	}
+}
+
+// runKhazardAI — Delphi TKhazard（ObjMon3.pas:1354-1403）：
+// 目标处于严格对角距离 2（|dx|=2 且 |dy|=2）时，50% 无条件拖拽 /
+// 50% 仅目标半血以下拖拽，把目标拉到面前一格并可能施绿毒 35s。
+// 拖拽成功后目标落在面前（dist=1），条件自然失效（无冷却自限）。
+// 注：Delphi 分支B 在目标半血以上时 nX/nY 未初始化（原版缺陷），
+// Go 统一为"仅满足条件时拖拽"的安全语义。
+func (o *MonsterObject) runKhazardAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	dx := abs(target.CurrX - o.CurrX)
+	dy := abs(target.CurrY - o.CurrY)
+	if dx == 2 && dy == 2 {
+		doPull := rand.Intn(2) == 0 // Delphi time1 := Random(2)
+		if doPull || int(target.WAbil.HP) <= int(target.WAbil.MaxHP)/2 {
+			fx, fy := o.frontPosition()
+			o.pullTargetTo(server, target, fx, fy)
+			anti := target.AntiPoison
+			if anti < 0 {
+				anti = 0
+			}
+			// Delphi Random(1)=0 恒真，判定只剩 Random(AntiPoison+7)<=6
+			if rand.Intn(anti+7) <= 6 {
+				target.MakePoison(POISON_DECHEALTH, 350, 1)
+				return // Delphi Exit：跳过本 tick 基类 AI
+			}
+		}
+	}
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target.BaseObject, now)
+	}
+}
+
+// frontPosition — Delphi GetFrontPosition（ObjBase.pas:4298-4356）：
+// 按朝向取面前一格（边界钳制）。
+func (o *MonsterObject) frontPosition() (int, int) {
+	dx, dy := dirToOffset(o.Dir)
+	nx, ny := o.CurrX+dx, o.CurrY+dy
+	if o.envir != nil {
+		if nx < 0 {
+			nx = 0
+		}
+		if ny < 0 {
+			ny = 0
+		}
+		if nx >= o.envir.Width {
+			nx = o.envir.Width - 1
+		}
+		if ny >= o.envir.Height {
+			ny = o.envir.Height - 1
+		}
+	}
+	return nx, ny
+}
+
+// pullTargetTo — Delphi SpaceMove 的玩家侧效果（ObjBase.pas:4359-4465）：
+// 把目标瞬移到指定格（不可走则回退周围 3×3），并全量重同步客户端视野
+//（SMClearObjects + SMChangeMap，与 EnterAnotherMap 同路径）。
+func (o *MonsterObject) pullTargetTo(server *netserver.TCPServer, target *PlayObject, x, y int) {
+	if o.envir == nil || target == nil || target.Ghost || target.Death {
+		return
+	}
+	tx, ty := x, y
+	if !o.envir.CanWalk(tx, ty) {
+		found := false
+		for ddy := -1; ddy <= 1 && !found; ddy++ {
+			for ddx := -1; ddx <= 1 && !found; ddx++ {
+				if o.envir.CanWalk(x+ddx, y+ddy) {
+					tx, ty, found = x+ddx, y+ddy, true
+				}
+			}
+		}
+		if !found {
+			return
+		}
+	}
+	if target.envir != nil {
+		target.envir.RemoveObject(target.CurrX, target.CurrY, OS_MOVINGOBJECT, target)
+	}
+	target.envir = o.envir
+	target.MapName = o.MapName
+	target.CurrX, target.CurrY = tx, ty
+	target.ClearQueuedMsgs(protocol.CMWalk, protocol.CMRun, protocol.CMHorseRun)
+	o.envir.AddObject(tx, ty, OS_MOVINGOBJECT, target)
+	target.VisibleActors = make(map[int32]*VisibleEntry)
+
+	clearMsg := protocol.MakeDefaultMsg(protocol.SMClearObjects, 0, 0, 0, 0)
+	server.Send(target.Session.ID, clearMsg, "")
+	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, target.ID, uint16(tx), uint16(ty), uint16(target.dayBright()))
+	server.Send(target.Session.ID, changeMsg, protocol.EncodeString(o.MapName))
+}
+
+// runFrostTigerAI — Delphi TFrostTiger 有目标分支（ObjMon3.pas:1237-1243）：
+// 发现目标立即退出隐身。无目标进入隐身见 enterAmbush。
+func (o *MonsterObject) runFrostTigerAI(server *netserver.TCPServer, target *PlayObject, dist int, now int64) {
+	if o.StatusTimeArr[STATE_TRANSPARENT] > 0 {
+		o.StatusTimeArr[STATE_TRANSPARENT] = 0
+		o.broadcastMonsterStatus()
+	}
+	if dist <= 1 {
+		o.meleeAttack(server, target, now)
+	} else {
+		o.chaseTarget(target.BaseObject, now)
+	}
+}
+
+// enterAmbush — Delphi MagMakePrivateTransparent(Self, 180)（Magic.pas:734-761）：
+// 进入隐身 180s，9 格内以本怪为目标的怪物丢失目标（距离>1 必清，贴脸 50%）。
+// 怪物状态每 250ms -1 → 180s = 720。
+func (o *MonsterObject) enterAmbush(server *netserver.TCPServer) {
+	if o.envir != nil {
+		for _, obj := range o.envir.GetRangeObjects(o.CurrX, o.CurrY, 9) {
+			m, ok := obj.(*MonsterObject)
+			if !ok || m == o || m.Death || m.Ghost {
+				continue
+			}
+			if m.TargetID != 0 && (abs(m.CurrX-o.CurrX) > 1 || abs(m.CurrY-o.CurrY) > 1 || rand.Intn(2) == 0) {
+				m.TargetID = 0
+			}
+		}
+	}
+	o.StatusTimeArr[STATE_TRANSPARENT] = 720
+	o.broadcastMonsterStatus()
+}
+
+// broadcastMonsterStatus — Delphi StatusChanged（ObjBase.pas:20139-20142）：
+// 广播状态位（STATE_TRANSPARENT → 客户端半透明渲染）。
+// 状态位 = $80000000 shr i（ObjBase.pas:20074-20088）；客户端重组为
+// State = Param<<16 | Tag，故高 16 位放 Param。
+func (o *MonsterObject) broadcastMonsterStatus() {
+	status := uint32(0)
+	for i := 0; i < 12; i++ {
+		if o.StatusTimeArr[i] > 0 {
+			status |= 0x80000000 >> uint(i)
+		}
+	}
+	o.SendRefMsg(RM_CHARSTATUSCHANGED, int(uint16(status>>16)), int(uint16(status)), 0, "")
 }

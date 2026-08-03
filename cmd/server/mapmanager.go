@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,13 +62,127 @@ func (m *MapManager) LoadAllMaps() error {
 		}
 
 		env := NewEnvironment(mapName, mapData)
-		env.InitMineEvents()
 		m.maps[mapName] = env
 		loaded++
 	}
 
 	log.Logf(log.LevelInfo, "MapManager", "loaded %d maps", loaded)
 	return nil
+}
+
+// InitMapFlags 从 map_info.jsonc 加载地图属性（Delphi LoadSubMapInfo 解析
+// mapinfo.txt props，LocalDB.pas:560-850），写入对应 Environment.Flag；
+// 并按 MINE 标志生成矿石节点。
+func (m *MapManager) InitMapFlags(configDir string) {
+	path := filepath.Join(configDir, "maps", "map_info.jsonc")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Logf(log.LevelWarn, "MapManager", "map info file not found: %s, no map flags loaded", path)
+		return
+	}
+	var raw struct {
+		Maps []struct {
+			Index string   `json:"index"`
+			Name  string   `json:"name"`
+			Props []string `json:"props"`
+		} `json:"maps"`
+	}
+	if err := parseJSONC(data, &raw); err != nil {
+		log.Logf(log.LevelWarn, "MapManager", "failed to parse %s: %v", path, err)
+		return
+	}
+
+	matched := 0
+	mined := 0
+	for _, mi := range raw.Maps {
+		env := m.FindMap(mi.Index)
+		if env == nil {
+			continue
+		}
+		env.Flag = parseMapFlag(mi.Props)
+		if env.Flag.Mine || env.Flag.Mine2 {
+			env.InitMineEvents()
+			mined++
+		}
+		matched++
+	}
+	log.Logf(log.LevelInfo, "MapManager", "applied map flags to %d/%d maps (%d mining) from %s",
+		matched, len(raw.Maps), mined, path)
+}
+
+// parseMapFlag 解析 props token（Delphi LocalDB.pas:573-850 的 token→flag 映射）。
+// 带参 token 形如 NORECONNECT(0)/EXPRATE(3)/DECHP(5/1000)。
+func parseMapFlag(props []string) MapFlag {
+	var f MapFlag
+	f.MusicID = -1
+	for _, tok := range props {
+		name, arg := tok, ""
+		if i := strings.IndexByte(tok, '('); i >= 0 {
+			name = tok[:i]
+			arg = strings.TrimSuffix(tok[i+1:], ")")
+		}
+		switch strings.ToUpper(name) {
+		case "SAFE":
+			f.Safe = true
+		case "DARK":
+			f.Dark = true
+		case "DAY":
+			f.DayLight = true
+		case "FIGHT":
+			f.Fight = true
+		case "FIGHT3":
+			f.Fight3 = true
+		case "QUIZ":
+			f.Quiz = true
+		case "MINE":
+			f.Mine = true
+		case "MINE2":
+			f.Mine2 = true
+		case "NORECONNECT":
+			f.NoReconnect = true
+			f.ReconnectMap = arg
+		case "NORECALL":
+			f.NoRecall = true
+		case "NORANDOMMOVE":
+			f.NoRandomMove = true
+		case "NOPOSITIONMOVE", "NOHORSE":
+			// Delphi NOHORSE 分支同样置 boNOPOSITIONMOVE（LocalDB.pas:808-811 原样行为）
+			f.NoPositionMove = true
+		case "NODRUG":
+			f.NoDrug = true
+		case "NEEDHOLE":
+			f.NeedHole = true
+		case "NODROPITEM":
+			f.NoDropItem = true
+		case "NOTHROWITEM":
+			f.NoThrowItem = true
+		case "NOCHAT":
+			f.NoChat = true
+		case "MUSIC":
+			f.MusicID = atoiOr(arg, -1)
+		case "EXPRATE":
+			f.ExpRate = atoiOr(arg, -1)
+		case "DECHP":
+			f.DecHPPoint, f.DecHPTime = parsePair(arg)
+		}
+	}
+	return f
+}
+
+// parsePair 解析 "point/time" 形式（Delphi DECHP/INCHP 参数，LocalDB.pas:678-684）。
+func parsePair(s string) (int, int) {
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		return atoiOr(s[:i], -1), atoiOr(s[i+1:], -1)
+	}
+	return -1, atoiOr(s, -1)
+}
+
+func atoiOr(s string, def int) int {
+	n := 0
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return def
+	}
+	return n
 }
 
 // FindMap 按名称查找地图。

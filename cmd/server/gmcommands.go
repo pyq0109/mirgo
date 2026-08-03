@@ -423,10 +423,14 @@ func (p *PlayObject) ringRecall(server *netserver.TCPServer) bool {
 		p.sysMsg(server, "需要行会")
 		return true
 	}
+	if !recallAllowed(p.envir) {
+		p.sysMsg(server, "这张地图禁止召回")
+		return true
+	}
 	p.Engine.mu.Lock()
 	count := 0
 	for _, pl := range p.Engine.PlayObjectList {
-		if pl.GuildName == p.GuildName && pl.Name != p.Name && pl.envir != nil {
+		if pl.GuildName == p.GuildName && pl.Name != p.Name && pl.envir != nil && recallAllowed(pl.envir) {
 			if p.envir != nil && p.envir.CanWalk(p.CurrX+count%3-1, p.CurrY+count/3-1) {
 				pl.envir.RemoveObject(pl.CurrX, pl.CurrY, OS_MOVINGOBJECT, pl)
 				pl.envir.broadcastRefMsg(pl.BaseObject, RM_DISAPPEAR, pl.ID, pl.CurrX, pl.CurrY, pl.Dir)

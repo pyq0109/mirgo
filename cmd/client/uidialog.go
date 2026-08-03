@@ -2,6 +2,8 @@ package main
 
 import (
 	"strings"
+
+	"github.com/pyq0109/mirgo/internal/engine"
 )
 
 // DialogBox — 移植自 DMsgDlg (FState.pas:1938-2158)。非阻塞: 结果
@@ -113,7 +115,7 @@ func showDialog(scene *PlayScene, size int, msg string, buttons []ModalResult, i
 		img = ImgModalNormal
 	}
 	d := &DialogBox{scene: scene, buttons: buttons, onResult: onResult}
-	d.msgLines = wrapDialogText(scene, msg, 260)
+	d.msgLines = wrapDialogText(scene.text, msg, 260)
 
 	win := NewUIControl("DMsgDlg", KindWindow)
 	win.Floating = true // DMessageDlg 设置 Floating := TRUE (:2045)
@@ -232,17 +234,17 @@ func ShowInput(scene *PlayScene, msg string, cb func(ok bool, text string)) {
 
 // wrapDialogText 按 '\' 分割 msg (Delphi 硬换行, :2317-2323) 并在
 // maxWidth 像素处折行。
-func wrapDialogText(scene *PlayScene, msg string, maxWidth int) []string {
+func wrapDialogText(text *engine.TextRenderer, msg string, maxWidth int) []string {
 	var out []string
 	for _, seg := range strings.Split(msg, "\\") {
-		if scene.text == nil || scene.text.MeasureText(seg) <= maxWidth {
+		if text == nil || text.MeasureText(seg) <= maxWidth {
 			out = append(out, seg)
 			continue
 		}
 		runes := []rune(seg)
 		start := 0
 		for end := 1; end <= len(runes); end++ {
-			if scene.text.MeasureText(string(runes[start:end])) > maxWidth || end == len(runes) {
+			if text.MeasureText(string(runes[start:end])) > maxWidth || end == len(runes) {
 				cut := end - 1
 				if cut <= start {
 					cut = end

@@ -1548,13 +1548,13 @@ func (s *PlayScene) OnKey(key int, action int) {
 			}
 			return
 		case 88: // Alt+X — 登出（ClMain:1575-1593）
-			if s.altDown && s.sendLogout != nil {
-				s.sendLogout()
+			if s.altDown {
+				s.tryLogout()
 			}
 			return
 		case 81: // Alt+Q — 退出游戏（ClMain:1594-1612）
-			if s.altDown && s.sendExit != nil {
-				s.sendExit()
+			if s.altDown {
+				s.tryExit()
 			}
 			return
 		case 265: // 上箭头 — 聊天向上翻一行（ClMain:1699-1706）
@@ -2234,6 +2234,43 @@ func (s *PlayScene) AddChatMessage(text string) {
 	if len(s.chatMessages) > 100 {
 		s.chatMessages = s.chatMessages[len(s.chatMessages)-100:]
 	}
+}
+
+// tryLogout Alt+X 登出。Delphi（ClMain:1575-1593 + AppLogout:1167）：
+// 战斗/死亡判定通过后弹确认框。判定条件为"最近 10 秒未受击/未攻击/未施法
+// 或已死亡"——但 Delphi 在判定前把三个时间戳强制置为 now+10001，等价于
+// 恒为"正在战斗"，实际仅死亡时才允许登出（防战斗下线）。此处按可观察
+// 行为实现：存活即拒绝并提示，死亡则弹确认框。
+func (s *PlayScene) tryLogout() {
+	if s.sendLogout == nil {
+		return
+	}
+	if s.State.MySelf != nil && !s.State.MySelf.Death {
+		s.AddChatMessage("正在战斗，不能退出..")
+		return
+	}
+	ShowConfirm(s, "是否重新选择人物 ?", []ModalResult{MrOk, MrCancel}, DlgNormal, func(mr ModalResult) {
+		if mr == MrOk && s.sendLogout != nil {
+			s.sendLogout()
+		}
+	})
+}
+
+// tryExit Alt+Q 退出游戏。Delphi（ClMain:1594-1612 + AppExit:1184）：
+// 与登出相同的战斗判定，死亡则弹确认框后退出。
+func (s *PlayScene) tryExit() {
+	if s.sendExit == nil {
+		return
+	}
+	if s.State.MySelf != nil && !s.State.MySelf.Death {
+		s.AddChatMessage("正在战斗，不能退出..")
+		return
+	}
+	ShowConfirm(s, "你真的要退出游戏吗?", []ModalResult{MrOk, MrCancel}, DlgNormal, func(mr ModalResult) {
+		if mr == MrOk && s.sendExit != nil {
+			s.sendExit()
+		}
+	})
 }
 
 func (s *PlayScene) drawWilImage(f *wil.File, idx int, x, y float32, proj [16]float32) bool {

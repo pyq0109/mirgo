@@ -17,9 +17,12 @@ type PlayerMagic struct {
 	TrainPoint int  `json:"trainPoint"`
 }
 
+// amuletSkills 需要消耗符咒的魔法（Delphi Magic.pas:420-488 符咒组 +
+// 无极真气 CheckAmulet，Magic.pas:685）。34 双龙斩为被动切换技、
+// 48 气功波（EnergyRepulsor）均不耗符，不在此表。
 var amuletSkills = map[int]int{
-	6: 1, 13: 1, 16: 1, 17: 1, 18: 1, 19: 1,
-	20: 1, 29: 1, 30: 1, 32: 1, 34: 1, 48: 1,
+	6: 1, 13: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1,
+	20: 1, 29: 1, 30: 1, 32: 1, 50: 1,
 }
 
 func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServer) {
@@ -212,29 +215,6 @@ func (p *PlayObject) castWarriorSpell(server *netserver.TCPServer, magID, power,
 				p.SendRefMsg(RM_RUSHKUNG, 8, p.CurrX, p.CurrY, "")
 			}
 		}
-	case 37:
-		for dy2 := -1; dy2 <= 1; dy2++ {
-			for dx2 := -1; dx2 <= 1; dx2++ {
-				if dx2 == 0 && dy2 == 0 {
-					continue
-				}
-				obj := p.envir.GetMovingObject(p.CurrX+dx2, p.CurrY+dy2)
-				if obj == nil {
-					continue
-				}
-				if mon, ok := obj.(*MonsterObject); ok && !mon.Death {
-					pushX := mon.CurrX + dx2*3
-					pushY := mon.CurrY + dy2*3
-					if p.envir.CanWalk(pushX, pushY) {
-						p.envir.RemoveObject(mon.CurrX, mon.CurrY, OS_MOVINGOBJECT, mon)
-						mon.CurrX, mon.CurrY = pushX, pushY
-						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, mon)
-						damage := power / 3
-						p.applyDamage(server, mon.BaseObject, damage, p.Dir)
-					}
-				}
-			}
-		}
 	case 35: // Wind Tebo: push facing target
 		dx, dy := dirToOffset(p.Dir)
 		obj := p.envir.GetMovingObject(p.CurrX+dx, p.CurrY+dy)
@@ -308,6 +288,10 @@ func (p *PlayObject) castMageSpell(server *netserver.TCPServer, magID, power, tx
 		p.doSpellDamageAreaAt(server, power, tx, ty, 2)
 	case 24:
 		p.doSpellDamageAreaAt(server, power, tx, ty, 3)
+	case 47: // 火龙气焰（Delphi SKILL_47，Magic.pas:665-672）：
+		// 目标点 3×3 MC 伤害，半径 nFireBoomRage 默认 1（M2Share.pas:2077）。
+		// 伤害公式与爆裂火焰(23)相同，DB 动画号不同。
+		p.doSpellDamageAreaAt(server, power, tx, ty, 1)
 	case 42:
 		objs := p.envir.GetRangeObjects(tx, ty, 3)
 		for _, obj := range objs {
@@ -420,23 +404,13 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				other.sendHealthSpell(server)
 			}
 		}
-	case 6, 34:
-		if magID == 34 {
-			target := p.findAttackTarget(tx, ty)
-			if target != nil {
-				if tp := p.envir.getPlayerByBase(target); tp != nil {
-					tp.StatusTimeArr[POISON_DECHEALTH] = 0
-					tp.StatusTimeArr[POISON_DAMAGEARMOR] = 0
-				}
-			}
-		} else {
-			target := p.findAttackTarget(tx, ty)
-			if target != nil {
-				if tp := p.envir.getPlayerByBase(target); tp != nil {
-					tp.MakePoison(POISON_DECHEALTH, 100, 4)
-				} else {
-					target.StatusTimeArr[POISON_DECHEALTH] = 100
-				}
+	case 6:
+		target := p.findAttackTarget(tx, ty)
+		if target != nil {
+			if tp := p.envir.getPlayerByBase(target); tp != nil {
+				tp.MakePoison(POISON_DECHEALTH, 100, 4)
+			} else {
+				target.StatusTimeArr[POISON_DECHEALTH] = 100
 			}
 		}
 	case 13:
@@ -456,6 +430,19 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				damage = 10
 			}
 			p.envir.AddHolyCurtainEvent(server, tx, ty, damage, 8000, p.ID)
+		}
+	case 15: // 神圣战甲术（Delphi SKILL_DEJIWONHO，Magic.pas:456-460）：
+		// 目标点 7×7 友方物理防御提升。持续 = GetPower13(60)≈60s + SC下限×10
+		//（MagMakeDefenceArea+DefenceUp，ObjBase.pas:24207-24275）。
+		scLo := int(p.WAbil.SC & 0xFFFF)
+		duration := int16((60 + scLo*10) * 10) // 秒 → ticks（100ms）
+		objs := p.envir.GetRangeObjects(tx, ty, 3)
+		for _, obj := range objs {
+			if other, ok := obj.(*PlayObject); ok && !other.Ghost && !other.Death {
+				other.MakePoison(STATE_DEFENCEUP, duration, 0)
+				other.RecalcAbilitys()
+				other.SendAbility(server)
+			}
 		}
 	case 16:
 		// Delphi: 幽灵盾 — STATE_DEFENCEUP + STATE_MAGDEFENCEUP (ObjBase.pas:24255, 24309)
@@ -546,17 +533,27 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				}
 			}
 		}
-	case 48:
-		objs := p.envir.GetRangeObjects(tx, ty, 2)
-		for _, obj := range objs {
-			switch t := obj.(type) {
-			case *MonsterObject:
-				if !t.Death && !t.Ghost {
-					t.StatusTimeArr[POISON_DECHEALTH] = 80
+	case 48: // 气功波（DB magId 48；Delphi SKILL_ENERGYREPULSOR=37，Magic.pas）：
+		// 以自身为中心推开周围怪物。
+		for dy2 := -1; dy2 <= 1; dy2++ {
+			for dx2 := -1; dx2 <= 1; dx2++ {
+				if dx2 == 0 && dy2 == 0 {
+					continue
 				}
-			case *PlayObject:
-				if !t.Ghost && !t.Death {
-					t.MakePoison(POISON_DECHEALTH, 80, 4)
+				obj := p.envir.GetMovingObject(p.CurrX+dx2, p.CurrY+dy2)
+				if obj == nil {
+					continue
+				}
+				if mon, ok := obj.(*MonsterObject); ok && !mon.Death {
+					pushX := mon.CurrX + dx2*3
+					pushY := mon.CurrY + dy2*3
+					if p.envir.CanWalk(pushX, pushY) {
+						p.envir.RemoveObject(mon.CurrX, mon.CurrY, OS_MOVINGOBJECT, mon)
+						mon.CurrX, mon.CurrY = pushX, pushY
+						p.envir.AddObject(pushX, pushY, OS_MOVINGOBJECT, mon)
+						damage := power / 3
+						p.applyDamage(server, mon.BaseObject, damage, p.Dir)
+					}
 				}
 			}
 		}
@@ -571,23 +568,26 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				server.Send(p.Session.ID, msg, protocol.EncodeString(mon.Name))
 			}
 		}
-	case 36: // MabMabe: damage + paralysis chance
-		target := p.findAttackTarget(tx, ty)
-		if target != nil {
-			damage := power
-			p.applyDamage(server, target, damage, p.Dir)
-			skillLvl := 0
-			if m := p.findMagic(36); m != nil {
-				skillLvl = m.Level
-			}
-			if rand.Intn(10) < 3+skillLvl {
-				if tp := p.envir.getPlayerByBase(target); tp != nil {
-					tp.MakePoison(POISON_STONE, 30, 0)
-				} else {
-					target.StatusTimeArr[POISON_STONE] = 30
-				}
-			}
+	case 49: // 净化术：Delphi SKILL_49 原样为空实现（Magic.pas:678-680，
+		// 仅置 boTrain 涨熟练度；RM_SPELL/RM_MAGICFIRE 由框架统一发出）。
+	case 50: // 无极真气（DB magId 50；Delphi SKILL_UENHANCER=36，Magic.pas:681-700）：
+		// 自身攻击提升，加值 = 等级+1+Random(等级)，持续 = 60 + SC下限×10 秒。
+		// Delphi 效果为 DC 高字 +2+value（ObjBase.pas:3424-3425），
+		// Go 复用 BuffDC 机制（上下字同时加，闭环近似）。
+		lv := 0
+		if m := p.findMagic(50); m != nil {
+			lv = m.Level
 		}
+		value := lv + 1
+		if lv > 0 {
+			value += rand.Intn(lv)
+		}
+		scLo := int(p.WAbil.SC & 0xFFFF)
+		durSec := 60 + scLo*10
+		p.BuffDC = 2 + value
+		p.BuffExpireTick = time.Now().UnixMilli() + int64(durSec)*1000
+		p.RecalcAbilitys()
+		p.SendAbility(server)
 	case 41: // Summon Angel
 		p.cleanSlaveList()
 		if len(p.SlaveIDs) >= MaxSlaveCount {
@@ -718,7 +718,7 @@ func (p *PlayObject) sendMagicFail(server *netserver.TCPServer) {
 // 所以这里按 magID 来区分类型；effnum（高字节）直接取自 magic_db 的 "effect"。
 var magicEffType = map[int]int{
 	1: 1, 5: 1, 10: 1, 11: 1, 13: 1, 44: 1, // projectiles → fly
-	22: 2, 23: 2, 24: 2, 33: 2, // area effects → ground
+	22: 2, 23: 2, 24: 2, 33: 2, 47: 2, // area effects → ground
 }
 
 func (p *PlayObject) magicEffectParams(magID int) (effType, effNum int) {

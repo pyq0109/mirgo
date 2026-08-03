@@ -100,10 +100,14 @@ func (p *PlayObject) MasterRecall(server *netserver.TCPServer) {
 	}
 	p.MasterRecallTick = now
 
+	if !recallAllowed(p.envir) {
+		p.sysMsg(server, "这张地图禁止召回")
+		return
+	}
 	count := 0
 	for _, name := range p.ApprenticeNames {
 		ap := p.Engine.GetPlayerByName(name)
-		if ap == nil || ap.envir == nil || ap.MasterName != p.Name {
+		if ap == nil || ap.envir == nil || ap.MasterName != p.Name || !recallAllowed(ap.envir) {
 			continue
 		}
 		x, y := p.adjacentFreeTile(count)

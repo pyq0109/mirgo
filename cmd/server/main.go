@@ -30,6 +30,28 @@ var loginAttempts = struct {
 	m map[string]*loginAttempt
 }{m: make(map[string]*loginAttempt)}
 
+const defaultNoticeText = "Welcome to MIR2 Go Server!"
+
+// loadNoticeText 加载登录公告（Delphi TNoticeManager，NoticeM.pas:52-72）。
+// 文件缺失或为空时回退默认文案。
+func loadNoticeText(configDir string) string {
+	path := filepath.Join(configDir, "notice", "notice.jsonc")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Logf(log.LevelWarn, "Server", "notice file not found: %s, using default", path)
+		return defaultNoticeText
+	}
+	var raw struct {
+		Content string `json:"content"`
+	}
+	if err := parseJSONC(data, &raw); err != nil || strings.TrimSpace(raw.Content) == "" {
+		log.Logf(log.LevelWarn, "Server", "failed to parse %s or empty content, using default", path)
+		return defaultNoticeText
+	}
+	log.Logf(log.LevelInfo, "Server", "loaded login notice from %s", path)
+	return raw.Content
+}
+
 func main() {
 	configDir := flag.String("config", "serverconfig", "Path to serverconfig directory")
 	mapDir := flag.String("maps", "asset/server/Map", "Path to map directory")
@@ -66,6 +88,7 @@ func main() {
 	}
 	mapMgr.InitRoutes(*configDir)
 	mapMgr.InitMiniMaps(*configDir)
+	mapMgr.InitMapFlags(*configDir)
 
 	var itemDB *ItemDB
 	itemDBPath := filepath.Join(*configDir, "items", "std_items.jsonc")
@@ -96,6 +119,8 @@ func main() {
 
 	safeZonesPath := filepath.Join(*configDir, "maps", "start_points.jsonc")
 	LoadSafeZones(safeZonesPath)
+
+	noticeText := loadNoticeText(*configDir)
 
 	monGenPath := filepath.Join(*configDir, "monsters", "mon_gen.jsonc")
 	npcConfigDir := filepath.Join(*configDir, "npcs")
@@ -236,6 +261,7 @@ func main() {
 		player.CurrY = charData.Y
 		player.Job = byte(charData.Job)
 		player.Gender = byte(charData.Sex)
+		player.Hair = byte(charData.Hair)
 		player.WAbil.Level = uint16(charData.Level)
 		player.WAbil.HP = uint16(charData.HP)
 		player.WAbil.MP = uint16(charData.MP)
@@ -284,6 +310,12 @@ func main() {
 		if metaJSON, err := db.LoadCharacterMeta(charData.ID); err == nil && metaJSON != nil {
 			var meta struct {
 				PkPoint         int             `json:"pkPoint"`
+				Dir             int             `json:"dir"`
+				BonusPoint      int             `json:"bonusPoint"`
+				CreditPoint     int             `json:"creditPoint"`
+				ReNewLevel      int             `json:"reNewLevel"`
+				AttackMode      int             `json:"attackMode"`
+				AllowGroup      bool            `json:"allowGroup"`
 				Magics          []PlayerMagic   `json:"magics"`
 				Storage         []savedUserItem `json:"storage"`
 				DearName        string          `json:"dearName"`
@@ -296,6 +328,14 @@ func main() {
 			}
 			if json.Unmarshal(metaJSON, &meta) == nil {
 				player.PkPoint = meta.PkPoint
+				if meta.Dir >= 0 && meta.Dir <= 7 {
+					player.Dir = meta.Dir
+				}
+				player.BonusPoint = meta.BonusPoint
+				player.CreditPoint = meta.CreditPoint
+				player.ReNewLevel = meta.ReNewLevel
+				player.AttackMode = byte(meta.AttackMode)
+				player.AllowGroup = meta.AllowGroup
 				player.DearName = meta.DearName
 				player.MasterName = meta.MasterName
 				player.ApprenticeNames = meta.ApprenticeNames
@@ -355,7 +395,7 @@ func main() {
 
 		// 发送公告（SMLogon 将在 CMLoginNoticeOK 之后发送）
 		noticeResp := protocol.MakeDefaultMsg(protocol.SMSendNotice, 0, 0, 0, 0)
-		server.Send(session.ID, noticeResp, protocol.EncodeString("Welcome to MIR2 Go Server!"))
+		server.Send(session.ID, noticeResp, protocol.EncodeString(noticeText))
 
 		player.NotifyFriendsOnline(server)
 
@@ -796,7 +836,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 
-		_, err = db.CreateCharacter(session.CharacterID, charName, job, sex)
+		_, err = db.CreateCharacter(session.CharacterID, charName, job, sex, hair)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[CMNewChr] creation failed: %v", err)
 			// Delphi 写库失败 Recog=4（UsrSoc.pas:833）。
@@ -958,6 +998,23 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMGuildBreakAlly, 0, 0, 0, body)
 	case protocol.CMGuildUpdateNotice:
 		player.SendMsg(protocol.CMGuildUpdateNotice, 0, 0, 0, body)
+	case protocol.CMGuildWar:
+		// Body = 目标行会名。
+		player.SendMsg(protocol.CMGuildWar, 0, 0, 0, body)
+	case protocol.CMButch:
+		// Recog = 目标怪物ID。
+		player.SendMsg(protocol.CMButch, int(msg.Recog), 0, 0, "")
+	case protocol.CMMineDig:
+		player.SendMsg(protocol.CMMineDig, 0, 0, 0, "")
+	case protocol.CMWhisper:
+		// Body = "目标名/消息内容"。
+		player.SendMsg(protocol.CMWhisper, 0, 0, 0, body)
+	case protocol.CMAddFriend:
+		player.SendMsg(protocol.CMAddFriend, 0, 0, 0, body)
+	case protocol.CMDelFriend:
+		player.SendMsg(protocol.CMDelFriend, 0, 0, 0, body)
+	case protocol.CMQueryFriends:
+		player.SendMsg(protocol.CMQueryFriends, 0, 0, 0, "")
 	case protocol.CMHorseRun:
 		player.SendMsg(protocol.CMHorseRun, int(msg.Param), 0, 0, "")
 	case protocol.CMOpenDoor:
@@ -1033,7 +1090,7 @@ func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, 
 		sb.WriteByte('/')
 		sb.WriteString(fmt.Sprintf("%d", c.Job))
 		sb.WriteByte('/')
-		sb.WriteString("0") // 发型
+		sb.WriteString(fmt.Sprintf("%d", c.Hair))
 		sb.WriteByte('/')
 		sb.WriteString(fmt.Sprintf("%d", c.Level))
 		sb.WriteByte('/')
@@ -1080,6 +1137,12 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 
 	type charMeta struct {
 		PkPoint         int             `json:"pkPoint"`
+		Dir             int             `json:"dir"`
+		BonusPoint      int             `json:"bonusPoint"`
+		CreditPoint     int             `json:"creditPoint"`
+		ReNewLevel      int             `json:"reNewLevel"`
+		AttackMode      int             `json:"attackMode"`
+		AllowGroup      bool            `json:"allowGroup"`
 		Magics          []PlayerMagic   `json:"magics"`
 		Storage         []savedUserItem `json:"storage"`
 		DearName        string          `json:"dearName"`
@@ -1092,6 +1155,12 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 	}
 	meta := charMeta{
 		PkPoint:         player.PkPoint,
+		Dir:             player.Dir,
+		BonusPoint:      player.BonusPoint,
+		CreditPoint:     player.CreditPoint,
+		ReNewLevel:      player.ReNewLevel,
+		AttackMode:      int(player.AttackMode),
+		AllowGroup:      player.AllowGroup,
 		Magics:          make([]PlayerMagic, 0, len(player.LearnedMagics)),
 		DearName:        player.DearName,
 		MasterName:      player.MasterName,
