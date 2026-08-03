@@ -102,6 +102,9 @@ type Actor struct {
 	OnHorse       bool
 	State         int32
 	IsSelf        bool
+	// Delphi FrmMain.ServerAcceptNextAction（Actor.pas:2695）：移动动画末帧
+	// 等待服务端 #+GOOD 确认的回调，nil 视为允许（他人角色不受门控）。
+	AcceptNextAction func() bool
 	RedrawPass    bool  // Phase C 覆盖重绘标记（自身翅膀仅在此 pass 绘制）
 	WingFrame     int   // 翅膀/特效动画帧（Delphi m_nFrame）
 	WingFrameTick int64 // 翅膀帧推进计时（Delphi m_dwFrameTick）
@@ -662,6 +665,11 @@ func (a *Actor) Move(now int64) bool {
 			a.PlayFootstep(a.CurrentFrame - a.StartFrame)
 		}
 		if a.CurrentFrame >= a.EndFrame {
+			// Delphi Actor.pas:2693-2699：自身移动动画播完后若服务端确认
+			// （#+GOOD）未到，保持动作停在末帧等待，避免步间闪站立姿势。
+			if a.IsSelf && a.AcceptNextAction != nil && !a.AcceptNextAction() {
+				return true
+			}
 			a.CurrentAction = 0
 			a.LockEndFrame = true
 			a.SmoothMoveTime = now

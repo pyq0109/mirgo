@@ -48,10 +48,11 @@ type PlayObject struct {
 	deathTick      int64
 	skeletonSent   bool
 
-	WalkTick       int64
-	RunTick        int64
-	HorseRunTick   int64
-	TurnTick       int64
+	// Delphi m_dwMoveTick/m_dwMoveCount（ObjBase.pas:617）：
+	// walk/run/horserun 共享同一个移动节拍；MoveCount 是连续超速修正计数。
+	MoveTick  int64
+	MoveCount int
+	TurnTick  int64
 	SpellTick      int64
 	DigUpTick      int64
 	WalkSpeed      int64
@@ -221,7 +222,7 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 		knownItems:     make(map[int32]bool),
 		WalkSpeed:      1400,
 		RunSpeed:       1400,
-		WalkTick:       time.Now().UnixMilli(),
+		MoveTick:       time.Now().UnixMilli(),
 		visionInterval: 2000 + rand.Int63n(2000),
 		StrScriptVars:  make(map[string]string),
 		nameLists:      make(map[string][]string),
@@ -231,12 +232,20 @@ func NewPlayObject(session *netserver.Session, name string, id int32) *PlayObjec
 }
 
 func (p *PlayObject) Operate(server *netserver.TCPServer) {
+	// Delphi m_boGhost 守卫：下线/退出后不再消费消息（ObjBase.pas SendMsg/GetMessage
+	// 均有此检查），避免残留的延迟移动消息把已移除对象插回地图格子。
+	if p.Ghost {
+		return
+	}
 	for {
 		msg, ok := p.GetMsg()
 		if !ok {
 			break
 		}
 		p.ProcessMessage(msg, server)
+		if p.Ghost {
+			return
+		}
 	}
 
 	now := time.Now().UnixMilli()
@@ -481,25 +490,39 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 }
 
 func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
+	// Delphi ClientWalkXY（ObjBase.pas:9593-9594）：麻痹/石化无论是否延迟消息都拦截。
 	if !p.CanMoveCheck() {
 		log.Logf(log.LevelDebug, "Move", "%s walk rejected: status effect (posion/stone) at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
-	now := time.Now().UnixMilli()
-	// Delphi: 受击硬直 (ObjBase.pas:25234)
-	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
-		log.Logf(log.LevelDebug, "Move", "%s walk rejected: struck cooldown (%dms left) at (%d,%d)", p.Name, p.Engine.Config.GetStruckTime()-(now-p.StruckTick), p.CurrX, p.CurrY)
-		return
+	if !msg.LateDelivery {
+		now := time.Now().UnixMilli()
+		// Delphi: 受击硬直 → 延迟重投（CheckActionStatus, ObjBase.pas:25234-25240）
+		if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+			left := p.Engine.Config.GetStruckTime() - (now - p.StruckTick)
+			log.Logf(log.LevelDebug, "Move", "%s walk delayed: struck cooldown (%dms left) at (%d,%d)", p.Name, left, p.CurrX, p.CurrY)
+			p.delayMoveOrFail(protocol.CMWalk, msg, server, left)
+			return
+		}
+		interval := p.Engine.Config.GetWalkInterval()
+		if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
+			interval *= 2
+		}
+		// Delphi: 步频过快 → 延迟重投而非 +FAIL（ObjBase.pas:9604-9626）
+		if !p.checkMoveInterval(now, interval, protocol.CMWalk, msg, server) {
+			return
+		}
+	} else {
+		// 延迟消息到期执行：跳过硬直/间隔复查（ObjBase.pas:9596），
+		// 但入队后位置若已改变（传送等）则丢弃并纠偏。
+		if msg.Param2 != p.CurrX || msg.Param3 != p.CurrY {
+			log.Logf(log.LevelDebug, "Move", "%s delayed walk dropped: position changed to (%d,%d)", p.Name, p.CurrX, p.CurrY)
+			p.sendMoveFail(server)
+			return
+		}
 	}
-	interval := p.Engine.Config.GetWalkInterval()
-	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
-		interval *= 2
-	}
-	if !p.checkActionSpeed(now, interval, &p.WalkTick, server) {
-		log.Logf(log.LevelDebug, "Move", "%s walk rejected: speed limit (interval=%dms) at (%d,%d)", p.Name, interval, p.CurrX, p.CurrY)
-		return
-	}
+	p.MoveTick = time.Now().UnixMilli() // Delphi ObjBase.pas:9637（含 WalkTo 失败也消耗间隔）
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
@@ -527,6 +550,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 		sendCtrl(server, p.Session.ID, "GOOD")
 		p.CheckMapRoute(server)
 	} else {
+		p.MoveCount = 0 // Delphi ObjBase.pas:9696
 		dx, dy := dirToOffset(dir)
 		log.Logf(log.LevelDebug, "Move", "%s walk rejected: blocked dir=%d target=(%d,%d) from (%d,%d)", p.Name, dir, p.CurrX+dx, p.CurrY+dy, p.CurrX, p.CurrY)
 		p.sendMoveFail(server)
@@ -539,25 +563,37 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
-	now := time.Now().UnixMilli()
-	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
-		log.Logf(log.LevelDebug, "Move", "%s run rejected: struck cooldown (%dms left) at (%d,%d)", p.Name, p.Engine.Config.GetStruckTime()-(now-p.StruckTick), p.CurrX, p.CurrY)
-		return
-	}
-	// F10: 仅步行模式
+	// F10: 仅步行模式（延迟消息同样拦截）
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		log.Logf(log.LevelDebug, "Move", "%s run rejected: walk-only mode at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
-	interval := p.Engine.Config.GetRunInterval()
-	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
-		interval *= 2
+	if !msg.LateDelivery {
+		now := time.Now().UnixMilli()
+		// Delphi: 受击硬直 → 延迟重投（CheckActionStatus, ObjBase.pas:25234-25240）
+		if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+			left := p.Engine.Config.GetStruckTime() - (now - p.StruckTick)
+			log.Logf(log.LevelDebug, "Move", "%s run delayed: struck cooldown (%dms left) at (%d,%d)", p.Name, left, p.CurrX, p.CurrY)
+			p.delayMoveOrFail(protocol.CMRun, msg, server, left)
+			return
+		}
+		interval := p.Engine.Config.GetRunInterval()
+		if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
+			interval *= 2
+		}
+		// Delphi: 步频过快 → 延迟重投（ClientRunXY, ObjBase.pas:9521-9543）
+		if !p.checkMoveInterval(now, interval, protocol.CMRun, msg, server) {
+			return
+		}
+	} else {
+		if msg.Param2 != p.CurrX || msg.Param3 != p.CurrY {
+			log.Logf(log.LevelDebug, "Move", "%s delayed run dropped: position changed to (%d,%d)", p.Name, p.CurrX, p.CurrY)
+			p.sendMoveFail(server)
+			return
+		}
 	}
-	if !p.checkActionSpeed(now, interval, &p.RunTick, server) {
-		log.Logf(log.LevelDebug, "Move", "%s run rejected: speed limit (interval=%dms) at (%d,%d)", p.Name, interval, p.CurrX, p.CurrY)
-		return
-	}
+	p.MoveTick = time.Now().UnixMilli() // Delphi ObjBase.pas:9554
 
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
@@ -597,21 +633,38 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
-	// F10: 仅步行模式
+	// F10: 仅步行模式（延迟消息同样拦截）
 	if p.Engine.Config.Game.WalkOnly && p.Permission < 10 {
 		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: walk-only mode at (%d,%d)", p.Name, p.CurrX, p.CurrY)
 		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
-	now := time.Now().UnixMilli()
-	interval := p.Engine.Config.GetRunInterval()
-	if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
-		interval *= 2
+	if !msg.LateDelivery {
+		now := time.Now().UnixMilli()
+		// Delphi: 受击硬直 → 延迟重投（CheckActionStatus, ObjBase.pas:25234-25240）
+		if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
+			left := p.Engine.Config.GetStruckTime() - (now - p.StruckTick)
+			log.Logf(log.LevelDebug, "Move", "%s horserun delayed: struck cooldown (%dms left) at (%d,%d)", p.Name, left, p.CurrX, p.CurrY)
+			p.delayMoveOrFail(protocol.CMHorseRun, msg, server, left)
+			return
+		}
+		interval := p.Engine.Config.GetRunInterval()
+		if p.WAbil.Weight > p.WAbil.MaxWeight && p.WAbil.MaxWeight > 0 {
+			interval *= 2
+		}
+		// Delphi: 步频过快 → 延迟重投（ClientHorseRunXY, ObjBase.pas:8914-8936）
+		if !p.checkMoveInterval(now, interval, protocol.CMHorseRun, msg, server) {
+			return
+		}
+	} else {
+		if msg.Param2 != p.CurrX || msg.Param3 != p.CurrY {
+			log.Logf(log.LevelDebug, "Move", "%s delayed horserun dropped: position changed to (%d,%d)", p.Name, p.CurrX, p.CurrY)
+			p.sendMoveFail(server)
+			return
+		}
 	}
-	if !p.checkActionSpeed(now, interval, &p.HorseRunTick, server) {
-		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: speed limit (interval=%dms) at (%d,%d)", p.Name, interval, p.CurrX, p.CurrY)
-		return
-	}
+	p.MoveTick = time.Now().UnixMilli() // Delphi ObjBase.pas:8939
+
 	dir := msg.Param1
 	if dir < 0 || dir > 7 {
 		log.Logf(log.LevelDebug, "Move", "%s horserun rejected: invalid dir=%d at (%d,%d)", p.Name, dir, p.CurrX, p.CurrY)
@@ -652,6 +705,62 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 func (p *PlayObject) runIgnoreEntities() bool {
 	cfg := p.Engine.Config
 	return cfg.Game.DisableRun || (p.Permission > 9 && cfg.Game.GMRunAll)
+}
+
+// checkMoveInterval Delphi 移动间隔检查（ObjBase.pas:9604-9626）：
+// 步频过快时不拒绝，而是算出剩余延迟走延迟重投；返回 true 表示可立即执行。
+func (p *PlayObject) checkMoveInterval(now, interval int64, cmIdent int, msg SendMessage, server *netserver.TCPServer) bool {
+	elapsed := now - p.MoveTick
+	if elapsed >= interval {
+		return true
+	}
+	p.MoveCount++
+	delay := interval - elapsed
+	if delay > interval/3 {
+		if p.MoveCount >= 4 {
+			// 安全阀：连续小幅超速后重置节拍，把延迟钳到 interval/3
+			// （ObjBase.pas:9611-9617）。
+			p.MoveTick = now
+			p.MoveCount = 0
+			delay = interval / 3
+		} else {
+			p.MoveCount = 0
+		}
+	}
+	log.Logf(log.LevelDebug, "Move", "%s move delayed: speed limit (%dms left, interval=%dms) at (%d,%d)", p.Name, delay, interval, p.CurrX, p.CurrY)
+	p.delayMoveOrFail(cmIdent, msg, server, delay)
+	return false
+}
+
+// delayMoveOrFail Delphi 移动消息延迟重投（ObjBase.pas:4967-5011）：
+// 队列中同类消息未积压时重新入队延迟执行（不回复客户端，到期后执行并发 +GOOD）；
+// 已积压则回 +FAIL 并计超速。Go 移动包只带方向，重投时附带当前坐标供到期校验。
+func (p *PlayObject) delayMoveOrFail(cmIdent int, msg SendMessage, server *netserver.TCPServer, delay int64) {
+	if delay <= 0 {
+		sendCtrl(server, p.Session.ID, "FAIL")
+		return
+	}
+	now := time.Now().UnixMilli()
+	// 超速计数衰减（与 checkActionSpeed 一致）
+	if p.OverSpeedCount > 0 && now-p.LastSpeedViolationTick > p.Engine.Config.GetSpeedDecayInterval() {
+		p.OverSpeedCount--
+		p.LastSpeedViolationTick = now
+	}
+	// Delphi nMaxWalkMsgCount/nMaxRunMsgCount 默认均为 1：
+	// 队列里已有一条同类移动消息就不再积压（ObjBase.pas:4974-4992）。
+	if p.QueuedMsgCount(cmIdent) >= 1 {
+		p.OverSpeedCount++
+		p.LastSpeedViolationTick = now
+		cfg := p.Engine.Config
+		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
+			log.Logf(log.LevelWarn, "Server", "speed-hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
+			server.CloseSession(p.Session.ID)
+			return
+		}
+		sendCtrl(server, p.Session.ID, "FAIL")
+		return
+	}
+	p.SendDelayMsg(cmIdent, msg.Param1, p.CurrX, p.CurrY, "", delay)
 }
 
 // checkActionSpeed 校验动作间隔并记录超速违规。
@@ -2100,6 +2209,9 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 	p.Ghost = true
 	p.SendRefMsg(RM_DISAPPEAR, 0, 0, 0, "")
 	p.Ghost = false
+
+	// 丢弃旧地图上残留的（含延迟重投的）移动指令，避免在新地图多走一步。
+	p.ClearQueuedMsgs(protocol.CMWalk, protocol.CMRun, protocol.CMHorseRun)
 
 	clearMsg := protocol.MakeDefaultMsg(protocol.SMClearObjects, 0, 0, 0, 0)
 	server.Send(p.Session.ID, clearMsg, "")

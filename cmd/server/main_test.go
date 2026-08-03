@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -350,9 +351,10 @@ func (ts *testServer) addr() string {
 // ============================================================================
 
 type mockClient struct {
-	conn net.Conn
-	code byte
-	t    *testing.T
+	conn    net.Conn
+	code    byte
+	t       *testing.T
+	readBuf []byte // 已从连接读入但尚未切出完整帧的残留字节
 }
 
 func newMockClient(t *testing.T, addr string) *mockClient {
@@ -385,38 +387,45 @@ func (c *mockClient) sendRaw(s string) {
 	}
 }
 
+// readFrame 从连接流式读取一个完整的 #...! 帧。
+// 服务端可能在同一 TCP 段内连发多帧（如 SMNeedUpdateAccount 后紧跟
+// SMPassOKSelectServer），也可能一帧分多段到达，因此必须按帧边界切分
+// 而不是假设一次 Read 恰好一帧。编码字符范围 0x3C-0x7B 不含 '#'/'!'，
+// 以 '!' 定界是安全的。
+func (c *mockClient) readFrame(timeout time.Duration) ([]byte, error) {
+	c.conn.SetReadDeadline(time.Now().Add(timeout))
+	tmp := make([]byte, 4096)
+	for {
+		if i := bytes.IndexByte(c.readBuf, '!'); i >= 0 {
+			frame := c.readBuf[:i+1]
+			c.readBuf = append([]byte(nil), c.readBuf[i+1:]...)
+			return frame, nil
+		}
+		n, err := c.conn.Read(tmp)
+		if n > 0 {
+			c.readBuf = append(c.readBuf, tmp[:n]...)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
 func (c *mockClient) recv() (protocol.DefaultMessage, string) {
 	c.t.Helper()
-	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	buf := make([]byte, 4096)
-	n, err := c.conn.Read(buf)
+	msg, body, err := c.recvTimeout(5 * time.Second)
 	if err != nil {
 		c.t.Fatalf("recv: %v", err)
-	}
-	data := buf[:n]
-	if len(data) < 3 || data[0] != '#' || data[len(data)-1] != '!' {
-		c.t.Fatalf("invalid frame: %q", string(data))
-	}
-	payload := string(data[1 : len(data)-1])
-	if len(payload) < protocol.DefBlockSize {
-		c.t.Fatalf("payload too short: %d bytes", len(payload))
-	}
-	msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
-	body := ""
-	if len(payload) > protocol.DefBlockSize {
-		body = protocol.DecodeString(payload[protocol.DefBlockSize:])
 	}
 	return msg, body
 }
 
 func (c *mockClient) recvTimeout(timeout time.Duration) (protocol.DefaultMessage, string, error) {
-	c.conn.SetReadDeadline(time.Now().Add(timeout))
-	buf := make([]byte, 4096)
-	n, err := c.conn.Read(buf)
+	data, err := c.readFrame(timeout)
 	if err != nil {
 		return protocol.DefaultMessage{}, "", err
 	}
-	data := buf[:n]
 	if len(data) < 3 || data[0] != '#' || data[len(data)-1] != '!' {
 		return protocol.DefaultMessage{}, "", fmt.Errorf("invalid frame: %q", string(data))
 	}

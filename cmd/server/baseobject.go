@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
@@ -116,6 +117,10 @@ type SendMessage struct {
 	Dir      int
 	SourceID int32
 	Msg      string
+	// Delphi dwDeliveryTime/boLateDelivery（ObjBase.pas:788,41）：
+	// 延迟重投消息到期才出队，LateDelivery 标记跳过速度/硬直复查。
+	DeliveryTime int64
+	LateDelivery bool
 }
 
 // NewBaseObject 创建一个新的基础对象。
@@ -140,18 +145,72 @@ func (o *BaseObject) SendMsg(ident, param1, param2, param3 int, msg string) {
 	o.msgMu.Unlock()
 }
 
-// GetMsg 从队列中取出并移除下一条消息。
+// SendDelayMsg 向自己的队列添加一条延迟消息，delayMs 后到期执行
+// （Delphi SendDelayMsg，ObjBase.pas:19367-19403）。
+func (o *BaseObject) SendDelayMsg(ident, param1, param2, param3 int, msg string, delayMs int64) {
+	o.msgMu.Lock()
+	o.msgList = append(o.msgList, SendMessage{
+		Ident:        ident,
+		Param1:       param1,
+		Param2:       param2,
+		Param3:       param3,
+		Msg:          msg,
+		DeliveryTime: time.Now().UnixMilli() + delayMs,
+		LateDelivery: true,
+	})
+	o.msgMu.Unlock()
+}
+
+// GetMsg 取出第一条已到期的消息（跳过未到期的延迟消息）。
+// Delphi GetMessage（ObjBase.pas:19501-19543）：允许到期消息越过未到期消息出队。
 func (o *BaseObject) GetMsg() (SendMessage, bool) {
 	o.msgMu.Lock()
 	defer o.msgMu.Unlock()
 
-	if len(o.msgList) == 0 {
-		return SendMessage{}, false
+	now := time.Now().UnixMilli()
+	for i := range o.msgList {
+		if o.msgList[i].DeliveryTime != 0 && now < o.msgList[i].DeliveryTime {
+			continue
+		}
+		msg := o.msgList[i]
+		o.msgList = append(o.msgList[:i], o.msgList[i+1:]...)
+		return msg, true
 	}
+	return SendMessage{}, false
+}
 
-	msg := o.msgList[0]
-	o.msgList = o.msgList[1:]
-	return msg, true
+// QueuedMsgCount 统计队列中指定 ident 的消息数（Delphi GetWalkMsgCount/
+// GetRunMsgCount，ObjBase.pas:25139-25179），用于延迟重投的积压上限。
+func (o *BaseObject) QueuedMsgCount(ident int) int {
+	o.msgMu.Lock()
+	defer o.msgMu.Unlock()
+	n := 0
+	for i := range o.msgList {
+		if o.msgList[i].Ident == ident {
+			n++
+		}
+	}
+	return n
+}
+
+// ClearQueuedMsgs 移除队列中指定 ident 集合的消息（切图时丢弃残留移动指令）。
+func (o *BaseObject) ClearQueuedMsgs(idents ...int) {
+	o.msgMu.Lock()
+	defer o.msgMu.Unlock()
+	keep := o.msgList[:0]
+	for _, m := range o.msgList {
+		drop := false
+		for _, id := range idents {
+			if m.Ident == id {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			keep = append(keep, m)
+		}
+	}
+	o.msgList = keep
 }
 
 // Feature 返回外观特征值。

@@ -638,7 +638,9 @@ func (s *PlayScene) Update(dt float64) {
 				if my.OnHorse && dist >= 4 && s.CanWalk(my.CurrX+dx*2, my.CurrY+dy*2) && s.CanWalk(my.CurrX+dx*3, my.CurrY+dy*3) {
 					my.UpdateMsg(protocol.CMHorseRun, my.CurrX+dx*3, my.CurrY+dy*3, dir, 0, 0)
 					s.sendMove(protocol.CMHorseRun, dir)
-				} else if dist >= 3 {
+				} else if dist >= 3 && s.CanWalk(my.CurrX+dx*2, my.CurrY+dy*2) {
+					// 服务端要求跑动路线两格都可通行（HandleRun x1/x2），
+					// 第二格被挡时降级为走，避免 SMMoveFail 拉扯+冻结。
 					my.UpdateMsg(protocol.CMRun, nx+dx, ny+dy, dir, 0, 0)
 					s.sendMove(protocol.CMRun, dir)
 				} else {
@@ -707,8 +709,11 @@ func (s *PlayScene) stepAutoPath() {
 	if !my.IsIdle() || !s.ServerAcceptNextAction() {
 		return
 	}
-	s.autoPath = s.repairAutoPath(dest, my)
-	if s.autoPath == nil {
+	// 绕行寻路失败（下一格被占且范围内无路）时保留原路径，
+	// 下个 moveTick 重试；阻塞者走开后自动恢复，不永久放弃。
+	if repaired := s.repairAutoPath(dest, my); repaired != nil {
+		s.autoPath = repaired
+	} else {
 		return
 	}
 	wp := s.autoPath[s.autoPathIdx]

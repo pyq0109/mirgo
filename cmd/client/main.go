@@ -1093,6 +1093,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		}
 		h.playScene.State.MySelf = actor
 		actor.IsSelf = true
+		actor.AcceptNextAction = h.playScene.ServerAcceptNextAction
 		actor.Level = h.playScene.State.Level
 		actor.MapRef = h.playScene.mapData
 		h.playScene.State.Sex = actor.Sex
@@ -1378,10 +1379,15 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		actor.Type = ActorHuman
 		h.playScene.State.MySelf = actor
 		actor.IsSelf = true
+		actor.AcceptNextAction = h.playScene.ServerAcceptNextAction
 		actor.Level = h.playScene.State.Level
 		actor.MapRef = h.playScene.mapData
 		h.playScene.State.Actors.Add(actor)
 		actor.SendMsg(protocol.SMTurn, newX, newY, 0, 0, 0)
+		// 切图后旧的预测/确认状态全部作废（服务端已清空残留移动消息）
+		h.playScene.ActionLock = false
+		h.playScene.targetX, h.playScene.targetY = -1, -1
+		h.playScene.clearAutoPath()
 
 	// =====================================================================
 	// 战斗
