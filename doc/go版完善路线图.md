@@ -284,7 +284,7 @@ ObjBase.pas 26821 行是 Delphi 版的维护噩梦。Go 侧 playobject.go 已 23
 - PlayObject 只保留移动/战斗/视野/消息分发主干。
 
 ### 6.5 客户端资源与平台层
-- **WIL LRU 淘汰**：解码结果永久驻留（wil.go:196-202），长时间跑图内存只增不减。Delphi 有 FreeOldMemorys+MaxMemorySize（WIL.pas:45），Go 补 LRU（引擎层 resourcemanager.go 是合适落点）。
+- ~~WIL LRU 淘汰~~ 已完成：落点改在 wil 包内（GetImage 直连调用方多，引擎层覆盖不全）——全局字节预算（默认 128MB，wil.SetCacheLimit 可调）+ 每文件 LRU，GPU 上传后 ReleasePixels 归还像素保留元数据壳。Delphi 原版（WIL.pas:546）实为 5 分钟 TTL、字节配额被注释，Go 版做了真 LRU。
 - **IME**：GLFW 无原生 IME，中文输入目前依赖 char 回调（无候选框）。如需完善，走平台层（X11 ibus / Win32 IMM32）——工作量不小，建议放 P2 之后。
 - **像素级命中检测**：可用 WIL 图像 alpha 做精灵精确点选（Delphi CheckSelect，PlayScn.pas:1785-1818），提升点选体验，属低成本增强。
 

@@ -97,7 +97,7 @@ func (r *GLRenderer) getTex(cache map[int]uint32, file *wil.File, idx int) uint3
 	}
 	tex := UploadTexture(img.RGBA)
 	cache[idx] = tex
-	img.RGBA = nil // 释放 Go 侧像素；GPU 已有自己的副本
+	file.ReleasePixels(idx) // 释放 Go 侧像素；GPU 已有自己的副本
 	return tex
 }
 

@@ -1,6 +1,7 @@
 package wil
 
 import (
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -14,6 +15,24 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 )
 
+// DefaultCacheLimit 是全局解码缓存的默认像素字节预算（所有 *File 共享）。
+const DefaultCacheLimit int64 = 128 << 20
+
+var (
+	cacheMu    sync.Mutex
+	cacheUsed  int64
+	cacheLimit int64 = DefaultCacheLimit
+)
+
+// SetCacheLimit 设置全局解码缓存的像素字节预算；n <= 0 表示不淘汰。
+// 只调整阈值，不立即触发裁剪（避免与文件锁形成反序死锁）；
+// 实际淘汰发生在后续 GetImage 插入新图时。
+func SetCacheLimit(n int64) {
+	cacheMu.Lock()
+	cacheLimit = n
+	cacheMu.Unlock()
+}
+
 func widthBytes(w, bpp int) int {
 	return (((w * bpp) + 31) / 32) * 4
 }
@@ -24,6 +43,8 @@ type Image struct {
 	HotX   int16
 	HotY   int16
 	RGBA   *image.RGBA
+
+	cachedBytes int64 // 入账时的像素字节数；RGBA 被释放后置 0
 }
 
 type File struct {
@@ -38,6 +59,9 @@ type File struct {
 	file    *os.File
 	offsets []int32
 	path    string
+
+	lruList *list.List            // 头部最近使用，Value 为图片索引
+	lruElem map[int]*list.Element // 索引 -> LRU 节点
 }
 
 // resolveInsensitive 在 target 所在目录中查找基名（不含扩展名）大小写不敏感匹配、
@@ -177,6 +201,8 @@ func Load(wilPath string) (*File, error) {
 
 	wf.offsets = offsets
 	wf.Images = make([]*Image, wf.Count)
+	wf.lruList = list.New()
+	wf.lruElem = make(map[int]*list.Element)
 
 	log.Logf(log.LevelTrace, "WIL", "已加载 %s：%d 张图片（懒加载）", filepath.Base(wilPath), wf.Count)
 	return wf, nil
@@ -193,13 +219,78 @@ func (wf *File) GetImage(idx int) *Image {
 	wf.mu.Lock()
 	defer wf.mu.Unlock()
 
-	if wf.Images[idx] != nil {
-		return wf.Images[idx]
+	if img := wf.Images[idx]; img != nil {
+		if el, ok := wf.lruElem[idx]; ok {
+			wf.lruList.MoveToFront(el)
+		}
+		return img
 	}
 
 	img := wf.decodeImage(idx)
+	if img.RGBA != nil {
+		img.cachedBytes = int64(len(img.RGBA.Pix))
+	}
 	wf.Images[idx] = img
+	wf.lruElem[idx] = wf.lruList.PushFront(idx)
+	if img.cachedBytes > 0 {
+		cacheMu.Lock()
+		cacheUsed += img.cachedBytes
+		cacheMu.Unlock()
+	}
+	wf.evictLocked(idx)
 	return img
+}
+
+// evictLocked 从 LRU 尾部淘汰条目，直到全局字节预算满足。
+// 调用方必须持有 wf.mu。壳条目（cachedBytes==0，仅存元数据）不参与淘汰；
+// protectIdx（刚解码插入的条目）受到保护，预算小于单图时容忍瞬时超额，
+// 避免刚解码的图当轮被逐导致每帧重解码。只淘汰本文件的条目，
+// 其他文件造成的超额留待其自身插入时清理。
+func (wf *File) evictLocked(protectIdx int) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	for cacheLimit > 0 && cacheUsed > cacheLimit {
+		var target *list.Element
+		for el := wf.lruList.Back(); el != nil; el = el.Prev() {
+			i := el.Value.(int)
+			if i == protectIdx {
+				break
+			}
+			if img := wf.Images[i]; img != nil && img.cachedBytes > 0 {
+				target = el
+				break
+			}
+		}
+		if target == nil {
+			break
+		}
+		i := target.Value.(int)
+		cacheUsed -= wf.Images[i].cachedBytes
+		wf.Images[i] = nil
+		wf.lruList.Remove(target)
+		delete(wf.lruElem, i)
+	}
+}
+
+// ReleasePixels 释放缓存图像的像素数据（调用方已把像素拷入 GPU 纹理后使用），
+// 保留提供 Width/Height 等元数据的壳条目，腾出的字节归还全局预算。幂等。
+func (wf *File) ReleasePixels(idx int) {
+	wf.mu.Lock()
+	defer wf.mu.Unlock()
+	if idx < 0 || idx >= wf.Count {
+		return
+	}
+	img := wf.Images[idx]
+	if img == nil || img.RGBA == nil {
+		return
+	}
+	img.RGBA = nil
+	if img.cachedBytes > 0 {
+		cacheMu.Lock()
+		cacheUsed -= img.cachedBytes
+		cacheMu.Unlock()
+		img.cachedBytes = 0
+	}
 }
 
 func (wf *File) decodeImage(idx int) *Image {
@@ -305,6 +396,20 @@ func (wf *File) Close() {
 	if wf.file != nil {
 		wf.file.Close()
 		wf.file = nil
+	}
+	var freed int64
+	for i, img := range wf.Images {
+		if img != nil {
+			freed += img.cachedBytes
+		}
+		wf.Images[i] = nil
+	}
+	wf.lruList.Init()
+	clear(wf.lruElem)
+	if freed > 0 {
+		cacheMu.Lock()
+		cacheUsed -= freed
+		cacheMu.Unlock()
 	}
 }
 

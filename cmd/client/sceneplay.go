@@ -1386,7 +1386,7 @@ func (s *PlayScene) getTex(cache map[int]uint32, file *wil.File, idx int) uint32
 	}
 	tex := s.gl.UploadTexture(img.RGBA)
 	cache[idx] = tex
-	img.RGBA = nil
+	file.ReleasePixels(idx) // 释放 Go 侧像素；GPU 已有自己的副本
 	return tex
 }
 

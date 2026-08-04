@@ -11,6 +11,7 @@ import (
 	"github.com/go-gl/glfw/v3.4/glfw"
 
 	mlog "github.com/pyq0109/mirgo/internal/log"
+	"github.com/pyq0109/mirgo/internal/wil"
 )
 
 const (
@@ -38,6 +39,9 @@ func main() {
 		log.Fatalf("目录无效: %s", dataDir)
 	}
 	mlog.Logf(mlog.LevelInfo, "Main", "数据目录: %s", dataDir)
+
+	// 缩略图网格每帧对全部索引调 GetImage，有限预算会造成每帧重解码抖动
+	wil.SetCacheLimit(0)
 
 	// 初始化 GLFW
 	if err := glfw.Init(); err != nil {
