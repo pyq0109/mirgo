@@ -32,9 +32,9 @@ go mod tidy && go mod vendor
 
 go run ./cmd/serverconfig -v                            # 转换服务端配置
 go run ./cmd/server                                     # 服务端
-go run -tags x11 ./cmd/client -server localhost:7000    # 客户端（Windows 省略 -tags x11）
-go run -tags x11 ./cmd/mapviewer ./asset/client/Map/0.map   # 地图查看器
-go run -tags x11 ./cmd/wilviewer ./asset/client/Data        # WIL 资源查看器
+go run ./cmd/client                                     # 客户端（Windows 省略 -tags x11）
+go run ./cmd/mapviewer ./asset/client/Map/0.map         # 地图查看器
+go run ./cmd/wilviewer ./asset/client/Data              # WIL 资源查看器
 ```
 
 ## 开源协议
