@@ -322,7 +322,7 @@ func TestClientFrameWithCode(t *testing.T) {
 
 func TestParseAbilityLayout(t *testing.T) {
 	gs := NewGameState()
-	raw := make([]byte, 60)
+	raw := make([]byte, 62)
 	u16 := func(o int, v uint16) { binary.LittleEndian.PutUint16(raw[o:o+2], v) }
 	u32 := func(o int, v uint32) { binary.LittleEndian.PutUint32(raw[o:o+4], v) }
 	u16(0, 42)          // Level
@@ -339,6 +339,8 @@ func TestParseAbilityLayout(t *testing.T) {
 	u16(52, 18)         // Speed
 	u16(54, 3)          // BonusPoint
 	u32(56, 777)        // Gold
+	hitSpeed := int16(-2)
+	u16(60, uint16(hitSpeed)) // HitSpeed（int16 位模式，可为负）
 
 	gs.ParseAbility(string(raw))
 
@@ -358,6 +360,9 @@ func TestParseAbilityLayout(t *testing.T) {
 	if gs.Hit != 9 || gs.Speed != 18 || gs.BonusPoint != 3 || gs.Gold != 777 {
 		t.Errorf("hit/speed/bonus/gold = %d/%d/%d/%d, want 9/18/3/777",
 			gs.Hit, gs.Speed, gs.BonusPoint, gs.Gold)
+	}
+	if gs.HitSpeed != -2 {
+		t.Errorf("HitSpeed = %d, want -2", gs.HitSpeed)
 	}
 }
 

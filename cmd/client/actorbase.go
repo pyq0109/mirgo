@@ -143,7 +143,7 @@ type Actor struct {
 	RushBounce      bool  // RushKung bounce-back animation flag
 	RushBounceDir   int   // bounce direction
 	Overweight      bool  // F3: 超重标志（移动减速）
-	NameColor       int   // SMChangeNameColor: 名字颜色（0=默认, 1=红, 2=黄）
+	NameColor       int   // SMChangeNameColor: 名字颜色调色板索引（249=红名, 251=黄名, 255=白）
 	ShowHP          bool  // SMOpenHealth: 显示头顶HP条
 	ShowHPVal       int   // 当前HP
 	ShowMaxHPVal    int   // 最大HP

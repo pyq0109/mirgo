@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,6 +29,9 @@ type GroundItemInfo struct {
 	X, Y  int
 	Looks int
 	Name  string
+	// FlashTime 记录落地时刻，驱动每物品独立的闪光相位
+	// （Delphi DropItem.FlashTime，PlayScn.pas:1352-1357）。
+	FlashTime int64
 }
 
 type FloatingText struct {
@@ -49,6 +54,7 @@ type PlayScene struct {
 	mapData       *mapformat.MapData
 	lighting      *LightingSystem
 	lightingDirty bool
+	gray          *grayPass // 死亡灰度后处理（懒初始化）
 
 	texCache       map[int]uint32
 	smTexCache     map[int]uint32
@@ -227,7 +233,6 @@ type PlayScene struct {
 	canTwnHit          bool  // +TWN 双龙斩
 	canFireHit         bool  // +FIR 烈火剑法（一次性）
 	canStnHit          bool  // +STN 石化攻击
-	attackSlow         bool  // 服务端强制攻击减速
 	lastFireHitTick    int64 // 烈火 10 秒冷却
 	hoverItemName      string
 	showAllItemNames   bool // Ctrl+Z 切换
@@ -501,7 +506,7 @@ func (s *PlayScene) toggleMinimap() {
 }
 
 func (s *PlayScene) AddGroundItem(id int32, x, y, looks int, name string) {
-	s.groundItems[id] = &GroundItemInfo{ID: id, X: x, Y: y, Looks: looks, Name: name}
+	s.groundItems[id] = &GroundItemInfo{ID: id, X: x, Y: y, Looks: looks, Name: name, FlashTime: time.Now().UnixMilli()}
 }
 
 func (s *PlayScene) RemoveGroundItem(id int32) {
@@ -556,6 +561,10 @@ func (s *PlayScene) Close() {
 	gActiveUI = nil
 	s.unregisterDebugCmds()
 	gSound.SilenceSound()
+	if s.gray != nil {
+		s.gray.dispose()
+		s.gray = nil
+	}
 	s.State.Reset()
 	log.Logf(log.LevelInfo, "PlayScene", "closed")
 }
@@ -608,13 +617,26 @@ func (s *PlayScene) Update(dt float64) {
 	s.events.Update(now)
 	s.pumpSellQuery()
 
+	// ClearDropItem：距自己 x 且 y 均 >30 格的地面物品本地清理
+	// （PlayScn.pas:633-652、984-990），SM_DELITEM 之外的兜底。
+	if s.State.MySelf != nil && len(s.groundItems) > 0 {
+		my := s.State.MySelf
+		for id, gi := range s.groundItems {
+			if absInt(gi.X-my.CurrX) > 30 && absInt(gi.Y-my.CurrY) > 30 {
+				delete(s.groundItems, id)
+			}
+		}
+	}
+
 	if s.State.MySelf != nil && s.cam != nil && s.mapData != nil {
 		my := s.State.MySelf
 		wx := float64(my.Rx)*engine.TileWidth + my.ShiftX + engine.TileWidth/2
 		wy := float64(my.Ry)*engine.TileHeight + my.ShiftY + engine.TileHeight/2
-		// 玩家居中在无遮挡可视区中心 (800/2=400, (600-131)/2≈234→取174匹配底栏blend区)。
-		s.cam.X = wx - 400/s.cam.Zoom
-		s.cam.Y = wy - 174/s.cam.Zoom
+		// Delphi: defx = -UNITX*2 + AAX + 14 = -66，defy = -UNITY*2 = -64
+		// （PlayScn.pas:1059-1060）→ 主角 tile 左上角在屏幕 (366,192)，
+		// tile 中心 (390,208)。wx/wy 为 tile 中心世界坐标。
+		s.cam.X = wx - 390/s.cam.Zoom
+		s.cam.Y = wy - 208/s.cam.Zoom
 		s.cam.ClampToBounds(s.mapData.Width, s.mapData.Height)
 	}
 
@@ -777,7 +799,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	debugRenderFrame = s.renderFrame
 	verbose := s.renderFrame <= 2
 
-	m := s.mapData
 	cam := s.cam
 
 	gl.Enable(gl.BLEND)
@@ -813,6 +834,76 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	right := float32(cam.X + float64(cam.ViewW)/cam.Zoom)
 	bottom := float32(cam.Y + float64(cam.ViewH)/cam.Zoom)
 	proj = engine.OrthoProj4(left, right, bottom, top)
+
+	if s.deathGray {
+		// Delphi ceGrayScale：世界层画入离屏 FBO 后灰度输出
+		// （PlayScn.pas:1397-1408）。初始化失败时退回直绘。
+		if s.gray == nil {
+			if gp, err := newGrayPass(ScreenWidth, ScreenHeight); err == nil {
+				s.gray = gp
+			} else {
+				log.Logf(log.LevelError, "Render", "grayscale init failed: %v", err)
+			}
+		}
+		if s.gray != nil {
+			s.gray.bind()
+			gl.ClearColor(0, 0, 0, 1)
+			gl.Clear(gl.COLOR_BUFFER_BIT)
+			s.renderWorld(proj)
+			s.gray.unbind()
+			s.gl.SetViewport(0, 0, fbW, fbH)
+			s.gray.draw(engine.OrthoProj(ScreenWidth, ScreenHeight))
+		} else {
+			s.renderWorld(proj)
+		}
+	} else {
+		s.renderWorld(proj)
+	}
+
+	// 光照/迷雾：死亡时跳过（Delphi PlayScn.pas:1032-1034）。
+	if s.lighting != nil && !s.deathGray && !s.DisableLight {
+		darkness := s.calcDarkness()
+		if darkness > 0.01 {
+			lights := s.collectLightSources()
+			s.lighting.Render(proj, s.cam.X, s.cam.Y, s.cam.ViewW, s.cam.ViewH, s.cam.Zoom, darkness, lights)
+		}
+	}
+
+	if s.dbg.WireMode > 0 {
+		s.gl.WireRecording = false
+		s.updateHover()
+		s.renderWireframes(proj)
+		s.renderHoverInfo(proj)
+		s.dbg.wireHandled = true
+	}
+	if s.ShowGrid {
+		s.renderDebugGrid(proj)
+	}
+	if s.ShowLabel {
+		s.renderDebugInfo(proj)
+	}
+	if s.ShowPath {
+		s.renderDebugPath(proj)
+	}
+
+	// UI 层使用完整窗口逻辑视口。
+	s.gl.SetViewport(0, 0, fbW, fbH)
+	if verbose {
+		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, ScreenWidth, ScreenHeight)
+	}
+	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
+	s.renderMinimap(uiProj)
+	s.RenderUI(uiProj)
+	if s.ui.ShowBounds {
+		s.ui.RenderDebugBounds(uiProj)
+	}
+}
+
+// renderWorld 渲染世界层（地图三层 + 角色 + 特效 + 物品闪光 + 飘字），
+// 供 Render 直绘或灰度 FBO 两用。光照/UI 不在此列。
+func (s *PlayScene) renderWorld(proj [16]float32) {
+	m := s.mapData
+	cam := s.cam
 
 	startX, startY, endX, endY := cam.ViewportTiles(cullMargin, cullMargin)
 	startX = clamp(startX, 0, m.Width-1)
@@ -883,58 +974,16 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
 	s.gl.WireCategory = 3
+	// 晚层特效（爆炸类，Delphi m_EffectList.DrawEff，PlayScn.pas:1328-1335）。
 	s.effects.Render(s.gl, s.resources, proj)
+
+	// 物品闪光/名字画在晚层特效之后（PlayScn.pas:1347-1396）。
+	s.renderGroundItemFlash(fStartX, fStartY, fEndX, fEndY, proj)
 
 	for _, ft := range s.floatingTexts {
 		if s.text != nil {
 			s.text.DrawText(ft.Text, ft.X, ft.Y, ft.Color[0], ft.Color[1], ft.Color[2], ft.Color[3], proj)
 		}
-	}
-
-	if s.deathGray {
-		// F6: 死亡灰度效果 — 使用 multiply blend 实现更自然的去饱和
-		gl.BlendFunc(gl.DST_COLOR, gl.ZERO)
-		s.gl.DrawQuadColor(float32(s.cam.X), float32(s.cam.Y),
-			float32(float64(s.cam.ViewW)/s.cam.Zoom), float32(float64(s.cam.ViewH)/s.cam.Zoom),
-			0.45, 0.45, 0.45, 1.0, proj)
-		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-	}
-
-	if s.lighting != nil && !s.deathGray && !s.DisableLight {
-		darkness := s.calcDarkness()
-		if darkness > 0.01 {
-			lights := s.collectLightSources()
-			s.lighting.Render(proj, s.cam.X, s.cam.Y, s.cam.ViewW, s.cam.ViewH, s.cam.Zoom, darkness, lights)
-		}
-	}
-
-	if s.dbg.WireMode > 0 {
-		s.gl.WireRecording = false
-		s.updateHover()
-		s.renderWireframes(proj)
-		s.renderHoverInfo(proj)
-		s.dbg.wireHandled = true
-	}
-	if s.ShowGrid {
-		s.renderDebugGrid(proj)
-	}
-	if s.ShowLabel {
-		s.renderDebugInfo(proj)
-	}
-	if s.ShowPath {
-		s.renderDebugPath(proj)
-	}
-
-	// UI 层使用完整窗口逻辑视口。
-	s.gl.SetViewport(0, 0, fbW, fbH)
-	if verbose {
-		log.Logf(log.LevelInfo, "Render", "frame=%d UI viewport=(0,0,%d,%d) uiProj=OrthoProj(%d,%d)", s.renderFrame, fbW, fbH, ScreenWidth, ScreenHeight)
-	}
-	uiProj := engine.OrthoProj(ScreenWidth, ScreenHeight)
-	s.renderMinimap(uiProj)
-	s.RenderUI(uiProj)
-	if s.ui.ShowBounds {
-		s.ui.RenderDebugBounds(uiProj)
 	}
 }
 
@@ -948,6 +997,10 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 			s.drawFrontSmall(info, x, y, proj)
 		}
 	}
+
+	// 地面魔法特效画在高前景物件之前（Delphi m_GroundEffectList，
+	// PlayScn.pas:1110-1118）。
+	s.effects.RenderGround(s.gl, s.resources, proj)
 
 	// 阶段 B：逐行 Y 排序——大型/混合前景物件、地图事件、
 	// 地面物品和角色按行交错绘制（PlayScn.pas:1124-1249）。
@@ -980,6 +1033,10 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 			s.drawChatBubble(a, worldX, worldY, proj)
 			actorIdx++
 		}
+
+		// 同行飞行物在角色之后（Delphi m_FlyList 逐行 Y 排序，
+		// PlayScn.pas:1241-1245）。
+		s.effects.RenderFlyRow(s.gl, s.resources, proj, y)
 	}
 
 	s.gl.WireCategory = 2
@@ -1022,7 +1079,12 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		fa.Draw(s.gl, s.resources, fx, fy, proj)
 		s.drawActorLabel(fa, fx, fy, proj)
 	}
+}
 
+// renderGroundItemFlash 绘制可视范围内地面物品的闪光圈与名称。
+// Delphi 中物品闪光画在 m_EffectList 之后（PlayScn.pas:1347-1396），
+// 故从 renderFrontWithActors 移出，由 Render 在晚层特效之后调用。
+func (s *PlayScene) renderGroundItemFlash(fStartX, fStartY, fEndX, fEndY int, proj [16]float32) {
 	for _, gi := range s.groundItems {
 		if gi.X < fStartX || gi.X > fEndX || gi.Y < fStartY || gi.Y > fEndY {
 			continue
@@ -1032,46 +1094,68 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 }
 
 func (s *PlayScene) drawGroundItemIcon(gi *GroundItemInfo, proj [16]float32) {
-	ix := float32(gi.X*engine.TileWidth) + 16
-	iy := float32(gi.Y*engine.TileHeight) + 8
+	// 格子中心（HALFX=24, HALFY=16）。
+	cx := float32(gi.X*engine.TileWidth) + engine.TileWidth/2
+	cy := float32(gi.Y*engine.TileHeight) + engine.TileHeight/2
 	if s.resources.DnItems != nil && gi.Looks >= 0 && gi.Looks < s.resources.DnItems.Count {
 		img := s.resources.DnItems.GetImage(gi.Looks)
 		if img != nil && img.RGBA != nil {
 			tex := s.resources.GetTexture(s.resources.DnItems, gi.Looks)
 			if tex != 0 {
+				// Delphi: ix + HALFX - w/2, iy + HALFY - h/2
+				// （PlayScn.pas:1211-1219），按实际图尺寸居中。
+				ix := cx - float32(img.Width)/2
+				iy := cy - float32(img.Height)/2
 				log.Logf(log.LevelTrace, "Render", "play ground item DnItems[%d] pos=(%.0f,%.0f) size=(%d,%d)", gi.Looks, ix, iy, img.Width, img.Height)
 				s.gl.DrawQuad(tex, ix, iy, float32(img.Width), float32(img.Height), proj)
 				return
 			}
 		}
 	}
-	s.gl.DrawQuadColor(ix, iy, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
+	// 占位方块同样以格子中心对齐。
+	s.gl.DrawQuadColor(cx-8, cy-8, 16, 16, 0.9, 0.8, 0.2, 0.8, proj)
 }
 
 func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32) {
-	ix := float32(gi.X*engine.TileWidth) + 16
-	iy := float32(gi.Y*engine.TileHeight) + 8
+	// 格子左上角与中心。
+	tileX := float32(gi.X * engine.TileWidth)
+	tileY := float32(gi.Y * engine.TileHeight)
 	if s.resources.Prguse != nil {
+		// 每物品独立相位：落地后每 5s 闪一次，10 步×20ms
+		// （PlayScn.pas:1352-1368）。
 		now := time.Now().UnixMilli()
-		cycle := now % 5000
+		cycle := (now - gi.FlashTime) % 5000
+		if cycle < 0 {
+			cycle += 5000
+		}
 		if cycle < 200 {
 			step := int(cycle / 20)
 			flashIdx := 410 + step
 			if fimg := s.resources.Prguse.GetImage(flashIdx); fimg != nil && fimg.RGBA != nil {
 				if ftex := s.resources.GetTexture(s.resources.Prguse, flashIdx); ftex != 0 {
-					log.Logf(log.LevelTrace, "Render", "play item flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, ix, iy)
+					// Delphi: DrawBlend(ix+ax, iy+ay)，(ax,ay) 为图自身热点
+					// （PlayScn.pas:1366-1367）。
+					fx := tileX + float32(fimg.HotX)
+					fy := tileY + float32(fimg.HotY)
+					log.Logf(log.LevelTrace, "Render", "play item flash Prguse[%d] pos=(%.0f,%.0f)", flashIdx, fx, fy)
 					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-					s.gl.DrawQuad(ftex, ix, iy, float32(fimg.Width), float32(fimg.Height), proj)
+					s.gl.DrawQuad(ftex, fx, fy, float32(fimg.Width), float32(fimg.Height), proj)
 					gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 				}
 			}
 		}
 	}
-	if s.text != nil && gi.Name != "" {
+	// Delphi 仅在 ShowItem.boShowName 或 g_boShowAllItem 时画名字
+	// （PlayScn.pas:1370-1391）；Go 无 ShowItem 配置表，取 Ctrl+Z 开关
+	// （showAllItemNames，对应 g_boShowAllItem）作为最接近行为。
+	if s.showAllItemNames && s.text != nil && gi.Name != "" {
 		nameW := float32(s.text.MeasureText(gi.Name))
-		nameX := float32(gi.X*engine.TileWidth) + float32(engine.TileWidth)/2 - nameW/2
-		log.Logf(log.LevelTrace, "Render", "play item name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, iy-14)
-		s.text.DrawText(gi.Name, nameX, iy-14, 1.0, 1.0, 0.8, 1.0, proj)
+		nameX := tileX + engine.TileWidth/2 - nameW/2
+		// Delphi: iy + HALFY - TextHeight*2（PlayScn.pas:1383-1388），
+		// 行高取 12 → tileY + 16 - 24 = tileY - 8；默认白字。
+		nameY := tileY + engine.TileHeight/2 - 2*12
+		log.Logf(log.LevelTrace, "Render", "play item name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, nameY)
+		s.text.DrawText(gi.Name, nameX, nameY, 1.0, 1.0, 1.0, 1.0, proj)
 	}
 }
 
@@ -1136,14 +1220,18 @@ func (s *PlayScene) drawChatBubble(a *Actor, worldX, worldY float32, proj [16]fl
 		sayY = worldY - 12
 	}
 	bubbleY := sayY - float32(a.SayLineCount)*16
-	log.Logf(log.LevelTrace, "Render", "play chat bubble lines=%d pos=(%.0f,%.0f)", a.SayLineCount, worldX-20, bubbleY)
+	// Delphi SayX = tile 中心（+24），气泡逐行按 SayX - TextWidth/2 居中
+	// （PlayScn.pas:1232, DrawScrn.pas:338-344）。
+	centerX := worldX + engine.TileWidth/2
+	log.Logf(log.LevelTrace, "Render", "play chat bubble lines=%d centerX=%.0f bubbleY=%.0f", a.SayLineCount, centerX, bubbleY)
 	for i := 0; i < a.SayLineCount && i < 5; i++ {
 		if a.SayingArr[i] != "" {
 			r, g, b := float32(1.0), float32(1.0), float32(1.0)
 			if a.Death {
 				r, g, b = 0.5, 0.5, 0.5
 			}
-			s.text.DrawText(a.SayingArr[i], worldX-20, bubbleY+float32(i)*14, r, g, b, 0.9, proj)
+			lineX := centerX - float32(s.text.MeasureText(a.SayingArr[i]))/2
+			s.text.DrawText(a.SayingArr[i], lineX, bubbleY+float32(i)*14, r, g, b, 0.9, proj)
 		}
 	}
 }
@@ -1166,10 +1254,10 @@ func (s *PlayScene) frontImageData(info *mapformat.CellInfo, x, y int) (loader *
 
 	ani := int(info.FrontAniFrame & 0x7F)
 	if ani > 0 {
+		// Delphi 原样使用 btAniTick（可为 0）：
+		// fridx + (AniCount mod (ani + ani*anitick)) div (1+anitick)
+		// （PlayScn.pas:1082）。钳制 tick≥1 会改变 tick=0 地图的动画序列。
 		tick := int(info.FrontAniTick)
-		if tick < 1 {
-			tick = 1
-		}
 		cycleLen := ani + ani*tick
 		if cycleLen > 0 {
 			frame := (s.animCounter % cycleLen) / (1 + tick)
@@ -1379,6 +1467,8 @@ func darkLevelToDarkness(level int) float32 {
 
 func (s *PlayScene) collectLightSources() []LightSource {
 	var lights []LightSource
+	// 主角光：Go 协议 SMLogon 不携带光等级（Delphi 为 Hibyte(cdir)），
+	// max(2, LightLevel) 为合理近似。
 	if s.State.MySelf != nil {
 		my := s.State.MySelf
 		lights = append(lights, LightSource{
@@ -1388,8 +1478,12 @@ func (s *PlayScene) collectLightSources() []LightSource {
 		})
 	}
 	lights = append(lights, s.effects.LightSources()...)
+	// 事件光源（火墙等，Delphi PlayScn.pas:1336-1342）。
+	lights = append(lights, s.events.LightSources()...)
 	if s.mapData != nil {
-		startX, startY, endX, endY := s.cam.ViewportTiles(2, 2)
+		// Delphi 扫描边距横向 ±5、纵向 -4/+35（PlayScn.pas:1258-1262）；
+		// 这里取 ±5（上边距略大于 Delphi，无害）。
+		startX, startY, endX, endY := s.cam.ViewportTiles(5, 5)
 		startX = clamp(startX, 0, s.mapData.Width-1)
 		startY = clamp(startY, 0, s.mapData.Height-1)
 		endX = clamp(endX, 0, s.mapData.Width-1)
@@ -1398,10 +1492,13 @@ func (s *PlayScene) collectLightSources() []LightSource {
 			for x := startX; x <= endX; x++ {
 				info := s.mapData.InfoAt(x, y)
 				if info.Light > 0 {
+					// Delphi AddLight 直接用 btLight 索引光罩
+					// （PlayScn.pas:1264-1266 → ApplyLightMap m_Lights[light]），
+					// lighting.go 同样以 Level 直接索引 fog 纹理，无需 -1。
 					lights = append(lights, LightSource{
 						X:     float64(x)*engine.TileWidth + engine.TileWidth/2,
 						Y:     float64(y)*engine.TileHeight + engine.TileHeight/2,
-						Level: int(info.Light) - 1,
+						Level: int(info.Light),
 					})
 				}
 			}
@@ -1936,13 +2033,14 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 				return
 			}
 
-			// Shift+无目标 → 空砍（ClMain:2316-2334）
+			// Shift+无目标 → 空砍（ClMain.pas:2316-2334）
 			clickLogf("[click] swing (no target) tile=(%d,%d)", tx, ty)
 			tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
+			// Delphi：g_dwLastAttackTick 无条件更新（ClMain.pas:2335）。
+			s.lastAttackTick = now
 			if my.IsIdle() && s.ServerAcceptNextAction() && s.canNextHit() {
 				s.lastHitTick = now
-				s.lastAttackTick = now
-				hitMsg := s.selectHitType()
+				hitMsg := s.swingHitType(tdir)
 				if s.sendAttack != nil {
 					s.sendAttack(hitMsg, tdir)
 				}
@@ -1972,22 +2070,47 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	}
 }
 
-// findTargetActor 用精灵包围盒检测查找点击命中的目标 Actor（PlayScn:1785-1818）。
+// findTargetActor 查找点击命中的目标 Actor（PlayScn.pas:1755-1818）。
 // wx, wy 为点击处的世界坐标；liveOnly=true 时仅返回存活 Actor（左键用）。
 // dupSelection 用于重叠 Actor 时循环选择。
 //
-// Delphi 原版先做像素级 CheckSelect，失败后回退到 CharWidth×CharHeight 包围盒
-// （PlayScn.pas:1798-1812）。NPC/怪物精灵底部锚定、向上延伸，精确格子匹配会漏掉
-// 点在身体/头部的点击，故此处采用世界空间包围盒检测。
+// 两段式（Delphi GetCharacter + GetAttackFocusCharacter）：先做像素级
+// CheckSelect（点中透明像素不命中），整轮无命中再回退 CharWidth×CharHeight
+// 包围盒（PlayScn.pas:1798-1812）。
 func (s *PlayScene) findTargetActor(wx, wy float64, liveOnly bool) *Actor {
 	my := s.State.MySelf
 	// SortedByY 按 Ry 升序（渲染由后往前）；命中检测反序遍历，
 	// 让绘制在最上层（Y 最大）的 Actor 优先被选中。
 	actors := s.State.Actors.SortedByY()
+	ty := int(math.Floor(wy / engine.TileHeight))
+
+	// 像素级 pass：Delphi 仅考虑 CurrY ∈ [ccy-1, ccy+8] 的角色（精灵自立足
+	// 格向上延伸，最高约 8 格，PlayScn.pas:1762）。
+	var pixelHits []*Actor
+	for i := len(actors) - 1; i >= 0; i-- {
+		a := actors[i]
+		if my != nil && a.RecogID == my.RecogID {
+			continue
+		}
+		if liveOnly && a.Death {
+			continue
+		}
+		if a.CurrY < ty-1 || a.CurrY > ty+8 {
+			continue
+		}
+		if s.actorPixelHit(a, wx, wy) {
+			pixelHits = append(pixelHits, a)
+		}
+	}
+	if len(pixelHits) > 0 {
+		return pixelHits[s.dupSelection%len(pixelHits)]
+	}
+
+	// 包围盒回退 pass。
 	var candidates []*Actor
 	for i := len(actors) - 1; i >= 0; i-- {
 		a := actors[i]
-		if a.RecogID == my.RecogID {
+		if my != nil && a.RecogID == my.RecogID {
 			continue
 		}
 		if liveOnly && a.Death {
@@ -2000,8 +2123,30 @@ func (s *PlayScene) findTargetActor(wx, wy float64, liveOnly bool) *Actor {
 	if len(candidates) == 0 {
 		return nil
 	}
-	idx := s.dupSelection % len(candidates)
-	return candidates[idx]
+	return candidates[s.dupSelection%len(candidates)]
+}
+
+// actorPixelHit 像素级命中（Delphi CheckSelect，Actor.pas:1947-1961）：
+// 目标像素及其上下左右 4 邻域均非透明才算命中。body 图左上角 =
+// tile 锚点 + 热点（与 drawBody 一致）。
+func (s *PlayScene) actorPixelHit(a *Actor, wx, wy float64) bool {
+	img := a.GetBodyImage(s.resources)
+	if img == nil || img.RGBA == nil {
+		return false
+	}
+	worldX := float64(a.Rx*engine.TileWidth) + a.ShiftX
+	worldY := float64(a.Ry*engine.TileHeight) + a.ShiftY
+	px := int(math.Floor(wx - (worldX + float64(img.HotX))))
+	py := int(math.Floor(wy - (worldY + float64(img.HotY))))
+	opaque := func(x, y int) bool {
+		if x < 0 || x >= img.Width || y < 0 || y >= img.Height {
+			return false
+		}
+		return img.RGBA.Pix[(y*img.Width+x)*4+3] > 0
+	}
+	return opaque(px, py) &&
+		opaque(px-1, py) && opaque(px+1, py) &&
+		opaque(px, py-1) && opaque(px, py+1)
 }
 
 // actorHitTest 判断世界坐标 (wx, wy) 是否落在 Actor 精灵的包围盒内。
@@ -2040,9 +2185,13 @@ func (s *PlayScene) actorHitTest(a *Actor, wx, wy float64) bool {
 	return wx >= left+centx && wx <= right-centx && wy >= top+centy && wy <= bottom-centy
 }
 
-// shouldAttack 判断是否应攻击目标（ClMain:2300-2314）。
+// shouldAttack 判断是否应攻击目标（ClMain.pas:2303-2312）。
 func (s *PlayScene) shouldAttack(a *Actor) bool {
 	if a.Type == ActorMonster {
+		// 召唤兽：名字含 "(" 不可攻击（Delphi pos('(', name) = 0，ClMain.pas:2307）。
+		if strings.Contains(a.UserName, "(") {
+			return false
+		}
 		return true
 	}
 	if a.Type == ActorNPC {
@@ -2053,7 +2202,9 @@ func (s *PlayScene) shouldAttack(a *Actor) bool {
 		if s.shiftDown {
 			return true
 		}
-		if a.NameColor == 1 { // 红名 = 敌人
+		// 红名 = 敌人（ENEMYCOLOR）。Go 服务端 NameColor() 返回调色板索引：
+		// 249=红名、251=黄名、255=白（cmd/server/pksystem.go:73-82）。
+		if a.NameColor == 249 {
 			return true
 		}
 		return false
@@ -2064,8 +2215,8 @@ func (s *PlayScene) shouldAttack(a *Actor) bool {
 	if a.Race == 50 { // RCC_MERCHANT
 		return false
 	}
-	// 召唤宠物：名字包含 "("
-	if len(a.UserName) > 0 && a.UserName[0] == '(' {
+	// 召唤兽：名字含 "("（任意位置，Delphi pos('(', name)，ClMain.pas:2307）。
+	if strings.Contains(a.UserName, "(") {
 		return false
 	}
 	return true
@@ -2080,13 +2231,15 @@ func (s *PlayScene) attackTarget(a *Actor) {
 	dy := a.CurrY - my.CurrY
 
 	if dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 && !a.Death {
+		now := time.Now().UnixMilli()
+		// Delphi：相邻分支无论攻击是否真正发出都更新 g_dwLastAttackTick
+		// （ClMain.pas:2165），1 秒内禁止移动。
+		s.lastAttackTick = now
 		if !my.IsIdle() || !s.ServerAcceptNextAction() || !s.canNextHit() {
 			return
 		}
-		now := time.Now().UnixMilli()
 		s.lastHitTick = now
-		s.lastAttackTick = now
-		hitMsg := s.selectHitType()
+		hitMsg := s.attackHitType(dir)
 		if s.sendAttack != nil {
 			s.sendAttack(hitMsg, dir)
 		}
@@ -2101,9 +2254,10 @@ func (s *PlayScene) attackTarget(a *Actor) {
 	}
 }
 
-// selectHitType 特殊攻击优先级链（ClMain:2136-2163）。
-func (s *PlayScene) selectHitType() int {
-	// 烈火剑法（一次性，10 秒冷却）
+// attackHitType 命中目标时的特殊攻击优先级链（ClMain.pas:2139-2161）。
+// 基础 = StdMode=6 武器 → CM_HEAVYHIT，否则 CM_HIT；链上命中则覆盖。
+func (s *PlayScene) attackHitType(dir int) int {
+	// 烈火剑法（一次性，MP≥7）
 	if s.canFireHit && s.State.MP >= 7 {
 		s.canFireHit = false
 		return protocol.CMFireHit
@@ -2113,24 +2267,24 @@ func (s *PlayScene) selectHitType() int {
 		s.canPowerHit = false
 		return protocol.CMPowerHit
 	}
-	// 双龙斩
+	// 双龙斩（一次性，MP≥10）
 	if s.canTwnHit && s.State.MP >= 10 {
 		s.canTwnHit = false
 		return protocol.CMTwinHit
 	}
-	// 半月弯刀
+	// 半月弯刀（MP≥3，目标分支无范围检查）
 	if s.canWideHit && s.State.MP >= 3 {
 		return protocol.CMWideHit
 	}
-	// 十字斩
+	// 十字斩（MP≥6，目标分支无范围检查）
 	if s.canCrsHit && s.State.MP >= 6 {
 		return protocol.CMCrsHit
 	}
-	// 刺杀剑术
-	if s.canLongHit {
+	// 刺杀剑术（需正前方第 2 格有目标，ClMain.pas:2159）
+	if s.canLongHit && s.targetInLongAttackRange(dir) {
 		return protocol.CMLongHit
 	}
-	// 普通攻击：StdMode=6 的武器用重击
+	// 基础：StdMode=6 的武器用重击
 	if w := s.State.UseItems[1]; w != nil {
 		if def := s.State.ItemDefs[int(w.WIndex)]; def != nil && def.StdMode == 6 {
 			return protocol.CMHeavyHit
@@ -2139,23 +2293,85 @@ func (s *PlayScene) selectHitType() int {
 	return protocol.CMHit
 }
 
-// canNextHit 攻击速度限制（ClMain:3415-3432）。
+// swingHitType 空砍（Shift+无目标）的选招（ClMain.pas:2321-2333）。
+// 基础 = CM_HIT + Random(3)；随后按范围依次覆盖（后匹配者优先），
+// 不含烈火/攻杀/双龙（这些仅目标分支可用）。
+func (s *PlayScene) swingHitType(dir int) int {
+	hitMsg := protocol.CMHit + rand.Intn(3)
+	if s.canLongHit && s.targetInLongAttackRange(dir) {
+		hitMsg = protocol.CMLongHit
+	}
+	if s.canWideHit && s.State.MP >= 3 && s.targetInFrontSideRange(dir) {
+		hitMsg = protocol.CMWideHit
+	}
+	if s.canCrsHit && s.State.MP >= 6 && s.targetInFrontSideRange(dir) {
+		hitMsg = protocol.CMCrsHit
+	}
+	return hitMsg
+}
+
+// findActorAtTile 返回指定格上的存活 Actor（Delphi FindActorXY，
+// PlayScn.pas:2001-2013）。
+func (s *PlayScene) findActorAtTile(x, y int) *Actor {
+	for _, a := range s.State.Actors.All() {
+		if a.CurrX == x && a.CurrY == y && !a.Death {
+			return a
+		}
+	}
+	return nil
+}
+
+// targetInLongAttackRange 刺杀剑术范围：正前方第 2 格有存活目标
+// （ClMain.pas:2003-2016）。
+func (s *PlayScene) targetInLongAttackRange(dir int) bool {
+	my := s.State.MySelf
+	dx, dy := dirOffset(dir)
+	nx, ny := my.CurrX+dx*2, my.CurrY+dy*2
+	if absInt(my.CurrX-nx) != 2 && absInt(my.CurrY-ny) != 2 {
+		return false
+	}
+	return s.findActorAtTile(nx, ny) != nil
+}
+
+// targetInFrontSideRange 半月弯刀/十字斩范围（Delphi 两函数实现相同，
+// ClMain.pas:2018-2075）：正前 1 格与相邻三方向（dir+1/dir+2/dir-1）之一
+// 各需一个存活目标。
+func (s *PlayScene) targetInFrontSideRange(dir int) bool {
+	my := s.State.MySelf
+	dx, dy := dirOffset(dir)
+	if s.findActorAtTile(my.CurrX+dx, my.CurrY+dy) == nil {
+		return false
+	}
+	for _, off := range []int{1, 2, 7} {
+		mdx, mdy := dirOffset((dir + off) % 8)
+		if s.findActorAtTile(my.CurrX+mdx, my.CurrY+mdy) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// canNextHit 攻击速度限制（ClMain.pas:3414-3431）。
 func (s *PlayScene) canNextHit() bool {
 	now := time.Now().UnixMilli()
+	// LevelFast = min(370, Level*14); LevelFast = min(800, LevelFast + m_nHitSpeed*60)。
+	// m_nHitSpeed 为装备攻速修正（可正可负），非命中率 Hit。
 	levelFast := s.State.Level * 14
 	if levelFast > 370 {
 		levelFast = 370
 	}
-	levelFast += s.State.Hit * 60
+	levelFast += s.State.HitSpeed * 60
 	if levelFast > 800 {
 		levelFast = 800
 	}
 	nextHitTime := int64(1400 - levelFast)
-	if s.attackSlow {
-		nextHitTime += 1500
+	if nextHitTime < 0 {
+		nextHitTime = 0
 	}
-	if s.State.Weight > s.State.MaxWeight {
-		nextHitTime *= 2
+	// Delphi g_boAttackSlow：HandWeight > MaxHandWeight 时触发
+	// （Actor.pas:2642-2644），+1500ms（而非背包超重 ×2）。
+	if s.State.HandWeight > s.State.MaxHandWeight {
+		nextHitTime += 1500
 	}
 	return now-s.lastHitTick >= nextHitTime
 }

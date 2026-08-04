@@ -78,6 +78,22 @@ func (em *EventManager) RenderRow(glState *engine.GLState, resources *engine.Res
 	}
 }
 
+// LightSources 返回事件光源供迷雾合成（Delphi evn.m_nLight > 0，
+// PlayScn.pas:1336-1342）。火墙 EType==1 → 光等级 1。
+func (em *EventManager) LightSources() []LightSource {
+	var lights []LightSource
+	for _, ev := range em.events {
+		if ev.EType == 1 {
+			lights = append(lights, LightSource{
+				X:     float64(ev.X*engine.TileWidth + engine.TileWidth/2),
+				Y:     float64(ev.Y*engine.TileHeight + engine.TileHeight/2),
+				Level: 1,
+			})
+		}
+	}
+	return lights
+}
+
 func (em *EventManager) renderEvent(glState *engine.GLState, resources *engine.ResourceManager, ev *MapEvent, proj [16]float32) {
 	px := float32(ev.X*engine.TileWidth + engine.TileWidth/2)
 	py := float32(ev.Y*engine.TileHeight + engine.TileHeight/2)

@@ -2155,6 +2155,9 @@ func (p *PlayObject) encodeAbilityBody() string {
 	putU16(uint16(p.SpeedPoint))
 	putU16(uint16(p.BonusPoint))
 	putU32(uint32(p.Gold))
+	// HitSpeed（Delphi m_nHitSpeed，装备攻速修正，可为负）追加在 offset 60。
+	// 旧客户端只读前 60 字节，向后兼容；新客户端 ParseAbility 按需读取。
+	putU16(uint16(int16(p.HitSpeed)))
 	return protocol.EncodeBuffer(buf)
 }
 

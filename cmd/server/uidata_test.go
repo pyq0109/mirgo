@@ -34,10 +34,11 @@ func TestEncodeAbilityBodyLayout(t *testing.T) {
 	p.SpeedPoint = 18
 	p.BonusPoint = 3
 	p.Gold = 777
+	p.HitSpeed = -2 // 装备攻速修正，可为负（Delphi m_nHitSpeed）
 
 	raw := []byte(decodeTestBody(p.encodeAbilityBody()))
-	if len(raw) != 60 {
-		t.Fatalf("ability body len = %d, want 60", len(raw))
+	if len(raw) != 62 {
+		t.Fatalf("ability body len = %d, want 62", len(raw))
 	}
 	u16 := func(o int) int { return int(binary.LittleEndian.Uint16(raw[o : o+2])) }
 	u32 := func(o int) uint32 { return binary.LittleEndian.Uint32(raw[o : o+4]) }
@@ -77,6 +78,10 @@ func TestEncodeAbilityBodyLayout(t *testing.T) {
 	// MaxExp 在服务端计算 (GetMaxExp)；偏移 34 必须承载该值。
 	if got := u32(34); got != p.GetMaxExp() {
 		t.Errorf("MaxExp = %d, want %d", got, p.GetMaxExp())
+	}
+	// HitSpeed 位于 offset 60，按 int16 位模式编码（可为负）。
+	if got := int(int16(u16(60))); got != p.HitSpeed {
+		t.Errorf("HitSpeed = %d, want %d", got, p.HitSpeed)
 	}
 }
 

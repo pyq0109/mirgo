@@ -94,7 +94,10 @@ type GameState struct {
 	HandWeight, MaxHandWeight int
 	AC, MAC, DC, MC, SC       uint32 // 打包格式 lo | hi<<16
 	Hit, Speed                int
-	BonusPoint                int
+	// HitSpeed 装备攻速修正（Delphi m_nHitSpeed，可为负），由 SMAbility 体
+	// offset 60 下发；供 canNextHit 使用（ClMain.pas:3420）。
+	HitSpeed   int
+	BonusPoint int
 
 	Sex, Hair int
 	Job       int // 0 战士 / 1 法师 / 2 道士（SMLogon body 第 3 字段）
@@ -360,6 +363,11 @@ func (gs *GameState) ParseAbility(body string) {
 	gs.Speed = u16(52)
 	gs.BonusPoint = u16(54)
 	gs.Gold = int(u32(56))
+	// HitSpeed（装备攻速修正，Delphi m_nHitSpeed）：offset 60 的可选字段，
+	// 旧服务端只发 60 字节时保持 0。负值经 int16 位模式还原。
+	if len(raw) >= 62 {
+		gs.HitSpeed = int(int16(u16(60)))
+	}
 }
 
 func (gs *GameState) ParseUseItems(body string) {

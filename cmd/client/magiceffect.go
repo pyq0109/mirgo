@@ -287,61 +287,107 @@ func (em *EffectManager) Update(now int64) {
 	em.effects = alive
 }
 
-func (em *EffectManager) Render(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32) {
-	for _, eff := range em.effects {
-		var idx int
-		switch {
-		case eff.Exploding:
-			idx = eff.BaseIdx + eff.Frame
-		case eff.Type == EffFlyAxe || eff.Type == EffFlyBug:
-			idx = eff.BaseIdx + eff.Dir16*10 + eff.Frame
-		case eff.Type == EffFly && !eff.Exploding:
-			idx = eff.BaseIdx + eff.Dir16*10 + eff.Frame
-		case eff.Type == EffFlyArrow:
-			idx = eff.BaseIdx + eff.Dir16 + eff.Frame
-		default:
-			idx = eff.BaseIdx + eff.Frame
-		}
+// isGroundEffect 判断地面特效（Delphi m_GroundEffectList，画在高前景物件
+// 之前，PlayScn.pas:1110-1118）。
+func isGroundEffect(eff *MagicEffect) bool {
+	return eff.Type == EffGround || eff.Type == EffBujaukGround
+}
 
-		var wilFile *wil.File
-		if eff.ImgLib == 0 {
-			wilFile = resources.Magic
+// isFlyEffect 判断飞行物（Delphi m_FlyList，参与逐行 Y 排序，
+// PlayScn.pas:1241-1245）。FireGun 属 m_EffectList 晚层，不在此列。
+func isFlyEffect(eff *MagicEffect) bool {
+	switch eff.Type {
+	case EffFly, EffFlyAxe, EffFlyArrow, EffFlyBug:
+		return true
+	}
+	return false
+}
+
+// drawEffect 绘制单个特效（帧索引计算 + 取图 + 混合绘制）。
+func (em *EffectManager) drawEffect(eff *MagicEffect, glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32) {
+	var idx int
+	switch {
+	case eff.Exploding:
+		idx = eff.BaseIdx + eff.Frame
+	case eff.Type == EffFlyAxe || eff.Type == EffFlyBug:
+		idx = eff.BaseIdx + eff.Dir16*10 + eff.Frame
+	case eff.Type == EffFly && !eff.Exploding:
+		idx = eff.BaseIdx + eff.Dir16*10 + eff.Frame
+	case eff.Type == EffFlyArrow:
+		idx = eff.BaseIdx + eff.Dir16 + eff.Frame
+	default:
+		idx = eff.BaseIdx + eff.Frame
+	}
+
+	var wilFile *wil.File
+	if eff.ImgLib == 0 {
+		wilFile = resources.Magic
+	} else {
+		wilFile = resources.Magic2
+	}
+	if wilFile == nil || idx < 0 || idx >= wilFile.Count {
+		return
+	}
+
+	img := wilFile.GetImage(idx)
+	if img == nil || img.RGBA == nil {
+		return
+	}
+
+	tex := resources.GetTexture(wilFile, idx)
+	if tex == 0 {
+		return
+	}
+
+	w := float32(img.Width)
+	h := float32(img.Height)
+	drawX := float32(eff.X) - w/2
+	drawY := float32(eff.Y) - h/2
+
+	switch eff.Type {
+	case EffFlyAxe, EffFlyArrow, EffFlyBug:
+		if !eff.Exploding {
+			glState.DrawQuad(tex, drawX, drawY, w, h, proj)
 		} else {
-			wilFile = resources.Magic2
-		}
-		if wilFile == nil || idx < 0 || idx >= wilFile.Count {
-			continue
-		}
-
-		img := wilFile.GetImage(idx)
-		if img == nil || img.RGBA == nil {
-			continue
-		}
-
-		tex := resources.GetTexture(wilFile, idx)
-		if tex == 0 {
-			continue
-		}
-
-		w := float32(img.Width)
-		h := float32(img.Height)
-		drawX := float32(eff.X) - w/2
-		drawY := float32(eff.Y) - h/2
-
-		switch eff.Type {
-		case EffFlyAxe, EffFlyArrow, EffFlyBug:
-			if !eff.Exploding {
-				glState.DrawQuad(tex, drawX, drawY, w, h, proj)
-			} else {
-				gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
-				glState.DrawQuad(tex, drawX, drawY, w, h, proj)
-				gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-			}
-		default:
 			gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
 			glState.DrawQuad(tex, drawX, drawY, w, h, proj)
 			gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 		}
+	default:
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+		glState.DrawQuad(tex, drawX, drawY, w, h, proj)
+		gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	}
+}
+
+// RenderGround 绘制地面特效（画在小前景之后、大前景/角色之前，
+// PlayScn.pas:1110-1118）。
+func (em *EffectManager) RenderGround(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32) {
+	for _, eff := range em.effects {
+		if isGroundEffect(eff) {
+			em.drawEffect(eff, glState, resources, proj)
+		}
+	}
+}
+
+// RenderFlyRow 仅绘制瓦片行等于 row 的飞行物特效（参与 Y 排序，
+// PlayScn.pas:1241-1245）。飞行物坐标为像素，行号 = floor(Y/TileHeight)。
+func (em *EffectManager) RenderFlyRow(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32, row int) {
+	for _, eff := range em.effects {
+		if isFlyEffect(eff) && int(eff.Y/engine.TileHeight) == row {
+			em.drawEffect(eff, glState, resources, proj)
+		}
+	}
+}
+
+// Render 绘制晚层特效（爆炸类等，画在角色之后，Delphi m_EffectList.DrawEff，
+// PlayScn.pas:1328-1335）。地面特效与飞行物已在前面的层绘制，此处跳过。
+func (em *EffectManager) Render(glState *engine.GLState, resources *engine.ResourceManager, proj [16]float32) {
+	for _, eff := range em.effects {
+		if isGroundEffect(eff) || isFlyEffect(eff) {
+			continue
+		}
+		em.drawEffect(eff, glState, resources, proj)
 	}
 }
 
