@@ -132,6 +132,7 @@ func (s *SelectChrScene) Open() {
 	s.deleteConfirm = false
 	s.ui = NewUIManager(s.gl, s.resources, s.text)
 	s.buildUI()
+	s.ui.Validate() // 建树后一次性审计布局一致性 (UIAudit 日志)
 	gActiveUI = s.ui
 	s.registerDebugCmds()
 }

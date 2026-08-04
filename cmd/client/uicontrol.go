@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/wil"
 )
 
@@ -221,10 +222,14 @@ func (c *UIControl) SetImgIndex(f *wil.File, idx int) {
 	}
 	c.WLib = f
 	c.FaceIndex = idx
-	if img := f.GetImage(idx); img != nil {
-		c.Width = img.Width
-		c.Height = img.Height
+	img := f.GetImage(idx)
+	if img == nil {
+		// 取图失败仍有命中矩形 → 空气按钮; 不能静默。
+		log.Logf(log.LevelWarn, "UI", "SetImgIndex %s: image %d is nil", c.Name, idx)
+		return
 	}
+	c.Width = img.Width
+	c.Height = img.Height
 }
 
 // ColRowAt 将父空间坐标映射到网格单元格 (TDGrid.GetColRow,

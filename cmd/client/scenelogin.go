@@ -333,6 +333,7 @@ func (s *LoginScene) Open() {
 	gSound.PlayBGM(bmgIntro)
 	s.ui = NewUIManager(s.gl, s.resources, s.textSmall)
 	s.buildLoginUI()
+	s.ui.Validate() // 建树后一次性审计布局一致性 (UIAudit 日志)
 	gActiveUI = s.ui
 	s.mode = modeLogin
 	s.showLoginUI = true

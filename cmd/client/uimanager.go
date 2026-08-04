@@ -23,8 +23,9 @@ type UIManager struct {
 	Capture *UIControl
 	Focused *UIControl
 
-	ShowBounds    bool // 调试: 绘制所有可见控件的包围盒
-	ShowHoverInfo bool // 调试: 鼠标悬停时浮动显示控件信息
+	ShowBounds     bool // 调试: 绘制所有可见控件的包围盒
+	ShowImageRects bool // 调试: bounds 时叠加图片实际绘制矩形 (红=BlitImage 位, 橙=+HotX/HotY 位)
+	ShowHoverInfo  bool // 调试: 鼠标悬停时浮动显示控件信息
 	// 调试: 包围盒名字模式 0=仅框 1=框+仅光标悬停控件及其祖先的名字 2=框+全部名字(带底条+去重)。
 	// 与 ShowBounds 解耦: ShowBounds 只决定是否画框, BoundsNames 决定名字密度。
 	BoundsNames    int
@@ -744,14 +745,22 @@ func (m *UIManager) DebugList(kindFilter string) string {
 }
 
 // DebugHoverInfo 返回鼠标坐标处最顶层控件的简要信息。
+// ShowImageRects 开启时附带图片绘制矩形对照 (hit≠img 即命中/绘制错位)。
 func (m *UIManager) DebugHoverInfo(x, y int) string {
 	c := m.HoveredControl(x, y)
 	if c == nil {
 		return ""
 	}
 	w, h := c.effectiveSize()
-	return fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d vis=%v",
+	s := fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d vis=%v",
 		c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, c.Visible)
+	if _, _, iw, ih, hotX, hotY, ok := c.imageRect(); ok {
+		s += fmt.Sprintf(" | img=%dx%d off=(%d,%d)", iw, ih, hotX, hotY)
+		if iw != w || ih != h || hotX != 0 || hotY != 0 {
+			s += " [hit≠img]"
+		}
+	}
+	return s
 }
 
 // HoveredControl 返回鼠标坐标处最顶层的可交互控件 (Button/Grid/EnableFocus)。
@@ -889,6 +898,23 @@ func (ctx *boundsCtx) walk(c *UIControl, proj [16]float32) {
 			}
 			x, y := float32(c.AbsX()), float32(c.AbsY())
 			drawWireRect(ctx.m.gl, x, y, float32(w), float32(h), r, g, b, 0.9, proj)
+			// 图片绘制矩形对照 (ui bounds img): 红=BlitImage 实际落图位,
+			// 橙=自定义绘制叠加 HotX/HotY 后的位置; 与绿框(命中)不重合即 bug 现场。
+			label := c.Name
+			if ctx.m.ShowImageRects {
+				if _, _, iw, ih, hotX, hotY, ok := c.imageRect(); ok {
+					fw, fh := float32(iw), float32(ih)
+					if iw != w || ih != h {
+						drawWireRect(ctx.m.gl, x, y, fw, fh, 1, 0.25, 0.25, 0.9, proj)
+					}
+					if hotX != 0 || hotY != 0 {
+						drawWireRect(ctx.m.gl, x+float32(hotX), y+float32(hotY), fw, fh, 1, 0.6, 0, 0.9, proj)
+					}
+					if iw != w || ih != h || hotX != 0 || hotY != 0 {
+						label = fmt.Sprintf("%s hit=%dx%d img=%dx%d off=(%d,%d)", c.Name, w, h, iw, ih, hotX, hotY)
+					}
+				}
+			}
 			parentIsGrid := c.Parent != nil && c.Parent.Kind == KindGrid
 			drawName := false
 			switch ctx.mode {
@@ -898,7 +924,7 @@ func (ctx *boundsCtx) walk(c *UIControl, proj [16]float32) {
 				drawName = ctx.hot[c]
 			}
 			if drawName {
-				ctx.drawLabel(c.Name, x, y, float32(w), float32(h), r, g, b, proj)
+				ctx.drawLabel(label, x, y, float32(w), float32(h), r, g, b, proj)
 			}
 		}
 	}

@@ -309,6 +309,7 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 	s.buildGuildPanels()
 	s.buildAbilPanel()
 	s.buildFriendPanel()
+	s.ui.Validate() // 建树后一次性审计布局一致性 (UIAudit 日志)
 	return s
 }
 

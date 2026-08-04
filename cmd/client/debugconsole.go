@@ -145,7 +145,7 @@ func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer, sceneMgr *en
 	dc.Register("wire", "wireframe: wire | wire all | wire 0", dc.cmdWire)
 	dc.Register("fps", "toggle FPS display", dc.cmdFPS)
 	dc.Register("hud", "toggle debug status bar", dc.cmdHUD)
-	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list", dc.cmdUI)
+	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list|audit", dc.cmdUI)
 	dc.Register("click", "click <x> <y> [right] — simulate click", dc.cmdClick)
 	dc.Register("clicklog", "toggle verbose click hit logging", dc.cmdClickLog)
 	dc.Register("dump", "dump console output to log", dc.cmdDump)
@@ -628,10 +628,16 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		return
 	}
 	if len(args) == 0 {
-		dc.Printf("usage: ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list")
+		dc.Printf("usage: ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list|audit")
 		return
 	}
 	switch args[0] {
+	case "audit":
+		filter := ""
+		if len(args) > 1 {
+			filter = args[1]
+		}
+		dc.Print(ui.DebugAudit(filter))
 	case "tree":
 		depth := 3
 		if len(args) > 1 {
@@ -639,6 +645,14 @@ func (dc *DebugConsole) cmdUI(args []string) {
 		}
 		dc.Print(ui.DebugTree(depth))
 	case "bounds":
+		if len(args) > 1 && args[1] == "img" {
+			ui.ShowImageRects = !ui.ShowImageRects
+			if ui.ShowImageRects {
+				ui.ShowBounds = true // 图片矩形需与命中框同屏对比才有意义
+			}
+			dc.Printf("ui bounds img %s (红=图片绘制位 橙=HotX/HotY 偏移位)", onOff(ui.ShowImageRects))
+			return
+		}
 		ui.ShowBounds = !ui.ShowBounds
 		if ui.ShowBounds {
 			ui.BoundsNames = 1 // 默认可读模式: 框+仅光标下名字

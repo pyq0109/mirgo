@@ -1,0 +1,40 @@
+DBackground (control) [0,0 800x600] vis 4ch
+  DLoginPanel (window) [252,173 296x254] HID 6ch
+    EdLoginID (control) [348,258 140x17] vis
+    EdLoginPW (control) [348,290 141x17] vis
+    BtnOK (button) [420,338 73x32] vis
+    BtnChangePW (button) [383,377 117x32] vis
+    BtnNewAccount (button) [278,377 102x32] vis
+    BtnClose (button) [504,201 16x23] vis
+  DRegPanel (window) [80,64 640x472] HID 16ch
+    EdReg0 (control) [241,180 117x16] vis
+    EdReg1 (control) [241,201 117x16] vis
+    EdReg2 (control) [241,222 117x16] vis
+    EdReg3 (control) [241,251 117x16] vis
+    EdReg4 (control) [241,272 117x16] vis
+    EdReg5 (control) [241,293 117x16] vis
+    EdReg6 (control) [241,320 164x16] vis
+    EdReg7 (control) [241,340 164x16] vis
+    EdReg8 (control) [241,361 164x16] vis
+    EdReg9 (control) [241,381 164x16] vis
+    EdReg10 (control) [241,411 117x16] vis
+    EdReg11 (control) [241,432 117x16] vis
+    EdReg12 (control) [241,452 166x16] vis
+    BtnRegOk (button) [237,479 82x30] vis
+    BtnRegCancel (button) [525,482 82x30] vis
+    BtnRegClose (button) [667,97 16x23] vis
+  DChgPanel (window) [190,150 420x300] HID 6ch
+    EdChg0 (control) [429,268 137x16] vis
+    EdChg1 (control) [429,300 137x16] vis
+    EdChg2 (control) [429,327 137x16] vis
+    EdChg3 (control) [429,358 137x16] vis
+    BtnChgOk (button) [370,402 70x26] vis
+    BtnChgCancel (button) [465,401 70x26] vis
+  DSrvPanel (window) [250,75 300x450] HID 7ch
+    BtnSrvClose (button) [494,101 24x24] vis
+    BtnSrv0 (button) [250,75 180x35] HID
+    BtnSrv1 (button) [250,75 180x35] HID
+    BtnSrv2 (button) [250,75 180x35] HID
+    BtnSrv3 (button) [250,75 180x35] HID
+    BtnSrv4 (button) [250,75 180x35] HID
+    BtnSrv5 (button) [250,75 180x35] HID

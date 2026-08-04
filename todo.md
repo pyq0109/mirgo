@@ -36,10 +36,8 @@
 
 # serverconfig
 
-- [ ] 检查 serverconfig 转换出来的配置文件与 asset/server 是否完全一致
-- [ ] serverdata 目录取消, 让 mir2.db 与 server 同级
-- [ ] 压缩优化 serverconfig 目录结构, 让配置更密集, 更合理
-- [ ] serverconfig 文件名去掉 "\_"
+- [ ] serverconfig 转换出来的配置文件要带上本项目的 go 服务端额外的一些配置, 而不仅仅是 176 服务端原本的配置
+- [ ] serverconfig 转换出来的配置文件要带上中文注释
 
 # 综合
 
@@ -47,3 +45,4 @@
 - [x] 封包拆包逻辑是否和 Delphi 完全一致
 - [x] doc 目录文档整理
 - [x] 恢复提交 go.sum（当前被 gitignore）
+

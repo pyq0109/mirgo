@@ -1,0 +1,117 @@
+DBackground (control) [0,0 800x600] vis 13ch
+  DBottom (window) [0,349 800x251] vis 20ch
+    DMyState (button) [643,410 80x24] vis
+    DMyState (button) [682,390 80x24] vis
+    DMyState (button) [722,370 80x24] vis
+    DMyState (button) [764,360 80x24] vis
+    DBotMiniMap (button) [219,453 80x24] vis
+    DBotTrade (button) [249,453 80x24] vis
+    DBotGuild (button) [279,453 80x24] vis
+    DBotGroup (button) [309,453 80x24] vis
+    DBotPlusAbil (button) [339,453 80x24] HID
+    DBotFriend (button) [369,453 80x24] vis
+    DBotLogout (button) [530,453 80x24] vis
+    DBotExit (button) [560,453 80x24] vis
+    DButtonHP (button) [40,440 45x90] vis
+    DButtonMP (button) [87,440 45x90] vis
+    DBelt (button) [285,408 32x29] vis
+    DBelt (button) [328,408 32x29] vis
+    DBelt (button) [371,408 32x29] vis
+    DBelt (button) [414,408 32x29] vis
+    DBelt (button) [457,408 32x29] vis
+    DBelt (button) [500,408 32x29] vis
+  DItemBag (window) [0,0 320x260] HID 4ch
+    DItemGrid (grid) [33,43 286x162] vis
+    DGold (button) [133,231 40x30] vis
+    DRepairItem (button) [10,10 48x22] vis
+    DClosebag (button) [314,20 14x20] vis
+  DStateWin (window) [560,0 240x300] HID 23ch
+    DCloseState (button) [783,20 14x20] vis
+    DPrevState (button) [784,65 80x24] vis
+    DNextState (button) [784,190 80x24] vis
+    DStPageUp (button) [762,52 80x24] vis
+    DStPageDown (button) [762,212 80x24] vis
+    DSW (button) [742,65 34x31] vis
+    DSW (button) [675,73 18x18] vis
+    DSW (button) [742,105 34x31] vis
+    DSW (button) [585,141 34x31] vis
+    DSW (button) [742,141 34x31] vis
+    DSW (button) [585,180 34x31] vis
+    DSW (button) [742,180 34x31] vis
+    DSW (button) [607,70 47x87] vis
+    DSW (button) [656,122 53x112] vis
+    DSW (button) [585,232 34x31] vis
+    DSW (button) [637,232 34x31] vis
+    DSW (button) [688,232 34x31] vis
+    DSW (button) [742,232 34x31] vis
+    DStMag (button) [590,37 31x33] vis
+    DStMag (button) [590,82 31x33] vis
+    DStMag (button) [590,127 31x33] vis
+    DStMag (button) [590,172 31x33] vis
+    DStMag (button) [590,216 31x33] vis
+  DMerchantDlg (window) [0,0 400x250] HID 1ch
+    DMerchantDlgClose (button) [372,20 80x24] vis
+  DMenuDlg (window) [0,170 300x200] HID 4ch
+    DMenuPrev (button) [328,212 80x24] vis
+    DMenuNext (button) [328,332 80x24] vis
+    DMenuBuy (button) [100,400 80x24] vis
+    DMenuClose (button) [175,400 80x24] vis
+  DSellDlg (window) [260,170 200x180] HID 3ch
+    DSellDlgSpot (button) [287,237 61x52] vis
+    DSellDlgOk (button) [288,305 80x24] vis
+    DSellDlgClose (button) [341,305 80x24] vis
+  DDealRemoteDlg (window) [464,0 236x200] HID 1ch
+    DDRGrid (control) [485,56 180x66] vis
+  DDealDlg (window) [464,185 236x200] HID 4ch
+    DDGrid (grid) [485,241 180x66] vis
+    DDGold (button) [475,322 80x24] vis
+    DDealOk (button) [619,313 80x24] vis
+    DDealClose (button) [684,227 80x24] vis
+  DGuildDlg (window) [0,-3 600x440] HID 14ch
+    DGDClose (button) [568,17 40x18] vis
+    DGDHome (button) [27,384 40x18] vis
+    DGDList (button) [27,404 40x18] vis
+    DGDChat (button) [112,404 40x18] vis
+    DGDAddMem (button) [235,384 40x18] vis
+    DGDDelMem (button) [235,404 40x18] vis
+    DGDEditNotice (button) [320,384 40x18] vis
+    DGDEditGrade (button) [320,404 40x18] vis
+    DGDAlly (button) [404,384 40x18] vis
+    DGDBreakAlly (button) [404,404 40x18] vis
+    DGDWar (button) [488,384 40x18] vis
+    DGDCancelWar (button) [488,404 40x18] vis
+    DGDUp (button) [567,107 80x24] vis
+    DGDDown (button) [567,361 80x24] vis
+  DGroupDlg (window) [240,155 320x290] HID 5ch
+    DGrpDlgClose (button) [536,176 80x24] vis
+    DGrpAllowGroup (button) [387,185 80x24] vis
+    DGrpCreate (button) [286,410 60x22] vis
+    DGrpAddMem (button) [363,410 60x22] vis
+    DGrpDelMem (button) [442,410 60x22] vis
+  DAdjustAbility (window) [0,0 300x340] HID 20ch
+    DPlus (button) [217,101 10x12] vis
+    DMinus (button) [227,101 10x12] vis
+    DPlus (button) [217,121 10x12] vis
+    DMinus (button) [227,121 10x12] vis
+    DPlus (button) [217,140 10x12] vis
+    DMinus (button) [227,140 10x12] vis
+    DPlus (button) [217,160 10x12] vis
+    DMinus (button) [227,160 10x12] vis
+    DPlus (button) [217,181 10x12] vis
+    DMinus (button) [227,181 10x12] vis
+    DPlus (button) [217,201 10x12] vis
+    DMinus (button) [227,201 10x12] vis
+    DPlus (button) [217,220 10x12] vis
+    DMinus (button) [227,220 10x12] vis
+    DPlus (button) [217,240 10x12] vis
+    DMinus (button) [227,240 10x12] vis
+    DPlus (button) [217,261 10x12] vis
+    DMinus (button) [227,261 10x12] vis
+    DAdjustAbilOk (button) [255,301 80x24] vis
+    DAdjustAbilClose (button) [282,19 14x20] vis
+  DUserState1 (window) [320,0 240x300] HID 1ch
+    DCloseUS1 (button) [340,223 14x20] vis
+  DFrdFriendDlg (window) [500,50 300x400] HID 3ch
+    DFrdClose (button) [768,58 24x24] vis
+    DFrdAdd (button) [520,410 80x24] vis
+    DFrdDel (button) [610,410 80x24] vis

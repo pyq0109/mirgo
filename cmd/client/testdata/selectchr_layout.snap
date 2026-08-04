@@ -1,0 +1,20 @@
+DBackground (control) [0,0 800x600] vis 8ch
+  BtnSelect1 (button) [134,454 76x33] vis
+  BtnSelect2 (button) [685,454 76x33] vis
+  BtnStart (button) [385,456 44x21] vis
+  BtnNewChr (button) [348,486 120x21] vis
+  BtnErase (button) [347,506 120x21] vis
+  BtnExit (button) [379,547 56x20] vis
+  DCreatePanel (window) [0,0 260x320] HID 8ch
+    EdChrName (control) [62,104 128x20] vis
+    BtnJob0 (button) [47,156 44x36] vis
+    BtnJob1 (button) [92,156 44x36] vis
+    BtnJob2 (button) [137,156 44x36] vis
+    BtnSex0 (button) [92,230 44x35] vis
+    BtnSex1 (button) [137,230 44x35] vis
+    BtnCreateOk (button) [95,359 90x29] vis
+    BtnCreateClose (button) [246,30 18x20] vis
+  DDeletePanel (window) [210,210 380x180] HID 3ch
+    BtnDelYes (button) [314,336 96x34] vis
+    BtnDelNo (button) [424,336 96x34] vis
+    BtnDelCancel (button) [534,336 96x34] vis
