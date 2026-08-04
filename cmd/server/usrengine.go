@@ -55,6 +55,15 @@ func (e *UserEngine) DB() *storage.Database {
 	return e.db
 }
 
+// allocItemID 分配全局唯一物品实例 ID。
+func (e *UserEngine) allocItemID() int32 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id := e.nextItemID
+	e.nextItemID++
+	return id
+}
+
 func (e *UserEngine) AddPlayer(player *PlayObject) {
 	e.mu.Lock()
 	e.PlayObjectList[player.ID] = player
@@ -161,7 +170,7 @@ func (e *UserEngine) SaveAllPlayers(db *storage.Database) {
 func (e *UserEngine) ProcessNpcs() {
 	for _, npc := range e.Npcs {
 		if npc.IsMerchant && len(npc.RefillConfig) > 0 {
-			npc.RefillGoods(e.ItemDB)
+			npc.RefillGoods(e.ItemDB, e)
 		}
 		npc.SaveData(e.db)
 	}

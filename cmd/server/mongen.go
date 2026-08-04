@@ -128,7 +128,7 @@ func (e *UserEngine) LoadNpcs() {
 			npc.Script = scriptPath
 		}
 
-		npc.LoadData(e.db)
+		npc.LoadData(e.db, e)
 		env.AddObject(npc.CurrX, npc.CurrY, OS_MOVINGOBJECT, npc)
 		e.Npcs = append(e.Npcs, npc)
 		merchantCount++

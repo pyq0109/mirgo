@@ -1859,57 +1859,44 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.State.ShowNpcDialog = false
 
 	case protocol.SMSendGoodsList:
+		// Delphi ClientGetSendGoodsList（ClMain.pas:5553-5584）：
+		// body 为文本 "名字/子菜单/价格/库存/..."。
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 0
 		h.playScene.State.ShopDetailMode = false
 		h.playScene.State.ShopNpcID = msg.Recog
 		h.playScene.menuTop = 0
 		h.playScene.menuIndex = -1
-		raw := []byte(body)
-		if len(raw) >= 2 {
-			count := int(binary.LittleEndian.Uint16(raw[0:2]))
-			h.playScene.State.ShopGoods = make([]ShopItem, 0, count)
-			for i := 0; i < count; i++ {
-				off := 2 + i*6
-				if off+6 > len(raw) {
-					break
-				}
-				itemIdx := binary.LittleEndian.Uint16(raw[off : off+2])
-				price := int(binary.LittleEndian.Uint16(raw[off+2 : off+4]))
-				stock := int(binary.LittleEndian.Uint16(raw[off+4 : off+6]))
-				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price, Stock: stock})
-			}
-		}
+		h.playScene.State.ShopGoods = parseGoodsText(body)
 
 	case protocol.SMSendDetailGoodsList:
-		// Delphi ClMain.pas:5692-5730：商品明细列表（逐实例耐久/价格）
+		// Delphi ClientGetSendDetailGoodsList（ClMain.pas:5692-5730）：
+		// body 按 '/' 分段、每段 DecodeBuffer→TClientItem；行数据
+		// Price=DuraMax 字段(单价)、Stock=MakeIndex、Grade=Dura/1000。
 		st := h.playScene.State
 		st.ShowShop = true
 		st.ShopMode = 0
 		st.ShopDetailMode = true
 		st.ShopDetailTop = int(msg.Tag)
-		raw := []byte(body)
-		st.ShopDetailGoods = nil
-		if len(raw) >= 2 {
-			count := int(binary.LittleEndian.Uint16(raw[0:2]))
-			st.ShopDetailGoods = make([]ShopDetailItem, 0, count)
-			for i := 0; i < count; i++ {
-				off := 2 + i*14
-				if off+14 > len(raw) {
-					break
-				}
-				it := ShopDetailItem{
-					WIndex:    binary.LittleEndian.Uint16(raw[off : off+2]),
-					Dura:      binary.LittleEndian.Uint16(raw[off+2 : off+4]),
-					DuraMax:   binary.LittleEndian.Uint16(raw[off+4 : off+6]),
-					MakeIndex: int32(binary.LittleEndian.Uint32(raw[off+6 : off+10])),
-					Price:     int(binary.LittleEndian.Uint32(raw[off+10 : off+14])),
-				}
-				if def, ok := st.ItemDefs[int(it.WIndex)]; ok {
-					it.Name = def.Name
-				}
-				st.ShopDetailGoods = append(st.ShopDetailGoods, it)
+		st.ShopNpcID = msg.Recog
+		h.playScene.menuTop = 0
+		h.playScene.menuIndex = -1
+		st.ShopGoods = nil
+		for _, seg := range strings.Split(body, "/") {
+			if seg == "" {
+				break
 			}
+			item, ok := protocol.DecodeClientItem(protocol.Decode6BitBuf([]byte(seg)))
+			if !ok {
+				break
+			}
+			st.ShopGoods = append(st.ShopGoods, ShopItem{
+				Name:    item.S.GetName(),
+				SubMenu: 0,
+				Price:   int(item.DuraMax),
+				Stock:   int(item.MakeIndex),
+				Grade:   int(item.Dura) / 1000,
+			})
 		}
 
 	case protocol.SMSendUserSell:
@@ -1927,10 +1914,37 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.sellPriceStr = ""
 
 	case protocol.SMBuyItemSuccess:
-		log.Logf(log.LevelInfo, "Client", "purchase succeeded")
+		// Delphi ClMain.pas:4636-4641：更新金币，SoldOutGoods 移除
+		// 已售出的详细列表条目（Grade>=0 且 Stock=MakeIndex，
+		// FState.pas:5077-5092）。
+		st := h.playScene.State
+		st.Gold = int(msg.Recog)
+		makeIndex := int(int32(uint32(msg.Tag)<<16 | uint32(msg.Param)))
+		for i := range st.ShopGoods {
+			if st.ShopGoods[i].Grade >= 0 && st.ShopGoods[i].Stock == makeIndex {
+				st.ShopGoods = append(st.ShopGoods[:i], st.ShopGoods[i+1:]...)
+				if h.playScene.menuIndex > len(st.ShopGoods)-1 {
+					h.playScene.menuIndex = len(st.ShopGoods) - 1
+				}
+				break
+			}
+		}
 
 	case protocol.SMBuyItemFail:
-		log.Logf(log.LevelInfo, "Client", "purchase failed: code=%d", msg.Recog)
+		// Delphi ClMain.pas:4642-4650。文案与错误码的原版错位
+		//（服务端 3=金币不足，客户端 3 显示"重量太重"）照搬。
+		var text string
+		switch msg.Recog {
+		case 1:
+			text = "钱数不够，购买失败."
+		case 2:
+			text = "你不能携带更多的物品.."
+		case 3:
+			text = "你的重量太重了.."
+		}
+		if text != "" {
+			ShowConfirm(h.playScene, text, []ModalResult{MrOk}, DlgSmall, nil)
+		}
 
 	case protocol.SMUserSellItemOK:
 		log.Logf(log.LevelInfo, "Client", "sell succeeded")
@@ -1955,27 +1969,15 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		log.Logf(log.LevelInfo, "Client", "repair cost: %d", msg.Recog)
 
 	case protocol.SMSendUserMakeDrugItemList: // 712
-		// 制药列表：复用商店面板，ShopMode=4
+		// 制药列表：与商品列表同一文本格式（Delphi
+		// ClientGetSendMakeDrugList，ClMain.pas:5586-5619），ShopMode=4。
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 4
+		h.playScene.State.ShopDetailMode = false
 		h.playScene.State.ShopNpcID = msg.Recog
 		h.playScene.menuTop = 0
 		h.playScene.menuIndex = -1
-		raw := []byte(body)
-		if len(raw) >= 2 {
-			count := int(binary.LittleEndian.Uint16(raw[0:2]))
-			h.playScene.State.ShopGoods = make([]ShopItem, 0, count)
-			for i := 0; i < count; i++ {
-				off := 2 + i*6
-				if off+6 > len(raw) {
-					break
-				}
-				itemIdx := binary.LittleEndian.Uint16(raw[off : off+2])
-				price := int(binary.LittleEndian.Uint16(raw[off+2 : off+4]))
-				stock := int(binary.LittleEndian.Uint16(raw[off+4 : off+6]))
-				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price, Stock: stock})
-			}
-		}
+		h.playScene.State.ShopGoods = parseGoodsText(body)
 
 	case protocol.SMMakeDrugSuccess: // 713
 		log.Logf(log.LevelInfo, "Client", "drug crafting succeeded")
@@ -2024,9 +2026,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 					name = item.Def.Name
 				}
 				st.ShopGoods = append(st.ShopGoods, ShopItem{
-					ItemIdx: item.Idx,
-					Price:   int(item.MakeIndex),
-					Name:    name,
+					Price: int(item.MakeIndex),
+					Name:  name,
+					Grade: -1,
 				})
 			}
 		}
@@ -2500,9 +2502,25 @@ func connectToServer(addr string, loginScene *LoginScene, playScene *PlayScene, 
 		handler.Send(msg, "")
 	})
 
-	playScene.SetSendBuyItem(func(itemIdx int) {
-		msg := protocol.MakeDefaultMsg(protocol.CMUserBuyItem, 0, uint16(itemIdx), 0, 0)
-		handler.Send(msg, "")
+	playScene.SetSendBuyItem(func(npcID int32, makeIndex int, name string) {
+		// Delphi SendBuyItem（ClMain.pas:3160-3166）：Recog=商人，
+		// Param/Tag=Lo/Hi(MakeIndex)，body=物品名。
+		msg := protocol.MakeDefaultMsg(protocol.CMUserBuyItem, npcID,
+			uint16(uint32(makeIndex)&0xFFFF), uint16(uint32(makeIndex)>>16), 0)
+		handler.Send(msg, name)
+	})
+
+	playScene.SetSendGetDetailItem(func(npcID int32, offset int, name string) {
+		// Delphi SendGetDetailItem（FState.pas:5037）：Recog=商人，
+		// Param=偏移，body=物品名。
+		msg := protocol.MakeDefaultMsg(protocol.CMUserGetDetailItem, npcID, uint16(offset), 0, 0)
+		handler.Send(msg, name)
+	})
+
+	playScene.SetSendMakeDrugItem(func(npcID int32, name string) {
+		// Delphi SendMakeDrugItem（FState.pas:5045-5047）。
+		msg := protocol.MakeDefaultMsg(protocol.CMUserMakeDrugItem, npcID, 0, 0, 0)
+		handler.Send(msg, name)
 	})
 
 	playScene.SetSendSellItem(func(makeIndex int32) {

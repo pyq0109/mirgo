@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -58,8 +59,9 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 		return
 	}
 
-	itemIdx := int(msg.Param1)
-	def := p.ItemDB.GetByIdx(itemIdx)
+	// Delphi SendMakeDrugItem（FState.pas:5045-5047）：body 携带物品名。
+	name := strings.TrimSpace(msg.Msg)
+	def := p.ItemDB.GetByName(name)
 	if def == nil {
 		p.sendMakeDrugFail(server)
 		return
@@ -79,7 +81,7 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 			return
 		}
 		p.Gold -= drugPrice
-		p.GiveItem(itemIdx)
+		p.GiveItem(def.Idx)
 		p.SendBagItemsFull(server)
 		goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 		server.Send(p.Session.ID, goldResp, "")
@@ -103,7 +105,7 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 		p.removeBagItems(mat.Name, mat.Count)
 	}
 	p.Gold -= recipe.GoldCost
-	p.GiveItem(itemIdx)
+	p.GiveItem(def.Idx)
 	p.SendBagItemsFull(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")

@@ -87,3 +87,27 @@ func (db *ItemDB) CreateUserItem(idx int) *protocol.UserItem {
 		DuraMax: dura,
 	}
 }
+
+// StdItemOf 将 ItemDef 打包为 protocol.StdItem（详细商品列表
+// TClientItem.S 用）。Lo/Hi 打包约定见 types.go：低字节=基础值，
+// 高字节=最大值（对应 Delphi CopyStdItemToOStdItem 的字段布局）。
+func StdItemOf(def *ItemDef) protocol.StdItem {
+	var s protocol.StdItem
+	copy(s.Name[:], def.Name)
+	s.StdMode = def.StdMode
+	s.Shape = def.Shape
+	s.Weight = def.Weight
+	s.AniCount = def.AniCount
+	s.Source = int8(def.Source)
+	s.Looks = def.Looks
+	s.DuraMax = def.DuraMax
+	s.AC = def.ACMax<<16 | def.AC
+	s.MAC = def.MACMax<<16 | def.MAC
+	s.DC = def.DCMax<<16 | def.DC
+	s.MC = def.MCMax<<16 | def.MC
+	s.SC = def.SCMax<<16 | def.SC
+	s.Need = uint32(def.Need)
+	s.NeedLevel = uint32(def.NeedLevel)
+	s.Price = def.Price
+	return s
+}

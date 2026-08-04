@@ -1,17 +1,13 @@
 package main
 
 import (
-	"encoding/binary"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
-
-type MerchantGoods struct {
-	ItemName string `json:"itemName"`
-	Price    int    `json:"price"`
-}
 
 // HandleMerchantDlgSelect 处理点击 NPC 对话链接（Delphi TMerchant.UserSelect, ObjNpc.pas:1419-1607）。
 func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.TCPServer) {
@@ -154,26 +150,35 @@ func (p *PlayObject) sendGoodsList(server *netserver.TCPServer, npc *NpcObject) 
 	p.sendGoodsListFromDB(server, npc)
 }
 
+// goodsSubMenu 按 Delphi 规则判定子菜单标志（ObjNpc.pas:1435-1437）：
+// 消耗品（StdMode<=4 / 42 / 31）无子菜单，装备类有。
+func goodsSubMenu(def *ItemDef) int {
+	if def.StdMode <= 4 || def.StdMode == 42 || def.StdMode == 31 {
+		return 0
+	}
+	return 1
+}
+
+// sendGoodsListFromStock 发送商品列表（Delphi TMerchant.UserSelect 内嵌 BuyItem，
+// ObjNpc.pas:1424-1457）：body 为文本 "名字/子菜单/价格/库存/..." 经 EncodeString，
+// 条目数放消息头 Param（ObjBase.pas:5855-5862）。
+// 顺序按 RefillConfig（脚本 [goods] 顺序）保证确定性，Delphi m_GoodsList 为有序 TList。
 func (p *PlayObject) sendGoodsListFromStock(server *netserver.TCPServer, npc *NpcObject) {
 	if p.ItemDB == nil {
 		return
 	}
 
-	type goodsEntry struct {
-		idx   uint16
-		price uint16
-		stock uint16
-	}
-	var entries []goodsEntry
-
-	npc.mu.RLock()
-	for name, stock := range npc.GoodsList {
-		if len(stock.Items) == 0 {
-			continue
+	var sb strings.Builder
+	count := 0
+	seen := make(map[string]bool)
+	appendEntry := func(name string) {
+		stock := npc.GoodsList[name]
+		if stock == nil || len(stock.Items) == 0 {
+			return
 		}
 		def := p.ItemDB.GetByName(name)
 		if def == nil {
-			continue
+			return
 		}
 		price := int(def.Price)
 		if ip, ok := npc.PriceList[def.Idx]; ok && ip.Price > 0 {
@@ -183,89 +188,77 @@ func (p *PlayObject) sendGoodsListFromStock(server *netserver.TCPServer, npc *Np
 		if price <= 0 {
 			price = 1
 		}
-		entries = append(entries, goodsEntry{idx: uint16(def.Idx), price: uint16(price), stock: uint16(len(stock.Items))})
+		sb.WriteString(name + "/" + strconv.Itoa(goodsSubMenu(def)) + "/" +
+			strconv.Itoa(price) + "/" + strconv.Itoa(len(stock.Items)) + "/")
+		count++
+		seen[name] = true
+	}
+
+	npc.mu.RLock()
+	for _, cfg := range npc.RefillConfig {
+		appendEntry(cfg.ItemName)
+	}
+	// RefillConfig 之外的库存（如玩家卖入的物品）按名字排序补充。
+	var extras []string
+	for name := range npc.GoodsList {
+		if !seen[name] {
+			extras = append(extras, name)
+		}
+	}
+	sort.Strings(extras)
+	for _, name := range extras {
+		appendEntry(name)
 	}
 	npc.mu.RUnlock()
 
-	buf := make([]byte, 0, 2+len(entries)*6)
-	count := make([]byte, 2)
-	binary.LittleEndian.PutUint16(count, uint16(len(entries)))
-	buf = append(buf, count...)
-	for _, e := range entries {
-		entry := make([]byte, 6)
-		binary.LittleEndian.PutUint16(entry[0:2], e.idx)
-		binary.LittleEndian.PutUint16(entry[2:4], e.price)
-		binary.LittleEndian.PutUint16(entry[4:6], e.stock)
-		buf = append(buf, entry...)
-	}
-	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(len(entries)), 0, 0)
-	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(count), 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(sb.String()))
 }
 
+// sendGoodsListFromDB 回退商品列表（Go 闭环专有，Delphi 无对应物）：
+// 无 [goods] 脚本的商人从物品库取前 50 件有价商品，格式与库存路径一致。
 func (p *PlayObject) sendGoodsListFromDB(server *netserver.TCPServer, npc *NpcObject) {
 	if p.ItemDB == nil {
 		return
 	}
-	var goods []MerchantGoods
+	var sb strings.Builder
+	count := 0
 	for i := range p.ItemDB.Items {
 		item := &p.ItemDB.Items[i]
 		if item.Price > 0 && item.StdMode < 40 {
-			goods = append(goods, MerchantGoods{ItemName: item.Name, Price: int(item.Price)})
+			sb.WriteString(item.Name + "/" + strconv.Itoa(goodsSubMenu(item)) + "/" +
+				strconv.Itoa(int(item.Price)) + "/9999/")
+			count++
 		}
-		if len(goods) >= 50 {
+		if count >= 50 {
 			break
 		}
 	}
-	buf := make([]byte, 0, 2+len(goods)*6)
-	count := make([]byte, 2)
-	binary.LittleEndian.PutUint16(count, uint16(len(goods)))
-	buf = append(buf, count...)
-	for _, g := range goods {
-		entry := make([]byte, 6)
-		def := p.ItemDB.GetByName(g.ItemName)
-		if def != nil {
-			binary.LittleEndian.PutUint16(entry[0:2], uint16(def.Idx))
-		}
-		binary.LittleEndian.PutUint16(entry[2:4], uint16(g.Price))
-		binary.LittleEndian.PutUint16(entry[4:6], 9999) // DB回退路径使用无限库存
-		buf = append(buf, entry...)
-	}
-	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(len(goods)), 0, 0)
-	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+	resp := protocol.MakeDefaultMsg(protocol.SMSendGoodsList, npc.ID, uint16(count), 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(sb.String()))
 }
 
-// sendMakeDrugList 发送制药配方列表（消息ID 712）
+// sendMakeDrugList 发送制药配方列表（消息ID 712）。
+// Delphi ClientGetSendMakeDrugList（ClMain.pas:5586-5619）与商品列表同一文本格式。
 func (p *PlayObject) sendMakeDrugList(server *netserver.TCPServer, npc *NpcObject) {
 	if p.ItemDB == nil {
 		return
 	}
-	// 简化实现：发送可制作的药品列表（StdMode 0-3 为药水类）
-	var goods []MerchantGoods
+	var sb strings.Builder
+	count := 0
 	for i := range p.ItemDB.Items {
 		item := &p.ItemDB.Items[i]
+		// StdMode 0-3 为药水类
 		if item.StdMode <= 3 && item.Price > 0 {
-			goods = append(goods, MerchantGoods{ItemName: item.Name, Price: int(item.Price)})
+			sb.WriteString(item.Name + "/0/" + strconv.Itoa(int(item.Price)) + "/9999/")
+			count++
 		}
-		if len(goods) >= 50 {
+		if count >= 50 {
 			break
 		}
 	}
-	buf := make([]byte, 0, 2+len(goods)*6)
-	count := make([]byte, 2)
-	binary.LittleEndian.PutUint16(count, uint16(len(goods)))
-	buf = append(buf, count...)
-	for _, g := range goods {
-		entry := make([]byte, 6)
-		def := p.ItemDB.GetByName(g.ItemName)
-		if def != nil {
-			binary.LittleEndian.PutUint16(entry[0:2], uint16(def.Idx))
-		}
-		binary.LittleEndian.PutUint16(entry[2:4], uint16(g.Price))
-		binary.LittleEndian.PutUint16(entry[4:6], 9999) // 无限库存
-		buf = append(buf, entry...)
-	}
-	resp := protocol.MakeDefaultMsg(protocol.SMSendUserMakeDrugItemList, npc.ID, uint16(len(goods)), 0, 0)
-	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+	resp := protocol.MakeDefaultMsg(protocol.SMSendUserMakeDrugItemList, npc.ID, uint16(count), 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(sb.String()))
 }
 
 // calcBuyPrice 计算物品实例的购买价格。
@@ -333,83 +326,121 @@ func (p *PlayObject) calcBuyPrice(npc *NpcObject, def *ItemDef, item *protocol.U
 	return price
 }
 
+// HandleBuyItem — Delphi ClientUserBuyItem + Merchant.ClientBuyItem
+//（ObjBase.pas:16157-16177、ObjNpc.pas:1922-2026）。
+// Param1=商人ID，Param2=MakeIndex，Msg=物品名。
+// 失败码：1=默认（名字/实例不匹配、负重门禁），2=背包满，3=金币不足
+//（客户端 1/3 文案与码的原版错位照搬，见 ClMain.pas:4643-4649）。
 func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer) {
-	// 距离验证：确保玩家仍在NPC附近
-	if p.CurrentNpc != nil && !p.isNearNpc(p.CurrentNpc) {
-		p.sendBuyFail(server)
+	// Delphi: m_boDealing 交易中禁止（ObjBase.pas:16162）
+	if p.Deal != nil {
+		return
+	}
+	var npc *NpcObject
+	if p.envir != nil {
+		npc, _ = p.envir.getNpcByID(int32(msg.Param1))
+	}
+	if npc == nil {
+		npc = p.CurrentNpc
+	}
+	// Delphi: 商人存在、同图、距离≤15（ObjBase.pas:16163-16168）
+	if npc == nil || !p.isNearNpc(npc) {
+		p.sendBuyFail(server, 1)
+		return
+	}
+	if p.ItemDB == nil {
+		p.sendBuyFail(server, 1)
+		return
+	}
+	name := msg.Msg
+	makeIndex := int32(msg.Param2)
+	def := p.ItemDB.GetByName(name)
+	if def == nil {
+		p.sendBuyFail(server, 1)
 		return
 	}
 
-	itemIdx := int(msg.Param1)
-	if p.ItemDB == nil {
-		p.sendBuyFail(server)
-		return
-	}
-	def := p.ItemDB.GetByIdx(itemIdx)
-	if def == nil {
-		p.sendBuyFail(server)
+	// Delphi: 负重门禁 IsAddWeightAvailable（ObjNpc.pas:1957）；
+	// 原版此分支保持 n1C=1（客户端文案与码错位，照搬）。
+	if p.WAbil.MaxWeight > 0 && int(p.WAbil.Weight)+int(def.Weight) > int(p.WAbil.MaxWeight) {
+		p.sendBuyFail(server, 1)
 		return
 	}
 	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
-		p.sendBuyFail(server)
+		p.sendBuyFail(server, 2) // AddItemToBag 失败：你不能携带更多的物品
 		return
 	}
 
-	var npc *NpcObject
-	if p.CurrentNpc != nil {
-		npc = p.CurrentNpc
-	}
-
-	// 先从库存选取物品，再按实例计算价格（Delphi ObjNpc.pas:1922-2028）
+	// 按名字找堆栈；消耗品忽略 MakeIndex 取首件，装备须 MakeIndex 精确匹配
+	//（ObjNpc.pas:1990-2000）。
+	consumable := def.StdMode <= 4 || def.StdMode == 42 || def.StdMode == 31
+	fromStock := false
 	var item *protocol.UserItem
-	if npc != nil && len(npc.GoodsList) > 0 {
-		npc.mu.Lock()
-		if stock, ok := npc.GoodsList[def.Name]; ok && len(stock.Items) > 0 {
+	npc.mu.Lock()
+	if stock, ok := npc.GoodsList[name]; ok && len(stock.Items) > 0 {
+		fromStock = true
+		if consumable {
 			item = stock.Items[0]
 			stock.Items = stock.Items[1:]
+		} else {
+			for i := range stock.Items {
+				if stock.Items[i].MakeIndex == makeIndex {
+					item = stock.Items[i]
+					stock.Items = append(stock.Items[:i], stock.Items[i+1:]...)
+					break
+				}
+			}
 		}
-		npc.mu.Unlock()
+		// 堆栈清空则删除（ObjNpc.pas:2010-2014）
+		if len(stock.Items) == 0 {
+			delete(npc.GoodsList, name)
+		}
 	}
+	npc.mu.Unlock()
+
 	if item == nil {
+		if fromStock {
+			// 有库存但无匹配实例（如被其他玩家先买走）：按原版失败
+			p.sendBuyFail(server, 1)
+			return
+		}
+		// Go 闭环兜底：NPC 完全没有该物品库存（DB 回退商品）时创建新实例
 		item = p.ItemDB.CreateUserItem(def.Idx)
-	}
-	if item == nil {
-		p.sendBuyFail(server)
-		return
+		if item == nil {
+			p.sendBuyFail(server, 1)
+			return
+		}
 	}
 
 	price := p.calcBuyPrice(npc, def, item)
-	if p.Gold < price {
-		// 放回库存
-		if npc != nil {
-			npc.mu.Lock()
-			stock := npc.GoodsList[def.Name]
-			if stock == nil {
-				stock = &GoodsStock{}
-				npc.GoodsList[def.Name] = stock
-			}
-			stock.Items = append([]*protocol.UserItem{item}, stock.Items...)
-			npc.mu.Unlock()
+	if p.Gold < price || price <= 0 {
+		// 放回库存头部（沿用既有模式）
+		npc.mu.Lock()
+		stock := npc.GoodsList[name]
+		if stock == nil {
+			stock = &GoodsStock{}
+			npc.GoodsList[name] = stock
 		}
-		p.sendBuyFail(server)
+		stock.Items = append([]*protocol.UserItem{item}, stock.Items...)
+		npc.mu.Unlock()
+		p.sendBuyFail(server, 3) // 金币不足（原版客户端文案 3="你的重量太重了.."，ClMain.pas:4647）
 		return
 	}
 
-	// 分配唯一 MakeIndex
-	if p.Engine != nil {
-		p.Engine.mu.Lock()
-		item.MakeIndex = int32(p.Engine.nextItemID)
-		p.Engine.nextItemID++
-		p.Engine.mu.Unlock()
+	if item.MakeIndex == 0 {
+		item.MakeIndex = p.Engine.allocItemID()
 	}
 	p.ItemList = append(p.ItemList, item)
 
 	p.Gold -= price
 	// 城堡税（Delphi Castle.pas:1022-1061）
-	if npc != nil && npc.Castle && p.Engine != nil && p.Engine.Castle != nil {
+	if npc.Castle && p.Engine != nil && p.Engine.Castle != nil {
 		p.Engine.Castle.CollectTax(int64(price * p.Engine.Config.GetCastleTaxRate() / 100))
 	}
-	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(p.Gold), 0, 0, 0)
+	// Delphi RM_BUYITEM_SUCCESS：Recog=剩余金币、Param/Tag=Lo/Hi(MakeIndex)
+	//（ObjBase.pas:5900-5909），客户端据此 SoldOutGoods（FState.pas:5077-5092）。
+	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemSuccess, int32(p.Gold),
+		uint16(uint32(item.MakeIndex)&0xFFFF), uint16(uint32(item.MakeIndex)>>16), 0)
 	server.Send(p.Session.ID, resp, "")
 	p.RecalcAbilitys()
 	p.SendBagItemsFull(server)
@@ -419,9 +450,10 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 }
 
 // HandleGetDetailItem — Delphi ClientUserBuyItem 的 CM_USERGETDETAILITEM 分支
-//（ObjBase.pas:16157-16185）+ Merchant.ClientGetDetailGoodsList（ObjNpc.pas:2031）：
-// 查询商人处某物品的实例明细（最多 10 条，含耐久/价格/MakeIndex）。
-// Recog=商人ID，Param1=页偏移，Msg=物品名。
+//（ObjBase.pas:16157-16185）+ Merchant.ClientGetDetailGoodsList（ObjNpc.pas:2031-2110）：
+// 查询商人处某物品的实例明细，每页最多 10 条。
+// Param1=商人ID，Param2=页偏移（仅 clamp 后回显，Delphi 不用它跳过条目），Msg=物品名。
+// body = 各条目 EncodeBuffer(TClientItem) 以 '/' 拼接后再整体 EncodeString。
 func (p *PlayObject) HandleGetDetailItem(msg SendMessage, server *netserver.TCPServer) {
 	// Delphi: m_boDealing 交易中禁止（ObjBase.pas:16162）
 	if p.Deal != nil {
@@ -442,44 +474,52 @@ func (p *PlayObject) HandleGetDetailItem(msg SendMessage, server *netserver.TCPS
 
 	name := msg.Msg
 	offset := msg.Param2
-	var items []*protocol.UserItem
+
 	npc.mu.RLock()
+	var items []*protocol.UserItem
 	if stock, ok := npc.GoodsList[name]; ok {
 		items = append(items, stock.Items...)
 	}
 	npc.mu.RUnlock()
 
-	if offset < 0 {
-		offset = 0
+	var def *ItemDef
+	if len(items) > 0 {
+		def = p.ItemDB.GetByIdx(int(items[0].WIndex))
 	}
-	if offset > len(items) {
-		offset = len(items)
-	}
-	end := offset + 10
-	if end > len(items) {
-		end = len(items)
+	if def == nil || def.Name != name {
+		return
 	}
 
-	buf := make([]byte, 0, 2+(end-offset)*14)
-	count := make([]byte, 2)
-	binary.LittleEndian.PutUint16(count, uint16(end-offset))
-	buf = append(buf, count...)
-	for i := offset; i < end; i++ {
-		item := items[i]
-		def := p.ItemDB.GetByIdx(int(item.WIndex))
-		if def == nil {
-			continue
+	// Delphi ObjNpc.pas:2055-2058：偏移越界时 clamp 为 max(0, count-10)，
+	// 之后仅回显，不参与取数。
+	if len(items)-1 < offset {
+		offset = len(items) - 10
+		if offset < 0 {
+			offset = 0
 		}
-		entry := make([]byte, 14)
-		binary.LittleEndian.PutUint16(entry[0:2], item.WIndex)
-		binary.LittleEndian.PutUint16(entry[2:4], item.Dura)
-		binary.LittleEndian.PutUint16(entry[4:6], item.DuraMax)
-		binary.LittleEndian.PutUint32(entry[6:10], uint32(item.MakeIndex))
-		binary.LittleEndian.PutUint32(entry[10:14], uint32(p.calcBuyPrice(npc, def, item)))
-		buf = append(buf, entry...)
 	}
-	resp := protocol.MakeDefaultMsg(protocol.SMSendDetailGoodsList, npc.ID, uint16(end-offset), uint16(offset), 0)
-	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
+
+	// Delphi ObjNpc.pas:2059-2072：倒序取最多 10 条。
+	var sb strings.Builder
+	count := 0
+	for ii := len(items) - 1; ii >= 0; ii-- {
+		item := items[ii]
+		ci := protocol.ClientItem{
+			S:         StdItemOf(def),
+			MakeIndex: item.MakeIndex,
+			Dura:      item.Dura,
+			// Delphi 把单价塞进 DuraMax 字段（客户端价格列显示它）；
+			// 原版 TClientItem.DuraMax 为 Word，溢出行为与原版一致。
+			DuraMax: uint16(p.calcBuyPrice(npc, def, item)),
+		}
+		sb.WriteString(protocol.EncodeBuffer(protocol.EncodeClientItem(&ci)) + "/")
+		count++
+		if count >= 10 {
+			break
+		}
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMSendDetailGoodsList, npc.ID, uint16(count), uint16(offset), 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(sb.String()))
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {
@@ -526,13 +566,15 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 	p.Gold += price
 
-	// 将物品添加到 NPC 商品列表（深拷贝，修复 Delphi 原始 bug）
+	// 将物品添加到 NPC 商品列表（深拷贝，修复 Delphi 原始 bug；
+	// 保留 MakeIndex 以便详细列表/按实例购买能匹配）。
 	if p.CurrentNpc != nil && p.CurrentNpc.IsMerchant {
 		npc := p.CurrentNpc
 		itemCopy := &protocol.UserItem{
-			WIndex:  item.WIndex,
-			Dura:    item.Dura,
-			DuraMax: item.DuraMax,
+			MakeIndex: item.MakeIndex,
+			WIndex:    item.WIndex,
+			Dura:      item.Dura,
+			DuraMax:   item.DuraMax,
 		}
 		copy(itemCopy.BtValue[:], item.BtValue[:])
 		npc.mu.Lock()
@@ -702,8 +744,8 @@ func (p *PlayObject) sendRepairMode(server *netserver.TCPServer, npc *NpcObject)
 	server.Send(p.Session.ID, resp, "")
 }
 
-func (p *PlayObject) sendBuyFail(server *netserver.TCPServer) {
-	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemFail, 0, 0, 0, 0)
+func (p *PlayObject) sendBuyFail(server *netserver.TCPServer, code int) {
+	resp := protocol.MakeDefaultMsg(protocol.SMBuyItemFail, int32(code), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 

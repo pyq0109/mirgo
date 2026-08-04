@@ -191,6 +191,70 @@ func DecodeBuffer(str string, buf []byte) {
 	copy(buf, decoded)
 }
 
+// ClientItemSize 是 ClientItem 二进制编码的字节数。
+// StdItem 65 字节（Name[20] + 7 字节字段 + Looks u16 + 9 个 u32）
+// + MakeIndex i32 + Dura u16 + DuraMax u16。
+// 对应 Delphi TClientItem（Grobal2.pas:563-568）。
+const ClientItemSize = 73
+
+// EncodeClientItem 将 ClientItem 编码为小端二进制。
+// 用于 SM_SENDDETAILGOODSLIST 详细商品列表条目。
+func EncodeClientItem(item *ClientItem) []byte {
+	buf := make([]byte, ClientItemSize)
+	copy(buf[0:20], item.S.Name[:])
+	buf[20] = item.S.StdMode
+	buf[21] = item.S.Shape
+	buf[22] = item.S.Weight
+	buf[23] = item.S.AniCount
+	buf[24] = byte(item.S.Source)
+	buf[25] = item.S.Reserved
+	buf[26] = item.S.NeedIdentify
+	binary.LittleEndian.PutUint16(buf[27:29], item.S.Looks)
+	binary.LittleEndian.PutUint32(buf[29:33], item.S.DuraMax)
+	binary.LittleEndian.PutUint32(buf[33:37], item.S.AC)
+	binary.LittleEndian.PutUint32(buf[37:41], item.S.MAC)
+	binary.LittleEndian.PutUint32(buf[41:45], item.S.DC)
+	binary.LittleEndian.PutUint32(buf[45:49], item.S.MC)
+	binary.LittleEndian.PutUint32(buf[49:53], item.S.SC)
+	binary.LittleEndian.PutUint32(buf[53:57], item.S.Need)
+	binary.LittleEndian.PutUint32(buf[57:61], item.S.NeedLevel)
+	binary.LittleEndian.PutUint32(buf[61:65], item.S.Price)
+	binary.LittleEndian.PutUint32(buf[65:69], uint32(item.MakeIndex))
+	binary.LittleEndian.PutUint16(buf[69:71], item.Dura)
+	binary.LittleEndian.PutUint16(buf[71:73], item.DuraMax)
+	return buf
+}
+
+// DecodeClientItem 将小端二进制解码为 ClientItem。
+// 数据不足 ClientItemSize 时返回 ok=false。
+func DecodeClientItem(buf []byte) (item ClientItem, ok bool) {
+	if len(buf) < ClientItemSize {
+		return item, false
+	}
+	copy(item.S.Name[:], buf[0:20])
+	item.S.StdMode = buf[20]
+	item.S.Shape = buf[21]
+	item.S.Weight = buf[22]
+	item.S.AniCount = buf[23]
+	item.S.Source = int8(buf[24])
+	item.S.Reserved = buf[25]
+	item.S.NeedIdentify = buf[26]
+	item.S.Looks = binary.LittleEndian.Uint16(buf[27:29])
+	item.S.DuraMax = binary.LittleEndian.Uint32(buf[29:33])
+	item.S.AC = binary.LittleEndian.Uint32(buf[33:37])
+	item.S.MAC = binary.LittleEndian.Uint32(buf[37:41])
+	item.S.DC = binary.LittleEndian.Uint32(buf[41:45])
+	item.S.MC = binary.LittleEndian.Uint32(buf[45:49])
+	item.S.SC = binary.LittleEndian.Uint32(buf[49:53])
+	item.S.Need = binary.LittleEndian.Uint32(buf[53:57])
+	item.S.NeedLevel = binary.LittleEndian.Uint32(buf[57:61])
+	item.S.Price = binary.LittleEndian.Uint32(buf[61:65])
+	item.MakeIndex = int32(binary.LittleEndian.Uint32(buf[65:69]))
+	item.Dura = binary.LittleEndian.Uint16(buf[69:71])
+	item.DuraMax = binary.LittleEndian.Uint16(buf[71:73])
+	return item, true
+}
+
 // MakeDefaultMsg 用给定参数创建一个 TDefaultMessage。
 func MakeDefaultMsg(ident uint16, recog int32, param, tag, series uint16) DefaultMessage {
 	return DefaultMessage{

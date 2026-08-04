@@ -145,7 +145,7 @@ func (o *NpcObject) InvalidateScript() {
 	o.mu.Unlock()
 }
 
-func (o *NpcObject) InitGoodsFromScript(script *NpcScript, itemDB *ItemDB) {
+func (o *NpcObject) InitGoodsFromScript(script *NpcScript, itemDB *ItemDB, engine *UserEngine) {
 	if !o.IsMerchant || script == nil {
 		return
 	}
@@ -200,13 +200,20 @@ func (o *NpcObject) InitGoodsFromScript(script *NpcScript, itemDB *ItemDB) {
 				o.GoodsList[cfg.ItemName] = stock
 			}
 			for len(stock.Items) < cfg.MaxCount {
-				stock.Items = append(stock.Items, itemDB.CreateUserItem(def.Idx))
+				item := itemDB.CreateUserItem(def.Idx)
+				if item == nil {
+					break
+				}
+				if engine != nil {
+					item.MakeIndex = engine.allocItemID()
+				}
+				stock.Items = append(stock.Items, item)
 			}
 		}
 	}
 }
 
-func (o *NpcObject) RefillGoods(itemDB *ItemDB) {
+func (o *NpcObject) RefillGoods(itemDB *ItemDB, engine *UserEngine) {
 	if itemDB == nil {
 		return
 	}
@@ -240,6 +247,9 @@ func (o *NpcObject) RefillGoods(itemDB *ItemDB) {
 			for i := current; i < cfg.MaxCount; i++ {
 				item := itemDB.CreateUserItem(def.Idx)
 				if item != nil {
+					if engine != nil {
+						item.MakeIndex = engine.allocItemID()
+					}
 					stock.Items = append(stock.Items, item)
 				}
 			}
@@ -298,7 +308,9 @@ func (o *NpcObject) SaveData(db *storage.Database) {
 }
 
 // LoadData 从 SQLite 加载商品库存和价格列表。
-func (o *NpcObject) LoadData(db *storage.Database) {
+// 恢复的库存实例若无 MakeIndex（旧存档），补分配唯一 ID
+//（详细列表与按实例购买依赖它）。
+func (o *NpcObject) LoadData(db *storage.Database, engine *UserEngine) {
 	if db == nil || !o.IsMerchant {
 		return
 	}
@@ -307,6 +319,15 @@ func (o *NpcObject) LoadData(db *storage.Database) {
 	if data, err := db.LoadNpcData(key, "goods"); err == nil && data != nil {
 		o.mu.Lock()
 		json.Unmarshal(data, &o.GoodsList)
+		if engine != nil {
+			for _, stock := range o.GoodsList {
+				for _, item := range stock.Items {
+					if item.MakeIndex == 0 {
+						item.MakeIndex = engine.allocItemID()
+					}
+				}
+			}
+		}
 		o.mu.Unlock()
 	}
 	if data, err := db.LoadNpcData(key, "prices"); err == nil && data != nil {

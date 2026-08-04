@@ -206,3 +206,59 @@ func TestIsClientIdent(t *testing.T) {
 		t.Error("IsClientIdent(0) = true, want false")
 	}
 }
+
+// TestClientItemRoundTrip 验证详细商品列表（SM_SENDDETAILGOODSLIST）
+// 条目的编解码往返，覆盖 Delphi TClientItem 的全部字段。
+func TestClientItemRoundTrip(t *testing.T) {
+	var name [20]byte
+	copy(name[:], []byte{0xBE, 0xAD, 0x01, 0xFF}) // 含高位的任意字节
+	in := ClientItem{
+		S: StdItem{
+			Name:         name,
+			StdMode:      5,
+			Shape:        1,
+			Weight:       12,
+			AniCount:     2,
+			Source:       -1,
+			Reserved:     7,
+			NeedIdentify: 3,
+			Looks:        1234,
+			DuraMax:      22000,
+			AC:           0x00020001,
+			MAC:          0x00040003,
+			DC:           0x00060005,
+			MC:           0x00080007,
+			SC:           0x000A0009,
+			Need:         1,
+			NeedLevel:    33,
+			Price:        100000,
+		},
+		MakeIndex: 200123,
+		Dura:      18000,
+		DuraMax:   65535,
+	}
+	buf := EncodeClientItem(&in)
+	if len(buf) != ClientItemSize {
+		t.Fatalf("EncodeClientItem len = %d, want %d", len(buf), ClientItemSize)
+	}
+	out, ok := DecodeClientItem(buf)
+	if !ok {
+		t.Fatal("DecodeClientItem returned ok=false")
+	}
+	if out != in {
+		t.Errorf("round trip mismatch:\n got %+v\nwant %+v", out, in)
+	}
+
+	// 短数据应失败
+	if _, ok := DecodeClientItem(buf[:ClientItemSize-1]); ok {
+		t.Error("DecodeClientItem(short) = ok, want false")
+	}
+
+	// 与 EncodeBuffer/Decode6BitBuf 组合往返（服务端 652 body 分段格式）
+	seg := EncodeBuffer(buf)
+	raw := Decode6BitBuf([]byte(seg))
+	out2, ok := DecodeClientItem(raw)
+	if !ok || out2 != in {
+		t.Errorf("EncodeBuffer round trip mismatch: ok=%v got %+v", ok, out2)
+	}
+}

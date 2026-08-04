@@ -1079,7 +1079,9 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMOpenDoor:
 		player.SendMsg(protocol.CMOpenDoor, 0, 0, 0, "")
 	case protocol.CMUserBuyItem:
-		player.SendMsg(protocol.CMUserBuyItem, int(msg.Param), 0, 0, "")
+		// Delphi SendBuyItem（ClMain.pas:3160-3166）：Recog=商人，
+		// Param/Tag=Lo/Hi(MakeIndex)，body=物品名。
+		player.SendMsg(protocol.CMUserBuyItem, int(msg.Recog), int(uint32(msg.Tag)<<16|uint32(msg.Param)), 0, body)
 	case protocol.CMUserSellItem:
 		player.SendMsg(protocol.CMUserSellItem, int(msg.Recog), 0, 0, "")
 	case protocol.CMUserRepairItem:
@@ -1089,7 +1091,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 	case protocol.CMMerchantQueryRepairCost:
 		player.SendMsg(protocol.CMMerchantQueryRepairCost, int(msg.Recog), 0, 0, "")
 	case protocol.CMUserMakeDrugItem:
-		player.SendMsg(protocol.CMUserMakeDrugItem, int(msg.Param), 0, 0, "")
+		// Delphi SendMakeDrugItem（FState.pas:5045-5047）：body=物品名。
+		player.SendMsg(protocol.CMUserMakeDrugItem, int(msg.Recog), 0, 0, body)
 	case protocol.CMMerchantDlgSelect:
 		// Body 携带点击的链接标签。
 		player.SendMsg(protocol.CMMerchantDlgSelect, int(msg.Recog), int(msg.Param), 0, body)

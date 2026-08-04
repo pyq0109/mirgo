@@ -83,7 +83,9 @@ type PlayScene struct {
 	sendNpcClick          func(npcID int)
 	sendDealCancel        func()
 	sendUseItem           func(makeIndex int32) // CMEat，通过 MakeIndex 定位物品
-	sendBuyItem           func(itemIdx int)
+	sendBuyItem           func(npcID int32, makeIndex int, name string) // CMUserBuyItem（Delphi SendBuyItem）
+	sendGetDetailItem     func(npcID int32, offset int, name string)    // CMUserGetDetailItem（装备子菜单）
+	sendMakeDrugItem      func(npcID int32, name string)                // CMUserMakeDrugItem
 	sendSellItem          func(makeIndex int32)              // CMUserSellItem，通过 MakeIndex 定位
 	sendDropItem          func(makeIndex int32)              // CMDropItem，通过 MakeIndex 定位
 	sendDropGold          func(amount int)                   // CMDropGold，数量放 Recog 字段
@@ -194,6 +196,7 @@ type PlayScene struct {
 	npcScrollOffset          int // 对话文本滚动偏移
 	menuTop                  int
 	menuIndex                int
+	curDetailItem            string // 详细列表当前物品名（Delphi CurDetailItem）
 	lastBuyTick              int64
 	sellItem                 *BagItem
 	sellWait                 *BagItem // 等待服务器确认出售的物品
@@ -376,8 +379,16 @@ func (s *PlayScene) SetSendUseItem(fn func(makeIndex int32)) {
 	s.sendUseItem = fn
 }
 
-func (s *PlayScene) SetSendBuyItem(fn func(itemIdx int)) {
+func (s *PlayScene) SetSendBuyItem(fn func(npcID int32, makeIndex int, name string)) {
 	s.sendBuyItem = fn
+}
+
+func (s *PlayScene) SetSendGetDetailItem(fn func(npcID int32, offset int, name string)) {
+	s.sendGetDetailItem = fn
+}
+
+func (s *PlayScene) SetSendMakeDrugItem(fn func(npcID int32, name string)) {
+	s.sendMakeDrugItem = fn
 }
 
 func (s *PlayScene) SetSendSellItem(fn func(makeIndex int32)) {

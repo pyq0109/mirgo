@@ -2226,7 +2226,7 @@ func (p *PlayObject) HandleNpcClick(msg SendMessage, server *netserver.TCPServer
 
 	script := npc.GetScript()
 	if script != nil {
-		npc.InitGoodsFromScript(script, p.ItemDB)
+		npc.InitGoodsFromScript(script, p.ItemDB, p.Engine)
 		p.ScriptGotoCount = 0
 		p.ScriptGoBackLabel = ""
 		p.ScriptCurrLabel = ""

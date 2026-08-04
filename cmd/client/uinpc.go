@@ -81,6 +81,32 @@ func (s *PlayScene) parseNpcDialog(body string) {
 	}
 }
 
+// parseGoodsText 解析 Delphi 商品列表文本 "名字/子菜单/价格/库存/..."
+//（ClientGetSendGoodsList / ClientGetSendMakeDrugList，ClMain.pas:5565-5580：
+// 每 4 段一组，名字/价格/库存任一为空则终止）。
+func parseGoodsText(body string) []ShopItem {
+	var goods []ShopItem
+	fields := strings.Split(body, "/")
+	for i := 0; i+3 < len(fields); i += 4 {
+		name, sub, price, stock := fields[i], fields[i+1], fields[i+2], fields[i+3]
+		if name == "" || price == "" || stock == "" {
+			break
+		}
+		atoi := func(s string) int {
+			n, _ := strconv.Atoi(s)
+			return n
+		}
+		goods = append(goods, ShopItem{
+			Name:    name,
+			SubMenu: atoi(sub),
+			Price:   atoi(price),
+			Stock:   atoi(stock),
+			Grade:   -1,
+		})
+	}
+	return goods
+}
+
 func (s *PlayScene) buildNpcPanels() {
 	ui := s.ui
 	prg := s.resources.Prguse
@@ -133,6 +159,18 @@ func (s *PlayScene) buildNpcPanels() {
 		menuPrev.SetImgIndex(prg, ImgPageUp)
 	}
 	menuPrev.OnClick = func(c *UIControl, x, y int) {
+		// 明细模式：重新向服务端请求上一页（Delphi DMenuPrevClick，
+		// FState.pas:5054-5065，MenuTopLine 步长 10）。
+		if s.State.ShopDetailMode {
+			if s.State.ShopDetailTop > 0 {
+				s.State.ShopDetailTop -= 10
+				if s.State.ShopDetailTop < 0 {
+					s.State.ShopDetailTop = 0
+				}
+				s.requestDetailPage()
+			}
+			return
+		}
 		s.menuTop -= menuMaxRows - 1
 		if s.menuTop < 0 {
 			s.menuTop = 0
@@ -146,6 +184,11 @@ func (s *PlayScene) buildNpcPanels() {
 		menuNext.SetImgIndex(prg, ImgPageDown)
 	}
 	menuNext.OnClick = func(c *UIControl, x, y int) {
+		if s.State.ShopDetailMode {
+			s.State.ShopDetailTop += 10
+			s.requestDetailPage()
+			return
+		}
 		if s.menuTop+menuMaxRows < len(s.State.ShopGoods) {
 			s.menuTop += menuMaxRows - 1
 		}
@@ -367,7 +410,17 @@ func (s *PlayScene) sendNpcSelect(tag string) {
 	}
 }
 
-// paintShopMenu 渲染购买列表 (FState:4887-4934)。
+// requestDetailPage 按当前滚动位置重新请求详细商品列表
+//（Delphi DMenuPrev/NextClick 明细分支，FState.pas:5059-5074）。
+func (s *PlayScene) requestDetailPage() {
+	if s.sendGetDetailItem != nil {
+		s.sendGetDetailItem(s.State.ShopNpcID, s.State.ShopDetailTop, s.curDetailItem)
+	}
+}
+
+// paintShopMenu 渲染购买列表 (FState:4887-4944)。
+// 主列表与详细列表共用同一绘制：第三列为"耐久"，
+// 主列表行 Grade=-1 留空，详细列表行显示 Grade（耐久/1000）。
 func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 	prg := s.resources.Prguse
 	if prg != nil {
@@ -377,37 +430,6 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		return
 	}
 	ax, ay := c.AbsX(), c.AbsY()
-	// 明细模式（SM_SENDDETAILGOODSLIST，ClMain.pas:5692-5730）：逐实例列表
-	if s.State.ShopDetailMode {
-		s.text.DrawText("物品列表", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
-		s.text.DrawText("持久度", float32(ax+164), float32(ay+31), 1, 1, 1, 1, proj)
-		s.text.DrawText("价格", float32(ax+262), float32(ay+31), 1, 1, 1, 1, proj)
-		details := s.State.ShopDetailGoods
-		rows := len(details) - s.menuTop
-		if rows > menuMaxRows {
-			rows = menuMaxRows
-		}
-		for m := 0; m < rows; m++ {
-			idx := s.menuTop + m
-			g := details[idx]
-			y := ay + 50 + m*menuRowH
-			if idx == s.menuIndex {
-				s.text.DrawText(">", float32(ax+25), float32(y), 1, 0, 0, 1, proj)
-			}
-			name := g.Name
-			if name == "" {
-				if def := s.State.ItemDefs[int(g.WIndex)]; def != nil {
-					name = def.Name
-				} else {
-					name = "Item#" + strconv.Itoa(int(g.WIndex))
-				}
-			}
-			s.text.DrawText(name, float32(ax+38), float32(y), 1, 1, 1, 1, proj)
-			s.text.DrawText(strconv.Itoa(int(g.Dura))+"/"+strconv.Itoa(int(g.DuraMax)), float32(ax+170), float32(y), 1, 1, 1, 1, proj)
-			s.text.DrawText(strconv.Itoa(g.Price)+" 金币", float32(ax+240), float32(y), 1, 1, 1, 1, proj)
-		}
-		return
-	}
 	// 表头 (FState:4913-4917 购买模式 / 4943-4946 寄存模式), 白色。
 	if s.State.ShopMode == 3 {
 		s.text.DrawText("保管物品", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
@@ -415,7 +437,7 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 	} else {
 		s.text.DrawText("物品列表", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
 		s.text.DrawText("价格", float32(ax+164), float32(ay+31), 1, 1, 1, 1, proj)
-		s.text.DrawText("有库存", float32(ax+262), float32(ay+31), 1, 1, 1, 1, proj)
+		s.text.DrawText("耐久", float32(ax+262), float32(ay+31), 1, 1, 1, 1, proj)
 	}
 	goods := s.State.ShopGoods
 	rows := len(goods) - s.menuTop
@@ -426,23 +448,20 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		idx := s.menuTop + m
 		g := goods[idx]
 		y := ay + 50 + m*menuRowH
+		// 选中行整行 clRed（Delphi Font.Color 在行首设置, :4923-4926）；
+		// char(7) 箭头因引擎字体无该字形以 '>' 替代。
+		r, gc, b := float32(1), float32(1), float32(1)
 		if idx == s.menuIndex {
-			// Delphi 用 clRed 绘制 char(7) (:4923-4925); 引擎字体
-			// 无该控制字符字形, 以 '>' 替代。
-			s.text.DrawText(">", float32(ax+25), float32(y), 1, 0, 0, 1, proj)
+			r, gc, b = 1, 0, 0
+			s.text.DrawText(">", float32(ax+25), float32(y), r, gc, b, 1, proj)
 		}
-		name := g.Name
-		if name == "" {
-			if def := s.State.ItemDefs[int(g.ItemIdx)]; def != nil {
-				name = def.Name
-			} else {
-				name = "Item#" + strconv.Itoa(int(g.ItemIdx))
-			}
+		s.text.DrawText(g.Name, float32(ax+38), float32(y), r, gc, b, 1, proj)
+		if g.SubMenu >= 1 {
+			// Delphi #31（▼）@(137,y)（:4929-4930）；字体无该字形以 'v' 替代。
+			s.text.DrawText("v", float32(ax+137), float32(y), r, gc, b, 1, proj)
 		}
-		s.text.DrawText(name, float32(ax+38), float32(y), 1, 1, 1, 1, proj)
 		if s.State.ShopMode == 3 {
-			// 持久度列 (寄存物品的 Dura/DuraMax; Delphi 的
-			// Stock/Grade 布局需要服务端商品格式, 归入 B5 批次)。
+			// 持久度列 (寄存物品的 Dura/DuraMax)。
 			dura := ""
 			for i := range s.State.StorageItems {
 				if s.State.StorageItems[i].MakeIndex == int32(g.Price) {
@@ -451,14 +470,14 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 					break
 				}
 			}
-			s.text.DrawText(dura, float32(ax+170), float32(y), 1, 1, 1, 1, proj)
+			s.text.DrawText(dura, float32(ax+170), float32(y), r, gc, b, 1, proj)
 		} else {
-			s.text.DrawText(strconv.Itoa(g.Price)+" 金币", float32(ax+170), float32(y), 1, 1, 1, 1, proj)
-			stockStr := strconv.Itoa(g.Stock)
-			if g.Stock <= 0 {
-				stockStr = "∞"
+			s.text.DrawText(strconv.Itoa(g.Price)+" 金币", float32(ax+170), float32(y), r, gc, b, 1, proj)
+			// 第三列：主列表 Grade=-1 留空；详细列表显示耐久等级
+			//（FState:4932-4934）。
+			if g.Grade >= 0 {
+				s.text.DrawText(strconv.Itoa(g.Grade), float32(ax+265), float32(y), r, gc, b, 1, proj)
 			}
-			s.text.DrawText(stockStr, float32(ax+265), float32(y), 1, 1, 1, 1, proj)
 		}
 	}
 }
@@ -466,57 +485,60 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 // menuRowClick 选择商品行 (FState:4969-5017)。
 func (s *PlayScene) menuRowClick(x, y int) {
 	// x,y 为父空间坐标 (uicontrol.go:162); 换算为菜单本地坐标
-	// (local = parent - Left/Top, 同 InRange 约定)。paintShopMenu
-	// 以本地 (14..279, 50+m*menuRowH) 绘制商品行。
+	// (local = parent - Left/Top, 同 InRange 约定)。
+	// Delphi 命中区 lx∈[14,279]、ly>=32（FState:4978-4979）。
 	lx := x - s.hudMenu.Left
 	ly := y - s.hudMenu.Top
-	if lx < 14 || lx > 279 || ly < 50 {
+	if lx < 14 || lx > 279 || ly < 32 {
 		return
 	}
-	idx := (ly-50)/menuRowH + s.menuTop
-	if s.State.ShopDetailMode {
-		if idx >= 0 && idx < len(s.State.ShopDetailGoods) {
-			s.menuIndex = idx
-			gSound.PlaySound(sGlassButtonClick)
-		}
-		return
-	}
+	idx := (ly-32)/menuRowH + s.menuTop
 	if idx >= 0 && idx < len(s.State.ShopGoods) {
 		s.menuIndex = idx
 		gSound.PlaySound(sGlassButtonClick)
 	}
 }
 
-// buySelected 对选中行执行操作: 购买 (商店) 或取回 (寄存),
-// FState:5028-5052 (Go 闭环中无子菜单)。
+// buySelected 对选中行执行操作 (FState:5028-5052)：
+// 子菜单行请求详细列表；寄存行取回；制药行制药；其余直接购买。
 func (s *PlayScene) buySelected() {
 	now := time.Now().UnixMilli()
 	if now < s.lastBuyTick {
 		return
 	}
+	if s.menuIndex < 0 || s.menuIndex >= len(s.State.ShopGoods) {
+		return
+	}
+	g := s.State.ShopGoods[s.menuIndex]
 	s.lastBuyTick = now + 5000
-	if s.State.ShopDetailMode {
-		// 明细行：按物品索引购买（服务端从库存选实例）
-		if s.menuIndex >= 0 && s.menuIndex < len(s.State.ShopDetailGoods) {
-			g := s.State.ShopDetailGoods[s.menuIndex]
-			if s.sendBuyItem != nil {
-				s.sendBuyItem(int(g.WIndex))
-			}
+	if s.State.ShopMode == 3 {
+		// 寄存行: "price" 字段携带 MakeIndex (FState:5041-5043)。
+		if s.sendTakeBackStorage != nil {
+			s.sendTakeBackStorage(int32(g.Price))
 		}
 		return
 	}
-	if s.menuIndex >= 0 && s.menuIndex < len(s.State.ShopGoods) {
-		g := s.State.ShopGoods[s.menuIndex]
-		if s.State.ShopMode == 3 {
-			// 寄存行: "price" 字段携带 MakeIndex (FState:5041-5043)。
-			if s.sendTakeBackStorage != nil {
-				s.sendTakeBackStorage(int32(g.Price))
-			}
-			return
+	if s.State.ShopMode == 4 {
+		// 制药行 (FState:5045-5047)。
+		if s.sendMakeDrugItem != nil {
+			s.sendMakeDrugItem(s.State.ShopNpcID, g.Name)
 		}
-		if s.sendBuyItem != nil {
-			s.sendBuyItem(int(g.ItemIdx))
+		return
+	}
+	if g.SubMenu > 0 {
+		// 装备子菜单：请求详细商品列表 (FState:5036-5039)。
+		s.curDetailItem = g.Name
+		s.State.ShopDetailTop = 0
+		s.menuTop = 0
+		s.menuIndex = -1
+		if s.sendGetDetailItem != nil {
+			s.sendGetDetailItem(s.State.ShopNpcID, 0, g.Name)
 		}
+		return
+	}
+	// 主列表消耗品行 Stock=库存数（服务端忽略）；详细列表行 Stock=MakeIndex。
+	if s.sendBuyItem != nil {
+		s.sendBuyItem(s.State.ShopNpcID, g.Stock, g.Name)
 	}
 }
 
@@ -653,6 +675,9 @@ func (s *PlayScene) clearMerchantState() {
 	s.queryPrice = false
 	s.menuTop = 0
 	s.menuIndex = -1
+	s.curDetailItem = ""
+	s.State.ShopDetailMode = false
+	s.State.ShopDetailTop = 0
 	s.npcLines = nil
 	s.npcClicks = nil
 }
