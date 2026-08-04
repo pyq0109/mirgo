@@ -1,16 +1,19 @@
 # client
 
-- [ ] ScenePlay 场景的 UI 问题
-- [ ] SceneSelectChr 场景的 UI 微调
+- [ ] 游戏声音
 - [x] 攻击特效 (攻杀剑术) 的动画播放问题
-- [ ] 声音
 - [x] WIL 解析问题, DnItems.wil 解析错误
 - [x] 人物男女角色渲染问题
 - [x] NPC 不能点
 - [x] 支持更大更多的分辨率 ALT + 回车 切换, 或者 res 1/2/3/4 切换
 - [x] 小地图显示错误
 - [x] 被攻击后的动画朝向问题
-- [x] 走路卡脚问题
+- [ ] 走路卡脚问题 (跑步会卡 1 秒左右?)
+- [ ] SceneSelectChr 场景的 UI 微调, 新建角色的名字输入框
+- [ ] NPC 购买物品功能
+- [ ] ScenePlay 场景的 UI 问题: NPC 对话框
+- [ ] ScenePlay 场景的 UI 问题: 聊天框
+- [ ] ScenePlay 场景的 UI 问题: 右下角四个按钮
 
 # server
 
