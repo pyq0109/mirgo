@@ -92,7 +92,7 @@ func (p *PlayObject) HandleMerchantDlgSelect(msg SendMessage, server *netserver.
 		case lower == "@castlegold" || lower == "@opendoor" || lower == "@closedoor" ||
 			lower == "@repairdoor" || lower == "@repairwall" ||
 			lower == "@hireguard" || lower == "@hirearcher" ||
-			lower == "@declarewar" ||
+			strings.HasPrefix(lower, "@declarewar") ||
 			strings.HasPrefix(lower, "@withdraw") || strings.HasPrefix(lower, "@castletax"):
 			p.HandleCastleNpcSelect(tag, npc, server)
 			return
@@ -416,6 +416,70 @@ func (p *PlayObject) HandleBuyItem(msg SendMessage, server *netserver.TCPServer)
 	p.sendWeightChanged(server)
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
+}
+
+// HandleGetDetailItem — Delphi ClientUserBuyItem 的 CM_USERGETDETAILITEM 分支
+//（ObjBase.pas:16157-16185）+ Merchant.ClientGetDetailGoodsList（ObjNpc.pas:2031）：
+// 查询商人处某物品的实例明细（最多 10 条，含耐久/价格/MakeIndex）。
+// Recog=商人ID，Param1=页偏移，Msg=物品名。
+func (p *PlayObject) HandleGetDetailItem(msg SendMessage, server *netserver.TCPServer) {
+	// Delphi: m_boDealing 交易中禁止（ObjBase.pas:16162）
+	if p.Deal != nil {
+		return
+	}
+	var npc *NpcObject
+	if p.envir != nil {
+		npc, _ = p.envir.getNpcByID(int32(msg.Param1))
+	}
+	// Delphi: 商人存在、可购买、同图、距离≤15（ObjBase.pas:16163-16168）
+	if npc == nil || !npc.IsMerchant || !npc.CanBuy || npc.envir != p.envir ||
+		abs(npc.CurrX-p.CurrX) > 15 || abs(npc.CurrY-p.CurrY) > 15 {
+		return
+	}
+	if p.ItemDB == nil {
+		return
+	}
+
+	name := msg.Msg
+	offset := msg.Param2
+	var items []*protocol.UserItem
+	npc.mu.RLock()
+	if stock, ok := npc.GoodsList[name]; ok {
+		items = append(items, stock.Items...)
+	}
+	npc.mu.RUnlock()
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(items) {
+		offset = len(items)
+	}
+	end := offset + 10
+	if end > len(items) {
+		end = len(items)
+	}
+
+	buf := make([]byte, 0, 2+(end-offset)*14)
+	count := make([]byte, 2)
+	binary.LittleEndian.PutUint16(count, uint16(end-offset))
+	buf = append(buf, count...)
+	for i := offset; i < end; i++ {
+		item := items[i]
+		def := p.ItemDB.GetByIdx(int(item.WIndex))
+		if def == nil {
+			continue
+		}
+		entry := make([]byte, 14)
+		binary.LittleEndian.PutUint16(entry[0:2], item.WIndex)
+		binary.LittleEndian.PutUint16(entry[2:4], item.Dura)
+		binary.LittleEndian.PutUint16(entry[4:6], item.DuraMax)
+		binary.LittleEndian.PutUint32(entry[6:10], uint32(item.MakeIndex))
+		binary.LittleEndian.PutUint32(entry[10:14], uint32(p.calcBuyPrice(npc, def, item)))
+		buf = append(buf, entry...)
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMSendDetailGoodsList, npc.ID, uint16(end-offset), uint16(offset), 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
 }
 
 func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer) {

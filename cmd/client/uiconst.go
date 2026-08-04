@@ -113,6 +113,7 @@ const (
 
 	ImgKeyDlg    = 229 // 按键选择对话框 (FState:1367, 覆盖 DlgConf 620)
 	ImgKeyF1     = 232 // F1..F8 = 232,234,236,238,240,242,244,246 (FState:1375-1398)
+	ImgKeyConF1  = 626 // Ctrl+F1..F8 = 626,628..640 (FState:1407-1430)
 	ImgKeyNone   = 231 // (FState:1399)
 	ImgKeyOk     = 230 // (FState:1402)
 	ImgMagicLv   = 23  // 魔法列表 "lv" 标记 (FState:2970)

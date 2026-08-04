@@ -425,6 +425,10 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 	}
 
 	cmd := strings.ToUpper(parts[0])
+	// 扩展注册表优先（路线图 6.2 表驱动：新命令登记在 npcscript_ext.go）
+	if fn, ok := scriptCondRegistry[cmd]; ok {
+		return fn(parts, p)
+	}
 	switch cmd {
 	case "CHECK":
 		// CHECK [N] value — 任务标志检查
@@ -933,6 +937,8 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		return compareOp(count, op, val)
 
 	default:
+		// 未知条件：宽容放行（Delphi 语义）+ 告警收集长尾缺口（路线图批次5）
+		log.Logf(log.LevelWarn, "NpcScript", "unknown script condition %q (player=%s)", cmd, p.Name)
 		return true
 	}
 }
@@ -973,6 +979,10 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 	}
 
 	cmd := strings.ToUpper(parts[0])
+	// 扩展注册表优先（路线图 6.2 表驱动：新命令登记在 npcscript_ext.go）
+	if fn, ok := scriptActionRegistry[cmd]; ok {
+		return fn(parts, p, npc, server)
+	}
 	switch cmd {
 	case "GIVE":
 		if len(parts) < 2 {
@@ -1977,7 +1987,8 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 			}
 		}
 	default:
-		_ = parts
+		// 未知动作：空操作（Delphi 语义）+ 告警收集长尾缺口（路线图批次5）
+		log.Logf(log.LevelWarn, "NpcScript", "unknown script action %q (player=%s)", cmd, p.Name)
 	}
 	return true
 }

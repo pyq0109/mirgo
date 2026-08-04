@@ -68,7 +68,7 @@ func (s *PlayScene) renderMinimap(proj [16]float32) {
 		return
 	}
 
-	selfColor, monsterColor := s.minimapMarkerColors()
+	selfColor, monsterColor, animalColor := s.minimapMarkerColors()
 
 	// 自己：1×1 白点，调色板 255（PlayScn.pas:820-822）。
 	s.gl.DrawQuadColor(ScreenWidth-120+float32(mx-left), float32(my-top),
@@ -90,6 +90,9 @@ func (s *PlayScene) renderMinimap(proj [16]float32) {
 		if a.Type == ActorHuman {
 			// race 0（其他玩家）→ 调色板 255。
 			c = selfColor
+		} else if a.Race == 50 || a.Race == 45 || a.Race == 12 {
+			// Delphi PlayScn.pas:831-835：race 50/45/12（动物/守卫）→ 调色板 218
+			c = animalColor
 		}
 		s.gl.DrawQuadColor(ScreenWidth-120+float32(a.CurrX*48/32-left), float32(a.CurrY-top),
 			2, 2, c[0], c[1], c[2], 1, proj)
@@ -98,15 +101,15 @@ func (s *PlayScene) renderMinimap(proj [16]float32) {
 
 // minimapMarkerColors 从 Prguse.wil 屏幕调色板取标记色（ClMain.pas:996
 // 将 Prguse 的 MainPalette 设为全屏调色板）：
-// 255 = 自己/其他玩家（白），249 = 怪物/NPC。
-// Delphi 另有 218（race 50/45/12 动物/守卫，PlayScn.pas:832），
-// Go 客户端无 race 细分，怪物/NPC 统一用 249 —— 已知偏差。
-func (s *PlayScene) minimapMarkerColors() (self, monster [3]float32) {
+// 255 = 自己/其他玩家（白），249 = 怪物/NPC，218 = race 50/45/12 动物/守卫。
+func (s *PlayScene) minimapMarkerColors() (self, monster, animal [3]float32) {
 	self = [3]float32{1, 1, 1}
 	monster = [3]float32{1, 0, 0}
+	animal = [3]float32{0, 1, 0}
 	if s.resources.Prguse != nil {
 		self = paletteRGB(s.resources.Prguse.Palette[255])
 		monster = paletteRGB(s.resources.Prguse.Palette[249])
+		animal = paletteRGB(s.resources.Prguse.Palette[218])
 	}
 	return
 }

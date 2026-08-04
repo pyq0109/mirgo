@@ -285,13 +285,37 @@ func (e *UserEngine) loadMonGenFromFile(homeMap string) bool {
 	return len(e.MonGenList) > 0
 }
 
+// getZenTime — Delphi GetZenTime（UsrEngn.pas:1098-1113）：刷怪间隔按在线人数加速。
+// 仅间隔 <30min 生效；r=(在线数−UserFull)/ZenFastStep 上限 6，间隔按 10%/档缩短（最多 60%）。
+func (e *UserEngine) getZenTime(zenTime int64) int64 {
+	if zenTime >= 30*60*1000 {
+		return zenTime
+	}
+	userFull, zenFastStep := 1000, 300
+	if e.Config != nil {
+		userFull = e.Config.GetUserFull()
+		zenFastStep = e.Config.GetZenFastStep()
+	}
+	if zenFastStep <= 0 {
+		return zenTime
+	}
+	r := float64(e.GetPlayerCount()-userFull) / float64(zenFastStep)
+	if r <= 0 {
+		return zenTime
+	}
+	if r > 6 {
+		r = 6
+	}
+	return zenTime - int64(math.Round(float64(zenTime)/10*r))
+}
+
 func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 	// Delphi: round-robin 每 tick 只处理一个刷怪器
 	if len(e.MonGenList) > 0 && !e.NoMonGen {
 		entry := &e.MonGenList[e.currMonGen]
 		e.currMonGen = (e.currMonGen + 1) % len(e.MonGenList)
 
-		if now-entry.LastTick > entry.ZenTime {
+		if now-entry.LastTick > e.getZenTime(entry.ZenTime) {
 			entry.LastTick = now
 
 			live := 0

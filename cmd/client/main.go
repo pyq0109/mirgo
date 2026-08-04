@@ -1210,6 +1210,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		log.Logf(log.LevelInfo, "Client", "logout OK, returning to char select")
 		h.sceneMgr.ChangeScene(engine.SceneSelectChr)
 
+	case protocol.SMOutOfConnection:
+		// Delphi ClMain.pas:3795,4162：被服务端踢下线，清理并回选角
+		log.Logf(log.LevelInfo, "Client", "kicked by server (SM_OUTOFCONNECTION)")
+		if h.playScene != nil {
+			h.playScene.AddChatMessage("与服务器的连接已断开")
+		}
+		h.sceneMgr.ChangeScene(engine.SceneSelectChr)
+
 	case protocol.SMExitOK:
 		log.Logf(log.LevelInfo, "Client", "exit OK, closing")
 		h.Close()
@@ -1667,7 +1675,16 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		fy := float64(msg.Tag)*engine.TileHeight + engine.TileHeight/2
 		effType := int(msg.Series & 0xFF)
 		effNum := int(msg.Series >> 8)
-		if magID := int(msg.Recog); magID > 0 {
+		// 特效参数查表（magiceffect.go magicEffectParams）；未知类型兜底爆炸。
+		effT := MagicEffectType(effType)
+		pr, ok := magicEffectParams[effT]
+		if !ok {
+			effT = EffExplosion
+			pr = magicEffectParams[EffExplosion]
+		}
+		if pr.Sound > 0 {
+			gSound.PlaySound(pr.Sound)
+		} else if magID := int(msg.Recog); magID > 0 {
 			gSound.PlaySound(10000 + magID*10 + 2)
 		}
 		var sx, sy float64
@@ -1677,33 +1694,35 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		} else {
 			sx, sy = fx, fy
 		}
-		switch MagicEffectType(effType) {
+		switch effT {
+		case EffNone:
+			// Delphi mtFireWind/mtKyulKai：无客户端特效（PlayScn.pas:1573-1574, 1607-1609）
 		case EffFly:
-			h.playScene.effects.AddFly(sx, sy, fx, fy, effNum, 6, 50)
+			h.playScene.effects.AddFly(sx, sy, fx, fy, effNum, pr.MaxFrame, pr.FrameTime)
 		case EffGround:
-			h.playScene.effects.AddGround(fx, fy, effNum, 10, 50)
+			h.playScene.effects.AddGround(fx, fy, effNum, pr.MaxFrame, pr.FrameTime)
 		case EffFlyAxe:
-			h.playScene.effects.AddFlyAxe(sx, sy, fx, fy, 447, 3, 50)
+			h.playScene.effects.AddFlyAxe(sx, sy, fx, fy, pr.BaseIdx, pr.MaxFrame, pr.FrameTime)
 		case EffFireGun:
-			h.playScene.effects.AddFireGun(sx, sy, fx, fy, 930, 6, 50)
+			h.playScene.effects.AddFireGun(sx, sy, fx, fy, pr.BaseIdx, pr.MaxFrame, pr.FrameTime)
 		case EffLightning:
-			h.playScene.effects.AddLightning(fx, fy, 970, 10, 80)
+			h.playScene.effects.AddLightning(fx, fy, pr.BaseIdx, pr.MaxFrame, pr.FrameTime)
 		case EffIce:
-			h.playScene.effects.AddIce(fx, fy, 10, 6, 80)
+			h.playScene.effects.AddIce(fx, fy, pr.BaseIdx, pr.MaxFrame, pr.FrameTime)
 		case EffBujaukExplo:
-			h.playScene.effects.AddBujaukExplo(fx, fy, 10, 80)
+			h.playScene.effects.AddBujaukExplo(fx, fy, pr.MaxFrame, pr.FrameTime)
 		case EffBujaukGround:
-			h.playScene.effects.AddBujaukGround(fx, fy, 10, 80)
+			h.playScene.effects.AddBujaukGround(fx, fy, pr.MaxFrame, pr.FrameTime)
 		case EffFlyArrow:
-			h.playScene.effects.AddFlyArrow(sx, sy, fx, fy, 2607, 1, 50)
+			h.playScene.effects.AddFlyArrow(sx, sy, fx, fy, pr.BaseIdx, pr.MaxFrame, pr.FrameTime)
 		case EffReady:
-			h.playScene.effects.AddReady(sx, sy, effNum, 10, 50)
+			h.playScene.effects.AddReady(sx, sy, effNum, pr.MaxFrame, pr.FrameTime)
 		case EffThunder2:
-			h.playScene.effects.AddThunder2(fx, fy, 6, 80)
+			h.playScene.effects.AddThunder2(fx, fy, pr.MaxFrame, pr.FrameTime)
 		case EffFlyBug:
-			h.playScene.effects.AddFlyBug(sx, sy, fx, fy, 3, 50)
+			h.playScene.effects.AddFlyBug(sx, sy, fx, fy, pr.MaxFrame, pr.FrameTime)
 		default:
-			h.playScene.effects.AddExplosion(fx, fy, effNum, 10, 50)
+			h.playScene.effects.AddExplosion(fx, fy, effNum, pr.MaxFrame, pr.FrameTime)
 		}
 
 	case protocol.SMMagicFireFail:
@@ -1842,6 +1861,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMSendGoodsList:
 		h.playScene.State.ShowShop = true
 		h.playScene.State.ShopMode = 0
+		h.playScene.State.ShopDetailMode = false
 		h.playScene.State.ShopNpcID = msg.Recog
 		h.playScene.menuTop = 0
 		h.playScene.menuIndex = -1
@@ -1858,6 +1878,37 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 				price := int(binary.LittleEndian.Uint16(raw[off+2 : off+4]))
 				stock := int(binary.LittleEndian.Uint16(raw[off+4 : off+6]))
 				h.playScene.State.ShopGoods = append(h.playScene.State.ShopGoods, ShopItem{ItemIdx: itemIdx, Price: price, Stock: stock})
+			}
+		}
+
+	case protocol.SMSendDetailGoodsList:
+		// Delphi ClMain.pas:5692-5730：商品明细列表（逐实例耐久/价格）
+		st := h.playScene.State
+		st.ShowShop = true
+		st.ShopMode = 0
+		st.ShopDetailMode = true
+		st.ShopDetailTop = int(msg.Tag)
+		raw := []byte(body)
+		st.ShopDetailGoods = nil
+		if len(raw) >= 2 {
+			count := int(binary.LittleEndian.Uint16(raw[0:2]))
+			st.ShopDetailGoods = make([]ShopDetailItem, 0, count)
+			for i := 0; i < count; i++ {
+				off := 2 + i*14
+				if off+14 > len(raw) {
+					break
+				}
+				it := ShopDetailItem{
+					WIndex:    binary.LittleEndian.Uint16(raw[off : off+2]),
+					Dura:      binary.LittleEndian.Uint16(raw[off+2 : off+4]),
+					DuraMax:   binary.LittleEndian.Uint16(raw[off+4 : off+6]),
+					MakeIndex: int32(binary.LittleEndian.Uint32(raw[off+6 : off+10])),
+					Price:     int(binary.LittleEndian.Uint32(raw[off+10 : off+14])),
+				}
+				if def, ok := st.ItemDefs[int(it.WIndex)]; ok {
+					it.Name = def.Name
+				}
+				st.ShopDetailGoods = append(st.ShopDetailGoods, it)
 			}
 		}
 
@@ -2129,8 +2180,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 			}
 		}
 
-	case protocol.SMSpaceMoveHide:
-		// D4: 传送隐藏动画（垂直收缩）
+	case protocol.SMSpaceMoveHide, protocol.SMSpaceMoveHide2:
+		// D4: 传送隐藏动画（垂直收缩）；HIDE2 为变体（ClMain.pas:3959-3985 合并处理）
 		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
 			actor.ScrollHideState = 1
 			actor.ScrollHideFrame = 0
@@ -2138,9 +2189,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		}
 		gSound.PlaySound(sSpacemoveOut)
 
-	case protocol.SMSpaceMoveShow:
-		// D4: 传送显示动画（从地面展开）
+	case protocol.SMSpaceMoveShow, protocol.SMSpaceMoveShow2:
+		// D4: 传送显示动画（从地面展开）；SHOW2 携带 TCharDesc body 换外观重建
 		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			if msg.Ident == protocol.SMSpaceMoveShow2 && body != "" {
+				actor.updateFeatureFromBody(body)
+			}
 			actor.ScrollHideState = 3
 			actor.ScrollHideFrame = 10
 			actor.ScrollHideTick = time.Now().UnixMilli()
@@ -2159,7 +2213,21 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 			actor.ShowHP = false
 		}
 
+	case protocol.SMInstanceHealGuage:
+		// Delphi ClMain.pas:4303-4313：治疗系魔法的瞬时头顶血条（约 2 秒）
+		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+			actor.ShowHP = true
+			actor.ShowHPVal = int(msg.Param)
+			actor.ShowMaxHPVal = int(msg.Tag)
+			actor.ShowHPUntil = time.Now().UnixMilli() + 2000
+		}
+
 	case protocol.SMBreakWeapon:
+		// Delphi ClMain.pas:4315-4322 → DoWeaponBreakEffect（Actor.pas:3529-3533）
+		if my := h.playScene.State.MySelf; my != nil {
+			my.WeaponEffect = 1
+			my.WeaponEffectUntil = time.Now().UnixMilli() + 600
+		}
 		h.playScene.AddChatMessage("你的武器已损坏！")
 		if h.playScene.State.MySelf != nil {
 			h.playScene.addFloatingText(h.playScene.State.MySelf.CurrX, h.playScene.State.MySelf.CurrY, "武器损坏", 1.0, 0.2, 0.2)
@@ -2190,6 +2258,25 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMMonsterSay:
 		if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
 			actor.Say(body)
+		}
+
+	case protocol.SMMyStatus:
+		// Delphi ClMain.pas:3901：自身状态旗标（Param=饥饿等级，Go 服务端恒 0）
+		if h.playScene != nil {
+			h.playScene.State.HungerStatus = int(msg.Param)
+		}
+
+	case protocol.SMAreaState:
+		// Delphi DrawScrn.pas:369-386：区域位标（Recog=bit0 FIGHT/bit1 SAFE/bit2 自由PK）
+		if h.playScene != nil {
+			h.playScene.State.AreaState = int(msg.Recog)
+		}
+
+	case protocol.SMChangeFace:
+		// Delphi ClMain.pas:4268-4278：变身换外观，等旧 actor 空闲后重建
+		if h.playScene != nil {
+			newRecog := int32(uint32(msg.Param) | uint32(msg.Tag)<<16)
+			h.playScene.queueChangeFace(msg.Recog, newRecog, body)
 		}
 
 	default:

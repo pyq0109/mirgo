@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -46,7 +47,49 @@ func ConvertMisc(inputDir, outputDir string) error {
 		return fmt.Errorf("converting custom magic: %w", err)
 	}
 
+	// 转换网关黑名单（路线图批次6）：
+	// DenyIPAddrList.txt → BlockIPList.txt（连接期 IP 黑名单）
+	// DenyAccountList.txt → DenyAccountList.txt（登录期账号黑名单）
+	if err := convertPlainList(envirDir, "DenyIPAddrList.txt", outputDir, "BlockIPList.txt"); err != nil {
+		return fmt.Errorf("converting DenyIPAddrList.txt: %w", err)
+	}
+	if err := convertPlainList(envirDir, "DenyAccountList.txt", outputDir, "DenyAccountList.txt"); err != nil {
+		return fmt.Errorf("converting DenyAccountList.txt: %w", err)
+	}
+	// WordFilter.txt（RunGate 敏感词表）：GEEM2 源未提供，存在时复制
+	if err := convertPlainList(inputDir, "WordFilter.txt", outputDir, "WordFilter.txt"); err != nil {
+		return fmt.Errorf("converting WordFilter.txt: %w", err)
+	}
+
 	return nil
+}
+
+// convertPlainList 按行复制纯文本列表（GBK→UTF-8，跳过空行与 ';' 注释）。
+// 文件不存在时跳过（不视为错误）。
+func convertPlainList(srcDir, srcName, dstDir, dstName string) error {
+	src := filepath.Join(srcDir, srcName)
+	if !FileExists(src) {
+		fmt.Printf("  跳过 %s (文件不存在)\n", srcName)
+		return nil
+	}
+	data, err := ReadGBKFile(src)
+	if err != nil {
+		return err
+	}
+	var lines []string
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == ';' || line[0] == '#' {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	out := strings.Join(lines, "\n")
+	if len(lines) > 0 {
+		out += "\n"
+	}
+	return os.WriteFile(filepath.Join(dstDir, dstName), []byte(out), 0644)
 }
 
 func convertGuardList(envirDir, outputDir string) error {

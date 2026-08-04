@@ -13,12 +13,15 @@ import (
 
 // guildsSchema 以行会名为主键存储行会数据，成员列表序列化为 JSON blob
 //（成员名+职位合并存储，对应内存中的 Members + Ranks）。
+// wars/allies 分别为行会战列表与联盟行会列表的 JSON blob。
 const guildsSchema = `CREATE TABLE IF NOT EXISTS guilds (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT UNIQUE NOT NULL,
 			master TEXT NOT NULL,
 			notice TEXT NOT NULL DEFAULT '',
 			members BLOB,
+			wars BLOB,
+			allies BLOB,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`
 
@@ -103,7 +106,8 @@ func (d *Database) initialize() error {
 			door_hp INTEGER NOT NULL DEFAULT 5000,
 			wall_hp INTEGER NOT NULL DEFAULT 10000,
 			war_state INTEGER NOT NULL DEFAULT 0,
-			tax_rate INTEGER NOT NULL DEFAULT 5
+			tax_rate INTEGER NOT NULL DEFAULT 5,
+			declarations BLOB
 		)`,
 		`CREATE TABLE IF NOT EXISTS npc_upgrades (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +140,48 @@ func (d *Database) initialize() error {
 	if err := d.migrateGuilds(); err != nil {
 		return err
 	}
+	if err := d.migrateCastle(); err != nil {
+		return err
+	}
 	return d.migrateCharacters()
+}
+
+// migrateCastle 为早期创建的 castle 表补齐 declarations 列（预约攻城列表）。
+func (d *Database) migrateCastle() error {
+	rows, err := d.db.Query(`PRAGMA table_info(castle)`)
+	if err != nil {
+		return fmt.Errorf("migrateCastle: %w", err)
+	}
+	hasDeclarations := false
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("migrateCastle: %w", err)
+		}
+		if name == "declarations" {
+			hasDeclarations = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("migrateCastle: %w", err)
+	}
+	rows.Close()
+	if hasDeclarations {
+		return nil
+	}
+	if _, err := d.db.Exec(`ALTER TABLE castle ADD COLUMN declarations BLOB`); err != nil {
+		return fmt.Errorf("migrateCastle: add declarations column: %w", err)
+	}
+	return nil
 }
 
 // migrateCharacters 为早期创建的 characters 表补齐 hair 列。
@@ -221,15 +266,15 @@ func (d *Database) migrateAccounts() error {
 
 // migrateGuilds 将早期以 leader_id（角色 ID 外键）定义、从未写入数据的
 // guilds 表重建为按行会名存储的新结构。新库无此表时由 initialize 创建，
-// 此处不做任何操作。
+// 旧结构库补齐 wars/allies 列（行会战与联盟持久化）。
 func (d *Database) migrateGuilds() error {
 	rows, err := d.db.Query(`PRAGMA table_info(guilds)`)
 	if err != nil {
 		return fmt.Errorf("migrateGuilds: %w", err)
 	}
-	defer rows.Close()
 
 	hasMaster := false
+	hasWars := false
 	for rows.Next() {
 		var (
 			cid     int
@@ -240,24 +285,38 @@ func (d *Database) migrateGuilds() error {
 			pk      int
 		)
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
 			return fmt.Errorf("migrateGuilds: %w", err)
 		}
 		if name == "master" {
 			hasMaster = true
 		}
+		if name == "wars" {
+			hasWars = true
+		}
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return fmt.Errorf("migrateGuilds: %w", err)
 	}
-	if hasMaster {
+	rows.Close()
+
+	if !hasMaster {
+		if _, err := d.db.Exec(`DROP TABLE guilds`); err != nil {
+			return fmt.Errorf("migrateGuilds: drop legacy table: %w", err)
+		}
+		if _, err := d.db.Exec(guildsSchema); err != nil {
+			return fmt.Errorf("migrateGuilds: recreate table: %w", err)
+		}
 		return nil
 	}
-
-	if _, err := d.db.Exec(`DROP TABLE guilds`); err != nil {
-		return fmt.Errorf("migrateGuilds: drop legacy table: %w", err)
-	}
-	if _, err := d.db.Exec(guildsSchema); err != nil {
-		return fmt.Errorf("migrateGuilds: recreate table: %w", err)
+	if !hasWars {
+		if _, err := d.db.Exec(`ALTER TABLE guilds ADD COLUMN wars BLOB`); err != nil {
+			return fmt.Errorf("migrateGuilds: add wars column: %w", err)
+		}
+		if _, err := d.db.Exec(`ALTER TABLE guilds ADD COLUMN allies BLOB`); err != nil {
+			return fmt.Errorf("migrateGuilds: add allies column: %w", err)
+		}
 	}
 	return nil
 }
@@ -500,29 +559,32 @@ type GuildMember struct {
 }
 
 // GuildRecord 是从数据库加载的行会数据。
+// Wars/Allies 为 JSON blob（行会战列表/联盟行会名列表），可为空。
 type GuildRecord struct {
 	Name    string
 	Master  string
 	Notice  string
 	Members []GuildMember
+	Wars    []byte
+	Allies  []byte
 }
 
 // SaveGuild 按行会名 upsert 一条行会记录，成员列表序列化为 JSON。
-func (d *Database) SaveGuild(name, master, notice string, members []GuildMember) error {
+func (d *Database) SaveGuild(name, master, notice string, members []GuildMember, wars, allies []byte) error {
 	membersJSON, err := json.Marshal(members)
 	if err != nil {
 		return err
 	}
 	_, err = d.db.Exec(
-		`INSERT OR REPLACE INTO guilds (name, master, notice, members) VALUES (?, ?, ?, ?)`,
-		name, master, notice, membersJSON,
+		`INSERT OR REPLACE INTO guilds (name, master, notice, members, wars, allies) VALUES (?, ?, ?, ?, ?, ?)`,
+		name, master, notice, membersJSON, wars, allies,
 	)
 	return err
 }
 
 // LoadGuilds 返回数据库中全部行会。
 func (d *Database) LoadGuilds() ([]GuildRecord, error) {
-	rows, err := d.db.Query(`SELECT name, master, notice, members FROM guilds`)
+	rows, err := d.db.Query(`SELECT name, master, notice, members, wars, allies FROM guilds`)
 	if err != nil {
 		return nil, err
 	}
@@ -532,7 +594,7 @@ func (d *Database) LoadGuilds() ([]GuildRecord, error) {
 	for rows.Next() {
 		var g GuildRecord
 		var membersJSON []byte
-		if err := rows.Scan(&g.Name, &g.Master, &g.Notice, &membersJSON); err != nil {
+		if err := rows.Scan(&g.Name, &g.Master, &g.Notice, &membersJSON, &g.Wars, &g.Allies); err != nil {
 			return nil, err
 		}
 		if len(membersJSON) > 0 {
@@ -580,20 +642,22 @@ type Character struct {
 }
 
 // CastleRecord 是城堡持久化数据。
+// Declarations 为预约攻城列表 JSON blob（行会名+日期），可为空。
 type CastleRecord struct {
-	OwnerGuild string
-	Gold       int64
-	DoorHP     int
-	WallHP     int
-	WarState   int
-	TaxRate    int
+	OwnerGuild   string
+	Gold         int64
+	DoorHP       int
+	WallHP       int
+	WarState     int
+	TaxRate      int
+	Declarations []byte
 }
 
 // SaveCastle 保存城堡状态（单行表，id=1）。
 func (d *Database) SaveCastle(r CastleRecord) error {
 	_, err := d.db.Exec(
-		`INSERT OR REPLACE INTO castle (id, owner_guild, gold, door_hp, wall_hp, war_state, tax_rate) VALUES (1, ?, ?, ?, ?, ?, ?)`,
-		r.OwnerGuild, r.Gold, r.DoorHP, r.WallHP, r.WarState, r.TaxRate,
+		`INSERT OR REPLACE INTO castle (id, owner_guild, gold, door_hp, wall_hp, war_state, tax_rate, declarations) VALUES (1, ?, ?, ?, ?, ?, ?, ?)`,
+		r.OwnerGuild, r.Gold, r.DoorHP, r.WallHP, r.WarState, r.TaxRate, r.Declarations,
 	)
 	return err
 }
@@ -601,8 +665,8 @@ func (d *Database) SaveCastle(r CastleRecord) error {
 // LoadCastle 加载城堡状态。无数据时返回零值。
 func (d *Database) LoadCastle() (CastleRecord, error) {
 	var r CastleRecord
-	err := d.db.QueryRow(`SELECT owner_guild, gold, door_hp, wall_hp, war_state, tax_rate FROM castle WHERE id=1`).
-		Scan(&r.OwnerGuild, &r.Gold, &r.DoorHP, &r.WallHP, &r.WarState, &r.TaxRate)
+	err := d.db.QueryRow(`SELECT owner_guild, gold, door_hp, wall_hp, war_state, tax_rate, declarations FROM castle WHERE id=1`).
+		Scan(&r.OwnerGuild, &r.Gold, &r.DoorHP, &r.WallHP, &r.WarState, &r.TaxRate, &r.Declarations)
 	if err == sql.ErrNoRows {
 		return CastleRecord{}, nil
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -108,26 +109,38 @@ func (g *Guild) GetRank(name string) string {
 	return "成员"
 }
 
-// SaveGuilds 将内存中全部行会持久化到 SQLite。
+// SaveGuilds 将内存中全部行会持久化到 SQLite（含行会战与联盟列表）。
 func (ue *UserEngine) SaveGuilds() {
 	for _, g := range ue.Guilds {
 		members := make([]storage.GuildMember, 0, len(g.Members))
 		for _, name := range g.Members {
 			members = append(members, storage.GuildMember{Name: name, Rank: g.GetRank(name)})
 		}
-		if err := ue.db.SaveGuild(g.Name, g.Leader, g.Notice, members); err != nil {
+		var warsJSON, alliesJSON []byte
+		if len(g.WarGuilds) > 0 {
+			if b, err := json.Marshal(g.WarGuilds); err == nil {
+				warsJSON = b
+			}
+		}
+		if len(g.AllyGuilds) > 0 {
+			if b, err := json.Marshal(g.AllyGuilds); err == nil {
+				alliesJSON = b
+			}
+		}
+		if err := ue.db.SaveGuild(g.Name, g.Leader, g.Notice, members, warsJSON, alliesJSON); err != nil {
 			log.Logf(log.LevelError, "Guild", "failed to save guild %s: %v", g.Name, err)
 		}
 	}
 }
 
-// LoadGuilds 在启动时从 SQLite 恢复全部行会到内存。
+// LoadGuilds 在启动时从 SQLite 恢复全部行会到内存（丢弃已过期的行会战）。
 func (ue *UserEngine) LoadGuilds() {
 	records, err := ue.db.LoadGuilds()
 	if err != nil {
 		log.Logf(log.LevelError, "Guild", "failed to load guilds: %v", err)
 		return
 	}
+	now := time.Now().UnixMilli()
 	for _, rec := range records {
 		g := &Guild{
 			Name:   rec.Name,
@@ -139,9 +152,69 @@ func (ue *UserEngine) LoadGuilds() {
 			g.Members = append(g.Members, m.Name)
 			g.Ranks[m.Name] = m.Rank
 		}
+		if len(rec.Wars) > 0 {
+			var wars []GuildWar
+			if err := json.Unmarshal(rec.Wars, &wars); err == nil {
+				for _, w := range wars {
+					if w.EndTick > now {
+						g.WarGuilds = append(g.WarGuilds, w)
+					}
+				}
+			}
+		}
+		if len(rec.Allies) > 0 {
+			json.Unmarshal(rec.Allies, &g.AllyGuilds)
+		}
 		ue.Guilds = append(ue.Guilds, g)
 	}
 	log.Logf(log.LevelInfo, "Guild", "loaded %d guilds from database", len(ue.Guilds))
+}
+
+// ProcessGuilds — Delphi TGuildManager.Run（Guild.pas:261-291）：
+// 周期清理到期行会战，通知双方在线成员并持久化变更。
+func (ue *UserEngine) ProcessGuilds(server *netserver.TCPServer, now int64) {
+	changed := false
+	for _, g := range ue.Guilds {
+		if g.expireWars(ue, server, now) {
+			changed = true
+		}
+	}
+	if changed {
+		ue.SaveGuilds()
+	}
+}
+
+// expireWars — Delphi Run 内层循环（Guild.pas:273-283）+ sub_499B4C（Guild.pas:1245-1248）：
+// 移除到期行会战，向本行会在线成员发送"战争结束"通知。
+func (g *Guild) expireWars(ue *UserEngine, server *netserver.TCPServer, now int64) bool {
+	if len(g.WarGuilds) == 0 {
+		return false
+	}
+	kept := make([]GuildWar, 0, len(g.WarGuilds))
+	expired := false
+	for _, w := range g.WarGuilds {
+		if now >= w.EndTick {
+			expired = true
+			g.sendGuildSystemMsg(ue, server, "***"+w.GuildName+" 与本行的战争结束了...")
+			log.Logf(log.LevelInfo, "Guild", "guild war expired: %s vs %s", g.Name, w.GuildName)
+			continue
+		}
+		kept = append(kept, w)
+	}
+	if expired {
+		g.WarGuilds = kept
+	}
+	return expired
+}
+
+// sendGuildSystemMsg 向行会全体在线成员发送系统消息（Delphi SendGuildMsg, Guild.pas:645）。
+func (g *Guild) sendGuildSystemMsg(ue *UserEngine, server *netserver.TCPServer, text string) {
+	resp := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
+	for _, memberName := range g.Members {
+		if member := ue.GetPlayerByName(memberName); member != nil {
+			server.Send(member.Session.ID, resp, protocol.EncodeString(text))
+		}
+	}
 }
 
 // HandleOpenGuildDlg 响应 CMOpenGuildDlg，返回行会概览

@@ -90,6 +90,18 @@ func (p *PlayObject) IsStone() bool {
 	return p.StatusTimeArr[POISON_STONE] > 0
 }
 
+// BroadcastStatus — Delphi StatusChanged（ObjBase.pas:20139-20142）：
+// 广播状态位给视野内玩家（客户端按位渲染半透明/石化等效果）。
+func (p *PlayObject) BroadcastStatus() {
+	status := uint32(0)
+	for i := 0; i < 12; i++ {
+		if p.StatusTimeArr[i] > 0 {
+			status |= 0x80000000 >> uint(i)
+		}
+	}
+	p.SendRefMsg(RM_CHARSTATUSCHANGED, int(uint16(status>>16)), int(uint16(status)), 0, "")
+}
+
 func (p *PlayObject) CanMoveCheck() bool {
 	return p.StatusTimeArr[POISON_DONTMOVE] <= 0 && p.StatusTimeArr[POISON_STONE] <= 0
 }

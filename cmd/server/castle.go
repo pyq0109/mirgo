@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
 	"github.com/pyq0109/mirgo/internal/protocol"
+	"github.com/pyq0109/mirgo/internal/storage"
 )
 
 type CastleWarState int
@@ -20,6 +22,13 @@ const (
 	CastleWarDeclared
 	CastleWarActive
 )
+
+// CastleWarDeclaration — Delphi m_AttackWarList 条目（Castle.pas:341/446）：
+// 宣战时登记行会名与预约攻城日期，到期日 WarStartHour 点自动开战。
+type CastleWarDeclaration struct {
+	GuildName  string `json:"guildName"`
+	AttackDate string `json:"attackDate"` // YYYY-MM-DD
+}
 
 type CastleConfig struct {
 	Name           string `json:"name"`
@@ -90,6 +99,10 @@ type CastleObject struct {
 	GuardIDs     []int32
 	DoorOpen     bool
 
+	// Delphi: 预约攻城列表 m_AttackWarList（Castle.pas:644-679）
+	WarDeclarations []CastleWarDeclaration
+	lastWarCheckDay string // 当日已完成 WarStartHour 开战检查（防重）
+
 	// Delphi: 城堡经济 (Castle.pas:67-80)
 	TechLevel   int   // 科技等级
 	Power       int   // 能源
@@ -132,7 +145,46 @@ func (c *CastleObject) IsDefendingGuild(guildName string) bool {
 	return c.OwnerGuild != "" && c.OwnerGuild == guildName
 }
 
-func (c *CastleObject) DeclareWar(guildName string) bool {
+// IsAttackAllyGuild — Delphi Castle.pas:768-783：是否为攻方行会的联盟行会。
+func (c *CastleObject) IsAttackAllyGuild(engine *UserEngine, guildName string) bool {
+	if guildName == "" || engine == nil {
+		return false
+	}
+	c.mu.Lock()
+	attackers := make([]string, len(c.AttackGuilds))
+	copy(attackers, c.AttackGuilds)
+	owner := c.OwnerGuild
+	c.mu.Unlock()
+	for _, name := range attackers {
+		if name == owner {
+			continue
+		}
+		if g := engine.FindGuild(name); g != nil && g.IsAllyGuild(guildName) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDefenseAllyGuild — Delphi Castle.pas:896-902：是否为城主（守方）的联盟行会，仅战争期间有效。
+func (c *CastleObject) IsDefenseAllyGuild(engine *UserEngine, guildName string) bool {
+	if guildName == "" || engine == nil || !c.IsAtWar() {
+		return false
+	}
+	owner := c.GetOwnerGuild()
+	if owner == "" {
+		return false
+	}
+	if g := engine.FindGuild(owner); g != nil {
+		return g.IsAllyGuild(guildName)
+	}
+	return false
+}
+
+// DeclareWar — Delphi 宣战（攻城）语义：登记预约战条目到 m_AttackWarList，
+// 到期日 WarStartHour 点自动开战（Castle.pas:644-679）。
+// attackDate 为空默认明天；不允许早于当天。
+func (c *CastleObject) DeclareWar(guildName, attackDate string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -142,18 +194,38 @@ func (c *CastleObject) DeclareWar(guildName string) bool {
 	if c.WarState == CastleWarActive {
 		return false
 	}
-	for _, g := range c.AttackGuilds {
-		if g == guildName {
+	today := time.Now().Format("2006-01-02")
+	if attackDate == "" {
+		attackDate = time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	} else {
+		if _, err := time.Parse("2006-01-02", attackDate); err != nil {
+			return false
+		}
+		if attackDate < today {
+			return false
+		}
+	}
+	for _, w := range c.WarDeclarations {
+		if w.GuildName == guildName {
 			return false
 		}
 	}
 
-	c.AttackGuilds = append(c.AttackGuilds, guildName)
+	c.WarDeclarations = append(c.WarDeclarations, CastleWarDeclaration{GuildName: guildName, AttackDate: attackDate})
 	if c.WarState == CastlePeace {
 		c.WarState = CastleWarDeclared
 	}
-	log.Logf(log.LevelInfo, "Castle", "%s declared war on castle %s", guildName, c.Config.Name)
+	log.Logf(log.LevelInfo, "Castle", "%s declared war on castle %s for %s", guildName, c.Config.Name, attackDate)
 	return true
+}
+
+// GetWarDeclarations 返回当前预约战列表副本（GM 查询/客户端展示用）。
+func (c *CastleObject) GetWarDeclarations() []CastleWarDeclaration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]CastleWarDeclaration, len(c.WarDeclarations))
+	copy(out, c.WarDeclarations)
+	return out
 }
 
 func (c *CastleObject) StartWar(server *netserver.TCPServer, engine *UserEngine) {
@@ -179,6 +251,7 @@ func (c *CastleObject) StartWar(server *netserver.TCPServer, engine *UserEngine)
 	text := fmt.Sprintf("[攻城战] %s 攻城战开始！进攻方: %s，防守方: %s",
 		c.Config.Name, strings.Join(attackers, ","), c.OwnerGuild)
 	c.broadcastSysMsg(server, engine, text)
+	c.SaveState(engine.DB())
 	log.Logf(log.LevelInfo, "Castle", "castle war started: attackers=%v defender=%s", attackers, c.OwnerGuild)
 }
 
@@ -217,7 +290,12 @@ func (c *CastleObject) EndWar(server *netserver.TCPServer, engine *UserEngine) {
 		c.mu.Unlock()
 		return
 	}
-	c.WarState = CastlePeace
+	// 仍有后续预约战 → 回到 Declared 等待下一场（Castle.pas 预约列表语义）
+	if len(c.WarDeclarations) > 0 {
+		c.WarState = CastleWarDeclared
+	} else {
+		c.WarState = CastlePeace
+	}
 	c.AttackGuilds = nil
 	c.WarStartTick = 0
 	c.WarEndTick = 0
@@ -225,6 +303,7 @@ func (c *CastleObject) EndWar(server *netserver.TCPServer, engine *UserEngine) {
 
 	text := fmt.Sprintf("[攻城战] %s 攻城战结束", c.Config.Name)
 	c.broadcastSysMsg(server, engine, text)
+	c.SaveState(engine.DB())
 	log.Logf(log.LevelInfo, "Castle", "castle war ended")
 }
 
@@ -339,8 +418,13 @@ func (c *CastleObject) CheckCapture(engine *UserEngine) string {
 	for guildName, count := range guildCounts {
 		if count >= 3 {
 			c.OwnerGuild = guildName
-			c.WarState = CastlePeace
+			if len(c.WarDeclarations) > 0 {
+				c.WarState = CastleWarDeclared
+			} else {
+				c.WarState = CastlePeace
+			}
 			c.AttackGuilds = nil
+			c.SaveState(engine.DB())
 			log.Logf(log.LevelInfo, "Castle", "castle captured by %s (%d members in palace)", guildName, count)
 			return guildName
 		}
@@ -528,10 +612,8 @@ func (c *CastleObject) ProcessCastleTick(engine *UserEngine, server *netserver.T
 
 	switch state {
 	case CastleWarDeclared:
-		hour := time.Now().Hour()
-		if hour >= c.Config.WarStartHour {
-			c.StartWar(server, engine)
-		}
+		// Delphi Castle.pas:644-679：每日 WarStartHour 点检查预约战列表
+		c.checkScheduledWar(server, engine)
 	case CastleWarActive:
 		c.mu.Lock()
 		endTick := c.WarEndTick
@@ -589,6 +671,102 @@ func (c *CastleObject) broadcastSysMsg(server *netserver.TCPServer, engine *User
 			server.Send(p.Session.ID, msg, protocol.EncodeString(text))
 		}
 	}
+}
+
+// checkScheduledWar — Delphi Castle.pas:644-679：每日 WarStartHour 点扫描预约战列表，
+// 攻击日期为当日的条目转入攻方列表并开战；无当日条目且列表清空则回到和平。
+func (c *CastleObject) checkScheduledWar(server *netserver.TCPServer, engine *UserEngine) {
+	t := time.Now()
+	if t.Hour() != c.Config.WarStartHour {
+		return
+	}
+	today := t.Format("2006-01-02")
+	c.mu.Lock()
+	if c.lastWarCheckDay == today {
+		c.mu.Unlock()
+		return
+	}
+	c.lastWarCheckDay = today
+	var remaining []CastleWarDeclaration
+	started := false
+	for _, w := range c.WarDeclarations {
+		if w.AttackDate == today {
+			c.AttackGuilds = append(c.AttackGuilds, w.GuildName)
+			started = true
+		} else {
+			remaining = append(remaining, w)
+		}
+	}
+	c.WarDeclarations = remaining
+	if !started {
+		if len(c.WarDeclarations) == 0 {
+			c.WarState = CastlePeace
+		}
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+	c.StartWar(server, engine)
+}
+
+// SaveState 持久化城堡状态（城主/金库/税率/城门墙血量/预约战）。
+func (c *CastleObject) SaveState(db *storage.Database) {
+	if db == nil {
+		return
+	}
+	c.mu.Lock()
+	rec := storage.CastleRecord{
+		OwnerGuild: c.OwnerGuild,
+		Gold:       c.Gold,
+		DoorHP:     c.DoorHP,
+		WallHP:     c.WallHP,
+		WarState:   int(c.WarState),
+		TaxRate:    c.TaxRate,
+	}
+	if len(c.WarDeclarations) > 0 {
+		if buf, err := json.Marshal(c.WarDeclarations); err == nil {
+			rec.Declarations = buf
+		}
+	}
+	c.mu.Unlock()
+	if err := db.SaveCastle(rec); err != nil {
+		log.Logf(log.LevelError, "Castle", "failed to save castle state: %v", err)
+	}
+}
+
+// LoadState 启动时恢复城堡状态（Delphi 城堡文件加载语义）。
+// 进行中的战争不恢复为 Active（重启视为停战，预约战保留）。
+func (c *CastleObject) LoadState(db *storage.Database) {
+	if db == nil {
+		return
+	}
+	rec, err := db.LoadCastle()
+	if err != nil {
+		log.Logf(log.LevelError, "Castle", "failed to load castle state: %v", err)
+		return
+	}
+	if rec.OwnerGuild == "" && rec.Gold == 0 && len(rec.Declarations) == 0 {
+		return
+	}
+	c.mu.Lock()
+	c.OwnerGuild = rec.OwnerGuild
+	c.Gold = rec.Gold
+	c.TaxRate = rec.TaxRate
+	if rec.DoorHP > 0 {
+		c.DoorHP = rec.DoorHP
+	}
+	if rec.WallHP > 0 {
+		c.WallHP = rec.WallHP
+	}
+	if len(rec.Declarations) > 0 {
+		json.Unmarshal(rec.Declarations, &c.WarDeclarations)
+	}
+	if len(c.WarDeclarations) > 0 {
+		c.WarState = CastleWarDeclared
+	}
+	c.mu.Unlock()
+	log.Logf(log.LevelInfo, "Castle", "loaded castle state: owner=%s gold=%d declarations=%d",
+		c.OwnerGuild, c.Gold, len(c.WarDeclarations))
 }
 
 func (e *UserEngine) allPlayers() []*PlayObject {

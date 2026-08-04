@@ -40,9 +40,15 @@ type ServerConfig struct {
 		SpeedHackMax     int            `json:"speedHackMax"`
 		ZenLimit         int            `json:"zenLimit"`
 		MonGenRate       int            `json:"monGenRate"`
+		UserFull         int            `json:"userFull"`
+		ZenFastStep      int            `json:"zenFastStep"`
 		WalkOnly         bool           `json:"walkOnly"`
 		HitIntervalTime  int64          `json:"hitIntervalTime"`
 		ActionInterval   int64          `json:"actionInterval"`
+		RunLongHitInterval int64        `json:"runLongHitInterval"`
+		RunHitInterval   int64          `json:"runHitInterval"`
+		WalkHitInterval  int64          `json:"walkHitInterval"`
+		RunMagicInterval int64          `json:"runMagicInterval"`
 		StruckTime       int64          `json:"struckTime"`
 		TurnInterval     int64          `json:"turnInterval"`
 		SpellInterval    int64          `json:"spellInterval"`
@@ -51,6 +57,12 @@ type ServerConfig struct {
 		TickInterval     int64          `json:"tickInterval"`
 		SaveInterval     int            `json:"saveInterval"`
 		GuildSaveInterval int           `json:"guildSaveInterval"`
+		DisableOnlineCount  bool        `json:"disableOnlineCount"`
+		SendOnlineTime      int64       `json:"sendOnlineTime"`
+		SendOnlineCountRate int         `json:"sendOnlineCountRate"`
+		SendOnlineCountMsg  string      `json:"sendOnlineCountMsg"`
+		MsgRateLimit        float64     `json:"msgRateLimit"`
+		MsgBurst            int         `json:"msgBurst"`
 	} `json:"game"`
 	Login struct {
 		MaxAttempts     int `json:"maxAttempts"`
@@ -337,6 +349,24 @@ func (c *ServerConfig) GetMonGenRate() int {
 	return 10
 }
 
+// GetUserFull — Delphi g_Config.nUserFull（M2Share.pas:1582 默认 1000）：
+// 在线人数达到该值后刷怪开始加速。
+func (c *ServerConfig) GetUserFull() int {
+	if c.Game.UserFull > 0 {
+		return c.Game.UserFull
+	}
+	return 1000
+}
+
+// GetZenFastStep — Delphi g_Config.nZenFastStep（M2Share.pas:1583 默认 300）：
+// 每多出该数量在线人数，刷怪间隔加速一档。
+func (c *ServerConfig) GetZenFastStep() int {
+	if c.Game.ZenFastStep > 0 {
+		return c.Game.ZenFastStep
+	}
+	return 300
+}
+
 func (c *ServerConfig) GetHitIntervalTime() int64 {
 	if c.Game.HitIntervalTime > 0 {
 		return c.Game.HitIntervalTime
@@ -348,7 +378,39 @@ func (c *ServerConfig) GetActionInterval() int64 {
 	if c.Game.ActionInterval > 0 {
 		return c.Game.ActionInterval
 	}
-	return 350
+	return 400 // Delphi dwActionIntervalTime 默认 400（ActionSpeedConfig.pas:137）
+}
+
+// GetRunLongHitInterval — Delphi dwRunLongHitIntervalTime（跑位刺杀，默认 800）。
+func (c *ServerConfig) GetRunLongHitInterval() int64 {
+	if c.Game.RunLongHitInterval > 0 {
+		return c.Game.RunLongHitInterval
+	}
+	return 800
+}
+
+// GetRunHitInterval — Delphi dwRunHitIntervalTime（跑位普攻，默认 800）。
+func (c *ServerConfig) GetRunHitInterval() int64 {
+	if c.Game.RunHitInterval > 0 {
+		return c.Game.RunHitInterval
+	}
+	return 800
+}
+
+// GetWalkHitInterval — Delphi dwWalkHitIntervalTime（走位普攻，默认 800）。
+func (c *ServerConfig) GetWalkHitInterval() int64 {
+	if c.Game.WalkHitInterval > 0 {
+		return c.Game.WalkHitInterval
+	}
+	return 800
+}
+
+// GetRunMagicInterval — Delphi dwRunMagicIntervalTime（跑位魔法，默认 900）。
+func (c *ServerConfig) GetRunMagicInterval() int64 {
+	if c.Game.RunMagicInterval > 0 {
+		return c.Game.RunMagicInterval
+	}
+	return 900
 }
 
 func (c *ServerConfig) GetStruckTime() int64 {
@@ -423,6 +485,46 @@ func (c *ServerConfig) GetGuildSaveInterval() int {
 		return c.Game.GuildSaveInterval
 	}
 	return 600
+}
+
+// GetSendOnlineTime — Delphi dwSendOnlineTime（M2Share.pas:1793 默认 5 分钟）。
+func (c *ServerConfig) GetSendOnlineTime() int64 {
+	if c.Game.SendOnlineTime > 0 {
+		return c.Game.SendOnlineTime
+	}
+	return 5 * 60 * 1000
+}
+
+// GetSendOnlineCountRate — Delphi nSendOnlineCountRate（M2Share.pas:1792 默认 10，即 ×rate/10）。
+func (c *ServerConfig) GetSendOnlineCountRate() int {
+	if c.Game.SendOnlineCountRate > 0 {
+		return c.Game.SendOnlineCountRate
+	}
+	return 10
+}
+
+// GetSendOnlineCountMsg — Delphi g_sSendOnlineCountMsg（M2Share.pas:3135）。
+func (c *ServerConfig) GetSendOnlineCountMsg() string {
+	if c.Game.SendOnlineCountMsg != "" {
+		return c.Game.SendOnlineCountMsg
+	}
+	return "当前在线人数: %c"
+}
+
+// GetMsgRateLimit — 每连接入站消息速率（条/秒，路线图 6.3 网关补偿层）。
+func (c *ServerConfig) GetMsgRateLimit() float64 {
+	if c.Game.MsgRateLimit > 0 {
+		return c.Game.MsgRateLimit
+	}
+	return 60
+}
+
+// GetMsgBurst — 每连接消息令牌桶突发容量。
+func (c *ServerConfig) GetMsgBurst() int {
+	if c.Game.MsgBurst > 0 {
+		return c.Game.MsgBurst
+	}
+	return 40
 }
 
 // --- Login getters ---

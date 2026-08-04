@@ -32,6 +32,22 @@ type Session struct {
 	Certification int32
 	SendChan      chan []byte
 	closeOnce     sync.Once // 保护 Conn.Close + close(SendChan) 只执行一次
+
+	// 封包序号校验（Delphi RunGate/Main.pas:363-413）
+	lastCode    byte
+	hasLastCode bool
+	SeqErrCount int
+
+	// 背压：已发送但未被客户端 '*' 回显确认的字节数
+	//（Delphi 2048B 未回显暂停发送 3 秒，RunGate/Main.pas:501-553）
+	unackedBytes int64
+
+	// 每连接消息限流令牌桶（路线图 6.3 网关补偿层）
+	msgTokens  float64
+	lastRefill time.Time
+
+	// 连续发送丢弃计数（超阈值视为客户端无响应，断开）
+	dropCount int
 }
 
 // MessageHandler 处理来自客户端的消息。body 是 6Bit 解码后的 body
@@ -62,6 +78,10 @@ type TCPServer struct {
 	onMessage    MessageHandler
 	onRawMessage RawMessageHandler
 
+	// 每连接入站消息限流（令牌桶；msgRate<=0 表示不限流）
+	msgRate  float64
+	msgBurst int
+
 	done chan struct{}
 	wg   sync.WaitGroup
 }
@@ -73,6 +93,13 @@ func NewTCPServer(addr string) *TCPServer {
 		addr:     addr,
 		done:     make(chan struct{}),
 	}
+}
+
+// SetMsgRateLimit 设置每连接入站消息速率（条/秒）与突发容量。
+// rate<=0 关闭限流（默认）。
+func (s *TCPServer) SetMsgRateLimit(ratePerSec float64, burst int) {
+	s.msgRate = ratePerSec
+	s.msgBurst = burst
 }
 
 // SetConnectHandler 设置连接处理器。
@@ -173,6 +200,18 @@ func (s *TCPServer) readLoop(session *Session) {
 
 	buf := make([]byte, 4096)
 	var scanner protocol.FrameScanner
+	// Delphi RunGate 序号校验（Main.pas:363-413）：重复序号累计违规
+	scanner.OnCode = func(code byte) {
+		if session.hasLastCode && code == session.lastCode {
+			session.SeqErrCount++
+		}
+		session.lastCode = code
+		session.hasLastCode = true
+	}
+	// 客户端 '*' 回显 = 接收确认，重置背压计数（RunGate/Main.pas:501-553）
+	keepalive := func() {
+		atomic.StoreInt64(&session.unackedBytes, 0)
+	}
 	for {
 		n, err := session.Conn.Read(buf)
 		if err != nil {
@@ -186,9 +225,18 @@ func (s *TCPServer) readLoop(session *Session) {
 		}
 
 		if n > 0 {
-			payloads, overflow := scanner.Feed(buf[:n], true, nil)
+			payloads, overflow := scanner.Feed(buf[:n], true, keepalive)
 			if overflow {
 				log.Logf(log.LevelWarn, "Server", "来自 %d 的接收缓冲区溢出，断开连接", session.ID)
+				return
+			}
+			// Delphi: 重复序号 >10 次拒绝服务；缓冲积压 >20000 直接记满
+			//（RunGate/Main.pas:363-413）
+			if scanner.Pending() > 20000 {
+				session.SeqErrCount = 99
+			}
+			if session.SeqErrCount > 10 {
+				log.Logf(log.LevelWarn, "Server", "来自 %d 的封包序号重复 %d 次，断开连接", session.ID, session.SeqErrCount)
 				return
 			}
 			for _, payload := range payloads {
@@ -203,6 +251,15 @@ func (s *TCPServer) readLoop(session *Session) {
 // 仅在 Ident 不被识别时才尝试 raw 消息检测，
 // 避免 Recog 字段恰好解码为 '+'/'*' 开头时的误路由。
 func (s *TCPServer) dispatchPayload(session *Session, payload string) {
+	// 每连接入站限流（令牌桶；超限丢弃并计违规，路线图 6.3）
+	if !s.allowMessage(session) {
+		session.SeqErrCount++
+		if session.SeqErrCount > 10 {
+			log.Logf(log.LevelWarn, "Server", "session %d 消息速率超限且违规累计 >10，断开连接", session.ID)
+			s.removeSession(session)
+		}
+		return
+	}
 	// 先尝试标准消息
 	if len(payload) >= protocol.DefBlockSize {
 		msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
@@ -232,6 +289,28 @@ func (s *TCPServer) dispatchPayload(session *Session, payload string) {
 	}
 }
 
+// allowMessage 每连接令牌桶限流。msgRate<=0 时不限流。
+func (s *TCPServer) allowMessage(session *Session) bool {
+	if s.msgRate <= 0 {
+		return true
+	}
+	now := time.Now()
+	if session.lastRefill.IsZero() {
+		session.lastRefill = now
+		session.msgTokens = float64(s.msgBurst)
+	}
+	session.msgTokens += now.Sub(session.lastRefill).Seconds() * s.msgRate
+	session.lastRefill = now
+	if session.msgTokens > float64(s.msgBurst) {
+		session.msgTokens = float64(s.msgBurst)
+	}
+	if session.msgTokens < 1 {
+		return false
+	}
+	session.msgTokens--
+	return true
+}
+
 func (s *TCPServer) writeLoop(session *Session) {
 	defer s.wg.Done()
 
@@ -243,11 +322,18 @@ func (s *TCPServer) writeLoop(session *Session) {
 			if !ok {
 				return
 			}
+			// Delphi 背压：2048B 未收到 '*' 回显则暂停发送 3 秒
+			//（RunGate/Main.pas:501-553）
+			if atomic.LoadInt64(&session.unackedBytes) > 2048 {
+				time.Sleep(3 * time.Second)
+				atomic.StoreInt64(&session.unackedBytes, 0)
+			}
 			_, err := session.Conn.Write(data)
 			if err != nil {
 				log.Logf(log.LevelDebug, "Server", "写入 %d 出错：%v", session.ID, err)
 				return
 			}
+			atomic.AddInt64(&session.unackedBytes, int64(len(data)))
 		}
 	}
 }
@@ -298,9 +384,15 @@ func (s *TCPServer) Send(sessionID int64, msg protocol.DefaultMessage, body stri
 
 	select {
 	case session.SendChan <- []byte(frame):
+		session.dropCount = 0
 		return nil
 	default:
-		log.Logf(log.LevelWarn, "Server", "发送缓冲区满，丢弃 %s（session %d）", protocol.MsgName(msg.Ident), sessionID)
+		session.dropCount++
+		log.Logf(log.LevelWarn, "Server", "发送缓冲区满，丢弃 %s（session %d，连续 %d 次）", protocol.MsgName(msg.Ident), sessionID, session.dropCount)
+		if session.dropCount > 32 {
+			log.Logf(log.LevelWarn, "Server", "session %d 发送持续积压，视为无响应断开", sessionID)
+			s.removeSession(session)
+		}
 		return fmt.Errorf("send buffer full for session %d", sessionID)
 	}
 }

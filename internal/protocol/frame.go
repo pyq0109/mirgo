@@ -4,6 +4,9 @@ package protocol
 // 客户端和服务端共用，避免帧扫描逻辑重复。
 type FrameScanner struct {
 	buf []byte
+	// OnCode 在剥离客户端帧首 code 数字时回调（Delphi RunGate
+	// 序号校验入口，Main.pas:363-413）。nil 表示不关心序号。
+	OnCode func(code byte)
 }
 
 // MaxRecvBuf 是接收缓冲区的最大容量，超出则应断开连接。
@@ -56,6 +59,9 @@ func (fs *FrameScanner) Feed(data []byte, stripCode bool, keepalive func()) (pay
 		// 可选剥离 code 数字
 		start := 0
 		if stripCode && len(frame) > 0 && frame[0] >= '0' && frame[0] <= '9' {
+			if fs.OnCode != nil {
+				fs.OnCode(frame[0])
+			}
 			start = 1
 		}
 		if start < len(frame) {

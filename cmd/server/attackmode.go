@@ -50,17 +50,21 @@ func (p *PlayObject) IsProtectTarget(target *PlayObject) bool {
 }
 
 func (p *PlayObject) CanAttackTarget(target *BaseObject) bool {
-	// 攻城战期间：攻守双方可自由攻击
+	// 攻城战期间：攻守双方（含各自联盟行会，Castle.pas:768-783/896-902）可自由攻击
 	if p.Engine != nil && p.Engine.Castle != nil && p.Engine.Castle.IsAtWar() {
 		if tp := p.envir.getPlayerByBase(target); tp != nil {
 			castle := p.Engine.Castle
-			if castle.IsAttackingGuild(p.GuildName) && castle.IsDefendingGuild(tp.GuildName) {
+			pAttack := castle.IsAttackingGuild(p.GuildName) || castle.IsAttackAllyGuild(p.Engine, p.GuildName)
+			pDefend := castle.IsDefendingGuild(p.GuildName) || castle.IsDefenseAllyGuild(p.Engine, p.GuildName)
+			tAttack := castle.IsAttackingGuild(tp.GuildName) || castle.IsAttackAllyGuild(p.Engine, tp.GuildName)
+			tDefend := castle.IsDefendingGuild(tp.GuildName) || castle.IsDefenseAllyGuild(p.Engine, tp.GuildName)
+			if pAttack && tDefend {
 				return true
 			}
-			if castle.IsDefendingGuild(p.GuildName) && castle.IsAttackingGuild(tp.GuildName) {
+			if pDefend && tAttack {
 				return true
 			}
-			if castle.IsAttackingGuild(p.GuildName) && castle.IsAttackingGuild(tp.GuildName) && p.GuildName != tp.GuildName {
+			if pAttack && tAttack && p.GuildName != tp.GuildName {
 				return true
 			}
 		}

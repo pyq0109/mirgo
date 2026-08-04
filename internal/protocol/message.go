@@ -39,6 +39,7 @@ const (
 	CMEat                = 1006
 	CMButch              = 1007
 	CMMagicKeyChange     = 1008
+	CMSoftClose          = 1009
 	CMClickNPC           = 1010
 	CMMerchantDlgSelect  = 1011
 	CMMerchantQuerySellPrice = 1012
@@ -122,7 +123,7 @@ func IsClientIdent(ident uint16) bool {
 	case CMQueryUsername, CMQueryBagItems, CMQueryUserState,
 		CMQueryChr, CMNewChr, CMDelChr, CMSelChr, CMSelectServer,
 		CMDropItem, CMPickup, CMOpenDoor, CMTakeOnItem, CMTakeOffItem,
-		CMEat, CMButch, CMMagicKeyChange, CMClickNPC,
+		CMEat, CMButch, CMMagicKeyChange, CMSoftClose, CMClickNPC,
 		CMMerchantDlgSelect, CMMerchantQuerySellPrice,
 		CMUserSellItem, CMUserBuyItem, CMUserGetDetailItem,
 		CMDropGold, CMLoginNoticeOK, CMGroupMode, CMCreateGroup,
@@ -422,6 +423,8 @@ func MsgName(ident uint16) string {
 		return "CM_EAT"
 	case CMButch:
 		return "CM_BUTCH"
+	case CMSoftClose:
+		return "CM_SOFTCLOSE"
 	case CMClickNPC:
 		return "CM_CLICKNPC"
 	case CMLoginNoticeOK:
@@ -844,6 +847,8 @@ func MsgName(ident uint16) string {
 		return "SM_CLOSEHEALTH"
 	case SMBreakWeapon:
 		return "SM_BREAKWEAPON"
+	case SMInstanceHealGuage:
+		return "SM_INSTANCEHEALGUAGE"
 	case SMChangeFace:
 		return "SM_CHANGEFACE"
 	case SMVersionFail:
@@ -874,10 +879,11 @@ const (
 
 // 生命/状态（1100+）
 const (
-	SMOpenHealth     = 1100
-	SMCloseHealth    = 1101
-	SMBreakWeapon    = 1102
-	SMChangeFace     = 1104
+	SMOpenHealth        = 1100
+	SMCloseHealth       = 1101
+	SMBreakWeapon       = 1102
+	SMInstanceHealGuage = 1103
+	SMChangeFace        = 1104
 	SMVersionFail    = 1106
 	SMLogoutOK       = 1107
 	SMExitOK         = 1108

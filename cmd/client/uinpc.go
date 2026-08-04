@@ -377,6 +377,37 @@ func (s *PlayScene) paintShopMenu(c *UIControl, proj [16]float32) {
 		return
 	}
 	ax, ay := c.AbsX(), c.AbsY()
+	// 明细模式（SM_SENDDETAILGOODSLIST，ClMain.pas:5692-5730）：逐实例列表
+	if s.State.ShopDetailMode {
+		s.text.DrawText("物品列表", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
+		s.text.DrawText("持久度", float32(ax+164), float32(ay+31), 1, 1, 1, 1, proj)
+		s.text.DrawText("价格", float32(ax+262), float32(ay+31), 1, 1, 1, 1, proj)
+		details := s.State.ShopDetailGoods
+		rows := len(details) - s.menuTop
+		if rows > menuMaxRows {
+			rows = menuMaxRows
+		}
+		for m := 0; m < rows; m++ {
+			idx := s.menuTop + m
+			g := details[idx]
+			y := ay + 50 + m*menuRowH
+			if idx == s.menuIndex {
+				s.text.DrawText(">", float32(ax+25), float32(y), 1, 0, 0, 1, proj)
+			}
+			name := g.Name
+			if name == "" {
+				if def := s.State.ItemDefs[int(g.WIndex)]; def != nil {
+					name = def.Name
+				} else {
+					name = "Item#" + strconv.Itoa(int(g.WIndex))
+				}
+			}
+			s.text.DrawText(name, float32(ax+38), float32(y), 1, 1, 1, 1, proj)
+			s.text.DrawText(strconv.Itoa(int(g.Dura))+"/"+strconv.Itoa(int(g.DuraMax)), float32(ax+170), float32(y), 1, 1, 1, 1, proj)
+			s.text.DrawText(strconv.Itoa(g.Price)+" 金币", float32(ax+240), float32(y), 1, 1, 1, 1, proj)
+		}
+		return
+	}
 	// 表头 (FState:4913-4917 购买模式 / 4943-4946 寄存模式), 白色。
 	if s.State.ShopMode == 3 {
 		s.text.DrawText("保管物品", float32(ax+27), float32(ay+31), 1, 1, 1, 1, proj)
@@ -443,6 +474,13 @@ func (s *PlayScene) menuRowClick(x, y int) {
 		return
 	}
 	idx := (ly-50)/menuRowH + s.menuTop
+	if s.State.ShopDetailMode {
+		if idx >= 0 && idx < len(s.State.ShopDetailGoods) {
+			s.menuIndex = idx
+			gSound.PlaySound(sGlassButtonClick)
+		}
+		return
+	}
 	if idx >= 0 && idx < len(s.State.ShopGoods) {
 		s.menuIndex = idx
 		gSound.PlaySound(sGlassButtonClick)
@@ -457,6 +495,16 @@ func (s *PlayScene) buySelected() {
 		return
 	}
 	s.lastBuyTick = now + 5000
+	if s.State.ShopDetailMode {
+		// 明细行：按物品索引购买（服务端从库存选实例）
+		if s.menuIndex >= 0 && s.menuIndex < len(s.State.ShopDetailGoods) {
+			g := s.State.ShopDetailGoods[s.menuIndex]
+			if s.sendBuyItem != nil {
+				s.sendBuyItem(int(g.WIndex))
+			}
+		}
+		return
+	}
 	if s.menuIndex >= 0 && s.menuIndex < len(s.State.ShopGoods) {
 		g := s.State.ShopGoods[s.menuIndex]
 		if s.State.ShopMode == 3 {

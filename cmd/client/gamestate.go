@@ -147,6 +147,14 @@ type GameState struct {
 	ShopNpcID   int32
 	ShopMode    int
 
+	// SM_SENDDETAILGOODSLIST 商品明细模式（Delphi BoDetailMenu，ClMain.pas:5692-5730）
+	ShopDetailMode  bool
+	ShopDetailGoods []ShopDetailItem
+	ShopDetailTop   int // 明细列表滚动首行（Delphi MenuTopLine=msg.Tag）
+
+	HungerStatus int // SM_MYSTATUS 饥饿状态（0=正常，Go 服务端无饥饿系统恒 0）
+	AreaState    int // SM_AREASTATE 区域位标（1=FIGHT 格斗区, 2=SAFE 安全图, 4=攻城自由PK）
+
 	SoundEnabled bool
 	BGMEnabled   bool
 	MapMusic     int
@@ -157,6 +165,16 @@ type ShopItem struct {
 	Price   int
 	Stock   int
 	Name    string
+}
+
+// ShopDetailItem 商店明细商品实例（含耐久与唯一 MakeIndex）。
+type ShopDetailItem struct {
+	MakeIndex int32
+	WIndex    uint16
+	Dura      uint16
+	DuraMax   uint16
+	Price     int
+	Name      string
 }
 
 func NewGameState() *GameState {

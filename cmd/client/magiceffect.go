@@ -15,6 +15,7 @@ const (
 	EffFly          MagicEffectType = 1
 	EffGround       MagicEffectType = 2
 	EffFlyAxe       MagicEffectType = 3
+	EffNone         MagicEffectType = 4 // 无特效（Delphi mtFireWind/mtKyulKai，PlayScn.pas:1573-1574, 1607-1609）
 	EffFireGun      MagicEffectType = 5
 	EffLightning    MagicEffectType = 6
 	EffIce          MagicEffectType = 7
@@ -25,6 +26,84 @@ const (
 	EffThunder2     MagicEffectType = 13
 	EffFlyBug       MagicEffectType = 14
 )
+
+// MagicEffectParams 每种特效类型的渲染参数，集中原散落在 main.go
+// SMMagicFire 分发里的硬编码。数值出处：Delphi PlayScn.pas:1448-1647
+// NewMagic 各 case 与 magiceff.pas 常量（FLYBASE=10、EXPLOSIONBASE=170、
+// FLYOMAAXEBASE=447、ARCHERBASE=2607，magiceff.pas:16-22）。
+// BaseIdx 为 -1 表示帧基址由 Add* 函数据 effNum 经 effectBase[effNum-1] 推导。
+type MagicEffectParams struct {
+	BaseIdx   int
+	MaxFrame  int
+	FrameTime int64
+	Sound     int // 0 = 用默认 10000+magID*10+2
+	Light     int // 光源级别（与 Add* 内部设置一致，集中备查）
+	ImgLib    int // 0=Magic.wil 1=Magic2.wil（与 Add* 内部设置一致）
+}
+
+var magicEffectParams = map[MagicEffectType]MagicEffectParams{
+	// 爆炸：基址 = effectBase[effNum-1]+170（magiceff.pas:17 EXPLOSIONBASE；
+	// 特例 effNum 见 explosionByEffNum，PlayScn.pas:1459-1572）。
+	EffExplosion: {BaseIdx: -1, MaxFrame: 10, FrameTime: 50, Light: 2},
+	// 飞行：基址 = effectBase[effNum-1]+10（magiceff.pas:16 FLYBASE），
+	// 飞行帧6（magiceff.pas:394）；effNum=39 寒冰掌特例见 flyByEffNum。
+	EffFly: {BaseIdx: -1, MaxFrame: 6, FrameTime: 50, Light: 1},
+	// 地面：基址 = effectBase[effNum-1]。
+	EffGround: {BaseIdx: -1, MaxFrame: 10, FrameTime: 50, Light: 3},
+	// 飞行斧：FLYOMAAXEBASE=447（magiceff.pas:20），3帧（magiceff.pas:531-538）。
+	EffFlyAxe: {BaseIdx: 447, MaxFrame: 3, FrameTime: 50, Light: 1},
+	// 无特效：仅播放音效，不创建特效。
+	EffNone: {},
+	// 火枪：TFireGunEffect(930)（PlayScn.pas:1575-1576），FIREGUNFRAME=6（magiceff.pas:26）。
+	EffFireGun: {BaseIdx: 930, MaxFrame: 6, FrameTime: 50, Light: 2},
+	// 疾光电影：TLightingThunder(970)（PlayScn.pas:1583-1584）。
+	EffLightning: {BaseIdx: 970, MaxFrame: 10, FrameTime: 80, Light: 4},
+	// 雷电术：TThuderEffect(10) + Magic2，6帧（PlayScn.pas:1577-1582）。
+	EffIce: {BaseIdx: 10, MaxFrame: 6, FrameTime: 80, Light: 2, ImgLib: 1},
+	// 符咒爆炸：TExploBujaukEffect(1160)（PlayScn.pas:1585-1596）。
+	EffBujaukExplo: {BaseIdx: 1160, MaxFrame: 10, FrameTime: 80, Light: 2},
+	// 符咒地面：TBujaukGroundEffect(1160)（PlayScn.pas:1598-1606）。
+	EffBujaukGround: {BaseIdx: 1160, MaxFrame: 10, FrameTime: 80, Light: 3},
+	// 飞行箭：ARCHERBASE=2607（magiceff.pas:22），1帧（magiceff.pas:539-544）。
+	EffFlyArrow: {BaseIdx: 2607, MaxFrame: 1, FrameTime: 50, Light: 0},
+	// 蓄力：基址 = effectBase[effNum-1]，MG_READY=10帧（magiceff.pas:11）。
+	EffReady: {BaseIdx: -1, MaxFrame: 10, FrameTime: 50, Light: 1},
+	// 雷电2（Delphi mt14）：TThuderEffect(140) + Magic2（PlayScn.pas:1634-1638）。
+	EffThunder2: {BaseIdx: 140, MaxFrame: 6, FrameTime: 80, Light: 2, ImgLib: 1},
+	// 飞行虫（Delphi mt15）：TFlyingBug，FlyImageBase=FLYOMAAXEBASE=447
+	//（PlayScn.pas:1639-1643, magiceff.pas:1455-1459）。
+	EffFlyBug: {BaseIdx: 447, MaxFrame: 3, FrameTime: 50, Light: 1},
+}
+
+// explosionByEffNum 爆炸特效按动画号的特例参数（Delphi mtExplosion 分支中
+// 覆盖 MagExplosionBase 的 case，PlayScn.pas:1459-1572）。imgLib: 1=Magic2
+// （PlayScn 中 meff.ImgLib := wimg 的分支，GetEffectBase 返回 Magic2）。
+var explosionByEffNum = map[int]struct {
+	base, frames  int
+	frameTime     int64
+	light, imgLib int
+}{
+	18: {1570, 10, 80, 2, 0},  // 诱惑之光（PlayScn.pas:1461-1466）
+	21: {1660, 20, 80, 3, 0},  // 爆裂火焰（PlayScn.pas:1467-1474）
+	26: {3990, 10, 80, 2, 0},  // 心灵启示（PlayScn.pas:1475-1482）
+	27: {1800, 10, 80, 3, 0},  // 群体治愈术（PlayScn.pas:1483-1490）
+	30: {3930, 16, 80, 3, 0},  // 圣言术（PlayScn.pas:1491-1498）
+	31: {3850, 20, 80, 3, 0},  // 冰咆哮（PlayScn.pas:1499-1506）
+	34: {140, 20, 80, 3, 1},   // Magic2（PlayScn.pas:1507-1516）
+	40: {620, 20, 100, 3, 1},  // 净化术，Magic2（PlayScn.pas:1517-1526）
+	45: {920, 20, 100, 3, 1},  // Magic2（PlayScn.pas:1527-1536）
+	47: {1010, 20, 100, 3, 1}, // 火龙气焰，Magic2（PlayScn.pas:1537-1546）
+	48: {1060, 40, 50, 3, 1},  // Magic2（PlayScn.pas:1547-1556）
+	49: {1110, 10, 100, 3, 1}, // Magic2（PlayScn.pas:1557-1566）
+}
+
+// flyByEffNum 飞行特效按动画号的特例参数：寒冰掌 effNum=39 飞行4帧、
+// 爆炸8帧、使用 Magic2（PlayScn.pas:1452-1456, magiceff.pas:400-403）。
+var flyByEffNum = map[int]struct {
+	frames, explosionFrames, imgLib int
+}{
+	39: {4, 8, 1},
+}
 
 type LightSource struct {
 	X, Y  float64
@@ -46,6 +125,7 @@ type MagicEffect struct {
 	Light            int
 	Dir16            int
 	ExplosionBase    int
+	ExplosionFrames  int // 0 = 默认10帧（Delphi ExplosionFrame 可被特例覆盖）
 	Exploding        bool
 }
 
@@ -137,24 +217,38 @@ func NewEffectManager() *EffectManager {
 }
 
 // AddExplosion 在目标点播放爆炸动画。effNum 为魔法 EffectNumber，
-// 帧基址 = EffectBase[effNum-1] + EXPLOSIONBASE(170)。
+// 帧基址 = EffectBase[effNum-1] + EXPLOSIONBASE(170)；特例动画号
+// （explosionByEffNum）改用 Delphi MagExplosionBase 覆盖值。
 func (em *EffectManager) AddExplosion(x, y float64, effNum, maxFrame int, frameTime int64) {
+	base := effectBaseIdx(effNum-1) + 170
+	light := magicEffectParams[EffExplosion].Light
+	imgLib := 0
+	if ov, ok := explosionByEffNum[effNum]; ok {
+		base, maxFrame, frameTime = ov.base, ov.frames, ov.frameTime
+		light, imgLib = ov.light, ov.imgLib
+	}
 	em.effects = append(em.effects, &MagicEffect{
 		Type: EffExplosion, X: x, Y: y,
-		BaseIdx: effectBaseIdx(effNum-1) + 170, MaxFrame: maxFrame, FrameTime: frameTime,
-		LastTick: time.Now().UnixMilli(), Light: 2,
+		BaseIdx: base, MaxFrame: maxFrame, FrameTime: frameTime,
+		LastTick: time.Now().UnixMilli(), Light: light, ImgLib: imgLib,
 	})
 }
 
 // AddFly 发射飞行弹道。effNum 为魔法 EffectNumber，
-// 飞行帧基址 = EffectBase[effNum-1] + FLYBASE(10)，到达后切换爆炸。
+// 飞行帧基址 = EffectBase[effNum-1] + FLYBASE(10)，到达后切换爆炸；
+// 特例动画号（flyByEffNum，如寒冰掌39）覆盖帧数/图库（PlayScn.pas:1452-1456）。
 func (em *EffectManager) AddFly(sx, sy, tx, ty float64, effNum, maxFrame int, frameTime int64) {
 	base := effectBaseIdx(effNum - 1)
+	imgLib := 0
+	explFrames := 0
+	if ov, ok := flyByEffNum[effNum]; ok {
+		maxFrame, imgLib, explFrames = ov.frames, ov.imgLib, ov.explosionFrames
+	}
 	em.effects = append(em.effects, &MagicEffect{
 		Type: EffFly, X: sx, Y: sy, StartX: sx, StartY: sy, TargetX: tx, TargetY: ty,
 		BaseIdx: base + 10, MaxFrame: maxFrame, FrameTime: frameTime,
-		LastTick: time.Now().UnixMilli(), Light: 1,
-		Dir16: flyDir16(sx, sy, tx, ty), ExplosionBase: base + 170,
+		LastTick: time.Now().UnixMilli(), Light: 1, ImgLib: imgLib,
+		Dir16: flyDir16(sx, sy, tx, ty), ExplosionBase: base + 170, ExplosionFrames: explFrames,
 	})
 }
 
@@ -268,6 +362,9 @@ func (em *EffectManager) Update(now int64) {
 							eff.Exploding = true
 							eff.Frame = 0
 							eff.MaxFrame = 10
+							if eff.ExplosionFrames > 0 {
+								eff.MaxFrame = eff.ExplosionFrames
+							}
 							eff.BaseIdx = eff.ExplosionBase
 							break
 						}

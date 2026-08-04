@@ -59,7 +59,9 @@ type PlayObject struct {
 	RunSpeed       int64
 	OverSpeedCount int
 	LastSpeedViolationTick int64 // 上次超速违规时间（用于衰减）
-	LastActionTick int64         // 上次动作时间（全局动作间隔）
+	LastActionTick int64         // Delphi m_dwActionTick：动作转换间隔锚点（ObjBase.pas:25246）
+	OldIdent       int           // Delphi m_wOldIdent：上一动作（归一化后，ObjBase.pas:25352）
+	OldDir         int           // Delphi m_btOldDir：上一动作方向（ObjBase.pas:25353）
 
 	HitTick     int64
 	FireHitTick int64
@@ -316,7 +318,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer) {
 	if p.Death {
 		switch msg.Ident {
-		case protocol.CMSay, protocol.CMQueryBagItems, protocol.CMTakeOnItem, protocol.CMTakeOffItem, protocol.CMWantMinimap:
+		case protocol.CMSay, protocol.CMQueryBagItems, protocol.CMTakeOnItem, protocol.CMTakeOffItem, protocol.CMWantMinimap, protocol.CMSitdown:
 		default:
 			return
 		}
@@ -430,6 +432,12 @@ func (p *PlayObject) ProcessMessage(msg SendMessage, server *netserver.TCPServer
 		p.HandleAdjustBonus(msg, server)
 	case protocol.CMQueryUserState:
 		p.HandleQueryUserState(msg, server)
+	case protocol.CMQueryUsername:
+		p.HandleQueryUsername(msg, server)
+	case protocol.CMSitdown:
+		p.HandleSitDown(msg, server)
+	case protocol.CMUserGetDetailItem:
+		p.HandleGetDetailItem(msg, server)
 	case protocol.CMWantMinimap:
 		p.HandleWantMinimap(server)
 	case RM_WALK:
@@ -491,6 +499,26 @@ func (p *PlayObject) HandleTurn(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 	p.TurnTo(dir)
+	p.recordAction(protocol.CMTurn, dir)
+	sendCtrl(server, p.Session.ID, "GOOD")
+}
+
+// HandleSitDown — Delphi ClientSitDownHit（ObjBase.pas:17024-17042）：
+// 死亡/石化禁止（+FAIL），TurnInterval 限速，广播 RM_POWERHIT 后 +GOOD。
+// 客户端屠宰（Alt+左键）也随 CMButch 发送本消息播放下蹲动作。
+func (p *PlayObject) HandleSitDown(msg SendMessage, server *netserver.TCPServer) {
+	if p.Death || p.StatusTimeArr[POISON_STONE] > 0 {
+		sendCtrl(server, p.Session.ID, "FAIL")
+		return
+	}
+	now := time.Now().UnixMilli()
+	if !p.checkActionSpeed(now, p.Engine.Config.GetTurnInterval(), &p.TurnTick, server) {
+		return
+	}
+	if dir := msg.Param1; dir >= 0 && dir <= 7 {
+		p.Dir = dir
+	}
+	p.SendRefMsg(RM_POWERHIT, p.Dir, p.CurrX, p.CurrY, "")
 	sendCtrl(server, p.Session.ID, "GOOD")
 }
 
@@ -546,6 +574,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 			p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 			p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
 			sendCtrl(server, p.Session.ID, "GOOD")
+			p.recordAction(protocol.CMWalk, dir)
 			p.CheckMapRoute(server)
 			return
 		}
@@ -553,6 +582,7 @@ func (p *PlayObject) HandleWalk(msg SendMessage, server *netserver.TCPServer) {
 	if p.WalkTo(dir) {
 		p.SendRefMsg(RM_WALK, dir, p.CurrX, p.CurrY, "")
 		sendCtrl(server, p.Session.ID, "GOOD")
+		p.recordAction(protocol.CMWalk, dir)
 		p.CheckMapRoute(server)
 	} else {
 		p.MoveCount = 0 // Delphi ObjBase.pas:9696
@@ -629,6 +659,7 @@ func (p *PlayObject) HandleRun(msg SendMessage, server *netserver.TCPServer) {
 	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.SendRefMsg(RM_RUN, dir, p.CurrX, p.CurrY, "")
 	sendCtrl(server, p.Session.ID, "GOOD")
+	p.recordAction(protocol.CMRun, dir)
 	p.CheckMapRoute(server)
 }
 
@@ -704,6 +735,7 @@ func (p *PlayObject) HandleHorseRun(msg SendMessage, server *netserver.TCPServer
 	p.envir.AddObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 	p.SendRefMsg(RM_HORSERUN, dir, p.CurrX, p.CurrY, "")
 	sendCtrl(server, p.Session.ID, "GOOD")
+	p.recordAction(protocol.CMRun, dir)
 	p.CheckMapRoute(server)
 }
 
@@ -759,13 +791,21 @@ func (p *PlayObject) delayMoveOrFail(cmIdent int, msg SendMessage, server *netse
 		cfg := p.Engine.Config
 		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
 			log.Logf(log.LevelWarn, "Server", "speed-hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
-			server.CloseSession(p.Session.ID)
+			p.kickOutOfGame(server)
 			return
 		}
 		sendCtrl(server, p.Session.ID, "FAIL")
 		return
 	}
 	p.SendDelayMsg(cmIdent, msg.Param1, p.CurrX, p.CurrY, "", delay)
+}
+
+// kickOutOfGame — Delphi m_boKickFlag 路径（ObjBase.pas:6584-6587）：
+// 先发 SM_OUTOFCONNECTION 通知客户端，再断开连接。
+func (p *PlayObject) kickOutOfGame(server *netserver.TCPServer) {
+	resp := protocol.MakeDefaultMsg(protocol.SMOutOfConnection, 0, 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+	server.CloseSession(p.Session.ID)
 }
 
 // checkActionSpeed 校验动作间隔并记录超速违规。
@@ -782,7 +822,7 @@ func (p *PlayObject) checkActionSpeed(now, interval int64, tick *int64, server *
 		cfg := p.Engine.Config
 		if p.OverSpeedCount > cfg.GetSpeedHackMax() && cfg.Game.SpeedHackKick {
 			log.Logf(log.LevelWarn, "Server", "speed-hack kick: %s (count=%d)", p.Name, p.OverSpeedCount)
-			server.CloseSession(p.Session.ID)
+			p.kickOutOfGame(server)
 			return false
 		}
 		sendCtrl(server, p.Session.ID, "FAIL")
@@ -790,6 +830,61 @@ func (p *PlayObject) checkActionSpeed(now, interval int64, tick *int64, server *
 	}
 	*tick = now
 	return true
+}
+
+// normalizeActionIdent — Delphi ObjBase.pas:25330-25340：
+// 普攻变体（重击/攻杀/半月/烈火等）统一按 CM_HIT 记录，供动作转换判定。
+func normalizeActionIdent(ident int) int {
+	switch ident {
+	case protocol.CMHit, protocol.CMHeavyHit, protocol.CMBigHit,
+		protocol.CMPowerHit, protocol.CMWideHit, protocol.CMFireHit:
+		return protocol.CMHit
+	}
+	return ident
+}
+
+// checkActionTransition — Delphi CheckActionStatus（ObjBase.pas:25226-25365）：
+// 不同动作之间的转换间隔。连续相同动作不受限（ObjBase.pas:25253-25258）；
+// 动作不同且方向改变时按四组合取间隔：跑位刺杀 RunLongHit / 跑位普攻 RunHit /
+// 走位普攻 WalkHit / 跑位魔法 RunMagic（ObjBase.pas:25266-25327），
+// 否则用基础 ActionInterval。无论通过与否都记录本次动作（ObjBase.pas:25352-25353）。
+func (p *PlayObject) checkActionTransition(now int64, ident, dir int, server *netserver.TCPServer) bool {
+	ident = normalizeActionIdent(ident)
+	if ident == p.OldIdent {
+		return true
+	}
+	cfg := p.Engine.Config
+	interval := cfg.GetActionInterval()
+	if dir != p.OldDir {
+		switch ident {
+		case protocol.CMLongHit:
+			if p.OldIdent == protocol.CMRun {
+				interval = cfg.GetRunLongHitInterval()
+			}
+		case protocol.CMHit:
+			switch p.OldIdent {
+			case protocol.CMWalk:
+				interval = cfg.GetWalkHitInterval()
+			case protocol.CMRun:
+				interval = cfg.GetRunHitInterval()
+			}
+		case protocol.CMSpell:
+			if p.OldIdent == protocol.CMRun {
+				interval = cfg.GetRunMagicInterval()
+			}
+		}
+	}
+	ok := p.checkActionSpeed(now, interval, &p.LastActionTick, server)
+	p.OldIdent = ident
+	p.OldDir = dir
+	return ok
+}
+
+// recordAction — 移动/转身成功后记录动作（Delphi m_wOldIdent/m_btOldDir,
+// ObjBase.pas:25352-25353），供后续攻击/施法的转换间隔判定。
+func (p *PlayObject) recordAction(ident, dir int) {
+	p.OldIdent = normalizeActionIdent(ident)
+	p.OldDir = dir
 }
 
 func hitSkillMagID(ident int) (int, bool) {
@@ -823,6 +918,11 @@ func (p *PlayObject) HandleHit(msg SendMessage, server *netserver.TCPServer) {
 	// Delphi: 受击硬直阻止攻击 (ObjBase.pas:25234)
 	if now-p.StruckTick < p.Engine.Config.GetStruckTime() {
 		sendCtrl(server, p.Session.ID, "FAIL")
+		return
+	}
+
+	// Delphi: 动作转换间隔（跑砍/走砍/跑位刺杀四组合，ObjBase.pas:25246-25327）
+	if !p.checkActionTransition(now, msg.Ident, msg.Param1, server) {
 		return
 	}
 
@@ -1250,6 +1350,11 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	// Delphi TTrainer（ObjNpc.pas:2628-2676）：训练师为无敌沙袋，仅累计伤害统计
 	if mon := p.envir.getMonsterByBase(target); mon != nil && isTrainer(mon) {
 		mon.addTrainingDamage(server, p.ID, damage)
+		return
+	}
+	// Delphi TSoccerBall（ObjMon2.pas:303-310）：m_boSuperMan 无敌，被击不扣血只触发踢滚
+	if mon := p.envir.getMonsterByBase(target); mon != nil && mon.AIBehavior == AISoccerBall {
+		mon.OnStruck(p.ID, time.Now().UnixMilli(), p.Engine)
 		return
 	}
 
@@ -2073,6 +2178,58 @@ func (p *PlayObject) HandleQueryUserState(msg SendMessage, server *netserver.TCP
 	server.Send(p.Session.ID, resp, protocol.EncodeBuffer(buf))
 }
 
+// HandleQueryUsername — Delphi ClientQueryUserName（ObjBase.pas:2638-2652）：
+// Param1=目标ID Param2=x Param3=y。目标位于 (x,y) 3×3 范围内则回
+// SM_USERNAME（名字+名字颜色），否则回 SM_GHOST（CretInNearXY，ObjBase.pas:16854）。
+func (p *PlayObject) HandleQueryUsername(msg SendMessage, server *netserver.TCPServer) {
+	targetID := int32(msg.Param1)
+	x, y := msg.Param2, msg.Param3
+	var target interface{}
+	if p.envir != nil {
+		for _, obj := range p.envir.GetRangeObjects(x, y, 1) {
+			var base *BaseObject
+			switch t := obj.(type) {
+			case *PlayObject:
+				base = t.BaseObject
+			case *MonsterObject:
+				base = t.BaseObject
+			case *NpcObject:
+				base = t.BaseObject
+			default:
+				continue
+			}
+			if base != nil && base.ID == targetID {
+				target = obj
+				break
+			}
+		}
+	}
+	if target == nil {
+		resp := protocol.MakeDefaultMsg(protocol.SMGhost, targetID, uint16(x), uint16(y), 0)
+		server.Send(p.Session.ID, resp, "")
+		return
+	}
+	color := 255
+	var name string
+	switch t := target.(type) {
+	case *PlayObject:
+		color = t.NameColor()
+		name = t.Name
+	case *MonsterObject:
+		name = t.Name
+		// Delphi GetShowName（ObjBase.pas:2654-2663）：召唤物附带主人名
+		if t.PlayerMasterID != 0 && p.Engine != nil {
+			if master := p.Engine.GetPlayer(t.PlayerMasterID); master != nil {
+				name += "(" + master.Name + ")"
+			}
+		}
+	case *NpcObject:
+		name = t.Name
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMUsername, targetID, uint16(color), 0, 0)
+	server.Send(p.Session.ID, resp, protocol.EncodeString(name))
+}
+
 // HandleWantMinimap 响应 CM_WANTMINIMAP：下发当前地图的小地图图像号。
 // Delphi: TPlayObject.ClientGetMinMap（ObjBase.pas:17985-17998）——
 // 索引放在 Param 字段（SendDefMessage(SM_READMINIMAP_OK, 0, nMinMap, 0, 0, '')）。
@@ -2242,6 +2399,27 @@ func (p *PlayObject) SendMapDescription(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, resp, protocol.EncodeString(p.MapName))
 }
 
+// SendAreaState — Delphi RefUserState（ObjBase.pas:4467-4476）：
+// bit1=FIGHT 格斗区、bit2=SAFE 安全图、bit4=自由 PK 区（攻城战期间的城堡图）。
+func (p *PlayObject) SendAreaState(server *netserver.TCPServer) {
+	if p.envir == nil {
+		return
+	}
+	state := 0
+	if p.envir.Flag.Fight || p.envir.Flag.Fight3 {
+		state |= 1
+	}
+	if p.envir.Flag.Safe {
+		state |= 2
+	}
+	if p.Engine != nil && p.Engine.Castle != nil && p.Engine.Castle.IsAtWar() &&
+		p.MapName == p.Engine.Castle.Config.MapName {
+		state |= 4
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMAreaState, int32(state), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
 func (p *PlayObject) SendSubAbility(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMSubAbility, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
@@ -2287,6 +2465,9 @@ func (p *PlayObject) EnterAnotherMap(server *netserver.TCPServer, newEnvir *Envi
 
 	changeMsg := protocol.MakeDefaultMsg(protocol.SMChangeMap, p.ID, uint16(p.CurrX), uint16(p.CurrY), uint16(p.dayBright()))
 	server.Send(p.Session.ID, changeMsg, protocol.EncodeString(p.MapName))
+
+	// Delphi: 切图后刷新区域状态位（ObjBase.pas:5617-5625 SM_NEWMAP 序列含 RefUserState）
+	p.SendAreaState(server)
 
 	p.VisibleActors = make(map[int32]*VisibleEntry)
 
