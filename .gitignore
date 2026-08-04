@@ -33,7 +33,6 @@ __pycache__
 
 # Go
 vendor/
-go.sum
 *.test
 *.prof
 *.prof.html

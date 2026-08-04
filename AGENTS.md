@@ -28,12 +28,12 @@ serverconfig/        # 已 gitignore — 转换后的配置文件
 
 ## 约束
 
-- `go.sum` 已 gitignore — 添加依赖后需运行 `go mod tidy`
+- `go.sum` 已提交入库 — 添加依赖后运行 `go mod tidy` 并连同 go.sum 一起提交
 - 无 CI、linter；测试用 `go test ./...`
 - `asset/` 目录禁止提交（含二进制和大文件）
 - 服务端单端口（默认7000）统一处理登录/选角/游戏消息
 - 客户端不使用 ImGui（自建渲染），查看器工具使用 ImGui
-- WIL 懒加载：`Load()` 只读索引，`GetImage(idx)` 按需解码，`Close()` 关闭句柄
+- WIL 懒加载：`Load()` 只读索引，`GetImage(idx)` 按需解码（全局字节预算 LRU 淘汰，默认 128MB，`wil.SetCacheLimit` 可调），像素拷入 GPU 后调 `ReleasePixels()` 归还，`Close()` 关闭句柄并清空缓存
 - 服务端 `Send()` 不编码 body，调用方自行 `protocol.EncodeString()`/`EncodeBuffer()`
 
 ## 资源目录（已 gitignore — 需手动准备）
