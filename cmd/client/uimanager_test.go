@@ -142,6 +142,35 @@ func TestModalShortCircuit(t *testing.T) {
 	m.CloseModal(modal)
 }
 
+// 修复 1.1：模态可见时点在模态框**矩形之外**也必须恒被吞掉
+// （Delphi TDWinManager 恒返回 TRUE，DWinCtl.pas:985,1012），
+// 否则点击会落到游戏世界导致走路/攻击。
+func TestModalConsumesClicksOutsideItsRect(t *testing.T) {
+	m := newTestManager()
+	modal := NewUIControl("modal", KindWindow)
+	modal.Left, modal.Top, modal.Width, modal.Height = 90, 90, 100, 80
+	m.ShowModal(modal)
+
+	// (500,500) 远在模态框之外。
+	if !m.RouteMouseDown(500, 500, 0) {
+		t.Fatal("mouse down outside modal rect must still be consumed")
+	}
+	if !m.RouteMouseUp(500, 500, 0) {
+		t.Fatal("mouse up outside modal rect must still be consumed")
+	}
+	if !m.RouteMouseMove(500, 500) {
+		t.Fatal("mouse move outside modal rect must still be consumed")
+	}
+	if !m.RouteDblClick(500, 500) {
+		t.Fatal("dblclick outside modal rect must still be consumed")
+	}
+	m.CloseModal(modal)
+	// 模态关闭后恢复正常命中：空白处不再被吞。
+	if m.RouteMouseDown(500, 500, 0) {
+		t.Fatal("after CloseModal, empty area should not consume down")
+	}
+}
+
 func TestBackgroundClickAndFocusRelease(t *testing.T) {
 	m := newTestManager()
 	bgClicks := 0

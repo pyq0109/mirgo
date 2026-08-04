@@ -113,8 +113,11 @@ func (m *UIManager) CloseModal(c *UIControl) {
 func (m *UIManager) RouteMouseDown(absX, absY int, button int) (consumed bool) {
 	defer func() { uiEventf("[down] (%d,%d) btn=%d consumed=%v", absX, absY, button, consumed) }()
 	if m.Modal != nil && m.Modal.Visible {
+		// 模态可见时恒吞掉鼠标事件 (TDWinManager.MouseDown
+		// 恒返回 TRUE, DWinCtl.pas:1008-1015), 点在模态框外也不许落到世界.
 		log.Logf(log.LevelDebug, "UI", "mouse-down routed -> modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
-		return m.dispatchMouseDown(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		m.dispatchMouseDown(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		return true
 	}
 	if m.Capture != nil {
 		log.Logf(log.LevelDebug, "UI", "mouse-down routed -> capture %s pos=(%d,%d)", m.Capture.Name, absX, absY)
@@ -127,7 +130,8 @@ func (m *UIManager) RouteMouseUp(absX, absY int, button int) (consumed bool) {
 	defer func() { uiEventf("[up] (%d,%d) btn=%d consumed=%v", absX, absY, button, consumed) }()
 	if m.Modal != nil && m.Modal.Visible {
 		log.Logf(log.LevelDebug, "UI", "mouse-up routed -> modal %s pos=(%d,%d)", m.Modal.Name, absX, absY)
-		return m.dispatchMouseUp(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		m.dispatchMouseUp(m.Modal, button, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		return true
 	}
 	if m.Capture != nil {
 		log.Logf(log.LevelDebug, "UI", "mouse-up routed -> capture %s pos=(%d,%d)", m.Capture.Name, absX, absY)
@@ -138,7 +142,9 @@ func (m *UIManager) RouteMouseUp(absX, absY int, button int) (consumed bool) {
 
 func (m *UIManager) RouteMouseMove(absX, absY int) bool {
 	if m.Modal != nil && m.Modal.Visible {
-		return m.dispatchMouseMove(m.Modal, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		// 恒吞 (DWinCtl.pas:976-1001).
+		m.dispatchMouseMove(m.Modal, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		return true
 	}
 	if m.Capture != nil {
 		return m.dispatchMouseMove(m.Capture, m.Capture.ParentSpaceX(absX), m.Capture.ParentSpaceY(absY))
@@ -150,7 +156,8 @@ func (m *UIManager) RouteMouseMove(absX, absY int) bool {
 // TDControl.DblClick DWinCtl.pas:553-578).
 func (m *UIManager) RouteDblClick(absX, absY int) bool {
 	if m.Modal != nil && m.Modal.Visible {
-		return m.dispatchDblClick(m.Modal, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		m.dispatchDblClick(m.Modal, m.Modal.ParentSpaceX(absX), m.Modal.ParentSpaceY(absY))
+		return true
 	}
 	if m.Capture != nil {
 		return m.dispatchDblClick(m.Capture, m.Capture.ParentSpaceX(absX), m.Capture.ParentSpaceY(absY))

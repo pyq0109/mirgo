@@ -6,6 +6,17 @@ import (
 
 // 好友面板 — 简化版 DFrdFriendDlg
 
+// toggleFriend 开关好友面板（Delphi OpenFriendDlg 纯本地 toggle，
+// FState:6795-6798）。好友系统为 Go 扩展功能（Delphi 好友窗按钮均无
+// 处理器），列表需向服务端请求，故打开时补发 CMQueryFriends——
+// V 键与底栏好友按钮共用此入口保持一致。
+func (s *PlayScene) toggleFriend() {
+	s.State.ShowFriend = !s.State.ShowFriend
+	if s.State.ShowFriend && s.sendQueryFriends != nil {
+		s.sendQueryFriends()
+	}
+}
+
 func (s *PlayScene) buildFriendPanel() {
 	ui := s.ui
 	prg := s.resources.Prguse

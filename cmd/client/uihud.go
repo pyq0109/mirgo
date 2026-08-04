@@ -72,7 +72,8 @@ func (s *PlayScene) buildHUD() {
 		btn.OnClick = func(c *UIControl, x, y int) {
 			switch {
 			case bag:
-				s.State.ShowBag = true // OpenItemBag = 显示 (FState:3805)
+				// OpenItemBag = toggle (FState:1797-1802)
+				s.State.ShowBag = !s.State.ShowBag
 			case page == -2:
 				if gSound != nil {
 					if gSound.ToggleSFX() {
@@ -82,8 +83,10 @@ func (s *PlayScene) buildHUD() {
 					}
 				}
 			default:
+				// OpenMyStatus = toggle (FState:1784-1788),
+				// DMyStateClick 按 Sender 分派 (FState:3799-3811)
 				s.State.StatePage = page
-				s.State.ShowEquip = true // OpenMyStatus = 显示 (FState:3801-3809)
+				s.State.ShowEquip = !s.State.ShowEquip
 			}
 		}
 		hint := d.hint
@@ -103,18 +106,13 @@ func (s *PlayScene) buildHUD() {
 		{"DBotTrade", ImgBotTrade, 249, "交易(W)", func() { s.tryDeal() }},
 		{"DBotGuild", ImgBotGuild, 279, "行会(G)", func() { s.toggleGuild() }},
 		{"DBotGroup", ImgBotGroup, 309, "组队(S)", func() { s.State.ShowGroupDlg = !s.State.ShowGroupDlg }},
-		{"DBotPlusAbil", ImgBotPlusAbil, 339, "技能点(N)", func() { s.State.ShowPlusAbil = !s.State.ShowPlusAbil }},
-		{"DBotFriend", ImgBotFriend, 369, "好友(V)", func() { s.State.ShowFriend = !s.State.ShowFriend }},
-		{"DBotLogout", ImgBotLogout, 530, "选择人物\\Alt-X", func() {
-			if s.sendLogout != nil {
-				s.sendLogout()
-			}
-		}},
-		{"DBotExit", ImgBotExit, 560, "退出游戏\\Alt-Q", func() {
-			if s.sendExit != nil {
-				s.sendExit()
-			}
-		}},
+		{"DBotPlusAbil", ImgBotPlusAbil, 339, "技能点(N)", func() { s.State.ShowPlusAbil = true }}, // OpenAdjustAbility 只开不 toggle (FState:5600-5603)
+		{"DBotFriend", ImgBotFriend, 369, "好友(V)", func() { s.toggleFriend() }},
+		// 登出/退出走与 Alt+X/Q 相同的确认流程
+		// (DBotLogoutClick/DBotExitClick → AppLogOut/AppExit,
+		// FState:5568-5598 → ClMain:1167-1195)。
+		{"DBotLogout", ImgBotLogout, 530, "选择人物\\Alt-X", func() { s.tryLogout() }},
+		{"DBotExit", ImgBotExit, 560, "退出游戏\\Alt-Q", func() { s.tryExit() }},
 	}
 	for _, d := range botDefs {
 		btn := NewUIControl(d.name, KindButton)
@@ -390,9 +388,26 @@ func (s *PlayScene) beltClick(slot int) {
 		// :3883-3897). 从背包拿起的物品保留其背包格位 (服务端模型);
 		// 腰带只保存引用.
 		if s.itemMove.Index >= 0 && s.itemMove.Item.Def != nil && s.itemMove.Item.Def.StdMode <= 3 {
-			it := s.itemMove.Item
-			st.BeltItems[slot] = &it
-			s.itemMove.End()
+			if old := st.BeltItems[slot]; old != nil {
+				// 目标格已占用: 交换, 原格物品换到光标上
+				// (FState:3887-3891). 腰带是背包引用, 同拾取一样
+				// 把旧物品从背包移除; 取消时 Index 格为空可复原
+				// (Delphi 取消经 AddItemBag 放回, :1829-1834).
+				held := s.itemMove.Item
+				oldCopy := *old
+				st.BeltItems[slot] = &held
+				bagSlot := st.FindBagItemByMakeIndex(oldCopy.MakeIndex)
+				if bagSlot >= 0 {
+					st.BagItems[bagSlot] = nil
+				}
+				s.itemMove.Item = oldCopy
+				s.itemMove.Index = bagSlot
+				s.itemMove.FromBelt = slot
+			} else {
+				it := s.itemMove.Item
+				st.BeltItems[slot] = &it
+				s.itemMove.End()
+			}
 		}
 		return
 	}
@@ -411,23 +426,22 @@ func (s *PlayScene) beltClick(slot int) {
 }
 
 // beltDblClick 使用该格的物品 (FState:3902-3920). 双击的第一下会拿起
-// 物品, 因此通常走手持分支 (:3912-3917).
+// 物品, 因此通常走手持分支 (:3912-3917 → EatItem(-1), 技能书弹学习
+// 确认). 槽位分支经 EatItem(idx) 的 StdMode<=3 门限, 实际只有药品
+// 生效 (ClMain:1950).
 func (s *PlayScene) beltDblClick(slot int) {
 	if s.itemMove.Moving {
 		if s.itemMove.FromBelt == slot && s.itemMove.Item.Def != nil {
 			stdMode := s.itemMove.Item.Def.StdMode
-			if (stdMode <= 4 || stdMode == 31) && s.sendUseItem != nil {
-				if idx := itemUseSoundIdx(stdMode); idx >= 0 {
-					gSound.PlaySound(idx)
-				}
-				s.sendUseItem(s.itemMove.Item.MakeIndex)
+			if stdMode <= 4 || stdMode == 31 {
+				s.useHeldItem(s.itemMove.Item)
 				s.itemMove.End()
 			}
 		}
 		return
 	}
 	if item := s.State.BeltItems[slot]; item != nil && item.Def != nil && s.sendUseItem != nil {
-		if stdMode := item.Def.StdMode; stdMode <= 4 || stdMode == 31 {
+		if stdMode := item.Def.StdMode; stdMode <= 3 {
 			if idx := itemUseSoundIdx(stdMode); idx >= 0 {
 				gSound.PlaySound(idx)
 			}
@@ -514,8 +528,14 @@ func indexByte(s string, b byte) int {
 	return -1
 }
 
-// tryDeal 发送 CMDealTry (DBotTradeClick, FState:5425-5431).
+// tryDeal 发送 CMDealTry, 3 秒共享节流
+// (DBotTradeClick, FState:5425-5431, g_dwQueryMsgTick).
 func (s *PlayScene) tryDeal() {
+	now := time.Now().UnixMilli()
+	if now < s.queryMsgTick {
+		return
+	}
+	s.queryMsgTick = now + 3000
 	if s.sendDealTry != nil {
 		s.sendDealTry()
 	}

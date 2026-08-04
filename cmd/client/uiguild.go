@@ -345,12 +345,18 @@ func (s *PlayScene) paintGroupPanel(c *UIControl, proj [16]float32) {
 }
 
 // toggleGuild 关闭面板, 或在打开时向服务端请求行会概况
-// (Delphi DBotGuildClick 发送 CMOpenGuildDlg, :5433-5442).
+// (Delphi DBotGuildClick, FState:5433-5442: 请求带 g_dwQueryMsgTick
+// 3 秒节流).
 func (s *PlayScene) toggleGuild() {
 	if s.State.ShowGuild {
 		s.State.ShowGuild = false
 		return
 	}
+	now := time.Now().UnixMilli()
+	if now < s.queryMsgTick {
+		return
+	}
+	s.queryMsgTick = now + 3000
 	if s.sendOpenGuild != nil {
 		s.sendOpenGuild()
 	} else {
@@ -358,14 +364,15 @@ func (s *PlayScene) toggleGuild() {
 	}
 }
 
-// sendGuildHomeSafe / sendGuildMemberListSafe 共享 3 秒查询间隔,
-// 并退出行会聊天模式 (Delphi g_dwQueryMsgTick, FState:6370-6386).
+// sendGuildHomeSafe / sendGuildMemberListSafe 与小地图/交易/行会窗
+// 共享 3 秒查询间隔 (Delphi g_dwQueryMsgTick, FState:6370-6386),
+// 并退出行会聊天模式.
 func (s *PlayScene) sendGuildHomeSafe() {
 	now := time.Now().UnixMilli()
-	if now < s.guildQueryTick {
+	if now < s.queryMsgTick {
 		return
 	}
-	s.guildQueryTick = now + 3000
+	s.queryMsgTick = now + 3000
 	s.guildChatMode = false
 	if s.sendGuildHome != nil {
 		s.sendGuildHome()
@@ -374,10 +381,10 @@ func (s *PlayScene) sendGuildHomeSafe() {
 
 func (s *PlayScene) sendGuildMemberListSafe() {
 	now := time.Now().UnixMilli()
-	if now < s.guildQueryTick {
+	if now < s.queryMsgTick {
 		return
 	}
-	s.guildQueryTick = now + 3000
+	s.queryMsgTick = now + 3000
 	s.guildChatMode = false
 	if s.sendGuildMemberList != nil {
 		s.sendGuildMemberList()

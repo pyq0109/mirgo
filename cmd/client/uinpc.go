@@ -291,6 +291,13 @@ func (s *PlayScene) syncMerchantWindows() {
 	if s.hudSell != nil {
 		s.hudSell.Visible = s.State.ShowShop && s.State.ShopMode != 0
 	}
+	// 商店窗口打开的瞬间强制打开背包一次 (ShowShopMenuDlg/
+	// ShowShopSellDlg, FState:4758,4773)。纯 NPC 对话不开
+	// (ShowMDlg 只挪位, :4707-4708)。
+	if s.State.ShowShop && !s.shopWasOpen {
+		s.State.ShowBag = true
+	}
+	s.shopWasOpen = s.State.ShowShop
 	open := s.State.ShowNpcDialog || s.State.ShowShop
 	if s.merchantWasOpen && !open {
 		s.clearMerchantState()

@@ -111,6 +111,11 @@ func (s *PlayScene) syncDealWindows() {
 	if s.hudDealRemote != nil {
 		s.hudDealRemote.Visible = s.State.InDeal
 	}
+	// 交易打开的瞬间强制打开背包一次 (OpenDealDlg, FState:5623)。
+	if s.State.InDeal && !s.dealWasOpen {
+		s.State.ShowBag = true
+	}
+	s.dealWasOpen = s.State.InDeal
 }
 
 func (s *PlayScene) paintDealCell(item *BagItem, x, y, w, h int, proj [16]float32) {

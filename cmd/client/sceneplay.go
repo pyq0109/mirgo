@@ -137,6 +137,7 @@ type PlayScene struct {
 	chatMessages []ChatMessage
 	chatInput     string
 	chatMode      bool
+	whisperName   string // 最近私聊对象（Delphi WhisperName，ClMain.pas:129）
 
 	ActionLock     bool
 	ActionLockTime int64
@@ -164,16 +165,16 @@ type PlayScene struct {
 	// 交易窗口（uideal.go）。
 	hudDealOwn, hudDealRemote *UIControl
 	dealActionTick            int64
+	dealWasOpen               bool // 上一帧 InDeal（打开瞬间强制开背包，FState:5623）
 
 	// 行会 + 组队面板（uiguild.go）。
 	hudGuild, hudGroup *UIControl
 	hudFriend          *UIControl
 	friendSelected     int
-	guildAdminBtns     []*UIControl
-	guildChatMode      bool
-	guildChats         []string // 行会聊天缓冲，上限 500 / 裁剪至 100（FState:6465-6475）
-	guildActionTick    int64    // 组队操作 5 秒共享间隔（FState:5514）
-	guildQueryTick     int64    // 行会首页/成员列表 3 秒间隔（FState:6370）
+	guildAdminBtns  []*UIControl
+	guildChatMode   bool
+	guildChats      []string // 行会聊天缓冲，上限 500 / 裁剪至 100（FState:6465-6475）
+	guildActionTick int64    // 组队操作 5 秒共享间隔（FState:5514）
 
 	// 属性加点 + 查看窗口（uiabil.go）。
 	hudAbil, hudInspect *UIControl
@@ -204,6 +205,7 @@ type PlayScene struct {
 	queryPrice               bool
 	queryPriceTick           int64
 	merchantWasOpen          bool
+	shopWasOpen              bool // 上一帧 ShowShop（打开瞬间强制开背包，FState:4758,4773）
 
 	// 逻辑 800×600 空间下的鼠标坐标（每次移动时更新）。
 	mouseX, mouseY float64
@@ -222,10 +224,17 @@ type PlayScene struct {
 	hoverSelf  bool // Delphi g_boSelectMyself：鼠标悬停在自己身上
 
 	// 小地图（Delphi PlayScn.pas DrawMiniMap 移植）。
-	minimapLv       int     // 0 隐藏 / 1 半透明 / 2 不透明（g_nViewMinMapLv）
-	mmBlinkOn       bool    // 标记闪烁状态（m_boViewBlink，300ms 翻转）
-	mmBlinkAcc      float64 // 闪烁累计时间（秒）
-	mmLastQueryTick int64   // CMWantMinimap 请求节流（g_dwQueryMsgTick，3 秒）
+	minimapLv  int     // 0 隐藏 / 1 半透明 / 2 不透明（g_nViewMinMapLv）
+	mmBlinkOn  bool    // 标记闪烁状态（m_boViewBlink，300ms 翻转）
+	mmBlinkAcc float64 // 闪烁累计时间（秒）
+
+	// 小地图/交易/行会共享的 3 秒查询节流（g_dwQueryMsgTick，
+	// MShare.pas:301；FState:5412,5427,5438,6372,6381）。
+	queryMsgTick int64
+
+	// NPC 对话打开时的自身坐标，走远 ≥8 格自动关闭
+	// （g_nMDlgX/g_nMDlgY，ClMain.pas:1447-1452）。-1 = 无对话。
+	npcDlgX, npcDlgY int
 
 	// Delphi 输入还原（ClMain.pas / MShare.pas）
 	targetCret         *Actor // 锁定攻击目标（g_TargetCret）
@@ -277,6 +286,8 @@ func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir 
 		groundItems:    make(map[int32]*GroundItemInfo),
 		targetX:        -1,
 		targetY:        -1,
+		npcDlgX:        -1,
+		npcDlgY:        -1,
 		effects:        NewEffectManager(),
 		events:         NewEventManager(),
 		ui:             NewUIManager(gl, resources, nil),
@@ -513,8 +524,8 @@ func (s *PlayScene) SetSendWantMinimap(fn func()) {
 func (s *PlayScene) toggleMinimap() {
 	if s.minimapLv == 0 || s.State.MinimapIndex < 0 {
 		now := time.Now().UnixMilli()
-		if now >= s.mmLastQueryTick && s.sendWantMinimap != nil {
-			s.mmLastQueryTick = now + 3000
+		if now >= s.queryMsgTick && s.sendWantMinimap != nil {
+			s.queryMsgTick = now + 3000
 			s.sendWantMinimap()
 			s.minimapLv = 1
 		}
@@ -561,6 +572,11 @@ func (s *PlayScene) LoadMap(mapName string) error {
 		s.sendWantMinimap()
 	}
 	s.lightingDirty = true
+
+	// 过图关闭 NPC 对话/商店（ClMain.pas:2482-2485）。
+	s.State.ShowNpcDialog = false
+	s.State.ShowShop = false
+	s.npcDlgX, s.npcDlgY = -1, -1
 
 	if s.resources.Objects[0] != nil {
 		s.objectsLoaders[0] = s.resources.Objects[0]
@@ -638,6 +654,7 @@ func (s *PlayScene) Update(dt float64) {
 	s.effects.Update(now)
 	s.events.Update(now)
 	s.pumpSellQuery()
+	s.checkNpcWalkAway()
 
 	// SMInstanceHealGuage 瞬时血条到期关闭（Delphi ClMain.pas:4303-4313）
 	for _, a := range s.State.Actors.All() {
@@ -1542,10 +1559,15 @@ func (s *PlayScene) OnChar(char rune) {
 	if s.ui.RouteChar(char) {
 		return
 	}
-	// 聊天前缀（ClMain:1765-1783）：@ ! / 打开聊天并预设前缀
+	// 聊天前缀（ClMain:1765-1783）：@ ! / 打开聊天并预设前缀。
+	// '/' 有最近私聊对象时预填 "/名字 "（ClMain:1772-1777）。
 	if !s.chatMode && (char == '@' || char == '!' || char == '/') {
 		s.chatMode = true
-		s.chatInput = string(char)
+		if char == '/' {
+			s.chatInput = s.slashPrefill()
+		} else {
+			s.chatInput = string(char)
+		}
 		return
 	}
 	// 聊天输入接受任何可打印字符，包括中文（游戏为中文环境）；
@@ -1576,8 +1598,19 @@ func (s *PlayScene) OnKey(key int, action int) {
 		s.altDown = action == 1
 		return
 	}
-	if key == 256 && s.itemMove.Moving { // Esc 取消手持物品
-		s.itemMove.Cancel(s.State)
+	if key == 256 && action == 1 { // Esc
+		// Delphi 中 Esc 仅两处有效：EdChat 内取消聊天
+		// (PlayScn.pas:435-439) 与模态框 (FState:2152-2157,
+		// 已由 RouteKeyDown 处理)。聊天优先于手持物品。
+		if s.chatMode {
+			s.chatInput = ""
+			s.chatMode = false
+			return
+		}
+		if s.itemMove.Moving { // Go 扩展：Esc 取消手持物品
+			s.itemMove.Cancel(s.State)
+			return
+		}
 		return
 	}
 
@@ -1586,12 +1619,13 @@ func (s *PlayScene) OnKey(key int, action int) {
 		case 257: // Enter
 			if s.chatMode {
 				if s.chatInput != "" && s.sendChat != nil {
+					s.recordWhisper(s.chatInput)
 					s.sendChat(s.chatInput)
 				}
 				s.chatInput = ""
 				s.chatMode = false
 			} else {
-				s.chatMode = true
+				s.enterChatMode()
 			}
 			return
 		case keyBackspace:
@@ -1600,19 +1634,27 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.chatInput = string(runes[:len(runes)-1])
 			}
 			return
-		case 32: // 空格 — 打开聊天（ClMain:1741-1745）
-			s.chatMode = true
+		case 32: // 空格 — 打开聊天（ClMain:1741-1753）
+			if !s.chatMode {
+				s.enterChatMode()
+			}
 			return
-		case 66: // B — 背包（ClMain:1675-1678）
-			s.State.ShowBag = !s.State.ShowBag
+		case 66: // B — 背包（ClMain:1675-1678，聊天时不响应）
+			if !s.chatMode {
+				s.State.ShowBag = !s.State.ShowBag
+			}
 			return
-		case 67: // C — 状态面板第 0 页（ClMain:1668-1674）
-			s.State.StatePage = 0
-			s.State.ShowEquip = true
+		case 67: // C — 状态面板第 0 页 toggle（ClMain:1668-1674）
+			if !s.chatMode {
+				s.State.StatePage = 0
+				s.State.ShowEquip = !s.State.ShowEquip
+			}
 			return
-		case 69: // E — 状态面板第 3 页（ClMain:1676-1685）
-			s.State.StatePage = 3
-			s.State.ShowEquip = true
+		case 69: // E — 状态面板第 3 页 toggle（ClMain:1680-1685）
+			if !s.chatMode {
+				s.State.StatePage = 3
+				s.State.ShowEquip = !s.State.ShowEquip
+			}
 			return
 		case 71: // G（ClMain:1637-1661）
 			if s.ctrlDown {
@@ -1625,7 +1667,7 @@ func (s *PlayScene) OnKey(key int, action int) {
 				if s.focusActor != nil && s.focusActor.Type == ActorHuman && s.sendDelGroupMember != nil {
 					s.sendDelGroupMember(s.focusActor.UserName)
 				}
-			} else {
+			} else if !s.chatMode {
 				s.toggleGuild()
 			}
 			return
@@ -1644,27 +1686,32 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.toggleMinimap()
 			}
 			return
-		case 78: // N — 属性加点（ClMain:1692-1695）
-			s.State.ShowPlusAbil = !s.State.ShowPlusAbil
-			return
-		case 83: // S — 组队对话框（ClMain:1629-1636）
-			s.State.ShowGroupDlg = !s.State.ShowGroupDlg
-			return
-		case 86: // V — 好友对话框
-			s.State.ShowFriend = !s.State.ShowFriend
-			if s.State.ShowFriend && s.sendQueryFriends != nil {
-				s.sendQueryFriends()
+		case 78: // N — 属性加点，只开不 toggle（ClMain:1692-1695 → OpenAdjustAbility）
+			if !s.chatMode {
+				s.State.ShowPlusAbil = true
 			}
 			return
-		case 87: // W — 交易（ClMain:1663-1666）
-			s.tryDeal()
+		case 83: // S — 组队对话框（ClMain:1663-1666，聊天时不响应）
+			if !s.chatMode {
+				s.State.ShowGroupDlg = !s.State.ShowGroupDlg
+			}
+			return
+		case 86: // V — 好友对话框（ClMain:1687-1690，toggle；Go 扩展打开时拉列表）
+			if !s.chatMode {
+				s.toggleFriend()
+			}
+			return
+		case 87: // W — 交易（ClMain:1629-1636，聊天时不响应）
+			if !s.chatMode {
+				s.tryDeal()
+			}
 			return
 		case 90: // Z（ClMain:1564-1573）
 			if s.ctrlDown {
-				// Ctrl+Z — 切换显示所有地面物品名（ClMain:1564-1567）
+				// Ctrl+Z — 切换显示所有地面物品名（ClMain:1564-1567，不门控）
 				s.showAllItemNames = !s.showAllItemNames
-			} else {
-				// Z — 拾取物品
+			} else if !s.chatMode {
+				// Z — 拾取物品（裸 Z 聊天时不响应，ClMain:1568）
 				if s.sendPickup != nil {
 					s.sendPickup()
 				}
@@ -1700,13 +1747,13 @@ func (s *PlayScene) OnKey(key int, action int) {
 		case 298: // F9 — 背包（ClMain:1488-1494）
 			s.State.ShowBag = !s.State.ShowBag
 			return
-		case 299: // F10 — 状态面板第 0 页（ClMain:1495-1502）
+		case 299: // F10 — 状态面板第 0 页 toggle（ClMain:1491-1494）
 			s.State.StatePage = 0
-			s.State.ShowEquip = true
+			s.State.ShowEquip = !s.State.ShowEquip
 			return
-		case 300: // F11 — 状态面板第 3 页（ClMain:1503-1508）
+		case 300: // F11 — 状态面板第 3 页 toggle（ClMain:1495-1498）
 			s.State.StatePage = 3
-			s.State.ShowEquip = true
+			s.State.ShowEquip = !s.State.ShowEquip
 			return
 		case 301: // F12 — 选项/声音（ClMain:1509+）
 			if gSound != nil {
@@ -1721,7 +1768,8 @@ func (s *PlayScene) OnKey(key int, action int) {
 
 		// F1..F8 释放绑定在该键上的魔法，朝鼠标位置施法（ClMain:1268-1285）。
 		// Ctrl+F1..F8 为第二套键位，映射键符 'E'..'L'（ClMain.pas:1477-1487）。
-		if !s.chatMode && key >= 290 && key <= 297 {
+		// Delphi KeyPreview 使聊天输入时 F 键依然生效，此处不门控。
+		if key >= 290 && key <= 297 {
 			now := time.Now().UnixMilli()
 			if now-s.lastSpellTick >= 500 {
 				k := byte('1' + (key - 290))
@@ -1744,17 +1792,72 @@ func (s *PlayScene) OnKey(key int, action int) {
 			return
 		}
 
+		// 数字 1-6 使用腰带物品。Delphi EatItem 仅接受 StdMode<=3
+		//（药品类，ClMain.pas:1950）。
 		if !s.chatMode && key >= 49 && key <= 54 {
-			if item := s.State.BeltItems[key-49]; item != nil && s.sendUseItem != nil {
-				if item.Def != nil {
-					if idx := itemUseSoundIdx(item.Def.StdMode); idx >= 0 {
-						gSound.PlaySound(idx)
-					}
+			if item := s.State.BeltItems[key-49]; item != nil && item.Def != nil &&
+				item.Def.StdMode <= 3 && s.sendUseItem != nil {
+				if idx := itemUseSoundIdx(item.Def.StdMode); idx >= 0 {
+					gSound.PlaySound(idx)
 				}
 				s.sendUseItem(item.MakeIndex)
 			}
 			return
 		}
+	}
+}
+
+// checkNpcWalkAway 走离打开对话处 ≥8 格时自动关闭 NPC 对话/商店
+// （ClMain.pas:1447-1452，g_nMDlgX/g_nMDlgY）。
+func (s *PlayScene) checkNpcWalkAway() {
+	if s.npcDlgX < 0 {
+		return
+	}
+	if !(s.State.ShowNpcDialog || s.State.ShowShop) {
+		s.npcDlgX, s.npcDlgY = -1, -1
+		return
+	}
+	my := s.State.MySelf
+	if my == nil {
+		return
+	}
+	if absInt(my.CurrX-s.npcDlgX) >= 8 || absInt(my.CurrY-s.npcDlgY) >= 8 {
+		s.State.ShowNpcDialog = false
+		s.State.ShowShop = false
+		s.npcDlgX, s.npcDlgY = -1, -1
+	}
+}
+
+// enterChatMode 打开聊天输入。行会聊天模式时预填 "!~"
+// （ClMain.pas:1741-1753，BoGuildChat 分支）。
+func (s *PlayScene) enterChatMode() {
+	s.chatMode = true
+	if s.guildChatMode {
+		s.chatInput = "!~"
+	}
+}
+
+// slashPrefill '/' 进入聊天时的预填：有最近私聊对象（≥2 字符）则
+// "/名字 "，否则仅 "/"（ClMain.pas:1772-1777）。
+func (s *PlayScene) slashPrefill() string {
+	if utf8.RuneCountInString(s.whisperName) >= 2 {
+		return "/" + s.whisperName + " "
+	}
+	return "/"
+}
+
+// recordWhisper 发送 "/名字 ..." 私聊时记录对象
+// （SendSay 尾部 GetValidStr3，ClMain.pas:3001-3004）。
+func (s *PlayScene) recordWhisper(text string) {
+	if len(text) < 2 || text[0] != '/' {
+		return
+	}
+	name := text[1:]
+	if i := strings.IndexByte(name, ' '); i >= 0 {
+		name = name[:i]
+	}
+	if name != "" {
+		s.whisperName = name
 	}
 }
 
@@ -1874,16 +1977,19 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 	ix, iy := int(x), int(y)
 
 	if action == 0 { // 松开（ClMain:2384-2389）
-		s.ui.RouteMouseUp(ix, iy, button)
+		consumed := s.ui.RouteMouseUp(ix, iy, button)
 		if button == 0 {
 			s.leftHeld = false
 		}
 		if button == 1 {
 			s.rightHeld = false
 		}
-		// Delphi: 松开鼠标取消移动目标
-		s.targetX, s.targetY = -1, -1
-		s.clearAutoPath()
+		// Delphi: 仅当 UI 未消费抬起事件时才取消移动目标
+		// (ClMain.pas:2387-2388 `if g_DWinMan.MouseUp then exit`)。
+		if !consumed {
+			s.targetX, s.targetY = -1, -1
+			s.clearAutoPath()
+		}
 		return
 	}
 	if action != 1 {
@@ -2487,34 +2593,26 @@ func (s *PlayScene) AddChatMessage(text string) {
 	}
 }
 
-// tryLogout Alt+X 登出。Delphi（ClMain:1575-1593 + AppLogout:1167）：
-// 战斗/死亡判定通过后弹确认框。判定条件为"最近 10 秒未受击/未攻击/未施法
-// 或已死亡"——但 Delphi 在判定前把三个时间戳强制置为 now+10001，等价于
-// 恒为"正在战斗"，实际仅死亡时才允许登出（防战斗下线）。此处按可观察
-// 行为实现：存活即拒绝并提示，死亡则弹确认框。
+// tryLogout Alt+X / 底栏登出按钮。Delphi（ClMain:1575-1593 +
+// AppLogout:1167-1185）：先把三个战斗 tick 强置 now+10001，随后检查
+// GetTickCount-tick > 10000。变量为 LongWord（MShare.pas:261,265,266），
+// 无符号回绕使条件恒真（注释"强制退出"即此意）——检查永远通过，
+// 任何状态下都弹确认框。
 func (s *PlayScene) tryLogout() {
 	if s.sendLogout == nil {
 		return
 	}
-	if s.State.MySelf != nil && !s.State.MySelf.Death {
-		s.AddChatMessage("正在战斗，不能退出..")
-		return
-	}
-	ShowConfirm(s, "是否重新选择人物 ?", []ModalResult{MrOk, MrCancel}, DlgNormal, func(mr ModalResult) {
+	ShowConfirm(s, "是否回到选角界面?", []ModalResult{MrOk, MrCancel}, DlgNormal, func(mr ModalResult) {
 		if mr == MrOk && s.sendLogout != nil {
 			s.sendLogout()
 		}
 	})
 }
 
-// tryExit Alt+Q 退出游戏。Delphi（ClMain:1594-1612 + AppExit:1184）：
-// 与登出相同的战斗判定，死亡则弹确认框后退出。
+// tryExit Alt+Q / 底栏退出按钮。Delphi（ClMain:1594-1612 +
+// AppExit:1187-1195）：与登出相同的恒过判定，弹确认框后退出。
 func (s *PlayScene) tryExit() {
 	if s.sendExit == nil {
-		return
-	}
-	if s.State.MySelf != nil && !s.State.MySelf.Death {
-		s.AddChatMessage("正在战斗，不能退出..")
 		return
 	}
 	ShowConfirm(s, "你真的要退出游戏吗?", []ModalResult{MrOk, MrCancel}, DlgNormal, func(mr ModalResult) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pyq0109/mirgo/internal/protocol"
@@ -230,19 +231,43 @@ func (s *PlayScene) bagGridSelect(col, row int) {
 	}
 }
 
-// bagGridDblClick 使用或装备物品 (FState:4602-4641)。双击的第一次
-// 点击会拿起格子物品, 因此双击触发时走的是手持分支
-// (:4622-4637)。
+// bagGridDblClick 双击背包格 (FState:4602-4641)。双击的第一次点击
+// 会拿起格子物品, 因此双击触发时走的是手持分支 (:4622-4637):
+// Ctrl+双击 = 整理到背包首个空位; 普通双击 = 使用 (Delphi 双击
+// 不穿装备, 装备须拖到格位)。
 func (s *PlayScene) bagGridDblClick(col, row int) {
 	idx := bagSlotIndex(col, row)
 	if idx < 0 {
 		return
 	}
-	if s.itemMove.Moving {
-		if s.itemMove.Index == idx {
-			s.useOrEquipHeld()
-		}
+	if !s.itemMove.Moving {
 		return
+	}
+	if s.ctrlDown {
+		// Ctrl+双击 = 整理 (FState:4626-4631, AddItemBag)。
+		it := s.itemMove.Item
+		s.itemMove.End()
+		returnItemToBag(s.State, it)
+		return
+	}
+	if s.itemMove.Index == idx {
+		item := s.itemMove.Item
+		if item.Def != nil && (item.Def.StdMode <= 4 || item.Def.StdMode == 31) {
+			s.useHeldItem(item)
+			s.itemMove.End()
+		}
+	}
+}
+
+// returnItemToBag 将物品放回背包首个空位 (Delphi AddItemBag,
+// FState.pas 同名函数)。仅本地视觉恢复, 背包内容仍以服务端为准。
+func returnItemToBag(gs *GameState, item BagItem) {
+	for i := range gs.BagItems {
+		if gs.BagItems[i] == nil {
+			it := item
+			gs.BagItems[i] = &it
+			return
+		}
 	}
 }
 
@@ -264,39 +289,37 @@ func (s *PlayScene) takeOnTargetSlot(stdMode byte) int {
 	return getTakeOnPosition(stdMode)
 }
 
-// useOrEquipHeld 消耗手持物品: 消耗品直接使用, 装备自动穿上
-// (Delphi 手持分支仅使用, FState:4622-4637; 自动装备是
-// Go 版扩展)。
-func (s *PlayScene) useOrEquipHeld() {
-	item := s.itemMove.Item
-	if item.Def == nil {
+// useHeldItem 使用手持物品 (Delphi EatItem -1 分支,
+// ClMain.pas:1975-1999)。StdMode=4 且 Shape<100 的技能书先弹学习
+// 确认; 取消时物品放回背包首个空位 (ClMain.pas:1984-1987)。
+func (s *PlayScene) useHeldItem(item BagItem) {
+	if item.Def == nil || s.sendUseItem == nil {
 		return
 	}
-	stdMode := item.Def.StdMode
-	if stdMode <= 4 || stdMode == 31 {
-		if s.sendUseItem != nil {
-			if idx := itemUseSoundIdx(stdMode); idx >= 0 {
-				gSound.PlaySound(idx)
-			}
-			s.sendUseItem(item.MakeIndex)
-			s.itemMove.End()
+	send := func() {
+		if idx := itemUseSoundIdx(item.Def.StdMode); idx >= 0 {
+			gSound.PlaySound(idx)
 		}
+		if s.sendUseItem != nil {
+			s.sendUseItem(item.MakeIndex)
+		}
+	}
+	if item.Def.StdMode == 4 && item.Def.Shape < 100 {
+		prompt := "确认开始学习"
+		if item.Def.Shape >= 50 {
+			prompt = "您确认开始学习"
+		}
+		ShowConfirm(s, fmt.Sprintf("%s \"%s\"?", prompt, item.Def.Name),
+			[]ModalResult{MrYes, MrNo}, DlgNormal, func(mr ModalResult) {
+				if mr == MrYes {
+					send()
+				} else {
+					returnItemToBag(s.State, item)
+				}
+			})
 		return
 	}
-	slot := s.takeOnTargetSlot(stdMode)
-	if slot < 0 || s.sendTakeOn == nil {
-		return
-	}
-	s.sendTakeOn(item.MakeIndex, slot)
-	// 乐观更新: 等待服务端同步确认。
-	it := item
-	s.State.UseItems[slot] = &protocol.UserItem{
-		MakeIndex: it.MakeIndex,
-		WIndex:    it.Idx,
-		Dura:      it.Dura,
-		DuraMax:   it.DuraMax,
-	}
-	s.itemMove.End()
+	send()
 }
 
 // bagGridHover 在格子下方显示物品提示 (FState:4527-4555) 并

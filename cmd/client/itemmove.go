@@ -97,6 +97,19 @@ func (m *ItemMoveState) Cancel(gs *GameState) {
 	if !m.Moving {
 		return
 	}
+	if m.FromBelt >= 0 && m.FromBelt < len(gs.BeltItems) {
+		// 腰带来源：放回原腰带格；格被占用时放入背包首个空位
+		// （Delphi CancelItemMoving idx 0..5 分支：原位空则还原，
+		// 否则 AddItemBag，FState.pas:1829-1834）。
+		if gs.BeltItems[m.FromBelt] == nil {
+			it := m.Item
+			gs.BeltItems[m.FromBelt] = &it
+		} else {
+			returnItemToBag(gs, m.Item)
+		}
+		m.End()
+		return
+	}
 	switch {
 	case m.Index >= 0: // 背包格
 		if m.Index < len(gs.BagItems) && gs.BagItems[m.Index] == nil {
@@ -113,10 +126,6 @@ func (m *ItemMoveState) Cancel(gs *GameState) {
 				DuraMax:   m.Item.DuraMax,
 			}
 		}
-	}
-	if m.FromBelt >= 0 && m.FromBelt < len(gs.BeltItems) && gs.BeltItems[m.FromBelt] == nil {
-		it := m.Item
-		gs.BeltItems[m.FromBelt] = &it
 	}
 	// 交易格来源：放回原交易格。
 	if m.Index >= -29 && m.Index <= -20 {

@@ -1344,6 +1344,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.State.NpcDialogName = npcName
 		h.playScene.parseNpcDialog(dialogText)
 		h.playScene.State.ShowNpcDialog = true
+		// 记录打开对话时的自身坐标, 走远自动关闭
+		// (g_nMDlgX/g_nMDlgY, ClMain.pas:1447-1452)。
+		if my := h.playScene.State.MySelf; my != nil {
+			h.playScene.npcDlgX = my.CurrX
+			h.playScene.npcDlgY = my.CurrY
+		}
 
 	case protocol.SMDayChanging:
 		log.Logf(log.LevelInfo, "Client", "day changing: bright=%d", msg.Recog)
@@ -1526,6 +1532,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.resetDeal()
 		h.playScene.State.InDeal = true
 		h.playScene.State.DealPartner = body
+		// 回包重置共享节流 (ClMain.pas:4766)。
+		h.playScene.queryMsgTick = time.Now().UnixMilli()
 
 	case protocol.SMDealSuccess:
 		log.Logf(log.LevelInfo, "Client", "trade complete")
@@ -2089,9 +2097,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		}
 		st.ShowGuild = true
 		st.GuildTopLine = 0
+		// 回包重置共享节流 (ClMain.pas:4749)。
+		h.playScene.queryMsgTick = time.Now().UnixMilli()
 
 	case protocol.SMOpenGuildDlgFail:
 		h.playScene.AddChatMessage("You are not in a guild")
+		h.playScene.queryMsgTick = time.Now().UnixMilli()
 
 	case protocol.SMChangeGuildName:
 		h.playScene.State.GuildName = body
@@ -2242,7 +2253,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		// Param 携带小地图图像号（1-based）；客户端减 1 作为 mmap.wil 索引
 		// （Delphi ClientGetReadMiniMap，ClMain.pas:6045-6051）。
 		if h.playScene != nil {
-			h.playScene.mmLastQueryTick = time.Now().UnixMilli()
+			h.playScene.queryMsgTick = time.Now().UnixMilli()
 			if msg.Param >= 1 {
 				h.playScene.State.MinimapIndex = int(msg.Param) - 1
 			}
@@ -2252,7 +2263,7 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMReadMinimapFail:
 		// 当前地图无小地图（Delphi ClMain.pas:4843-4847）。
 		if h.playScene != nil {
-			h.playScene.mmLastQueryTick = time.Now().UnixMilli()
+			h.playScene.queryMsgTick = time.Now().UnixMilli()
 			h.playScene.State.MinimapIndex = -1
 			h.playScene.AddChatMessage("没有可用的小地图")
 		}
