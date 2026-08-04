@@ -118,11 +118,11 @@ func (e *UserEngine) ProcessHumans(server *netserver.TCPServer) {
 	}
 }
 
-func (e *UserEngine) ProcessDoors(currentTick int64) {
+func (e *UserEngine) ProcessDoors(server *netserver.TCPServer, currentTick int64) {
 	e.mapMgr.mu.RLock()
 	defer e.mapMgr.mu.RUnlock()
 	for _, env := range e.mapMgr.maps {
-		ProcessDoors(env, currentTick, e.Config)
+		ProcessDoors(env, currentTick, e.Config, server)
 	}
 }
 

@@ -12,6 +12,16 @@ import (
 	"github.com/pyq0109/mirgo/internal/protocol"
 )
 
+// Delphi RunGate 背压参数（GateShare.pas:9-10,98）：
+// 累计发送 >=512B 未回显时在下一发送块前插入 '*' 探针；
+// >=2048B 未回显则暂停发送等待回显，超时 dwClientCheckTimeOut=50ms
+//（{3000} 为 GateShare.pas:98 注释中的旧值）后恢复。
+const (
+	sendCheckSize        = 512
+	sendCheckSizeMax     = 2048
+	clientCheckTimeoutMs = 50
+)
+
 // SessionState 表示客户端会话的连接状态。
 type SessionState int32
 
@@ -39,8 +49,16 @@ type Session struct {
 	SeqErrCount int
 
 	// 背压：已发送但未被客户端 '*' 回显确认的字节数
-	//（Delphi 2048B 未回显暂停发送 3 秒，RunGate/Main.pas:501-553）
+	//（= Delphi nCheckSendLength，RunGate/Main.pas:501-553）
 	unackedBytes int64
+	// boSendCheck：本轮已累计 >=512B 且尚未在发送块前插入 '*' 探针
+	//（RunGate/Main.pas:529-533）
+	probeSent atomic.Bool
+	// dwTimeOutTime：背压暂停到期时间戳（毫秒）；0 表示未暂停
+	//（RunGate/Main.pas:534-537）
+	pauseUntil atomic.Int64
+	// 背压 '*' 回显恢复信号（缓冲 1，writeLoop 暂停等待用）
+	resumeSig chan struct{}
 
 	// 每连接消息限流令牌桶（路线图 6.3 网关补偿层）
 	msgTokens  float64
@@ -172,10 +190,11 @@ func (s *TCPServer) acceptLoop() {
 
 		sessionID := s.nextID.Add(1)
 		session := &Session{
-			ID:       sessionID,
-			Conn:     conn,
-			State:    StateConnected,
-			SendChan: make(chan []byte, 256),
+			ID:        sessionID,
+			Conn:      conn,
+			State:     StateConnected,
+			SendChan:  make(chan []byte, 256),
+			resumeSig: make(chan struct{}, 1),
 		}
 
 		s.mu.Lock()
@@ -208,9 +227,9 @@ func (s *TCPServer) readLoop(session *Session) {
 		session.lastCode = code
 		session.hasLastCode = true
 	}
-	// 客户端 '*' 回显 = 接收确认，重置背压计数（RunGate/Main.pas:501-553）
+	// 客户端 '*' 回显 = 接收确认，立即恢复背压并清零（RunGate/Main.pas:1010-1016）
 	keepalive := func() {
-		atomic.StoreInt64(&session.unackedBytes, 0)
+		session.resumeSend()
 	}
 	for {
 		n, err := session.Conn.Read(buf)
@@ -322,19 +341,48 @@ func (s *TCPServer) writeLoop(session *Session) {
 			if !ok {
 				return
 			}
-			// Delphi 背压：2048B 未收到 '*' 回显则暂停发送 3 秒
-			//（RunGate/Main.pas:501-553）
-			if atomic.LoadInt64(&session.unackedBytes) > 2048 {
-				time.Sleep(3 * time.Second)
-				atomic.StoreInt64(&session.unackedBytes, 0)
+			// Delphi 背压：>=2048B 未回显则暂停发送，等待客户端 '*' 回显，
+			// 超时 dwClientCheckTimeOut=50ms 后恢复（Main.pas:520-527,534-537）。
+			if pu := session.pauseUntil.Load(); pu > 0 {
+				if wait := time.Until(time.UnixMilli(pu)); wait > 0 {
+					select {
+					case <-s.done:
+						return
+					case <-session.resumeSig:
+					case <-time.After(wait):
+					}
+				}
+				session.resumeSend()
+			}
+			// >=512B 未回显时在发送块前插入 '*' 探针，客户端收到后立即回显
+			//（Main.pas:529-533；回显由 readLoop keepalive → resumeSend 处理）。
+			if atomic.LoadInt64(&session.unackedBytes) >= sendCheckSize && !session.probeSent.Load() {
+				session.probeSent.Store(true)
+				data = append([]byte{'*'}, data...)
 			}
 			_, err := session.Conn.Write(data)
 			if err != nil {
 				log.Logf(log.LevelDebug, "Server", "写入 %d 出错：%v", session.ID, err)
 				return
 			}
-			atomic.AddInt64(&session.unackedBytes, int64(len(data)))
+			if n := atomic.AddInt64(&session.unackedBytes, int64(len(data))); n >= sendCheckSizeMax {
+				session.pauseUntil.Store(time.Now().UnixMilli() + clientCheckTimeoutMs)
+			}
 		}
+	}
+}
+
+// resumeSend 清零背压计数并唤醒暂停中的 writeLoop。
+// Delphi 收到 '*' 回显时的恢复路径（Main.pas:1010-1016）；
+// 超时恢复（Main.pas:520-527）同样走这里——原版超时不清 boSendCheck，
+// 此处一并清零，保证下一轮累计到 512B 时能重新发探针。
+func (session *Session) resumeSend() {
+	atomic.StoreInt64(&session.unackedBytes, 0)
+	session.probeSent.Store(false)
+	session.pauseUntil.Store(0)
+	select {
+	case session.resumeSig <- struct{}{}:
+	default:
 	}
 }
 

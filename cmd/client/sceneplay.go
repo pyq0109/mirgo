@@ -2041,10 +2041,15 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		s.clearAutoPath()
 		my := s.State.MySelf
 		if absInt(my.CurrX-tx) <= 2 && absInt(my.CurrY-ty) <= 2 {
-			dir := dirToward(my.CurrX, my.CurrY, tx, ty)
-			my.UpdateMsg(protocol.CMTurn, my.CurrX, my.CurrY, dir, 0, 0)
-			s.sendMove(protocol.CMTurn, dir)
-			s.lastMoveActionTick = time.Now().UnixMilli()
+			// Delphi: 转向同样受 CanNextAction+ServerAcceptNextAction 门控
+			//（ClMain.pas:2221-2223），否则移动中连续转向会被服务端
+			// TurnInterval 拒绝回 +FAIL，客户端冻结移动 1 秒。
+			if my.IsIdle() && s.ServerAcceptNextAction() {
+				dir := dirToward(my.CurrX, my.CurrY, tx, ty)
+				my.UpdateMsg(protocol.CMTurn, my.CurrX, my.CurrY, dir, 0, 0)
+				s.sendMove(protocol.CMTurn, dir)
+				s.lastMoveActionTick = time.Now().UnixMilli()
+			}
 		} else {
 			s.targetX = tx
 			s.targetY = ty

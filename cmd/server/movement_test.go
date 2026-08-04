@@ -8,10 +8,11 @@ import "testing"
 
 func newTestEnv(w, h int) *Environment {
 	return &Environment{
-		Name:   "test",
-		Width:  w,
-		Height: h,
-		Cells:  make([]MapCellInfo, w*h),
+		Name:     "test",
+		Width:    w,
+		Height:   h,
+		Cells:    make([]MapCellInfo, w*h),
+		objIndex: make(map[int32]interface{}),
 	}
 }
 

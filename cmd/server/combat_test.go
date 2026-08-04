@@ -162,7 +162,7 @@ func TestGreenPoisonKill(t *testing.T) {
 }
 
 func TestAttackModePeace(t *testing.T) {
-	envir := &Environment{Width: 10, Height: 10, Cells: make([]MapCellInfo, 100)}
+	envir := &Environment{Width: 10, Height: 10, Cells: make([]MapCellInfo, 100), objIndex: make(map[int32]interface{})}
 
 	p := &PlayObject{BaseObject: NewBaseObject("player1", 1)}
 	p.AttackMode = AttackModePeace

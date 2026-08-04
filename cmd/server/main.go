@@ -484,7 +484,7 @@ func main() {
 			now := time.Now().UnixMilli()
 			userEngine.ProcessHumans(server)
 			userEngine.ProcessMonsters(server, now)
-			userEngine.ProcessDoors(now)
+			userEngine.ProcessDoors(server, now)
 			userEngine.ProcessEvents(server, now)
 			userEngine.ProcessMineRegen(now)
 			userEngine.ProcessNpcIdle()

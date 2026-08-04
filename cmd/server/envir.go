@@ -89,6 +89,9 @@ type Environment struct {
 	Events      []*MapEvent
 	MineEvents  []*MineEvent
 	eventIDSeq  int32
+	// objIndex 按 ID 索引全部移动对象（AddObject/RemoveObject 维护），
+	// 避免 getObjectByID 等在每条 RM 广播上全图线性扫描。
+	objIndex map[int32]interface{}
 
 	rawMap *mapformat.MapData
 	Castle *CastleObject // 沙巴克城堡引用（仅城堡地图非nil）
@@ -101,11 +104,12 @@ type Environment struct {
 // NewEnvironment 从地图文件创建环境。
 func NewEnvironment(name string, m *mapformat.MapData) *Environment {
 	env := &Environment{
-		Name:   name,
-		Width:  m.Width,
-		Height: m.Height,
-		Cells:  make([]MapCellInfo, m.Width*m.Height),
-		rawMap: m,
+		Name:     name,
+		Width:    m.Width,
+		Height:   m.Height,
+		Cells:    make([]MapCellInfo, m.Width*m.Height),
+		rawMap:   m,
+		objIndex: make(map[int32]interface{}),
 	}
 
 	for y := 0; y < m.Height; y++ {
@@ -206,56 +210,19 @@ func (e *Environment) CanSafeWalk(x, y int) bool {
 }
 
 func (e *Environment) getPlayerByID(id int32) *PlayObject {
-	for i := range e.Cells {
-		for _, o := range e.Cells[i].ObjList {
-			if o.Type != OS_MOVINGOBJECT {
-				continue
-			}
-			if p, ok := o.Obj.(*PlayObject); ok && p.ID == id {
-				return p
-			}
-		}
+	if p, ok := e.objIndex[id].(*PlayObject); ok {
+		return p
 	}
 	return nil
 }
 
 func (e *Environment) getNpcByID(id int32) (*NpcObject, bool) {
-	for i := range e.Cells {
-		for _, o := range e.Cells[i].ObjList {
-			if o.Type != OS_MOVINGOBJECT {
-				continue
-			}
-			if npc, ok := o.Obj.(*NpcObject); ok && npc.ID == id {
-				return npc, true
-			}
-		}
-	}
-	return nil, false
+	npc, ok := e.objIndex[id].(*NpcObject)
+	return npc, ok
 }
 
 func (e *Environment) getObjectByID(id int32) interface{} {
-	for i := range e.Cells {
-		for _, o := range e.Cells[i].ObjList {
-			if o.Type != OS_MOVINGOBJECT {
-				continue
-			}
-			switch obj := o.Obj.(type) {
-			case *PlayObject:
-				if obj.ID == id {
-					return obj
-				}
-			case *MonsterObject:
-				if obj.ID == id {
-					return obj
-				}
-			case *NpcObject:
-				if obj.ID == id {
-					return obj
-				}
-			}
-		}
-	}
-	return nil
+	return e.objIndex[id]
 }
 
 func objectBase(obj interface{}) *BaseObject {
@@ -307,6 +274,9 @@ func (e *Environment) AddObject(x, y int, objType byte, obj interface{}) bool {
 		Type: objType,
 		Obj:  obj,
 	})
+	if objType == OS_MOVINGOBJECT && base != nil {
+		e.objIndex[base.ID] = obj
+	}
 	return true
 }
 
@@ -321,6 +291,9 @@ func (e *Environment) RemoveObject(x, y int, objType byte, obj interface{}) bool
 	for i, o := range cell.ObjList {
 		if o.Type == objType && objectBase(o.Obj) == target {
 			cell.ObjList = append(cell.ObjList[:i], cell.ObjList[i+1:]...)
+			if objType == OS_MOVINGOBJECT && target != nil {
+				delete(e.objIndex, target.ID)
+			}
 			return true
 		}
 	}
