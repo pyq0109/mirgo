@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -143,6 +144,7 @@ func main() {
 		castleCfg = DefaultCastleConfig()
 	}
 	userEngine.Castle = NewCastleObject(*castleCfg)
+	userEngine.Castle.LoadState(db)
 	if castleEnv := mapMgr.FindMap(castleCfg.MapName); castleEnv != nil {
 		castleEnv.Castle = userEngine.Castle
 	}
@@ -151,10 +153,20 @@ func main() {
 	LoadDrugRecipes(*configDir)
 
 	loadDenyChrNameList(*configDir)
+	loadBlockLists(*configDir)
+	loadWordFilter(*configDir)
 
 	server := netserver.NewTCPServer(listenAddr)
+	// 每连接入站消息限流（路线图 6.3 网关补偿层，默认 60 条/秒突发 40）
+	server.SetMsgRateLimit(config.GetMsgRateLimit(), config.GetMsgBurst())
 
 	server.SetConnectHandler(func(session *netserver.Session) {
+		// IP 黑名单（Delphi BlockIPList 语义）：连接期直接拒绝
+		if ip := sessionIP(session.Conn); isIPBlocked(ip) {
+			log.Logf(log.LevelWarn, "Server", "blocked IP rejected: %s (session %d)", ip, session.ID)
+			session.Conn.Close()
+			return
+		}
 		sessionMgr.Add(session)
 		log.Logf(log.LevelInfo, "Server", "session %d connected (total: %d)", session.ID, sessionMgr.Count())
 	})
@@ -316,6 +328,7 @@ func main() {
 				ReNewLevel      int             `json:"reNewLevel"`
 				AttackMode      int             `json:"attackMode"`
 				AllowGroup      bool            `json:"allowGroup"`
+				StatusTimeArr   [12]int16       `json:"statusTimeArr"`
 				Magics          []PlayerMagic   `json:"magics"`
 				Storage         []savedUserItem `json:"storage"`
 				DearName        string          `json:"dearName"`
@@ -336,6 +349,17 @@ func main() {
 				player.ReNewLevel = meta.ReNewLevel
 				player.AttackMode = byte(meta.AttackMode)
 				player.AllowGroup = meta.AllowGroup
+				// Delphi wStatusTimeArr 持久化：恢复毒/隐身等残留状态
+				player.StatusTimeArr = meta.StatusTimeArr
+				if meta.StatusTimeArr[STATE_TRANSPARENT] > 0 {
+					player.Hidden = true
+				}
+				for _, v := range meta.StatusTimeArr {
+					if v > 0 {
+						player.BroadcastStatus()
+						break
+					}
+				}
 				player.DearName = meta.DearName
 				player.MasterName = meta.MasterName
 				player.ApprenticeNames = meta.ApprenticeNames
@@ -420,13 +444,15 @@ func main() {
 		case netserver.StateAuthenticated:
 			handleAuthenticatedMessage(server, session, msg, body, rawBody, config, db, userEngine, mapMgr)
 		case netserver.StateInGame:
-			if msg.Ident == protocol.CMLogout || msg.Ident == protocol.CMExitGame {
+			if msg.Ident == protocol.CMLogout || msg.Ident == protocol.CMExitGame || msg.Ident == protocol.CMSoftClose {
 				player := userEngine.GetPlayer(int32(session.CharacterID))
 				if player != nil {
-					if msg.Ident == protocol.CMLogout {
-						userEngine.LogoutPlayer(server, db, player)
-					} else {
+					if msg.Ident == protocol.CMExitGame {
 						userEngine.ExitPlayer(server, db, player)
+					} else {
+						// CM_SOFTCLOSE（Delphi ObjBase.pas:4751-4755）：软关闭回选角，
+						// 单进程下与 CM_LOGOUT 同走 LogoutPlayer（保留连接回 Authenticated 态）。
+						userEngine.LogoutPlayer(server, db, player)
 					}
 				}
 				return
@@ -449,6 +475,8 @@ func main() {
 	log.Logf(log.LevelInfo, "Server", "server started. Press Ctrl+C to stop.")
 
 	tickCount := int64(0)
+	lastGuildRun := int64(0)
+	lastOnlineMsg := int64(0)
 	for {
 		select {
 		case <-ticker.C:
@@ -463,18 +491,41 @@ func main() {
 			if userEngine.Castle != nil {
 				userEngine.Castle.ProcessCastleTick(userEngine, server, now)
 			}
+			// Delphi g_GuildManager.Run 每 10 秒（Guild.pas:261）：行会战到期清理
+			if now-lastGuildRun >= 10000 {
+				lastGuildRun = now
+				userEngine.ProcessGuilds(server, now)
+			}
+			// Delphi boSendOnlineCount（UsrEngn.pas:3054-3058）：周期系统广播在线人数
+			if !config.Game.DisableOnlineCount && now-lastOnlineMsg >= config.GetSendOnlineTime() {
+				lastOnlineMsg = now
+				count := userEngine.GetPlayerCount() * config.GetSendOnlineCountRate() / 10
+				text := strings.Replace(config.GetSendOnlineCountMsg(), "%c", strconv.Itoa(count), 1)
+				onlineResp := protocol.MakeDefaultMsg(protocol.SMSysMessage, 0, 0, 0, 0)
+				for _, p := range userEngine.allPlayers() {
+					if !p.Ghost {
+						server.Send(p.Session.ID, onlineResp, protocol.EncodeString(text))
+					}
+				}
+			}
 			if tickCount%int64(config.GetSaveInterval()) == 0 {
 				userEngine.ProcessNpcs()
 				userEngine.SaveAllPlayers(db)
 			}
 			if tickCount%int64(config.GetGuildSaveInterval()) == 0 {
 				userEngine.SaveGuilds()
+				if userEngine.Castle != nil {
+					userEngine.Castle.SaveState(db)
+				}
 			}
 		case sig := <-sigChan:
 			fmt.Println()
 			log.Logf(log.LevelInfo, "Server", "received signal: %v", sig)
 			log.Logf(log.LevelInfo, "Server", "shutting down...")
 			userEngine.SaveGuilds()
+			if userEngine.Castle != nil {
+				userEngine.Castle.SaveState(db)
+			}
 			server.Stop()
 			log.Logf(log.LevelInfo, "Server", "server stopped")
 			return
@@ -610,6 +661,14 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 		// 从 body 解析用户名/密码（格式: "username/password"）
 		username, password := parseCredentials(body)
 		log.Logf(log.LevelInfo, "Server", "login attempt: %s", username)
+
+		// 账号黑名单（Delphi DenyAccountList 语义）：登录期拒绝
+		if isAccountBlocked(username) {
+			log.Logf(log.LevelWarn, "Server", "blocked account rejected: %s", username)
+			resp := protocol.MakeDefaultMsg(protocol.SMPasswdFail, 0, 0, 0, 0)
+			server.Send(session.ID, resp, "")
+			return
+		}
 
 		// 登录失败锁定检查（Delphi: 5次后锁定60秒，LoginSrv/LMain.pas:1218-1230）
 		loginAttempts.Lock()
@@ -1044,6 +1103,15 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendMsg(protocol.CMAdjustBonus, int(msg.Recog), 0, 0, body)
 	case protocol.CMQueryUserState:
 		player.SendMsg(protocol.CMQueryUserState, int(msg.Recog), 0, 0, "")
+	case protocol.CMQueryUsername:
+		// Delphi: Param1=目标ID Param2=x Param3=y（ObjBase.pas:4663-4666）。
+		player.SendMsg(protocol.CMQueryUsername, int(msg.Recog), int(msg.Param), int(msg.Tag), "")
+	case protocol.CMUserGetDetailItem:
+		// Delphi: Param1=商人 Param2=偏移 sMsg=物品名（ObjBase.pas:4768-4769）。
+		player.SendMsg(protocol.CMUserGetDetailItem, int(msg.Recog), int(msg.Param), 0, body)
+	case protocol.CMSitdown:
+		// Param = 朝向（屠宰动作共用此消息，客户端 Alt+左键）。
+		player.SendMsg(protocol.CMSitdown, int(msg.Param), 0, 0, "")
 	case protocol.CMWantMinimap:
 		player.SendMsg(protocol.CMWantMinimap, 0, 0, 0, "")
 	case protocol.CMLoginNoticeOK:
@@ -1055,6 +1123,10 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendSpecialAttackFlags(server)
 		player.SendDayChanging(server)
 		player.SendMapDescription(server)
+		player.SendAreaState(server)
+		// Delphi RefMyStatus（ObjBase.pas:6193-6196）：饥饿状态（Go 无饥饿系统恒 0）
+		statusResp := protocol.MakeDefaultMsg(protocol.SMMyStatus, 0, 0, 0, 0)
+		server.Send(player.Session.ID, statusResp, "")
 		player.SendSubAbility(server)
 		player.SendRefMsg(RM_TURN, player.Dir, player.CurrX, player.CurrY, player.Name)
 	case protocol.CMQueryBagItems:
@@ -1143,6 +1215,7 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		ReNewLevel      int             `json:"reNewLevel"`
 		AttackMode      int             `json:"attackMode"`
 		AllowGroup      bool            `json:"allowGroup"`
+		StatusTimeArr   [12]int16       `json:"statusTimeArr"`
 		Magics          []PlayerMagic   `json:"magics"`
 		Storage         []savedUserItem `json:"storage"`
 		DearName        string          `json:"dearName"`
@@ -1161,6 +1234,7 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		ReNewLevel:      player.ReNewLevel,
 		AttackMode:      int(player.AttackMode),
 		AllowGroup:      player.AllowGroup,
+		StatusTimeArr:   player.StatusTimeArr,
 		Magics:          make([]PlayerMagic, 0, len(player.LearnedMagics)),
 		DearName:        player.DearName,
 		MasterName:      player.MasterName,

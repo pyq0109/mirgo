@@ -44,6 +44,11 @@ func (p *PlayObject) HandleSpellFull(msg SendMessage, server *netserver.TCPServe
 	targetX := msg.Param2
 	targetY := msg.Param3
 
+	// Delphi: 跑位施法转换间隔（RunMagic 组合，ObjBase.pas:25319-25326）
+	if !p.checkActionTransition(now, protocol.CMSpell, dirToward(p.CurrX, p.CurrY, targetX, targetY), server) {
+		return
+	}
+
 	pm := p.findMagic(magID)
 	if pm == nil {
 		p.sendMagicFail(server)
@@ -402,6 +407,7 @@ func (p *PlayObject) castTaoistSpell(server *netserver.TCPServer, magID, power, 
 				}
 				other.WAbil.HP = uint16(hp)
 				other.sendHealthSpell(server)
+				p.sendHealGuage(server, other)
 			}
 		}
 	case 6:
@@ -675,7 +681,16 @@ func (p *PlayObject) healTarget(server *netserver.TCPServer, amount, tx, ty int)
 		if p.IncHealing > cap {
 			p.IncHealing = cap
 		}
+		// Delphi Magic.pas:188-190：治疗者视角的瞬时头顶血条
+		p.sendHealGuage(server, p)
 	}
+}
+
+// sendHealGuage — Delphi RM_10414→SM_INSTANCEHEALGUAGE（ObjBase.pas:6315-6323）：
+// 治疗系魔法命中后向施法者展示被治疗目标的当前血量条。
+func (p *PlayObject) sendHealGuage(server *netserver.TCPServer, target *PlayObject) {
+	resp := protocol.MakeDefaultMsg(protocol.SMInstanceHealGuage, target.ID, target.WAbil.HP, target.WAbil.MaxHP, 0)
+	server.Send(p.Session.ID, resp, "")
 }
 
 func (p *PlayObject) findMagic(magID int) *PlayerMagic {
@@ -712,20 +727,112 @@ func (p *PlayObject) sendMagicFail(server *netserver.TCPServer) {
 	server.Send(p.Session.ID, resp, "")
 }
 
-// magicEffType 将魔法分类为客户端特效类型，打包到
-// SMMagicFire.Series 低字节：0=爆炸, 1=飞行, 2=地面。magic_db 中的
-// effectType 字段是 Delphi 的动画集选择器（0..14），和这个枚举不对应，
-// 所以这里按 magID 来区分类型；effnum（高字节）直接取自 magic_db 的 "effect"。
-var magicEffType = map[int]int{
-	1: 1, 5: 1, 10: 1, 11: 1, 13: 1, 44: 1, // projectiles → fly
-	22: 2, 23: 2, 24: 2, 33: 2, 47: 2, // area effects → ground
+// 客户端特效类型枚举，与 cmd/client/magiceffect.go 的 MagicEffectType 一一对应
+// （打包进 SMMagicFire.Series 低字节）。
+const (
+	effExplosion    = 0  // 爆炸
+	effFly          = 1  // 飞行弹道
+	effGround       = 2  // 地面
+	effFlyAxe       = 3  // 飞行斧
+	effNone         = 4  // 无特效（Delphi mtFireWind/mtKyulKai）
+	effFireGun      = 5  // 火枪（地狱火）
+	effLightning    = 6  // 疾光电影
+	effIce          = 7  // 雷电术（Delphi mtThunder，Magic2 基址10）
+	effBujaukExplo  = 8  // 符咒爆炸（灵魂火符/集体隐身）
+	effBujaukGround = 9  // 符咒地面（幽灵盾/神圣战甲术）
+	effFlyArrow     = 11 // 飞行箭
+	effReady        = 12 // 蓄力（Delphi mtReady）
+	effThunder2     = 13 // 雷电2（Delphi mt14，Magic2 基址140）
+	effFlyBug       = 14 // 飞行虫（Delphi mt15）
+)
+
+type magicEffDef struct {
+	effType int // Go MagicEffectType 值
+	effNum  int // 0 = 取 magic_db 的 effect 字段；>0 = 固定动画号
+}
+
+// magicEffType 完整映射 magID → 客户端特效类型，打包到 SMMagicFire.Series
+// 低字节；effNum（高字节）默认取 magic_db 的 "effect" 字段。
+//
+// 依据：magic_db 的 effectType 字段 = Delphi TMagic.btEffectType
+// （Grobal2.pas:637），即客户端 NewMagic 分发的 TMagicType
+// （magiceff.pas:140-146）；Delphi 服务端原样转发（Magic.pas:496
+// MakeWord(btEffectType, btEffect)），客户端在 Actor.pas:1684-1686 解码。
+// Go 枚举数值与 Delphi 不同，此表按 magID 完成转换：
+//
+//	mtReady(0)→12  mtFly(1)→1  mtExplosion(2)→0  mtFlyAxe(3)→3
+//	mtFireWind(4)→4(EffNone)  mtFireGun(5)→5  mtLightingThunder(6)→6
+//	mtThunder(7)→7  mtExploBujauk(8)→8  mtBujaukGroundEffect(9)→9
+//	mtKyulKai(10)→4(EffNone)  mtFlyArrow(11)→11  mt14(14)→13  mt15(15)→14
+//
+// EffNone：Delphi 不创建客户端特效——mtFireWind 直接 meff := nil
+// （PlayScn.pas:1573-1574），mtKyulKai 的 TKyulKai 被注释禁用
+// （PlayScn.pas:1607-1609）。火墙(22)的火由地图事件 SM_SHOWEVENT 渲染，
+// 魔法盾(31)的盾绘制在角色身上，均不走特效通道。
+// 未在表中的 magID 兜底为爆炸（effExplosion），保持旧行为。
+var magicEffType = map[int]magicEffDef{
+	// --- 战士（job=0）：被动/近战技，Go 目前不发 SMMagicFire，条目备查 ---
+	3:  {effNone, 0},      // 基本剑术 mtReady effect=0，无动画帧（Magic.DB）
+	7:  {effReady, 0},     // 攻杀剑术 mtReady effect=5（Magic.DB）
+	12: {effReady, 0},     // 刺杀剑术 mtReady effect=13（Magic.DB）
+	25: {effReady, 0},     // 半月弯刀 mtReady effect=23（Magic.DB）
+	26: {effReady, 0},     // 烈火剑法 mtReady effect=24（Magic.DB）
+	27: {effReady, 0},     // 野蛮冲撞 mtReady effect=25（Magic.DB）
+	40: {effReady, 0},     // 双龙斩 mtReady effect=44（Magic.DB）
+	42: {effNone, 0},      // 龙影剑法 mtReady effect=0，无动画帧（Magic.DB）
+	43: {effReady, 0},     // 雷霆剑法 mtReady effect=38（Magic.DB）
+	56: {effNone, 0},      // 逐日剑法 mtReady effect=0，无动画帧（Magic.DB）
+	71: {effExplosion, 0}, // 擒龙手 mtExplosion effect=52（Magic.DB）
+
+	// --- 法师（job=1） ---
+	1:  {effFly, 0},        // 火球术 mtFly effect=1（Magic.pas:279-280, PlayScn.pas:1449-1450）
+	5:  {effFly, 0},        // 大火球 mtFly effect=3（Magic.pas:279-280）
+	8:  {effNone, 0},       // 抗拒火环 mtFireWind effect=6（Magic.pas:384）
+	9:  {effFireGun, 0},    // 地狱火 mtFireGun effect=7（Magic.pas:387, PlayScn.pas:1575-1576）
+	10: {effLightning, 0},  // 疾光电影 mtLightingThunder effect=8（Magic.pas:397, PlayScn.pas:1583-1584）
+	11: {effIce, 0},        // 雷电术 mtThunder effect=9（Magic.pas:407, PlayScn.pas:1577-1582）
+	20: {effExplosion, 0},  // 诱惑之光 mtExplosion effect=18（Magic.pas:489, PlayScn.pas:1461-1466）
+	21: {effNone, 0},       // 瞬息移动 mtFireWind effect=19（Magic.pas:495）
+	22: {effNone, 0},       // 火墙 mtFireWind effect=20，火焰走地图事件（Magic.pas:501）
+	23: {effExplosion, 0},  // 爆裂火焰 mtExplosion effect=21（Magic.pas:510, PlayScn.pas:1467-1474）
+	24: {effNone, 0},       // 地狱雷光 mtFireWind effect=22（Magic.pas:518）
+	31: {effNone, 0},       // 魔法盾 mtFireWind effect=29，盾绘于角色（Magic.pas:568）
+	32: {effExplosion, 0},  // 圣言术 mtExplosion effect=30（Magic.pas:572, PlayScn.pas:1491-1498）
+	33: {effExplosion, 0},  // 冰咆哮 mtExplosion effect=31（Magic.pas:578, PlayScn.pas:1499-1506）
+	44: {effFly, 0},        // 寒冰掌 mtFly effect=39，飞行4帧+Magic2（PlayScn.pas:1452-1456）
+	45: {effThunder2, 0},   // 灭天火 mt14 effect=34；Go 最接近类型=雷电2（PlayScn.pas:1634-1638）
+	47: {effExplosion, 47}, // 火龙气焰 SKILL_47（Magic.pas:665-672）；不在 magic_db，固定 effNum=47 → 基址1010（PlayScn.pas:1537-1546）
+	58: {effExplosion, 0},  // 流星火雨 mtExplosion effect=51（Magic.DB）
+	74: {effFly, 0},        // 分身术 mtFly effect=74（Magic.DB）
+
+	// --- 道士（job=2） ---
+	2:  {effExplosion, 0},    // 治愈术 mtExplosion effect=2（Magic.pas:301）
+	4:  {effNone, 0},         // 精神力战法 mtReady effect=0，无动画帧（Magic.DB）
+	6:  {effExplosion, 0},    // 施毒术 mtExplosion effect=4（Magic.pas:318）
+	13: {effBujaukExplo, 0},  // 灵魂火符 mtExploBujauk effect=10（Magic.pas:436, PlayScn.pas:1585-1590）
+	14: {effBujaukGround, 0}, // 幽灵盾 mtBujaukGround effect=11，16帧（Magic.pas:451, PlayScn.pas:1598-1606）
+	15: {effBujaukGround, 0}, // 神圣战甲术 mtBujaukGround effect=12，16帧（Magic.pas:456, PlayScn.pas:1598-1606）
+	16: {effNone, 0},         // 困魔咒 mtKyulKai effect=14；Delphi 已禁用 TKyulKai（Magic.pas:461, PlayScn.pas:1607-1609）
+	17: {effNone, 0},         // 召唤骷髅 mtFireWind effect=15（Magic.pas:465）
+	18: {effNone, 0},         // 隐身术 mtFireWind effect=16（Magic.pas:476）
+	19: {effBujaukExplo, 0},  // 集体隐身术 mtExploBujauk effect=17（Magic.pas:480, PlayScn.pas:1591-1595）
+	28: {effExplosion, 0},    // 心灵启示 mtExplosion effect=26（Magic.pas:522, PlayScn.pas:1475-1482）
+	29: {effExplosion, 0},    // 群体治愈术 mtExplosion effect=27（Magic.pas:532, PlayScn.pas:1483-1490）
+	30: {effNone, 0},         // 召唤神兽 mtFireWind effect=28（Magic.pas:537）
+	41: {effNone, 0},         // 狮子吼 mtFireWind effect=43（Magic.DB）
+	48: {effNone, 0},         // 气功波 mtFireWind effect=36（Magic.DB）
+	49: {effExplosion, 0},    // 净化术 mtExplosion effect=40（Magic.DB, PlayScn.pas:1517-1526）
+	50: {effNone, 0},         // 无极真气 mtFireWind effect=35（Magic.DB）
+	55: {effNone, 0},         // 召唤月灵 mtFireWind effect=41（Magic.DB）
 }
 
 func (p *PlayObject) magicEffectParams(magID int) (effType, effNum int) {
-	effType = magicEffType[magID]
-	if p.MagicDB != nil {
-		if def := p.MagicDB.GetByID(magID); def != nil {
-			effNum = def.Effect
+	def := magicEffType[magID] // 零值 = effExplosion(0) 兜底爆炸
+	effType = def.effType
+	effNum = def.effNum
+	if effNum == 0 && p.MagicDB != nil {
+		if md := p.MagicDB.GetByID(magID); md != nil {
+			effNum = md.Effect
 		}
 	}
 	return effType, effNum

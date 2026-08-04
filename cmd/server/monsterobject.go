@@ -124,6 +124,10 @@ type MonsterObject struct {
 	trainLastTick    int64
 	trainLastHiterID int32
 
+	// 足球（Delphi TSoccerBall Race 120，ObjMon2.pas:303-366）滚动状态
+	rollDist             int // n550：剩余滚动距离（受击累加，上限 20）
+	rollTargetX, rollTargetY int // m_nTargetX/Y：滚动目标格
+
 	// 运行时缓存（Run 期间有效）
 	engine *UserEngine
 
@@ -134,6 +138,8 @@ type MonsterObject struct {
 func getAIBehavior(race byte) int {
 	// Race 到 AI 的映射，参考 Delphi 工厂方法（UsrEngn.pas:1819-1938）。
 	switch race {
+	case 20: // TArcherPolice — TArcherGuard 子类，构造仅设 Race（ObjMon2.pas:984-988）
+		return AIGuard
 	case 51: // 鸡 — 被动动物
 		return AIPassive
 	case 52: // 鹿 — 由 SpawnMonster 掷骰决定 AIFlee/AIPassive
@@ -202,6 +208,8 @@ func getAIBehavior(race byte) int {
 		return AISpit
 	case 119: // TBigPoisionSpider — 毒喷吐
 		return AISpit
+	case 120: // TSoccerBall — 足球，可推动滚动（ObjMon2.pas:303-366）
+		return AISoccerBall
 	case 130: // TDoubleCriticalMonster — 远程双暴击
 		return AICritical
 	case 131: // TRonObject — 范围攻击
@@ -261,6 +269,11 @@ func (o *MonsterObject) Feature() int32 {
 }
 
 func (o *MonsterObject) OnStruck(attackerID int32, now int64, userEngine *UserEngine) {
+	// Delphi TSoccerBall.Struck（ObjMon2.pas:359-366）：足球被踢沿攻击者朝向滚动，不记仇不索敌
+	if o.AIBehavior == AISoccerBall {
+		o.kickSoccerBall(attackerID, userEngine)
+		return
+	}
 	o.LastHiterID = attackerID
 	o.LastHiterTick = now
 	// Delphi: 攻击延迟惩罚 m_dwHitTick += 150 - min(130, Level*4)
@@ -309,6 +322,14 @@ func (o *MonsterObject) Run(server *netserver.TCPServer, now int64, userEngine *
 		if o.Ghost || o.Death {
 			return
 		}
+	}
+
+	// Delphi TSoccerBall（ObjMon2.pas:320-357）：可推动物体——不搜索目标、不受状态影响，
+	// m_boSuperMan 每 tick 回满 HP（ObjBase.pas:3712-3716），被踢才滚动。
+	if o.AIBehavior == AISoccerBall {
+		o.WAbil.HP = uint16(o.MaxHP)
+		o.runSoccerRoll(now)
+		return
 	}
 
 	// 状态效果 tick（所有对象都需要，包括石化中的怪物）

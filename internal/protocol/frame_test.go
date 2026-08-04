@@ -163,3 +163,31 @@ func TestFrameScannerCodeDigitOnly(t *testing.T) {
 		t.Fatalf("got %v, want empty", payloads)
 	}
 }
+
+func TestFrameScannerOnCode(t *testing.T) {
+	var fs FrameScanner
+	var codes []byte
+	fs.OnCode = func(code byte) {
+		codes = append(codes, code)
+	}
+
+	// 三个带 code 的帧
+	fs.Feed([]byte("#1abc!#2def!#9ghi!"), true, nil)
+	if string(codes) != "129" {
+		t.Fatalf("OnCode got %q, want %q", codes, "129")
+	}
+
+	// 不带 code 的帧（服务端帧格式）不回调
+	codes = nil
+	fs.Feed([]byte("#xyz!"), true, nil)
+	if len(codes) != 0 {
+		t.Fatalf("OnCode got %v, want none", codes)
+	}
+
+	// stripCode=false 时不剥离也不回调
+	codes = nil
+	fs.Feed([]byte("#5uvw!"), false, nil)
+	if len(codes) != 0 {
+		t.Fatalf("OnCode with stripCode=false got %v, want none", codes)
+	}
+}

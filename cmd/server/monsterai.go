@@ -43,6 +43,7 @@ const (
 	AIKhazard          = 31 // 对角2格拖拽+绿毒（Race 206 TKhazard）
 	AIFrostTiger       = 32 // 隐身伏击（Race 210 TFrostTiger）
 	AITrainer          = 33 // 训练师沙袋（Race 55 TRAINER）
+	AISoccerBall       = 34 // 足球（Race 120 TSoccerBall）：可推动物体，被踢滚动反弹（ObjMon2.pas:303-366）
 )
 
 func (o *MonsterObject) runExtendedAI(server *netserver.TCPServer, e *UserEngine, target *PlayObject, dist int, now int64) {
@@ -1185,3 +1186,78 @@ func (o *MonsterObject) broadcastMonsterStatus() {
 	}
 	o.SendRefMsg(RM_CHARSTATUSCHANGED, int(uint16(status>>16)), int(uint16(status)), 0, "")
 }
+
+// kickSoccerBall — Delphi TSoccerBall.Struck（ObjMon2.pas:359-366）：
+// 沿击打者朝向滚动，动量累加（+4+rand4，上限 20 格），目标 = 前方 n 格。
+func (o *MonsterObject) kickSoccerBall(attackerID int32, e *UserEngine) {
+	var hiterDir int
+	found := false
+	if e != nil {
+		if p := e.GetPlayer(attackerID); p != nil {
+			hiterDir, found = p.Dir, true
+		} else if m := e.GetMonster(attackerID); m != nil {
+			hiterDir, found = m.Dir, true
+		}
+	}
+	if !found {
+		return
+	}
+	o.Dir = hiterDir
+	o.rollDist += 4 + rand.Intn(4)
+	if o.rollDist > 20 {
+		o.rollDist = 20
+	}
+	o.rollTargetX, o.rollTargetY = o.soccerTargetInDir(o.Dir, o.rollDist)
+}
+
+// soccerTargetInDir — 从当前位置沿 dir 前进 steps 格，地图边界处钳制。
+// （Delphi GetNextPosition 越界时整体不更新目标，ObjMon2.pas:365；
+// 此处改为钳制到边界，保证贴边踢球仍有滚动效果。）
+func (o *MonsterObject) soccerTargetInDir(dir, steps int) (int, int) {
+	tx, ty := o.CurrX, o.CurrY
+	if o.envir == nil {
+		return tx, ty
+	}
+	dx, dy := dirToOffset(dir)
+	for i := 0; i < steps; i++ {
+		nx, ny := tx+dx, ty+dy
+		if nx < 0 || nx >= o.envir.Width || ny < 0 || ny >= o.envir.Height {
+			break
+		}
+		tx, ty = nx, ny
+	}
+	return tx, ty
+}
+
+// runSoccerRoll — Delphi TSoccerBall.Run（ObjMon2.pas:320-357）：
+// 每 tick 向滚动目标移动一格；路径受阻时按 Delphi 反弹方向表反向并重算目标，
+// 到达目标后动量清零（Delphi 原文在可走时反向，按其设计意图实现为受阻反弹）。
+func (o *MonsterObject) runSoccerRoll(now int64) {
+	if o.rollDist <= 0 {
+		return
+	}
+	if o.CurrX == o.rollTargetX && o.CurrY == o.rollTargetY {
+		o.rollDist = 0
+		return
+	}
+	dir := dirToward(o.CurrX, o.CurrY, o.rollTargetX, o.rollTargetY)
+	if o.WalkTo(dir) {
+		o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
+		return
+	}
+	// Delphi 反弹方向表（ObjMon2.pas:331-340）：正方向 180° 反向，斜方向水平翻转
+	bounced := [8]int{4, 7, 6, 5, 0, 3, 2, 1}
+	o.Dir = bounced[dir]
+	o.rollTargetX, o.rollTargetY = o.soccerTargetInDir(o.Dir, o.rollDist)
+	if o.CurrX == o.rollTargetX && o.CurrY == o.rollTargetY {
+		o.rollDist = 0
+		return
+	}
+	dir = dirToward(o.CurrX, o.CurrY, o.rollTargetX, o.rollTargetY)
+	if o.WalkTo(dir) {
+		o.SendRefMsg(RM_WALK, dir, o.CurrX, o.CurrY, "")
+	} else {
+		o.rollDist = 0
+	}
+}
+

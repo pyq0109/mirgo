@@ -41,6 +41,14 @@ type FloatingText struct {
 	StartTime int64
 }
 
+// pendingChangeFace — SMChangeFace 变身暂存（Delphi ClMain.pas:4268-4278）。
+type pendingChangeFace struct {
+	oldRecog int32
+	newRecog int32
+	body     string
+	start    int64
+}
+
 type ChatMessage struct {
 	Text string
 	Time int64
@@ -121,7 +129,10 @@ type PlayScene struct {
 
 	groundItems   map[int32]*GroundItemInfo
 	floatingTexts []FloatingText
-	chatMessages  []ChatMessage
+	// SMChangeFace 变身等待队列（Delphi m_nWaitForRecogId，PlayScn.pas:916-923）：
+	// 等旧 actor 动作结束后再应用新外观。
+	pendingFaces []pendingChangeFace
+	chatMessages []ChatMessage
 	chatInput     string
 	chatMode      bool
 
@@ -616,6 +627,15 @@ func (s *PlayScene) Update(dt float64) {
 	s.effects.Update(now)
 	s.events.Update(now)
 	s.pumpSellQuery()
+
+	// SMInstanceHealGuage 瞬时血条到期关闭（Delphi ClMain.pas:4303-4313）
+	for _, a := range s.State.Actors.All() {
+		if a != nil && a.ShowHPUntil > 0 && now > a.ShowHPUntil {
+			a.ShowHP = false
+			a.ShowHPUntil = 0
+		}
+	}
+	s.processPendingChangeFace(now)
 
 	// ClearDropItem：距自己 x 且 y 均 >30 格的地面物品本地清理
 	// （PlayScn.pas:633-652、984-990），SM_DELITEM 之外的兜底。
@@ -1689,10 +1709,14 @@ func (s *PlayScene) OnKey(key int, action int) {
 		}
 
 		// F1..F8 释放绑定在该键上的魔法，朝鼠标位置施法（ClMain:1268-1285）。
+		// Ctrl+F1..F8 为第二套键位，映射键符 'E'..'L'（ClMain.pas:1477-1487）。
 		if !s.chatMode && key >= 290 && key <= 297 {
 			now := time.Now().UnixMilli()
 			if now-s.lastSpellTick >= 500 {
 				k := byte('1' + (key - 290))
+				if s.ctrlDown {
+					k = byte('E' + (key - 290))
+				}
 				for i := range s.State.Magics {
 					if s.State.Magics[i].Key != k {
 						continue
@@ -2573,4 +2597,40 @@ func (s *PlayScene) addFloatingText(tileX, tileY int, text string, r, g, b float
 		Color:     [4]float32{r, g, b, 1.0},
 		StartTime: time.Now().UnixMilli(),
 	})
+}
+
+// queueChangeFace — SMChangeFace 暂存变身请求（Delphi ClMain.pas:4268-4278）：
+// Recog=旧对象ID，Param|Tag<<16=新对象ID，body 携带新外观（TCharDesc）。
+func (s *PlayScene) queueChangeFace(oldRecog, newRecog int32, body string) {
+	s.pendingFaces = append(s.pendingFaces, pendingChangeFace{
+		oldRecog: oldRecog,
+		newRecog: newRecog,
+		body:     body,
+		start:    time.Now().UnixMilli(),
+	})
+}
+
+// processPendingChangeFace — Delphi PlayScn.pas:916-923（m_nWaitForRecogId）：
+// 等旧 actor 当前动作结束后应用新外观；超过 5 秒强制应用。
+func (s *PlayScene) processPendingChangeFace(now int64) {
+	if len(s.pendingFaces) == 0 {
+		return
+	}
+	remaining := s.pendingFaces[:0]
+	for _, pf := range s.pendingFaces {
+		actor := s.State.Actors.Get(pf.oldRecog)
+		if actor == nil {
+			continue
+		}
+		if !actor.IsIdle() && now-pf.start < 5000 {
+			remaining = append(remaining, pf)
+			continue
+		}
+		// 管理器按 RecogID 索引，换 ID 需重新注册
+		s.State.Actors.Remove(pf.oldRecog)
+		actor.RecogID = pf.newRecog
+		s.State.Actors.Add(actor)
+		actor.updateFeatureFromBody(pf.body)
+	}
+	s.pendingFaces = remaining
 }

@@ -53,10 +53,12 @@ cmd/server/
 ├── baseobject.go     # 基础对象、RM_*常量、SendRefMsg、WalkTo
 ├── playobject.go     # 玩家：移动/战斗/视野/地图切换/消息分发
 ├── monsterobject.go  # 怪物：AI(搜索/追击/攻击/游荡)
-├── monsterai.go      # 怪物AI行为(34种:AIMelee=0..AITrainer=33)
+├── monsterai.go      # 怪物AI行为(35种:AIMelee=0..AISoccerBall=34)
 ├── monsterdb.go      # 怪物数据库加载(monster_db.jsonc)
+├── trainernpc.go     # 训练师沙袋(Race 55)
+├── mining.go         # 挖矿(鹤嘴锄重击/=#DIG)
 ├── npcobject.go      # NPC：固定位置、外观
-├── mongen.go         # 刷怪系统、地面物品消失
+├── mongen.go         # 刷怪系统(在线人数加速)、地面物品消失
 ├── drops.go          # 怪物掉落逻辑
 ├── droptable.go      # 掉落表加载(MonItems/*.jsonc)
 ├── envir.go          # 地图环境、碰撞、门、对象管理
@@ -70,16 +72,21 @@ cmd/server/
 ├── magicdb.go        # 魔法数据库加载(magic_db.jsonc)
 ├── magicsystem.go    # 施法/三职业技能/伤害
 ├── npcscript.go      # NPC脚本引擎([@label]解析)
+├── npcscript_ext.go  # NPC脚本扩展命令注册表(表驱动)
 ├── chatsystem.go     # 聊天广播/组队
+├── wordfilter.go     # 聊天敏感词过滤(WordFilter.txt)
+├── blocklist.go      # IP/账号黑名单(BlockIPList/DenyAccountList)
 ├── pksystem.go       # PK点数/红名/衰减
 ├── tradesystem.go    # 面对面交易
 ├── guildsystem.go    # 行会创建/聊天
+├── castle.go         # 城堡战(预约战/联盟/税收/攻城)
+├── castlenpc.go      # 城堡NPC命令
 ├── merchantsystem.go # NPC商店买/卖/修理/价格查询
 ├── attackmode.go     # 攻击模式(全体/组队/和平等)
 ├── safezone.go       # 安全区配置(start_points.jsonc)
 ├── statuseffect.go   # 状态效果(毒/隐身/石化等12种)
-├── storagesystem.go  # 仓库存取(39格)
-└── gmcommands.go     # GM命令(@make/@level/@move/@mob等)
+├── storagesystem.go  # 仓库存取(50格)
+└── gmcommands.go     # GM命令(@make/@level/@move/@mob/@status等)
 ```
 
 ## 客户端文件结构

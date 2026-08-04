@@ -25,6 +25,9 @@ func (p *PlayObject) HandleSay(msg SendMessage, server *netserver.TCPServer) {
 		return
 	}
 
+	// 敏感词过滤（Delphi RunGate FilterSayMsg 网关层语义，Main.pas:554-579）
+	text = filterChatText(text)
+
 	if strings.HasPrefix(text, "!~") {
 		if guildText := text[2:]; guildText != "" {
 			gmsg := msg
@@ -84,7 +87,7 @@ func (p *PlayObject) HandleWhisper(msg SendMessage, server *netserver.TCPServer)
 		return
 	}
 	targetName := body[:slashIdx]
-	text := body[slashIdx+1:]
+	text := filterChatText(body[slashIdx+1:])
 
 	if p.Engine == nil {
 		return

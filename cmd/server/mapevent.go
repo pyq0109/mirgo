@@ -38,6 +38,10 @@ func (e *Environment) ProcessMapEvents(server *netserver.TCPServer, now int64) {
 			// 纯视觉事件，仅等待过期
 		case protocol.ETHolyCurtain:
 			e.processHolyCurtain(server, ev, now)
+		case protocol.ETHealZone:
+			e.processHealZone(server, ev)
+		case protocol.ETDamageZone:
+			e.processDamageZone(server, ev, now)
 		case protocol.ETSculPiece:
 			// 装饰事件，仅等待过期
 		}
@@ -130,6 +134,74 @@ func (e *Environment) AddHolyCurtainEvent(server *netserver.TCPServer, x, y, dam
 	}
 	e.Events = append(e.Events, ev)
 	e.broadcastShowEvent(server, ev)
+}
+
+// AddZoneEvent 创建治疗区/伤害区事件（脚本 MAKEHEALZONE/MAKEDAMAGEZONE，
+// Delphi ObjNpc.pas 区域命令）。amount>0 为每 tick 治疗量（治疗区）或
+// 伤害量（伤害区）。
+func (e *Environment) AddZoneEvent(server *netserver.TCPServer, zoneType, x, y, amount int, durationMs int64) {
+	e.eventIDSeq++
+	ev := &MapEvent{
+		ServerID: e.eventIDSeq,
+		Type:     zoneType,
+		X:        x,
+		Y:        y,
+		Damage:   amount,
+		Duration: durationMs,
+		EndTick:  time.Now().UnixMilli() + durationMs,
+	}
+	e.Events = append(e.Events, ev)
+	e.broadcastShowEvent(server, ev)
+}
+
+// processHealZone 治疗区：站立的玩家每 tick 恢复 Damage 点 HP。
+func (e *Environment) processHealZone(server *netserver.TCPServer, ev *MapEvent) {
+	if ev.Damage <= 0 {
+		return
+	}
+	obj := e.GetMovingObject(ev.X, ev.Y)
+	if p, ok := obj.(*PlayObject); ok && !p.Ghost && !p.Death {
+		hp := int(p.WAbil.HP) + ev.Damage
+		if hp > int(p.WAbil.MaxHP) {
+			hp = int(p.WAbil.MaxHP)
+		}
+		if hp != int(p.WAbil.HP) {
+			p.WAbil.HP = uint16(hp)
+			p.sendHealthSpell(server)
+		}
+	}
+}
+
+// processDamageZone 伤害区：站立的对象每 tick 受 Damage 点伤害（玩家钳制在 1 HP，
+// 与火墙一致，地图事件不驱动死亡流程）。
+func (e *Environment) processDamageZone(server *netserver.TCPServer, ev *MapEvent, now int64) {
+	if ev.Damage <= 0 {
+		return
+	}
+	obj := e.GetMovingObject(ev.X, ev.Y)
+	switch o := obj.(type) {
+	case *MonsterObject:
+		if !o.Death && !o.IsSafeZoneGuard {
+			hp := int(o.WAbil.HP) - ev.Damage
+			if hp <= 0 {
+				o.Death = true
+				o.DeathTick = now
+				o.WAbil.HP = 0
+				e.broadcastDeathMsg(o.BaseObject, o.ID, o.CurrX, o.CurrY, o.Dir, true)
+			} else {
+				o.WAbil.HP = uint16(hp)
+			}
+		}
+	case *PlayObject:
+		if !o.Ghost && !o.Death {
+			hp := int(o.WAbil.HP) - ev.Damage
+			if hp < 1 {
+				hp = 1
+			}
+			o.WAbil.HP = uint16(hp)
+			o.sendHealthSpell(server)
+		}
+	}
 }
 
 // AddPileStonesEvent 创建碎石堆视觉事件（无游戏逻辑）。

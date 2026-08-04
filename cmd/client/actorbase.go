@@ -134,7 +134,8 @@ type Actor struct {
 	HiterCode           int32
 	MapRef              *mapformat.MapData
 
-	WeaponEffect    int   // weapon glow effect number (0=none)
+	WeaponEffect      int   // weapon glow effect number (0=none)
+	WeaponEffectUntil int64 // 武器特效到期时间（Delphi 破碎特效 5帧×120ms，Actor.pas:3557-3563）
 	EffectNumber    int   // spell effect WIL index for casting animation
 	ScrollHideState int   // 0=normal, 1=hiding, 2=hidden, 3=showing
 	ScrollHideFrame int   // teleport animation frame (0-10)
@@ -147,6 +148,7 @@ type Actor struct {
 	ShowHP          bool  // SMOpenHealth: 显示头顶HP条
 	ShowHPVal       int   // 当前HP
 	ShowMaxHPVal    int   // 最大HP
+	ShowHPUntil     int64 // SMInstanceHealGuage: 血条到期时间（0=常驻，Delphi 2s）
 
 	// NPC 特效覆盖层（Delphi TNpcActor: Actor.pas:760-775）
 	NpcUseEffect     bool  // m_boUseEffect
@@ -765,6 +767,12 @@ func (a *Actor) DefaultMotion(now int64) {
 	if now-a.EffectFrameTick > 100 {
 		a.EffectFrameTick = now
 		a.EffectFrame++
+	}
+
+	// 武器破碎特效到期关闭（Delphi m_boWeaponEffect 5 帧后清除，Actor.pas:3557-3563）
+	if a.WeaponEffect > 0 && a.WeaponEffectUntil > 0 && now > a.WeaponEffectUntil {
+		a.WeaponEffect = 0
+		a.WeaponEffectUntil = 0
 	}
 
 	if a.Death {

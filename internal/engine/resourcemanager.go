@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"container/list"
 	"fmt"
 	"image"
 	"path/filepath"
@@ -11,6 +12,16 @@ import (
 )
 
 var texLogCount int
+
+// maxCachedTextures 纹理缓存 LRU 上限（路线图 6.5：Delphi WIL.pas:45
+// FreeOldMemorys/MaxMemorySize 的等价机制，防止长跑图内存只增不减）。
+const maxCachedTextures = 8192
+
+// texEntry 是纹理缓存 LRU 节点。
+type texEntry struct {
+	key string
+	tex uint32
+}
 
 // ResourceManager 管理 WIL 文件加载与纹理缓存。
 type ResourceManager struct {
@@ -42,9 +53,10 @@ type ResourceManager struct {
 	HumEffect *wil.File
 	MagIcon  *wil.File
 
-	// 纹理缓存
+	// 纹理缓存（LRU：长期未访问的纹理被淘汰释放显存）
 	mu       sync.RWMutex
-	texCache map[string]uint32 // "wilName:index" -> 纹理 ID
+	texCache map[string]*list.Element // "wilPtr:index" -> LRU 节点
+	texLRU   *list.List               // 头部最近使用
 
 	// 懒加载的辅助 WIL（St<N>.wil 装备外观文件）；nil 值用于缓存
 	// 加载失败的结果。
@@ -57,7 +69,8 @@ func NewResourceManager(dataDir string, gl *GLState) (*ResourceManager, error) {
 	rm := &ResourceManager{
 		dataDir:  dataDir,
 		gl:       gl,
-		texCache: make(map[string]uint32),
+		texCache: make(map[string]*list.Element),
+		texLRU:   list.New(),
 	}
 
 	if err := rm.loadAll(); err != nil {
@@ -183,8 +196,13 @@ func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 	key := fmt.Sprintf("%p:%d", f, index)
 
 	rm.mu.RLock()
-	if tex, ok := rm.texCache[key]; ok {
+	if el, ok := rm.texCache[key]; ok {
+		tex := el.Value.(*texEntry).tex
 		rm.mu.RUnlock()
+		// 命中提升 LRU 位置（升级写锁）
+		rm.mu.Lock()
+		rm.texLRU.MoveToFront(el)
+		rm.mu.Unlock()
 		return tex
 	}
 	rm.mu.RUnlock()
@@ -213,7 +231,25 @@ func (rm *ResourceManager) GetTexture(f *wil.File, index int) uint32 {
 	}
 
 	rm.mu.Lock()
-	rm.texCache[key] = tex
+	// 并发竞态：另一路径可能已插入同一 key
+	if el, ok := rm.texCache[key]; ok {
+		rm.mu.Unlock()
+		rm.gl.DeleteTexture(tex)
+		return el.Value.(*texEntry).tex
+	}
+	el := rm.texLRU.PushFront(&texEntry{key: key, tex: tex})
+	rm.texCache[key] = el
+	// LRU 淘汰：超出上限删除最久未访问的纹理（释放显存）
+	for rm.texLRU.Len() > maxCachedTextures {
+		back := rm.texLRU.Back()
+		if back == nil {
+			break
+		}
+		evicted := back.Value.(*texEntry)
+		rm.texLRU.Remove(back)
+		delete(rm.texCache, evicted.key)
+		rm.gl.DeleteTexture(evicted.tex)
+	}
 	rm.mu.Unlock()
 
 	return tex
@@ -254,10 +290,11 @@ func (rm *ResourceManager) GetExtraWil(name string) *wil.File {
 // ClearCache 清空纹理缓存。
 func (rm *ResourceManager) ClearCache() {
 	rm.mu.Lock()
-	for _, tex := range rm.texCache {
-		rm.gl.DeleteTexture(tex)
+	for _, el := range rm.texCache {
+		rm.gl.DeleteTexture(el.Value.(*texEntry).tex)
 	}
-	rm.texCache = make(map[string]uint32)
+	rm.texCache = make(map[string]*list.Element)
+	rm.texLRU.Init()
 	rm.mu.Unlock()
 }
 

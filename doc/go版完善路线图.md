@@ -6,7 +6,11 @@
 
 ---
 
-## 修复进度（2026-08-04）
+## 修复进度（2026-08-04，批次 1-7 全部完成）
+
+> 本文档为活文档：批次 1-7 按"玩法优先"顺序实施完毕，每项附落点。
+> 剩余长尾（特化怪物渲染类、UI 邮件/设置/二级密码、客户端反作弊、GME 副本、
+> 攻城器械、付费体系持久化等）见文末 backlog，按需立项。
 
 **已完成 ✅**
 
@@ -22,6 +26,20 @@
 | P1-怪物 | Race 206 拖拽（TKhazard）/208 绿毒触碰/209 红毒触碰/210 隐身伏击（含 RM_CHARSTATUSCHANGED→SMCharStatusChanged 广播）；训练师重写为 Race 55 无敌沙袋+伤害统计 | monsterai.go / monsterobject.go / trainernpc.go / mongen.go |
 | P1-持久化 | 发型入库（建角不再丢弃）+ 迁移；方向/加点/声望/转生/攻击模式/组队开关入 meta；仓库 39→50 格 | sqlite.go / main.go / config.go |
 | P1-客户端 | 公告模态确认（Delphi DMessageDlg 语义）、登出/退出守卫（死亡才可退+确认框，忠实 GEEM2 变体行为）、SM 补齐：640 魔法训练度/655 油灯耐久/685 交易改金失败/707 仓库取回满包/761 行会职务失败/764-765 捐献 | scenenotice.go / sceneplay.go / uidialog.go / main.go |
+| 批次1-怪物 | Race 20 弓箭警察（复用 AIGuard，TArcherPolice 为 TArcherGuard 子类）；Race 120 足球（AISoccerBall：被踢沿击打者朝向滚动、动量累加上限 20 格、受阻按 Delphi 反弹表反向、m_boSuperMan 无敌） | monsterobject.go / monsterai.go / playobject.go applyDamage |
+| 批次1-刷怪 | GetZenTime 在线人数加速（<30min 间隔、r=(在线−UserFull)/ZenFastStep≤6、每档 −10%）；config 新增 userFull(1000)/zenFastStep(300)；GetPlayerCount 接入 | mongen.go getZenTime / config.go |
+| 批次1-CM | CM_QUERYUSERNAME(80) 3×3 近距校验→SM_USERNAME/SM_GHOST；CM_USERGETDETAILITEM(1015) 交易中禁止+同图距离≤15→SM_SENDDETAILGOODSLIST（≤10 实例含价格）；CM_SITDOWN(3012) 死亡/石化 FAIL+TurnInterval 限速+RM_POWERHIT；CM_SOFTCLOSE(1009) 复用 LogoutPlayer 回选角（保留连接，Delphi 语义）。CM_QUERYUSERSET(3040) 经查为 Delphi MD5 后门，CM_THROW(3005) Delphi 无处理器 → backlog | main.go / playobject.go / merchantsystem.go / message.go |
+| 批次1-行会 | 行会周期 Run（10s，Delphi GuildManager.Run）：到期行会战移除+双方在线成员"战争结束"通知+变更落盘；guilds 表新增 wars/allies 列（ALTER 迁移）；启动加载丢弃过期战争 | guildsystem.go / sqlite.go / main.go |
+| 批次1-速度 | ActionSpeed 四组合：RunLongHit/RunHit/WalkHit/RunMagic（默认 800/800/800/900）；checkActionTransition 复刻 Delphi CheckActionStatus（同动作不限、方向变化按组合取间隔）；HandleHit/HandleSpellFull 接入，Walk/Run/HorseRun/Turn 记录动作；ActionInterval 默认对齐 Delphi 400 | config.go / playobject.go / magicsystem.go |
+| 批次1-持久化 | statusTimeArr[12] 入 charMeta：下线保存毒/隐身等剩余时间，上线恢复（含 Hidden 标志）并 BroadcastStatus | main.go / statuseffect.go |
+| 批次2-城堡战 | WarDate 预约战：宣战登记日期（缺省明天，@declarewar [YYYY-MM-DD]）、到期日 WarStartHour 点自动开战、多预约队列、战后残留预约回 Declared；IsAttackAllyGuild/IsDefenseAllyGuild 联盟判定并接入攻城 PK（attackmode.go）；城堡状态持久化（castle 表 declarations 列+迁移+启动恢复） | castle.go / castlenpc.go / attackmode.go / sqlite.go |
+| 批次2-引擎 | 在线人数周期系统广播（Delphi boSendOnlineCount 语义：5 分钟、%c 模板、rate/10 系数、可配置关闭）；SM_AREASTATE(766) 发送侧（登录+切图，FIGHT=1/SAFE=2/攻城自由PK=4） | main.go / config.go / playobject.go |
+| 批次3-SM | 528 超速踢线前发 SM_OUTOFCONNECTION（Delphi KickFlag 路径）；652 商店明细列表（客户端解析+商店面板明细模式渲染/点击购买）；708 登录发送+客户端存储（饥饿系统未实装恒 0）；1103 协议常量+治疗系发送侧+客户端 2s 瞬时头顶血条；1104 客户端处理+WaitForRecogId 等待机制（服务端变身现走 FEATURECHANGED）；806/807 客户端合并处理（SHOW2 解析 body 换外观） | main.go(两端) / playobject.go / magicsystem.go / uinpc.go / sceneplay.go |
+| 批次3-渲染 | 魔法特效数据化：服务端 magicEffType 扩展为 46 条 magID→effType/effNum 映射（对照 magic_db effectType=Delphi btEffectType），客户端 14 类特效参数查表（帧基址/帧数/音效）+爆炸特例 12 条；武器特效接线（Delphi DrawWeaponGlimmer 为空实现，真实触发为 SM_BREAKWEAPON→WeaponEffect 5帧×120ms）；小地图第三色（race 50/45/12→调色板 218）；Ctrl+F1-F8 第二套魔法键（键符 E-L，运行时+键位对话框第二排按钮） | magicsystem.go / magiceffect.go / actorbase.go / minimap.go / sceneplay.go / uistate.go |
+| 批次4-协议覆盖 | 三个覆盖测试（go/ast 解析 message.go 常量 × 代码引用交叉断言 × 豁免表必须附原因）：①CM 路由覆盖（防 P0-1 复发，豁免 CMThrow）②SM 客户端处理覆盖（豁免 6 项：Spell2/CertificationSuccess/IDNotFound/Reconnect/TimeCheckMsg/ItemUpdate）③AI race 映射双向覆盖（Delphi 工厂 51 race 期望表+全 256 race 反向扫描，防 P0-2 复发）。决策：用"覆盖测试+豁免表"替代中心注册表重构，同等拦截能力、更低重构风险 | protocol_coverage_test.go（两端） |
+| 批次5-NPC脚本 | 混合表驱动（存量 ~180 命令保留 switch 零语义风险，新命令走注册表 npcscript_ext.go init 登记）；未知条件/动作 default 分支告警日志（跑图实测驱动长尾收集）；新增 12 条命令：条件 CHECKITEMTYPE（Delphi ObjNpc.pas:5142）/CHECKHORSE/CHECKCASTLEWAR/CHECKMONAREA，动作 HAIRSTYLE（ObjNpc.pas:3010）/HAIRCOLOR/HORSECALL/KILLHORSE（Delphi 空实现，Go 闭环实装并注明）/INCFAME/DECFAME（CreditPoint 承载）/MAKEHEALZONE/MAKEDAMAGEZONE（新事件类型 ETHealZone/ETDamageZone，NPC 为中心 3×3）；6 个命令级单测 | npcscript.go / npcscript_ext.go / mapevent.go / types.go |
+| 批次6-网关中间件 | 五层补偿（6.3 方案落地）：①封包序号校验（FrameScanner.OnCode 钩子+会话违规计数，重复 >10 断开、缓冲积压 >20000 记满，RunGate/Main.pas:363-413 语义）②每连接令牌桶限流（默认 60 条/秒突发 40，msgRateLimit/msgBurst 可配，超限计入违规累计）③敏感词过滤（serverconfig/WordFilter.txt 每行一词，聊天/私聊大小写不敏感替换等字符 '*'，RunGate FilterSayMsg 语义）④发送背压（客户端 '*' 回显重置计数，2048B 未确认暂停发送 3s，RunGate/Main.pas:501-553；SendChan 连续丢弃 32 次视为无响应断开）⑤黑名单（BlockIPList.txt 连接期 IP 拒绝支持前缀匹配、DenyAccountList.txt 登录期账号拒绝；转换器补 DenyIPAddrList/DenyAccountList/WordFilter 转换；机器码黑名单不做——客户端无机器码）；5 个中间件单测 | frame.go / server.go / wordfilter.go / blocklist.go / convert_misc.go |
+| 批次7-工程化 | /status GM 命令（在线/会话/怪物/NPC/行会/堆内存/GC/goroutine/怪物按地图分布，6.7 可观测性）；WIL 纹理缓存 LRU（8192 上限，超限淘汰最久未访问纹理释放显存，6.5）；WAL 已启用（sqlite.go 连接串 _journal_mode=WAL，6.6 已满足）；迁移保持状态自检式（PRAGMA table_info 幂等自愈，替代版本号方案）；go vet 全量干净。CI 按用户要求不做（保持 AGENTS.md"无 CI"现状，验证命令：go build ./... + go vet ./... + go test ./... -count=1） | gmcommands.go / resourcemanager.go |
 
 **有意不做（本轮）⚠️**
 
@@ -83,9 +101,9 @@
 | Race 209 红毒同类变种 | ObjMon3.pas:134,1312 | ✅ 已修复（AIRedPoison） |
 | Race 210 霜虎无目标隐身伏击 | ObjMon3.pas:118,1220-1252 | ✅ 已修复（AIFrostTiger） |
 | 训练师 Race 判定不一致 | Delphi Race=55（M2Share.pas:152） | ✅ 已修复（重写为 Race 55 沙袋+统计） |
-| Race 20 弓箭警察（TArcherPolice） | ObjMon2.pas:96 | 待实现 |
-| Race 120 足球（TSoccerBall，可推动物体） | ObjMon2.pas:134 | 待实现 |
-| 刷怪无在线人数加速 | Delphi GetZenTime（UsrEngn.pas:1097-1160） | 待实现 |
+| Race 20 弓箭警察（TArcherPolice） | ObjMon2.pas:96 | ✅ 已修复（复用 AIGuard，TArcherPolice 为 TArcherGuard 子类） |
+| Race 120 足球（TSoccerBall，可推动物体） | ObjMon2.pas:134 | ✅ 已修复（AISoccerBall：被踢滚动+反弹+无敌） |
+| 刷怪无在线人数加速 | Delphi GetZenTime（UsrEngn.pas:1097-1160） | ✅ 已修复（getZenTime，<30min 间隔按在线数加速最多 60%） |
 
 > 注：Go 现有 34 个 AI 行为常量（AIMelee=0…AITrainer=33，monsterai.go:10-45），
 > 覆盖 Delphi 工厂 58 分支中的绝大多数；AGENTS.md 中"12 种"的说法已过时。
@@ -122,7 +140,7 @@ Go 已有：move/search/recall/slave/dearrecall/masterrecall/nomob/make/level/mo
 | 加点 | BonusAbil/nBonusPoint | ✅ 已修复（入 meta） |
 | 声望/转生 | btCreditPoint/btReLevel | ✅ 已修复（入 meta） |
 | 行为偏好 | btAllowGroup/btAttatckMode | ✅ 已修复（入 meta） |
-| 状态效果 | wStatusTimeArr | 待实现（下线清毒/清隐身） |
+| 状态效果 | wStatusTimeArr | ✅ 已修复（入 charMeta，上线恢复含隐身标志+状态广播） |
 | 回城点 | sHomeMap/wHomeX/wHomeY | 设计决策：用全局安全区替代（playobject.go:1739） |
 | 仓库密码 | sStoragePwd | 待实现（无设置/解锁流程） |
 | 元宝/游戏点/充值点 | nGameGold/nGamePoint/nPayMentPoint | 待实现（只有 Gold） |
@@ -130,11 +148,11 @@ Go 已有：move/search/recall/slave/dearrecall/masterrecall/nomob/make/level/mo
 
 #### 其他服务端缺口
 - **仓库格数**：~~Go 默认 39 格 vs Delphi 50 格~~ ✅ 已修复（config.go GetMaxStorageSlots 现为 50，对齐 Delphi TStorageItems[0..49]）
-- **城堡战**：缺预约战日期 WarDate、联盟行会判定 IsAttackAllyGuild/IsDefenseAllyGuild、皇宫/密道地图管理、TechLevel 效果（castle.go:94 仅字段）；对照 Castle.pas:39-127
-- **商人行为**：Delphi 商人移动/招揽（TMerchant.Run，UsrEngn.pas:1028-1092 ProcessMerchants）；Go 商人静止（usrengine.go:156-163 仅补货+存档）
-- **行会 Run 语义**：Delphi g_GuildManager.Run 每 10s（Guild.pas:261）；Go 仅周期存档（main.go:430-432），行会战到期自动结束依赖 WarGuilds.EndTick（guildsystem.go:18-20）需补 tick 检查
-- **在线人数广播**：Delphi boSendOnlineCount（UsrEngn.pas:3054-3060），Go 无
-- **CM 缺口**：CM_SOFTCLOSE(1009)/CM_USERGETDETAILITEM(1015)/CM_QUERYUSERNAME(80)/CM_QUERYUSERSET(3040)/CM_SITDOWN(3012)/CM_THROW(3005) 未处理（对照 ObjBase.pas:4663-5287）
+- **城堡战**：~~缺预约战日期 WarDate、联盟行会判定~~ ✅ 已修复（WarDate 预约制+IsAttackAllyGuild/IsDefenseAllyGuild+状态持久化）；余 TechLevel 效果（castle.go 仅字段，需先调研 Delphi 语义）与皇宫/密道独立地图管理（backlog）
+- **商人行为**：Delphi 商人移动/招揽（TMerchant.Run，UsrEngn.pas:1028-1092 ProcessMerchants）——经查 m_boCanMove 所有赋值点在 Delphi 中被注释（ConfigMerchant.pas:975/LocalDB.pas:1140,3418,3447），属死功能 → backlog（保留开关位）；攻城隐藏城堡商人已实现（usrengine.go ProcessNpcIdle）
+- **行会 Run 语义**：~~Delphi g_GuildManager.Run 每 10s；Go 仅周期存档~~ ✅ 已修复（ProcessGuilds 每 10s：到期行会战移除+成员通知+落盘；wars/allies 持久化）
+- **在线人数广播**：~~Delphi boSendOnlineCount（UsrEngn.pas:3054-3060），Go 无~~ ✅ 已修复（周期系统消息，配置 sendOnlineTime/sendOnlineCountRate/sendOnlineCountMsg）
+- **CM 缺口**：~~CM_SOFTCLOSE(1009)/CM_USERGETDETAILITEM(1015)/CM_QUERYUSERNAME(80)/CM_SITDOWN(3012)~~ ✅ 已修复；CM_QUERYUSERSET(3040) 经查为 Delphi MD5 后门、CM_THROW(3005) Delphi 无处理器 → backlog（对照 ObjBase.pas:4663-5287）
 
 ### 3.2 客户端
 
@@ -143,18 +161,18 @@ Go 已有：move/search/recall/slave/dearrecall/masterrecall/nomob/make/level/mo
 |----|------|-------------|
 | 528 | SM_OUTOFCONNECTION | 断线清理（ClMain.pas:3795,4162） |
 | 640 | SM_MAGIC_LVEXP | 魔法等级/训练度更新（ClMain.pas:4522） |
-| 652 | SM_SENDDETAILGOODSLIST | 商店详细商品（ClMain.pas:4669） |
+| 652 | SM_SENDDETAILGOODSLIST | ✅ 已修复（服务端 HandleGetDetailItem + 客户端明细列表 UI） |
 | 655 | SM_LAMPCHANGEDURA | 火把/油灯耐久（ClMain.pas:4042） |
 | 685 | SM_DEALCHGGOLD_FAIL | 交易改金币失败（ClMain.pas:4824） |
 | 707 | SM_TAKEBACKSTORAGEITEM_FULLBAG | 仓库取回背包满（ClMain.pas:4624） |
-| 708 | SM_MYSTATUS | 饥饿状态图标（ClMain.pas:3901） |
+| 708 | SM_MYSTATUS | ✅ 已修复（登录发送+客户端存储；饥饿系统未实装恒 0） |
 | 761/764/765 | SM_GUILDRANKUPDATE_FAIL/SM_DONATE_OK/FAIL | 行会职务/捐献反馈（ClMain.pas:4877,4926） |
-| 766 | SM_AREASTATE | 战斗区域图标（DrawScrn.pas:369-386） |
-| 802 | SM_RECONNECT | 换服重连（ClMain.pas:5161-5213） |
-| 806/807 | SM_SPACEMOVE_HIDE2/SHOW2 | 传送特效变体（ClMain.pas:3960） |
-| 810 | SM_TIMECHECK_MSG | 速度作弊检测（ClMain.pas:3563-3600） |
-| 1103 | SM_INSTANCEHEALGUAGE | 瞬时头顶血条（ClMain.pas:4303），Go 未定义 |
-| 1104 | SM_CHANGEFACE | 变身换外观（ClMain.pas:4268） |
+| 766 | SM_AREASTATE | ✅ 发送侧已实现（登录+切图）；客户端图标渲染待做（DrawScrn.pas:369-386） |
+| 802 | SM_RECONNECT | 换服重连（ClMain.pas:5161-5213）——P3 决策转服不做 → backlog |
+| 806/807 | SM_SPACEMOVE_HIDE2/SHOW2 | ✅ 客户端已处理（与 800/801 合并，SHOW2 解析 body 换外观）；服务端暂无发送场景 |
+| 810 | SM_TIMECHECK_MSG | 速度作弊检测（ClMain.pas:3563-3600）——随客户端反作弊 backlog |
+| 1103 | SM_INSTANCEHEALGUAGE | ✅ 已修复（常量+治疗系发送侧+客户端 2s 头顶血条） |
+| 1104 | SM_CHANGEFACE | ✅ 客户端已处理（含 WaitForRecogId 等待机制）；服务端变身现走 FEATURECHANGED |
 | 5007/5008 | SM_SERVERCONFIG/SM_GAMEGOLDNAME | 服务器配置/元宝名称（ClMain.pas:3864,3898），未定义 |
 | 5009/8002/8003 | SM_PASSWORD 族 | 二级密码（ClMain.pas:4279,4944），未定义 |
 | 8001 | SM_PLAYDICE | 骰子小游戏（FState.pas:1945-1994），未定义 |
@@ -163,11 +181,11 @@ Go 已有：move/search/recall/slave/dearrecall/masterrecall/nomob/make/level/mo
 | 缺口 | 证据 |
 |------|------|
 | **特化怪物渲染类全缺**：34 个怪物类（专属死亡/攻击特效常量 DEATHEFFECTBASE/COWMONFIREBASE 等）+ 10 个物体类（草药/城门/龙/足球） | AxeMon.pas:11-256、HerbActor.pas 全文；Delphi 工厂 PlayScn.pas:2028-2149 按 race 实例化；Go 仅泛型 Actor 三分（actormanager.go:97-128） |
-| **魔法特效保真度低**：Delphi 客户端按 magid 本地查表生成特化特效（大 case 含爆炸参数/光效/帧数）；Go 服务端只把 12 个 magID 分为飞行/地面，其余默认爆炸 | PlayScn.pas:1448-1660 vs cmd/server/magicsystem.go:714-722 |
-| 武器发光缺失 | Delphi DrawWeaponGlimmer（Actor.pas:1994-2016），Go 无 |
-| 变身等待机制缺失 | Delphi m_nWaitForRecogId（PlayScn.pas:916-923），配合 SM_CHANGEFACE |
-| 小地图第三色缺失 | Delphi race 50/45/12 用调色板 218（PlayScn.pas:831-835）；Go 仅两色（minimap.go:99-103 自注） |
-| 像素级命中检测缺失 | Delphi CheckSelect 像素判定+包围盒回退（PlayScn.pas:1785-1818）；Go 仅包围盒（sceneplay.go:1975-1982） |
+| **魔法特效保真度低** | ✅ 已修复：服务端 46 条 magID→effType/effNum 映射 + 客户端 14 类特效参数查表（数据驱动方案） |
+| 武器发光缺失 | ✅ 已修复：Delphi DrawWeaponGlimmer 实为空实现，真实特效为 SM_BREAKWEAPON 武器破碎光效（Go 已接线 WeaponEffect） |
+| 变身等待机制缺失 | ✅ 已修复（pendingFaces 队列，等 actor 空闲后应用，5s 超时强制） |
+| 小地图第三色缺失 | ✅ 已修复（race 50/45/12 → 调色板 218） |
+| 像素级命中检测缺失 | ✅ 已实现（sceneplay.go actorPixelHit，本表原说法已过时） |
 | 公告模态确认缺失 | Delphi 公告以模态对话框显示并等待用户点 Ok 才发 CM_LOGINNOTICEOK（ClMain.pas:5732-5749）；Go 静默自动确认（main.go:1063-1065） |
 | 字体切换缺失 | Delphi Ctrl+F 循环 8 种字体（ClMain.pas:1547-1563）；Go 单一 TTF |
 | 全屏模式缺失 | Delphi DirectX 全屏；Go 仅窗口化 4 档分辨率（main.go:80-81） |
@@ -208,10 +226,10 @@ Delphi 客户端三定时器 CheckHackTimer/SpeedHackTimer/SendTimeTimer（ClMai
 | 发言间隔限制 | dwSayMsgTime=1000ms（GateShare.pas:110） | 无 |
 | IP/账号/机器码黑名单 | BlockIPList.txt/TempBlockIPList（GateShare.pas:93-94）；DenyIPAddrList/DenyAccountList/DenyMachineIDList（Envir 目录） | 仅 DenyChrNameList 建角黑名单（validation.go:19-42）；三类列表未转换未实现 |
 | 发送背压/心跳 | 每 512B 插 `*`，2048B 未回显暂停发送 3 秒（RunGate/Main.pas:501-553）；客户端回显 `*`（ClMain.pas:2795-2799） | 客户端回显已实现（cmd/client/main.go:750-753）；服务端 FrameScanner keepalive 传 nil（server.go:189），无背压（SendChan 256 满则丢包 server.go:299-305） |
-| =DIG 服务端发送 | 挖矿成功发 `=DIG`（ObjBase.pas:8834） | 客户端接收已实现（client/main.go:766,838），服务端从不发 |
+| =DIG 服务端发送 | 挖矿成功发 `=DIG`（ObjBase.pas:8834） | ✅ 已实现（playobject.go:885-886、mining.go:182-183 两处；本表原"服务端从不发"说法有误） |
 | 客户端速度作弊检测 | SM_TIMECHECK_MSG + +GOOD 载荷（见 3.2） | 仅定义常量（message.go:871） |
 | 自适应处理预算 | RunGate 接收/发送各 30-300ms 动态调节（RunGate/Main.pas:255-320） | goroutine 直接处理，无预算控制 |
-| 动作速度配置剩余 | ActionSpeedConfig.pas:138-141 四组合间隔（RunLongHit/RunHit/WalkHit/RunMagic） | config.go:37-48 仅六项基础间隔 |
+| 动作速度配置剩余 | ActionSpeedConfig.pas:138-141 四组合间隔（RunLongHit/RunHit/WalkHit/RunMagic） | ✅ 已修复（config 四组合+checkActionTransition 复刻 CheckActionStatus） |
 | Envir 配置长尾 | MonHPProgress/MonSpAbilList/MonDropLimitList/NameFilterList/ItemBind*/Highest&LowestSellingPrice/DisableMoveMap/Robot_def/SmartMonster | 未转换未实现（SmartMonster 仅建目录） |
 | 在线人数广播 | boSendOnlineCount（UsrEngn.pas:3054-3060） | 无 |
 | 登录期限流覆盖 | LoginSrv/DBServer 全链路 | ratelimit.go:24-88 已移植注册/改密/查角/建角限流；游戏期无每连接频率限制 |
@@ -282,22 +300,50 @@ Delphi 用 5 个监控 GUI（ViewKernelInfo/ViewLevel/ViewList/ViewOnlineHuman/V
 - 在线人数周期广播（对齐 Delphi boSendOnlineCount）。
 
 ### 6.8 工程化基线
-- 补最小 CI：`go build ./... && go build -tags x11 ./cmd/client && go test ./... -count=1`。Go 侧已有 40+ 测试（协议 KAT/帧/类型/移动/战斗/物品/UI/地图）是很好的基线，Delphi 原版零测试。
+- ~~补最小 CI~~ 用户决策：不加 CI，保持本地验证（`go build ./... && go vet ./... && go test ./... -count=1`）。Go 侧已有 70+ 测试（协议 KAT/帧/类型/移动/战斗/物品/UI/地图/协议覆盖）是很好的基线，Delphi 原版零测试。
 - 文档同步机制：doc/技术参考.md 的勘误（3 处）说明文档与代码会漂移；建议把本次路线图作为活文档，每完成一项打勾。
 
 ---
 
-## 七、建议实施顺序
+## 七、建议实施顺序（已全部执行完毕）
 
-| 阶段 | 内容 | 预估 | 验收 |
-|------|------|------|------|
-| 1 | P0 六项全修 | 1-2 天 | 屠宰/私聊/好友/行会宣战/挖矿可用；Race134/214 怪物行为正确；黑暗地图生效；公告显示转换后文本 |
-| 2 | 协议覆盖测试 + 消息注册表（6.1） | 2-3 天 | 测试能捕获本批 P0；新增 CM/SM 必须登记 |
-| 3 | P1 服务端核心：魔法补齐、6 类特殊怪、持久化字段、仓库 50 格、昼夜/地图属性消费完善 | 1-2 周 | 逐项对照 3.1 清单 |
-| 4 | P1 客户端长尾：未处理 SM 清单、公告模态、登出守卫、Ctrl+F1-F8、小地图三色、魔法特效数据化 | 1-2 周 | 逐项对照 3.2 清单 |
-| 5 | NPC 脚本/GM 命令长尾（表驱动化先行，6.2） | 持续 | 脚本命令单测 |
-| 6 | P2 连接中间件链（6.3） | 1 周 | 序号校验/限流/过滤分层可测 |
-| 7 | 工程化：CI、/status、WIL LRU | 穿插 | CI 绿 |
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| 1 | P0 六项全修 | ✅（2026-08-04 上午） |
+| 2 | 协议覆盖测试 + 消息注册表（6.1） | ✅ 批次4（覆盖测试+豁免表方案，等效拦截） |
+| 3 | P1 服务端核心 | ✅ 批次1-2 |
+| 4 | P1 客户端长尾 | ✅ 批次3 |
+| 5 | NPC 脚本/GM 命令长尾 | ✅ 批次5（混合表驱动+12 条玩法命令，余长尾由未知命令告警驱动） |
+| 6 | P2 连接中间件链（6.3） | ✅ 批次6（五层补偿） |
+| 7 | 工程化：CI、/status、WIL LRU | ✅ 批次7 |
+
+## 八、Backlog（记录不排期，按需立项）
+
+**渲染/表现**
+- 特化怪物渲染 34 类 + 物体类 10 个：走数据化方案（参照魔法特效 magiceff 模式），不逐类移植 AxeMon/HerbActor。
+- 符咒飞行段→爆炸段切换、符咒地面 16/24 帧、雷电2 10 帧（批次3 保留 Go 现值的已知偏差）。
+- SM_AREASTATE(766) 客户端区域图标渲染（发送侧已实现）。
+- Ctrl+F 字体切换、全屏模式、IME 候选框（平台层）。
+
+**UI/系统**
+- 邮件系统、黑名单面板、游戏设置面板、二级密码（SM_PASSWORD 族 5009/8002/8003）、骰子小游戏（8001）、好友面板完整功能（私聊/邮件/翻页）。
+- 饥饿系统（SM_MYSTATUS 管道已铺，服务端恒 0）。
+
+**服务端长尾**
+- 解毒术（Delphi 40）：ID 体系迁移决策后再做（与双龙斩冲突）。
+- 城堡战 TechLevel 效果逻辑、皇宫/密道独立地图管理。
+- 商人巡逻（Delphi 死代码，保留 m_boCanMove 开关位）。
+- GM 命令长尾（封禁族/属性修改族/城堡族，Delphi 192 vs Go ~31）。
+- NPC 脚本长尾（GME 副本/SQL 变量/攻城器械/天气法术/玩家摆摊等 ~220 条，由未知命令告警日志实测驱动）。
+- CM_QUERYUSERSET(3040)（Delphi MD5 后门）、CM_THROW(3005)（Delphi 无处理器）。
+
+**协议/安全**
+- 客户端反作弊（810 TIMECHECK 响应、CheckHackTimer/SpeedHackTimer、+GOOD 速度载荷）——服务端已有超速检测替代。
+- SM_RECONNECT(802) 换服重连——P3 决策转服不做。
+- SMSpell2/SMCertificationSuccess/SMIDNotFound/SMItemUpdate——旧协议变体，Go 闭环有替代通道。
+
+**持久化**
+- 元宝/游戏点/充值点/贡献/身体幸运（付费体系）；仓库密码 StoragePwd（无设置/解锁流程）。
 
 ## 附：调查方法与证据索引
 

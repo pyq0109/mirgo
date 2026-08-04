@@ -50,6 +50,11 @@ func NewUserEngine(db *storage.Database, mapMgr *MapManager) *UserEngine {
 	}
 }
 
+// DB 返回底层存储（城堡等子系统持久化用）。
+func (e *UserEngine) DB() *storage.Database {
+	return e.db
+}
+
 func (e *UserEngine) AddPlayer(player *PlayObject) {
 	e.mu.Lock()
 	e.PlayObjectList[player.ID] = player

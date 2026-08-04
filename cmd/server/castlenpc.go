@@ -101,8 +101,8 @@ func (p *PlayObject) HandleCastleNpcSelect(tag string, npc *NpcObject, server *n
 	case strings.HasPrefix(tag, "@withdraw"):
 		p.handleCastleWithdraw(castle, tag, server)
 
-	case tag == "@declarewar":
-		p.handleCastleDeclareWar(castle, server)
+	case tag == "@declarewar" || strings.HasPrefix(tag, "@declarewar "):
+		p.handleCastleDeclareWar(castle, tag, server)
 
 	case strings.HasPrefix(tag, "@castletax"):
 		p.handleCastleSetTax(castle, tag, server)
@@ -169,7 +169,7 @@ func (p *PlayObject) handleCastleWithdraw(castle *CastleObject, tag string, serv
 	log.Logf(log.LevelInfo, "Castle", "%s withdrew %d gold from castle treasury", p.Name, amount)
 }
 
-func (p *PlayObject) handleCastleDeclareWar(castle *CastleObject, server *netserver.TCPServer) {
+func (p *PlayObject) handleCastleDeclareWar(castle *CastleObject, tag string, server *netserver.TCPServer) {
 	if p.GuildName == "" {
 		p.sysMsg(server, "你需要加入行会才能宣战")
 		return
@@ -179,18 +179,31 @@ func (p *PlayObject) handleCastleDeclareWar(castle *CastleObject, server *netser
 		return
 	}
 
-	if castle.DeclareWar(p.GuildName) {
+	// @declarewar [YYYY-MM-DD]：缺省预约明天（Delphi AttackWarList 语义）
+	attackDate := strings.TrimSpace(strings.TrimPrefix(tag, "@declarewar"))
+	if castle.DeclareWar(p.GuildName, attackDate) {
+		date := attackDate
+		if date == "" {
+			date = time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+		}
 		castle.broadcastSysMsg(server, p.Engine,
-			fmt.Sprintf("[攻城战] %s 向 %s 宣战！", p.GuildName, castle.Config.Name))
-		p.sysMsg(server, "宣战成功")
+			fmt.Sprintf("[攻城战] %s 向 %s 宣战！预定开战日期: %s", p.GuildName, castle.Config.Name, date))
+		p.sysMsg(server, fmt.Sprintf("宣战成功，预定开战日期: %s %d点", date, castle.Config.WarStartHour))
+		if p.Engine != nil {
+			castle.SaveState(p.Engine.DB())
+		}
 	} else {
 		state := castle.GetWarState()
 		if state == CastleWarActive {
 			p.sysMsg(server, "攻城战正在进行中")
-		} else if castle.IsAttackingGuild(p.GuildName) {
-			p.sysMsg(server, "你的行会已经宣战过了")
 		} else {
-			p.sysMsg(server, "无法宣战")
+			for _, w := range castle.GetWarDeclarations() {
+				if w.GuildName == p.GuildName {
+					p.sysMsg(server, fmt.Sprintf("你的行会已预约 %s 开战", w.AttackDate))
+					return
+				}
+			}
+			p.sysMsg(server, "无法宣战（日期格式 YYYY-MM-DD，且不能早于当天）")
 		}
 	}
 }

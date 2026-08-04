@@ -12,7 +12,7 @@
 - 服务端配置: https://github.com/cjlaaa/Mir2-GeeM2 (commit 26b2881ae2e8aca0aac0ab58acbfca9c39dbfc9c)
 - 客户端美术资源: [热血传奇十周年硬盘版.rar (提取码: ussz)](https://pan.baidu.com/s/1Fo4rnHku8EFRXDUcE-incw?pwd=ussz)
 
-## 准备
+注意, 这个客户端美术资源也是我从网上收集到的, **会包含病毒程序, 请注意杀毒**. 本项目只使用美术资源部分
 
 客户端美术资源解压放入 `asset/client/`，服务端配置放入 `asset/server/`。
 

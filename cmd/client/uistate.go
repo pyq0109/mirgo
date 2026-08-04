@@ -533,6 +533,26 @@ func (s *PlayScene) openKeySelDlg(magIdx int) {
 		win.AddChild(btn)
 	}
 
+	// Ctrl+F1..F8 第二套键位（键符 'E'..'L'，ClMain.pas:1477-1487）。
+	// Delphi 按钮定义在 FState.pas:1407-1430（原注释块，此处启用），
+	// 位置上移避开 OK/None 按钮行。
+	for i, x := range xs {
+		key := byte('E' + i)
+		img := ImgKeyConF1 + i*2
+		btn := NewUIControl("DKsConF", KindButton)
+		btn.Left, btn.Top = x, 100
+		if prg != nil {
+			btn.SetImgIndex(prg, img)
+		}
+		btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
+			if selKey == key || c.Downed {
+				s.ui.BlitImage(prg, img, c.AbsX(), c.AbsY(), proj)
+			}
+		}
+		btn.OnClick = func(c *UIControl, x, y int) { selKey = key }
+		win.AddChild(btn)
+	}
+
 	ok := NewUIControl("DKsOk", KindButton)
 	ok.Left, ok.Top = 213, 121
 	if prg != nil {

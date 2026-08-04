@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +85,36 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 	}
 
 	switch command {
+	case "status":
+		// 路线图 6.7 可观测性：替代 Delphi ViewKernelInfo/ViewOnlineHuman 监控窗体
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		p.sysMsg(server, fmt.Sprintf("在线: %d  会话: %d", p.Engine.GetPlayerCount(), server.GetSessionCount()))
+		p.sysMsg(server, fmt.Sprintf("怪物: %d  NPC: %d  行会: %d", len(p.Engine.Monsters), len(p.Engine.Npcs), len(p.Engine.Guilds)))
+		p.sysMsg(server, fmt.Sprintf("堆内存: %dMB  GC: %d次  Goroutine: %d", ms.HeapAlloc/1024/1024, ms.NumGC, runtime.NumGoroutine()))
+		monByMap := make(map[string]int)
+		for _, m := range p.Engine.Monsters {
+			if !m.Ghost {
+				monByMap[m.MapName]++
+			}
+		}
+		if len(monByMap) > 0 {
+			names := make([]string, 0, len(monByMap))
+			for name := range monByMap {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			var sb strings.Builder
+			sb.WriteString("怪物分布: ")
+			for i, name := range names {
+				if i > 0 {
+					sb.WriteString(" ")
+				}
+				fmt.Fprintf(&sb, "%s=%d", name, monByMap[name])
+			}
+			p.sysMsg(server, sb.String())
+		}
+		return true
 	case "make":
 		if len(parts) < 2 {
 			return true

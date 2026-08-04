@@ -88,6 +88,8 @@ const (
 	ETHolyCurtain = 4
 	ETFire        = 5
 	ETSculPiece   = 6
+	ETHealZone    = 7 // 脚本 MAKEHEALZONE 治疗区（Delphi ObjNpc MAKEHEALZONE）
+	ETDamageZone  = 8 // 脚本 MAKEDAMAGEZONE 伤害区（Delphi ObjNpc MAKEDAMAGEZONE）
 )
 
 // 种族类型常量
