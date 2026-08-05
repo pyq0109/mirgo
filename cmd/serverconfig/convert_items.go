@@ -73,7 +73,60 @@ func ConvertItems(inputDir, outputDir string) error {
 		return fmt.Errorf("converting MakeItem.txt: %w", err)
 	}
 
+	// 转换 DisableTakeOffList.txt
+	if err := convertDisableTakeOffList(envirDir, outputDir); err != nil {
+		return fmt.Errorf("converting DisableTakeOffList.txt: %w", err)
+	}
+
 	return nil
+}
+
+// convertDisableTakeOffList 转换禁止脱下物品列表。
+// Delphi 格式 "物品名 索引"（M2Share.pas:4578-4609），索引 = wIndex-1，
+// 即 0 基 DB 索引；Go 的 WIndex 同为 0 基，直接保存。
+func convertDisableTakeOffList(envirDir, outputDir string) error {
+	listFile := filepath.Join(envirDir, "DisableTakeOffList.txt")
+	data, err := ReadGBKFile(listFile)
+	if err != nil {
+		return err
+	}
+
+	type TakeOffItem struct {
+		Name string `json:"name"`
+		Idx  int    `json:"idx"`
+	}
+
+	var items []TakeOffItem
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == ';' {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			var item TakeOffItem
+			item.Name = parts[0]
+			fmt.Sscanf(parts[1], "%d", &item.Idx)
+			items = append(items, item)
+		}
+	}
+
+	result := map[string]interface{}{
+		"_source":      "asset/server/Envir/DisableTakeOffList.txt",
+		"_description": "禁止脱下物品列表",
+		"items":        items,
+	}
+
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	outputFile := filepath.Join(outputDir, "items", "disable_takeoff_list.jsonc")
+	comment := fmt.Sprintf("禁止脱下物品列表\n来源: asset/server/Envir/DisableTakeOffList.txt\n数量: %d 个物品", len(items))
+
+	return WriteJSONC(outputFile, string(jsonData), comment)
 }
 
 func convertFilterItems(envirDir, outputDir string) error {

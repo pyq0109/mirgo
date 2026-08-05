@@ -621,10 +621,20 @@ func (c *CastleObject) ProcessCastleTick(engine *UserEngine, server *netserver.T
 		if now >= endTick {
 			c.EndWar(server, engine)
 		} else {
+			prevOwner := c.GetOwnerGuild()
 			captured := c.CheckCapture(engine)
 			if captured != "" {
 				text := fmt.Sprintf("[攻城战] %s 被 %s 占领！", c.Config.Name, captured)
 				c.broadcastSysMsg(server, engine, text)
+				// 原城主行会成员：Need 7/70 城堡装备需求失效自动脱下。
+				if prevOwner != "" && prevOwner != captured {
+					for _, p := range engine.allPlayers() {
+						if p.Ghost || p.GuildName != prevOwner {
+							continue
+						}
+						p.checkAutoTakeOff(server)
+					}
+				}
 			}
 		}
 	}

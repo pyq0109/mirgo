@@ -21,6 +21,11 @@ type ClientItemDef struct {
 	MC, MCMax   uint16
 	SC, SCMax   uint16
 	Price     uint32
+	// tooltip 显示用扩展字段（SMStdItems v2 追加段）。
+	Source   int16 // 强度/神圣/幸运诅咒显示
+	Reserved byte  // &1 → 名称 (*) 前缀
+	Need     byte  // 需求类型（0 等级/1 DC/2 MC/3 SC/6 行会…）
+	AniCount byte
 }
 
 type BagItem struct {
@@ -98,6 +103,8 @@ type GameState struct {
 	// offset 60 下发；供 canNextHit 使用（ClMain.pas:3420）。
 	HitSpeed   int
 	BonusPoint int
+	// 抗性/恢复五属性（Delphi g_nMyAntiMagic 族，SMAbility 体 offset 62-70）。
+	AntiMagic, AntiPoison, PoisonRecover, HealthRecover, SpellRecover int
 
 	Sex, Hair int
 	Job       int // 0 战士 / 1 法师 / 2 道士（SMLogon body 第 3 字段）
@@ -216,7 +223,8 @@ func (gs *GameState) ParseItemDefs(body string) {
 	}
 	count := int(binary.LittleEndian.Uint16(raw[0:2]))
 	off := 2
-	for i := 0; i < count && off+26 <= len(raw); i++ {
+	// 每条记录：固定段 32 字节 + v2 扩展段 5 字节 + NameLen 1 字节 = 38。
+	for i := 0; i < count && off+38 <= len(raw); i++ {
 		def := &ClientItemDef{
 			Looks:     binary.LittleEndian.Uint16(raw[off+2 : off+4]),
 			StdMode:   raw[off+4],
@@ -237,8 +245,13 @@ func (gs *GameState) ParseItemDefs(body string) {
 		off += 26
 		def.SCMax = binary.LittleEndian.Uint16(raw[off : off+2])
 		def.Price = binary.LittleEndian.Uint32(raw[off+2 : off+6])
-		nameLen := int(raw[off+6])
-		off += 7
+		// v2 扩展段：Source u16(int16 位模式) + Reserved/Need/AniCount u8×3。
+		def.Source = int16(binary.LittleEndian.Uint16(raw[off+6 : off+8]))
+		def.Reserved = raw[off+8]
+		def.Need = raw[off+9]
+		def.AniCount = raw[off+10]
+		nameLen := int(raw[off+11])
+		off += 12
 		if off+nameLen > len(raw) {
 			break
 		}
@@ -380,6 +393,14 @@ func (gs *GameState) ParseAbility(body string) {
 	// 旧服务端只发 60 字节时保持 0。负值经 int16 位模式还原。
 	if len(raw) >= 62 {
 		gs.HitSpeed = int(int16(u16(60)))
+	}
+	// 抗性/恢复五属性：offset 62-70 的可选字段（旧服务端缺省保持 0）。
+	if len(raw) >= 72 {
+		gs.AntiMagic = u16(62)
+		gs.AntiPoison = u16(64)
+		gs.PoisonRecover = u16(66)
+		gs.HealthRecover = u16(68)
+		gs.SpellRecover = u16(70)
 	}
 }
 

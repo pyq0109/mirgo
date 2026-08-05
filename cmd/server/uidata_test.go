@@ -35,10 +35,16 @@ func TestEncodeAbilityBodyLayout(t *testing.T) {
 	p.BonusPoint = 3
 	p.Gold = 777
 	p.HitSpeed = -2 // 装备攻速修正，可为负（Delphi m_nHitSpeed）
+	// offset 62 起的抗性/恢复五属性（原 SM_SUBABILITY 承载）。
+	p.AntiMagic = 11
+	p.AntiPoison = 12
+	p.PoisonRecover = 13
+	p.HealthRecover = 14
+	p.SpellRecover = 15
 
 	raw := []byte(decodeTestBody(p.encodeAbilityBody()))
-	if len(raw) != 62 {
-		t.Fatalf("ability body len = %d, want 62", len(raw))
+	if len(raw) != 72 {
+		t.Fatalf("ability body len = %d, want 72", len(raw))
 	}
 	u16 := func(o int) int { return int(binary.LittleEndian.Uint16(raw[o : o+2])) }
 	u32 := func(o int) uint32 { return binary.LittleEndian.Uint32(raw[o : o+4]) }
@@ -83,6 +89,23 @@ func TestEncodeAbilityBodyLayout(t *testing.T) {
 	if got := int(int16(u16(60))); got != p.HitSpeed {
 		t.Errorf("HitSpeed = %d, want %d", got, p.HitSpeed)
 	}
+	// 抗性/恢复五属性位于 offset 62..70。
+	resChecks := []struct {
+		name string
+		off  int
+		want int
+	}{
+		{"AntiMagic", 62, 11},
+		{"AntiPoison", 64, 12},
+		{"PoisonRecover", 66, 13},
+		{"HealthRecover", 68, 14},
+		{"SpellRecover", 70, 15},
+	}
+	for _, c := range resChecks {
+		if got := u16(c.off); got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, got, c.want)
+		}
+	}
 }
 
 func TestEncodeStdItemsBodyLayout(t *testing.T) {
@@ -90,6 +113,7 @@ func TestEncodeStdItemsBodyLayout(t *testing.T) {
 		{
 			Idx: 7, Name: "WoodSword", StdMode: 5, Shape: 1, Weight: 10,
 			Looks: 42, DuraMax: 1000, AC: 0, ACMax: 0, DC: 1, DCMax: 3, Price: 100, NeedLevel: 2,
+			Source: -5, Reserved: 1, Need: 1, AniCount: 2,
 		},
 		{
 			Idx: 9, Name: "金创药", StdMode: 0, Shape: 0, Weight: 1,
@@ -123,25 +147,33 @@ func TestEncodeStdItemsBodyLayout(t *testing.T) {
 	if dcMax := binary.LittleEndian.Uint16(raw[off+18 : off+20]); dcMax != 3 {
 		t.Errorf("item0 DCMax = %d, want 3", dcMax)
 	}
-	// 固定部分: 2+2+4+20+4 = 32 字节，然后是 NameLen u8 + Name。
+	// 固定部分: 2+2+4+20+4 = 32 字节，v2 扩展段 Source u16 +
+	// Reserved/Need/AniCount u8×3 = 5 字节，然后 NameLen u8 + Name。
 	if price := binary.LittleEndian.Uint32(raw[off+28 : off+32]); price != 100 {
 		t.Errorf("item0 price = %d, want 100", price)
 	}
-	nameLen := int(raw[off+32])
+	if src := int16(binary.LittleEndian.Uint16(raw[off+32 : off+34])); src != -5 {
+		t.Errorf("item0 source = %d, want -5", src)
+	}
+	if raw[off+34] != 1 || raw[off+35] != 1 || raw[off+36] != 2 {
+		t.Errorf("item0 reserved/need/aniCount = %d/%d/%d, want 1/1/2",
+			raw[off+34], raw[off+35], raw[off+36])
+	}
+	nameLen := int(raw[off+37])
 	if nameLen != len("WoodSword") {
 		t.Fatalf("item0 nameLen = %d, want %d", nameLen, len("WoodSword"))
 	}
-	if name := string(raw[off+33 : off+33+nameLen]); name != "WoodSword" {
+	if name := string(raw[off+38 : off+38+nameLen]); name != "WoodSword" {
 		t.Errorf("item0 name = %q, want WoodSword", name)
 	}
 
 	// 第二条记录: UTF-8 中文名可正确往返。
-	off += 33 + nameLen
+	off += 38 + nameLen
 	if idx := int(binary.LittleEndian.Uint16(raw[off : off+2])); idx != 9 {
 		t.Errorf("item1 idx = %d, want 9", idx)
 	}
-	nameLen2 := int(raw[off+32])
-	name2 := string(raw[off+33 : off+33+nameLen2])
+	nameLen2 := int(raw[off+37])
+	name2 := string(raw[off+38 : off+38+nameLen2])
 	if name2 != "金创药" {
 		t.Errorf("item1 name = %q, want 金创药", name2)
 	}

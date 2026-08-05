@@ -376,12 +376,12 @@ func (s *PlayScene) paintStateDetails(ax, ay int, proj [16]float32) {
 	line(3, "手上重量", fmt.Sprintf("%d/%d", st.HandWeight, st.MaxHandWeight), st.HandWeight > st.MaxHandWeight)
 	line(4, "准确度", fmt.Sprintf("%d", st.Hit), false)
 	line(5, "敏捷度", fmt.Sprintf("%d", st.Speed), false)
-	// 恢复/抗性数值需要协议扩展 (B5); 暂用占位。
-	line(6, "魔法躲避", "+0%", false)
-	line(7, "中毒躲避", "+0%", false)
-	line(8, "中毒恢复", "+0%", false)
-	line(9, "生命恢复", "+0%", false)
-	line(10, "魔法恢复", "+0%", false)
+	// 抗性/恢复（Delphi FState:2910-2917：值 ×10 显示为百分比）。
+	line(6, "魔法防御", fmt.Sprintf("+%d%%", st.AntiMagic*10), false)
+	line(7, "中毒防御", fmt.Sprintf("+%d%%", st.AntiPoison*10), false)
+	line(8, "中毒恢复", fmt.Sprintf("+%d%%", st.PoisonRecover*10), false)
+	line(9, "体力恢复", fmt.Sprintf("+%d%%", st.HealthRecover*10), false)
+	line(10, "魔法恢复", fmt.Sprintf("+%d%%", st.SpellRecover*10), false)
 }
 
 // paintMagicList 渲染第 3 页文字/图标 (FState:2931-2998); 图标
@@ -421,6 +421,7 @@ func (s *PlayScene) paintMagicList(ax, ay int, proj [16]float32) {
 func (s *PlayScene) equipSlotClick(slot int) {
 	st := s.State
 	if s.itemMove.Moving {
+		equipped := false
 		if s.itemMove.Index >= 0 && s.itemMove.Item.Def != nil {
 			if takeOnSlotMatches(s.itemMove.Item.Def.StdMode, slot) && s.sendTakeOn != nil {
 				s.sendTakeOn(s.itemMove.Item.MakeIndex, slot)
@@ -436,7 +437,22 @@ func (s *PlayScene) equipSlotClick(slot int) {
 					DuraMax:   it.DuraMax,
 				}
 				s.itemMove.End()
+				equipped = true
 			}
+		}
+		// 手持装备点击其他装备格 → 还原原槽（Delphi FState:3355-3362）。
+		if !equipped && s.itemMove.Index >= -13 && s.itemMove.Index < 0 {
+			orig := moveEquipSlot(s.itemMove.Index)
+			if orig >= 0 && orig < 13 && st.UseItems[orig] == nil {
+				it := s.itemMove.Item
+				st.UseItems[orig] = &protocol.UserItem{
+					MakeIndex: it.MakeIndex,
+					WIndex:    it.Idx,
+					Dura:      it.Dura,
+					DuraMax:   it.DuraMax,
+				}
+			}
+			s.itemMove.End()
 		}
 		return
 	}

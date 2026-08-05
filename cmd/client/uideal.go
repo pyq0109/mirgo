@@ -202,8 +202,9 @@ func (s *PlayScene) dealGridSelect(idx int) {
 	mi := s.itemMove.Index
 	switch {
 	case mi >= 0:
-		// 从背包 → 放入交易栏 (服务端将物品从背包移出)。
-		if st.DealItems[idx] == nil && s.sendDealAdd != nil {
+		// 从背包 → 放入交易栏。Delphi 无条件发包（FState:5744-5747），
+		// 目标格是否占用由服务端决定；回包按服务端指定槽位放置。
+		if s.sendDealAdd != nil {
 			s.sendDealAdd(s.itemMove.Item.MakeIndex)
 			s.itemMove.End()
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"strings"
@@ -173,25 +174,10 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 		return
 	}
 
-	// Delphi CheckTakeOnItems: Need 类型检查（0=等级 1=DC 2=MC 3=SC）。
-	if def.NeedLevel > 0 {
-		ok := false
-		switch def.Need {
-		case 0:
-			ok = p.WAbil.Level >= uint16(def.NeedLevel)
-		case 1:
-			ok = int(p.WAbil.DC>>16) >= int(def.NeedLevel)
-		case 2:
-			ok = int(p.WAbil.MC>>16) >= int(def.NeedLevel)
-		case 3:
-			ok = int(p.WAbil.SC>>16) >= int(def.NeedLevel)
-		default:
-			ok = p.WAbil.Level >= uint16(def.NeedLevel)
-		}
-		if !ok {
-			p.sendTakeOnFail(server, 2)
-			return
-		}
+	// Delphi CheckTakeOnItems: Need 全分支检查（ObjBase.pas:23001-23260）。
+	if !p.checkItemNeed(def) {
+		p.sendTakeOnFail(server, 2)
+		return
 	}
 
 	{
@@ -210,6 +196,21 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 	}
 
 	oldItem := p.UseItems[slot]
+
+	// 被顶下的旧物品同样过四道禁脱校验（Delphi ObjBase.pas:17119-17151）。
+	if oldItem != nil {
+		oldDef := p.ItemDB.GetByIdx(int(oldItem.WIndex))
+		if oldDef != nil && !p.canTakeOffItem(oldItem, oldDef) {
+			p.sysMsg(server, "无法取下物品！！！")
+			p.sendTakeOnFail(server, 4)
+			return
+		}
+	}
+
+	// 穿上首饰时清除"神秘未鉴定"标记（Delphi ObjBase.pas:17153-17155）。
+	if isAccessoryStdMode(def.StdMode) && item.BtValue[8] != 0 {
+		item.BtValue[8] = 0
+	}
 
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 	p.UseItems[slot] = item
@@ -236,6 +237,11 @@ func (p *PlayObject) HandleTakeOnItem(msg SendMessage, server *netserver.TCPServ
 func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPServer) {
 	slot := msg.Param1
 
+	// Delphi ClientTakeOffItems（ObjBase.pas:17228）：交易中禁止脱下。
+	if p.Deal != nil {
+		p.sendTakeOffFail(server)
+		return
+	}
 	if slot < 0 || slot > 12 {
 		p.sendTakeOffFail(server)
 		return
@@ -250,6 +256,13 @@ func (p *PlayObject) HandleTakeOffItem(msg SendMessage, server *netserver.TCPSer
 	}
 
 	item := p.UseItems[slot]
+	if p.ItemDB != nil {
+		if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil && !p.canTakeOffItem(item, def) {
+			p.sysMsg(server, "无法取下物品！！！")
+			p.sendTakeOffFail(server)
+			return
+		}
+	}
 	p.UseItems[slot] = nil
 	p.ItemList = append(p.ItemList, item)
 
@@ -319,6 +332,11 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 				p.WAbil.MP = uint16(mp)
 				used = true
 			}
+		} else if def.Shape == 2 {
+			// 解锁药（Delphi ObjBase.pas:23344-23348）：解除 Reserved&2
+			// 与首饰封印（btValue[7]）的禁脱状态。
+			p.UserUnLockDurg = true
+			used = true
 		} else {
 			// 金创药/魔法药：渐进回复（Delphi m_nIncHealth/m_nIncSpell）
 			if def.AC > 0 {
@@ -330,19 +348,24 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 				used = true
 			}
 		}
-	case 1, 2: // 食物/杂项。
-		if def.AC > 0 {
-			hp := int(p.WAbil.HP) + int(def.AC)
-			if hp > int(p.WAbil.MaxHP) {
-				hp = int(p.WAbil.MaxHP)
-			}
-			p.WAbil.HP = uint16(hp)
-			used = true
+	case 1: // 食物（Delphi ObjBase.pas:23371-23379）：饥饿度 += DuraMax/10，上限 5000。
+		p.HungerStatus += int(def.DuraMax) / 10
+		if p.HungerStatus > 5000 {
+			p.HungerStatus = 5000
 		}
+		p.sendMyStatus(server)
+		used = true
+	case 2: // 杂项：直接消耗无任何效果（Delphi ObjBase.pas:23380）。
+		used = true
 	case 3: // 特殊消耗品，按 Shape 分发。
 		used = p.useSpecialItem(def, server)
 	case 4: // 技能书（Delphi ReadBook, ObjBase.pas:23443）。
 		used = p.readBook(def, server)
+	case 31: // 打包物品：解包或触发 @StdModeFunc（ObjBase.pas:17394-17413）。
+		used = p.usePackItem(def, bagIdx, server)
+		if used {
+			return // usePackItem 已处理消耗与回包
+		}
 	}
 
 	if !used {
@@ -363,14 +386,23 @@ func (p *PlayObject) HandleEatItem(msg SendMessage, server *netserver.TCPServer)
 	log.Logf(log.LevelInfo, "Items", "%s used %s", p.Name, def.Name)
 }
 
-// useSpecialItem 处理 StdMode=3 的特殊消耗品（Delphi EatUseItems）。
+// useSpecialItem 处理 StdMode=3 的特殊消耗品（Delphi EatUseItems，
+// ObjBase.pas:23518-23575）。
 func (p *PlayObject) useSpecialItem(def *ItemDef, server *netserver.TCPServer) bool {
 	switch def.Shape {
 	case 1: // 地牢逃脱卷：传送至安全区。
 		return p.teleportToSafe(server)
 	case 2: // 随机传送卷：当前地图随机位置。
+		if p.envir != nil && p.envir.Flag.NoRandomMove {
+			p.sysMsg(server, "这张地图禁止随机传送")
+			return false
+		}
 		return p.teleportRandom(server)
-	case 3, 5: // 回城卷 / 行会回城卷。
+	case 3: // 回城卷 PK 版（ObjBase.pas:23536-23545）：红名进红名监狱。
+		if p.PKLevel() >= 2 {
+			cfg := p.Engine.Config
+			return p.teleportToMap(server, cfg.GetRedHomeMap(), cfg.GetRedHomeX(), cfg.GetRedHomeY())
+		}
 		return p.teleportToSafe(server)
 	case 4: // 祝福油：Delphi WeaptonMakeLuck (ObjBase.pas:23621-23671)
 		weapon := p.UseItems[protocol.UWeapon]
@@ -380,7 +412,39 @@ func (p *PlayObject) useSpecialItem(def *ItemDef, server *netserver.TCPServer) b
 		}
 		p.weaponMakeLuck(server, weapon)
 		return true
-	case 9, 10: // 修复油 / 战神油：修复武器耐久。
+	case 5: // 行会回城卷（ObjBase.pas:23550-23574）：需行会且本行会占领城堡。
+		if p.GuildName == "" {
+			p.sysMsg(server, "此处无法使用")
+			return false
+		}
+		if !p.isCastleMember() || p.Engine.Castle == nil {
+			p.sysMsg(server, "无效")
+			return false
+		}
+		cc := p.Engine.Castle.Config
+		return p.teleportToMap(server, cc.MapName, cc.PalaceX, cc.PalaceY)
+	case 9: // 修理卷轴（Delphi RepairWeapon，ObjBase.pas:23673-23690）。
+		weapon := p.UseItems[protocol.UWeapon]
+		if weapon == nil {
+			p.sysMsg(server, "请先装备武器")
+			return false
+		}
+		if weapon.DuraMax <= weapon.Dura {
+			return false
+		}
+		weapon.DuraMax -= (weapon.DuraMax - weapon.Dura) / 30
+		add := int(weapon.DuraMax - weapon.Dura)
+		if add > 5000 {
+			add = 5000
+		}
+		if add <= 0 {
+			return false
+		}
+		weapon.Dura += uint16(add)
+		p.sendDuraChange(server, weapon)
+		p.sysMsg(server, "武器修复成功...")
+		return true
+	case 10: // 特修卷轴（Delphi SuperRepairWeapon，ObjBase.pas:23692-23700）。
 		weapon := p.UseItems[protocol.UWeapon]
 		if weapon == nil {
 			p.sysMsg(server, "请先装备武器")
@@ -388,6 +452,7 @@ func (p *PlayObject) useSpecialItem(def *ItemDef, server *netserver.TCPServer) b
 		}
 		weapon.Dura = weapon.DuraMax
 		p.sendDuraChange(server, weapon)
+		p.sysMsg(server, "武器修复成功...")
 		return true
 	case 12: // 临时 Buff（神水/精酿）。
 		return p.applyBuff(def, server)
@@ -395,13 +460,12 @@ func (p *PlayObject) useSpecialItem(def *ItemDef, server *netserver.TCPServer) b
 	return false
 }
 
-// teleportToSafe 传送至安全区（回城卷/地牢逃脱卷）。
-func (p *PlayObject) teleportToSafe(server *netserver.TCPServer) bool {
-	safeMap, safeX, safeY := GetSafeZonePoint()
+// teleportToMap 传送至指定地图坐标（Delphi BaseObjectMove）。
+func (p *PlayObject) teleportToMap(server *netserver.TCPServer, mapName string, x, y int) bool {
 	if p.MapMgr == nil {
 		return false
 	}
-	env := p.MapMgr.FindMap(safeMap)
+	env := p.MapMgr.FindMap(mapName)
 	if env == nil {
 		return false
 	}
@@ -411,13 +475,19 @@ func (p *PlayObject) teleportToSafe(server *netserver.TCPServer) bool {
 			p.envir.RemoveObject(p.CurrX, p.CurrY, OS_MOVINGOBJECT, p)
 			p.envir.broadcastRefMsg(p.BaseObject, RM_DISAPPEAR, p.ID, p.CurrX, p.CurrY, p.Dir)
 		}
-		p.CurrX, p.CurrY = safeX, safeY
-		p.envir.AddObject(safeX, safeY, OS_MOVINGOBJECT, p)
-		p.envir.broadcastRefMsg(p.BaseObject, RM_LOGON, p.ID, safeX, safeY, p.Dir)
+		p.CurrX, p.CurrY = x, y
+		p.envir.AddObject(x, y, OS_MOVINGOBJECT, p)
+		p.envir.broadcastRefMsg(p.BaseObject, RM_LOGON, p.ID, x, y, p.Dir)
 	} else {
-		p.EnterAnotherMap(server, env, safeX, safeY)
+		p.EnterAnotherMap(server, env, x, y)
 	}
 	return true
+}
+
+// teleportToSafe 传送至安全区（回城卷/地牢逃脱卷）。
+func (p *PlayObject) teleportToSafe(server *netserver.TCPServer) bool {
+	safeMap, safeX, safeY := GetSafeZonePoint()
+	return p.teleportToMap(server, safeMap, safeX, safeY)
 }
 
 // teleportRandom 当前地图随机传送。
@@ -462,6 +532,82 @@ func (p *PlayObject) applyBuff(def *ItemDef, server *netserver.TCPServer) bool {
 	p.BuffExpireTick = time.Now().UnixMilli() + int64(duration)*1000
 	p.RecalcAbilitys()
 	p.SendAbility(server)
+	return true
+}
+
+// giveItemByName 按物品名创建实例并放入背包（Delphi
+// CopyToUserItemFromName，UsrEngn.pas:1625-1627）。背包满返回 false。
+func (p *PlayObject) giveItemByName(name string) bool {
+	if p.ItemDB == nil || p.Engine == nil {
+		return false
+	}
+	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
+		return false
+	}
+	def := p.ItemDB.GetByName(name)
+	if def == nil {
+		return false
+	}
+	item := p.ItemDB.CreateUserItem(def.Idx)
+	if item == nil {
+		return false
+	}
+	item.MakeIndex = p.Engine.allocItemID()
+	p.ItemList = append(p.ItemList, item)
+	return true
+}
+
+// usePackItem 处理 StdMode=31 打包物品（Delphi ObjBase.pas:17394-17413）。
+// AniCount=0：解包——背包空位校验（count+6-1 ≤ maxBag），消耗本物品，
+// 按解包表（Shape→物品名）发 6 件（ObjBase.pas:17301-17336）。
+// AniCount≠0：触发 NPC 脚本 @StdModeFunc<AniCount>（Delphi
+// UseStdmodeFunItem，ObjBase.pas:17447-17455；Go 无 FunctionNPC，
+// 改为扫描全部 NPC 脚本找同名 label，找不到则不消耗）。
+// 成功时本函数自行消耗物品并回包，调用方不再走通用流程。
+func (p *PlayObject) usePackItem(def *ItemDef, bagIdx int, server *netserver.TCPServer) bool {
+	if def.AniCount == 0 {
+		name := ""
+		if p.ItemDB != nil {
+			name = p.ItemDB.UnbindList[int(def.Shape)]
+		}
+		if name == "" {
+			return false
+		}
+		maxBag := p.Engine.Config.GetMaxBagSlots()
+		if len(p.ItemList)+6-1 > maxBag {
+			p.sysMsg(server, "你不能携带更多的物品.")
+			return false
+		}
+		p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
+		for i := 0; i < 6; i++ {
+			if !p.giveItemByName(name) {
+				break
+			}
+		}
+	} else {
+		label := fmt.Sprintf("StdModeFunc%d", def.AniCount)
+		var target *NpcObject
+		var script *NpcScript
+		for _, npc := range p.Engine.Npcs {
+			if s := npc.GetScript(); s != nil {
+				if _, ok := s.Labels[label]; ok {
+					target, script = npc, s
+					break
+				}
+			}
+		}
+		if target == nil {
+			return false
+		}
+		p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
+		script.Execute(label, p, target, server)
+	}
+
+	resp := protocol.MakeDefaultMsg(protocol.SMEatOK, int32(bagIdx), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+	p.SendBagItemsFull(server)
+	p.sendWeightChanged(server)
+	log.Logf(log.LevelInfo, "Items", "%s opened pack item %s", p.Name, def.Name)
 	return true
 }
 
@@ -865,6 +1011,163 @@ func getEquipSlot(stdMode byte) int {
 	return -1
 }
 
+// checkItemsNeed 行会/城堡类装备需求复查（Delphi CheckItemsNeed，
+// ObjBase.pas:25985+）：仅 Need 6/7/60/70 会在装备后失效。
+func (p *PlayObject) checkItemsNeed(def *ItemDef) bool {
+	switch def.Need {
+	case 6:
+		return p.GuildName != ""
+	case 60:
+		return p.GuildName != "" && p.isGuildMaster()
+	case 7:
+		return p.GuildName != "" && p.isCastleMember()
+	case 70:
+		return p.GuildName != "" && p.isCastleMember() && p.isGuildMaster()
+	}
+	return true
+}
+
+// checkAutoTakeOff 需求不满足的装备自动脱下（Delphi ObjBase.pas:6622-6666）：
+// 脱入背包，背包满则落地。行会/城堡状态变化后调用。
+func (p *PlayObject) checkAutoTakeOff(server *netserver.TCPServer) {
+	if p.ItemDB == nil {
+		return
+	}
+	changed := false
+	for i := 0; i < 13; i++ {
+		it := p.UseItems[i]
+		if it == nil {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(it.WIndex))
+		if def == nil {
+			p.UseItems[i] = nil
+			changed = true
+			continue
+		}
+		if p.checkItemsNeed(def) {
+			continue
+		}
+		if len(p.ItemList) < p.Engine.Config.GetMaxBagSlots() {
+			p.ItemList = append(p.ItemList, it)
+		} else if p.envir != nil {
+			p.dropItemToGround(it, server, time.Now().UnixMilli())
+		} else {
+			continue
+		}
+		p.UseItems[i] = nil
+		changed = true
+	}
+	if changed {
+		p.RecalcAbilitys()
+		p.updateAppearance()
+		p.SendUseItemsFull(server)
+		p.SendBagItemsFull(server)
+		p.sendWeightChanged(server)
+	}
+}
+
+// isGuildMaster 判断玩家是否行会掌门（Go 行会职务为字符串，
+// 兼容 "master" 与 "掌门人" 两种取值）。
+func (p *PlayObject) isGuildMaster() bool {
+	return p.GuildRank == "master" || p.GuildRank == "掌门人"
+}
+
+// isCastleMember 判断玩家是否占领城堡行会的成员
+//（Delphi g_CastleManager.IsCastleMember，Castle.pas:762）。
+func (p *PlayObject) isCastleMember() bool {
+	return p.Engine != nil && p.Engine.Castle != nil &&
+		p.Engine.Castle.OwnerGuild != "" && p.Engine.Castle.OwnerGuild == p.GuildName
+}
+
+// checkItemNeed 装备需求全分支（Delphi CheckTakeOnItems 的 Need case，
+// ObjBase.pas:23001-23260）。NeedLevel 打包约定：LoWord=条件1、HiWord=条件2。
+// 会员系（8/81/82）依赖的会员系统未实装，按需求不满足处理。
+func (p *PlayObject) checkItemNeed(def *ItemDef) bool {
+	nl := def.NeedLevel
+	lo := int(nl & 0xFFFF)
+	hi := int(nl >> 16)
+	switch def.Need {
+	case 0:
+		return int(p.WAbil.Level) >= int(nl)
+	case 1:
+		return int(p.WAbil.DC>>16) >= int(nl)
+	case 2:
+		return int(p.WAbil.MC>>16) >= int(nl)
+	case 3:
+		return int(p.WAbil.SC>>16) >= int(nl)
+	case 4: // 转生等级
+		return p.ReNewLevel >= int(nl)
+	case 5: // 声望（Delphi m_btCreditPoint）
+		return p.CreditPoint >= int(nl)
+	case 6: // 已加入行会
+		return p.GuildName != ""
+	case 7: // 沙城成员（行会占领城堡）
+		return p.GuildName != "" && p.isCastleMember()
+	case 8, 81, 82: // 会员系：会员系统未实装
+		return false
+	case 10:
+		return int(p.Job) == lo && int(p.WAbil.Level) >= hi
+	case 11:
+		return int(p.Job) == lo && int(p.WAbil.DC>>16) >= hi
+	case 12:
+		return int(p.Job) == lo && int(p.WAbil.MC>>16) >= hi
+	case 13:
+		return int(p.Job) == lo && int(p.WAbil.SC>>16) >= hi
+	case 40:
+		return p.ReNewLevel >= lo && int(p.WAbil.Level) >= hi
+	case 41:
+		return p.ReNewLevel >= lo && int(p.WAbil.DC>>16) >= hi
+	case 42:
+		return p.ReNewLevel >= lo && int(p.WAbil.MC>>16) >= hi
+	case 43:
+		return p.ReNewLevel >= lo && int(p.WAbil.SC>>16) >= hi
+	case 44:
+		return p.ReNewLevel >= lo && p.CreditPoint >= hi
+	case 60: // 行会掌门
+		return p.GuildName != "" && p.isGuildMaster()
+	case 70: // 沙城掌门 + 等级
+		return p.GuildName != "" && p.isCastleMember() && p.isGuildMaster() &&
+			int(p.WAbil.Level) >= int(nl)
+	default:
+		// GEEM2 库存在 Need=200（宝玉类）等 Delphi 无对应分支的取值；
+		// 兼容现有内容：NeedLevel=0 视为无需求，否则按等级判定。
+		if nl == 0 {
+			return true
+		}
+		return int(p.WAbil.Level) >= int(nl)
+	}
+}
+
+// isAccessoryStdMode 首饰类 StdMode 集合（封印标记 btValue[7] 生效范围，
+// ObjBase.pas:17123-17131）。
+func isAccessoryStdMode(stdMode byte) bool {
+	switch stdMode {
+	case 15, 19, 20, 21, 22, 23, 24, 26:
+		return true
+	}
+	return false
+}
+
+// canTakeOffItem 四道禁脱校验（Delphi ObjBase.pas:17119-17151/17237-17263）：
+// ① 首饰封印 btValue[7]≠0；② Reserved&2 禁脱（①②可被解锁药绕过）；
+// ③ Reserved&4 永久禁脱；④ 禁脱列表。
+func (p *PlayObject) canTakeOffItem(item *protocol.UserItem, def *ItemDef) bool {
+	if isAccessoryStdMode(def.StdMode) && !p.UserUnLockDurg && item.BtValue[7] != 0 {
+		return false
+	}
+	if !p.UserUnLockDurg && def.Reserved&2 != 0 {
+		return false
+	}
+	if def.Reserved&4 != 0 {
+		return false
+	}
+	if p.ItemDB != nil && p.ItemDB.InDisableTakeOffList(item.WIndex) {
+		return false
+	}
+	return true
+}
+
 // validEquipSlot 判断 slot 是否为 stdMode 的合法装备目标，
 // 双槽位物品允许左右任一侧（FState:3300-3318）。
 func validEquipSlot(stdMode byte, slot int) bool {
@@ -893,9 +1196,18 @@ func (p *PlayObject) sendTakeOffFail(server *netserver.TCPServer) {
 	p.SendUseItemsFull(server)
 }
 
+// sendMyStatus 发送饥饿状态（Delphi RefMyStatus，ObjBase.pas:6193-6196）。
+func (p *PlayObject) sendMyStatus(server *netserver.TCPServer) {
+	resp := protocol.MakeDefaultMsg(protocol.SMMyStatus, 0, uint16(p.HungerStatus), 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
 func (p *PlayObject) sendEatFail(server *netserver.TCPServer) {
 	resp := protocol.MakeDefaultMsg(protocol.SMEatFail, 0, 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
+	// 客户端双击使用时物品已离手（Delphi g_EatingItem），失败时补发
+	// 全量背包恢复显示（Delphi 客户端本地放回，Go 走全量刷新架构）。
+	p.SendBagItemsFull(server)
 }
 
 func (p *PlayObject) CheckSpecialItemEffects() {
@@ -908,19 +1220,21 @@ func (p *PlayObject) CheckSpecialItemEffects() {
 	p.HasAngry = false
 	p.HasMagicShield = false
 	p.HasMuscle = false
+	p.HasUnParalysis = false
+	p.HasSuperman = false
+	p.HasUnMagicShield = false
+	p.HasUnRevival = false
+	p.HasGuildMove = false
+	p.HasNoDropItem = false
+	p.HasNoDropUseItem = false
 
 	if p.ItemDB == nil {
 		return
 	}
-	for i := 0; i < 13; i++ {
-		if p.UseItems[i] == nil {
-			continue
-		}
-		def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
-		if def == nil {
-			continue
-		}
-		switch def.AniCount {
+	// Delphi（ObjBase.pas:2960-3060/3134-3310）同时按 AniCount 与
+	// Shape 两套编码识别特效。
+	applyCode := func(code byte) {
+		switch code {
 		case 112:
 			p.HasTeleport = true
 		case 113:
@@ -931,7 +1245,7 @@ func (p *PlayObject) CheckSpecialItemEffects() {
 			p.HasFlame = true
 		case 116:
 			p.HasRecovery = true
-		case 117:
+		case 117, 170:
 			p.HasAngry = true
 		case 118:
 			p.HasMagicShield = true
@@ -939,7 +1253,32 @@ func (p *PlayObject) CheckSpecialItemEffects() {
 			p.HasMuscle = true
 		case 121:
 			p.HasProbe = true
+		case 139:
+			p.HasUnParalysis = true
+		case 140:
+			p.HasSuperman = true
+		case 143:
+			p.HasUnMagicShield = true
+		case 144:
+			p.HasUnRevival = true
+		case 145:
+			p.HasGuildMove = true
+		case 171:
+			p.HasNoDropItem = true
+		case 172:
+			p.HasNoDropUseItem = true
 		}
+	}
+	for i := 0; i < 13; i++ {
+		if p.UseItems[i] == nil {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(p.UseItems[i].WIndex))
+		if def == nil {
+			continue
+		}
+		applyCode(def.AniCount)
+		applyCode(def.Shape)
 	}
 
 	p.applyRingSkills()
@@ -1077,6 +1416,62 @@ func (p *PlayObject) countItem(name string) int {
 		}
 	}
 	return count
+}
+
+// questCheckItem 对应 Delphi QuestCheckItem（ObjBase.pas:24539-24567）：
+// 按名字清点背包物品，返回数量与耐久最高的匹配实例，并把该实例
+// 记入 CheckedItemMakeIndex 供 TAKECHECKITEM 收取（无命中则清除旧记录）。
+func (p *PlayObject) questCheckItem(name string) (int, *protocol.UserItem) {
+	p.CheckedItemMakeIndex = 0
+	if p.ItemDB == nil {
+		return 0, nil
+	}
+	def := p.ItemDB.GetByName(name)
+	if def == nil {
+		return 0, nil
+	}
+	count := 0
+	var best *protocol.UserItem
+	for _, item := range p.ItemList {
+		if item == nil || int(item.WIndex) != def.Idx {
+			continue
+		}
+		count++
+		if best == nil || item.Dura > best.Dura {
+			best = item
+		}
+	}
+	if best != nil {
+		p.CheckedItemMakeIndex = best.MakeIndex
+	}
+	return count, best
+}
+
+// questTakeCheckItem 收取 questCheckItem 记录的实例
+//（Delphi QuestTakeCheckItem，ObjBase.pas:24588-24619）：先查背包再查装备。
+func (p *PlayObject) questTakeCheckItem(server *netserver.TCPServer) {
+	if p.CheckedItemMakeIndex == 0 {
+		return
+	}
+	if idx := p.findBagItem(p.CheckedItemMakeIndex); idx >= 0 {
+		p.ItemList = append(p.ItemList[:idx], p.ItemList[idx+1:]...)
+		p.CheckedItemMakeIndex = 0
+		p.RecalcAbilitys()
+		p.SendBagItemsFull(server)
+		p.sendWeightChanged(server)
+		return
+	}
+	for i, item := range p.UseItems {
+		if item != nil && item.MakeIndex == p.CheckedItemMakeIndex {
+			p.UseItems[i] = nil
+			p.CheckedItemMakeIndex = 0
+			p.RecalcAbilitys()
+			p.updateAppearance()
+			p.SendUseItemsFull(server)
+			p.sendWeightChanged(server)
+			return
+		}
+	}
 }
 
 func (p *PlayObject) takeItem(name string, count int) {

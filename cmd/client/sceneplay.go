@@ -258,7 +258,12 @@ type PlayScene struct {
 	canStnHit          bool  // +STN 石化攻击
 	lastFireHitTick    int64 // 烈火 10 秒冷却
 	hoverItemName      string
-	showAllItemNames   bool // Ctrl+Z 切换
+	showAllItemNames   bool  // Ctrl+Z 切换
+	focusItemID        int32 // 悬停命中的地面物品（不画其名字）
+	// 自动捡物（Delphi g_boAutoPuckUpItem，ClMain.pas:2443-2466）。
+	// Delphi 由 ShowItem 配置对话框控制，Go 闭环以 Ctrl+P 切换。
+	autoPickup         bool
+	lastAutoPickupTick int64
 
 	effects *EffectManager
 	events  *EventManager
@@ -540,7 +545,10 @@ func (s *PlayScene) toggleMinimap() {
 }
 
 func (s *PlayScene) AddGroundItem(id int32, x, y, looks int, name string) {
-	s.groundItems[id] = &GroundItemInfo{ID: id, X: x, Y: y, Looks: looks, Name: name, FlashTime: time.Now().UnixMilli()}
+	// 闪光随机相位（Delphi ClMain.pas:5413：FlashTime := GetTickCount
+	// + Random(3000)），避免同批落地物品齐闪。
+	s.groundItems[id] = &GroundItemInfo{ID: id, X: x, Y: y, Looks: looks, Name: name,
+		FlashTime: time.Now().UnixMilli() + rand.Int63n(3000)}
 }
 
 func (s *PlayScene) RemoveGroundItem(id int32) {
@@ -656,6 +664,20 @@ func (s *PlayScene) Update(dt float64) {
 	s.events.Update(now)
 	s.pumpSellQuery()
 	s.checkNpcWalkAway()
+
+	// 自动捡物：每 50ms 捡脚下物品（Delphi ClMain.pas:2443-2466，
+	// 原版按 ShowItem.boAutoPickup 过滤；Go 无配置表，捡脚下全部）。
+	if s.autoPickup && s.sendPickup != nil && s.State.MySelf != nil &&
+		!s.State.MySelf.Death && now-s.lastAutoPickupTick >= 50 {
+		s.lastAutoPickupTick = now
+		my := s.State.MySelf
+		for _, gi := range s.groundItems {
+			if gi.X == my.CurrX && gi.Y == my.CurrY {
+				s.sendPickup()
+				break
+			}
+		}
+	}
 
 	// SMInstanceHealGuage 瞬时血条到期关闭（Delphi ClMain.pas:4303-4313）
 	for _, a := range s.State.Actors.All() {
@@ -1197,6 +1219,10 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 	// Delphi 仅在 ShowItem.boShowName 或 g_boShowAllItem 时画名字
 	// （PlayScn.pas:1370-1391）；Go 无 ShowItem 配置表，取 Ctrl+Z 开关
 	// （showAllItemNames，对应 g_boShowAllItem）作为最接近行为。
+	// 悬停焦点物品不画名（PlayScn.pas:1371），其名字已在提示框显示。
+	if gi.ID == s.focusItemID {
+		return
+	}
 	if s.showAllItemNames && s.text != nil && gi.Name != "" {
 		nameW := float32(s.text.MeasureText(gi.Name))
 		nameX := tileX + engine.TileWidth/2 - nameW/2
@@ -1206,6 +1232,27 @@ func (s *PlayScene) drawGroundItemFlashName(gi *GroundItemInfo, proj [16]float32
 		log.Logf(log.LevelTrace, "Render", "play item name '%s' pos=(%.0f,%.0f)", gi.Name, nameX, nameY)
 		s.text.DrawText(gi.Name, nameX, nameY, 1.0, 1.0, 1.0, 1.0, proj)
 	}
+}
+
+// groundItemPixelHit 判断世界坐标是否命中物品图素的非透明像素
+//（Delphi PlayScn.pas:1840-1870 s.Pixels[dx,dy]<>0）。图像不可用
+// 时退化为格子命中。
+func (s *PlayScene) groundItemPixelHit(gi *GroundItemInfo, wx, wy float64) bool {
+	if s.resources.DnItems == nil || gi.Looks < 0 || gi.Looks >= s.resources.DnItems.Count {
+		return true
+	}
+	img := s.resources.DnItems.GetImage(gi.Looks)
+	if img == nil || img.RGBA == nil {
+		return true
+	}
+	cx := float64(gi.X*engine.TileWidth) + float64(engine.TileWidth)/2
+	cy := float64(gi.Y*engine.TileHeight) + float64(engine.TileHeight)/2
+	px := int(wx - (cx - float64(img.Width)/2))
+	py := int(wy - (cy - float64(img.Height)/2))
+	if px < 0 || py < 0 || px >= img.Width || py >= img.Height {
+		return false
+	}
+	return img.RGBA.RGBAAt(px, py).A > 0
 }
 
 func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]float32) {
@@ -1733,6 +1780,17 @@ func (s *PlayScene) OnKey(key int, action int) {
 				s.tryExit()
 			}
 			return
+		case 80: // Ctrl+P — 切换自动捡物（Delphi g_boAutoPuckUpItem；
+			// 原版在 ShowItem 配置对话框，Go 闭环以快捷键替代）。
+			if s.ctrlDown {
+				s.autoPickup = !s.autoPickup
+				state := "关闭"
+				if s.autoPickup {
+					state = "开启"
+				}
+				s.AddChatMessage("[系统] 自动捡物: " + state)
+			}
+			return
 		case 265: // 上箭头 — 聊天向上翻一行（ClMain:1699-1706）
 			s.scrollChat(-1)
 			return
@@ -1914,14 +1972,25 @@ func (s *PlayScene) OnMouseMove(x, y float64) {
 	wx, wy := s.cam.ScreenToWorld(x, y)
 	tx, ty := s.cam.WorldToTile(wx, wy)
 
-	// 地面物品悬停提示（ClMain:2098-2107）
+	// 地面物品悬停提示：像素级命中检测（Delphi PlayScn.pas:1840-1870
+	// s.Pixels[dx,dy]<>0；ClMain.pas:2098-2107），同格多物品名以 '\' 聚合。
 	hoverItem := ""
+	s.focusItemID = 0
+	var hoverNames []string
 	for _, gi := range s.groundItems {
-		if gi.X == tx && gi.Y == ty {
-			hoverItem = gi.Name
-			s.tooltip.Show(int(x), int(y), gi.Name, [4]float32{1, 1, 0.8, 1}, true)
-			break
+		if gi.X != tx || gi.Y != ty {
+			continue
 		}
+		if s.groundItemPixelHit(gi, wx, wy) {
+			hoverNames = append(hoverNames, gi.Name)
+			if s.focusItemID == 0 {
+				s.focusItemID = gi.ID
+			}
+		}
+	}
+	if len(hoverNames) > 0 {
+		hoverItem = strings.Join(hoverNames, "\\")
+		s.tooltip.Show(int(x), int(y), hoverItem, [4]float32{1, 1, 0.8, 1}, true)
 	}
 	// 仅当之前有悬停物品且现在没有时清除（避免覆盖 UI 提示）
 	if s.hoverItemName != "" && hoverItem == "" {

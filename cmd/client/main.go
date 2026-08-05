@@ -1548,8 +1548,9 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		h.playScene.resetDeal()
 
 	case protocol.SMDealChgGoldOK:
+		// Delphi（ClMain:4819）：Gold = MakeLong(Param, Tag)，32 位金币。
 		h.playScene.State.DealGold = int(msg.Recog)
-		h.playScene.State.Gold = int(msg.Param)
+		h.playScene.State.Gold = int(uint32(msg.Param) | uint32(msg.Tag)<<16)
 
 	case protocol.SMDealRemoteChgGold:
 		h.playScene.State.DealRemoteGold = int(msg.Recog)
@@ -1620,7 +1621,12 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMGoldChanged:
 		log.Logf(log.LevelInfo, "Client", "gold: %d", msg.Recog)
+		// Delphi（ClMain.pas:4479-4487）：增加时显示"获得 N 金币"。
+		oldGold := h.playScene.State.Gold
 		h.playScene.State.Gold = int(msg.Recog)
+		if h.playScene.State.Gold > oldGold {
+			h.playScene.AddChatMessage(fmt.Sprintf("获得 %d 金币", h.playScene.State.Gold-oldGold))
+		}
 		gSound.PlaySound(sMoney)
 
 	case protocol.SMBackStep:
@@ -1798,6 +1804,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMDelItems:
 		log.Logf(log.LevelInfo, "Client", "items cleared")
+		queryBag := protocol.MakeDefaultMsg(protocol.CMQueryBagItems, 0, 0, 0, 0)
+		h.Send(queryBag, "")
 
 	case protocol.SMDropItemSuccess:
 		log.Logf(log.LevelInfo, "Client", "item dropped")
@@ -1961,9 +1969,16 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMUserSellItemFail:
 		log.Logf(log.LevelInfo, "Client", "sell failed")
 		h.playScene.sellFailed()
+		// Delphi（ClMain.pas:4570-4576）：失败对话框。
+		ShowConfirm(h.playScene, "你不能出售这个物品.", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMSendBuyPrice:
-		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
+		// Delphi（ClMain.pas:4555-4562）：Recog<=0 显示 ????。
+		if msg.Recog > 0 {
+			h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog)) + " 金币"
+		} else {
+			h.playScene.sellPriceStr = "???? 金币"
+		}
 		log.Logf(log.LevelInfo, "Client", "buy price: %d", msg.Recog)
 
 	case protocol.SMUserRepairItemOK:
@@ -1971,9 +1986,16 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMUserRepairItemFail:
 		log.Logf(log.LevelInfo, "Client", "repair failed")
+		// Delphi（ClMain.pas:4597-4603）。
+		ShowConfirm(h.playScene, "你不能修理这个物品.", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMSendRepairCost:
-		h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog))
+		// Delphi（ClMain.pas:4578-4585）：Recog<0 显示 ????。
+		if msg.Recog >= 0 {
+			h.playScene.sellPriceStr = strconv.Itoa(int(msg.Recog)) + " 金币"
+		} else {
+			h.playScene.sellPriceStr = "???? 金币"
+		}
 		log.Logf(log.LevelInfo, "Client", "repair cost: %d", msg.Recog)
 
 	case protocol.SMSendUserMakeDrugItemList: // 712
@@ -1990,10 +2012,24 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMMakeDrugSuccess: // 713
 		log.Logf(log.LevelInfo, "Client", "drug crafting succeeded")
 		h.playScene.State.ShowShop = false
+		// Delphi（ClMain.pas:4651-4656）：Recog=剩余金币 + 成功对话框。
+		h.playScene.State.Gold = int(msg.Recog)
+		ShowConfirm(h.playScene, "药品研制成功..", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMMakeDrugFail: // 714
 		log.Logf(log.LevelInfo, "Client", "drug crafting failed")
 		h.playScene.State.ShowShop = false
+		// Delphi（ClMain.pas:4657-4665）四档文案。
+		text := "药品研制失败."
+		switch msg.Recog {
+		case 2:
+			text = "发生了错误"
+		case 3:
+			text = "金币不足."
+		case 4:
+			text = "你缺乏所必需的物品。"
+		}
+		ShowConfirm(h.playScene, text, []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMSendUserStorageItem:
 		// 仓库复用商店面板（Delphi BoStorageMenu）：列表是
@@ -2043,9 +2079,13 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMStorageFail:
 		log.Logf(log.LevelInfo, "Client", "storage deposit failed")
+		// Delphi（ClMain.pas:4597-4603 同族文案）。
+		ShowConfirm(h.playScene, "操作失败.", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMTakeBackStorageItemFail:
 		log.Logf(log.LevelInfo, "Client", "storage retrieval failed")
+		// Delphi（ClMain.pas:4622-4634）。
+		ShowConfirm(h.playScene, "你不能取回.", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMGroupModeChanged:
 		h.playScene.State.AllowGroup = msg.Recog != 0
@@ -2150,6 +2190,8 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 
 	case protocol.SMDealTryFail:
 		log.Logf(log.LevelInfo, "Client", "trade request failed")
+		// Delphi（ClMain.pas:4765-4768，原文两行以 #13 分隔）。
+		ShowConfirm(h.playScene, "交易被取消. 要确实交易需要双方都确认.", []ModalResult{MrOk}, DlgSmall, nil)
 
 	case protocol.SMDealAddItemOK:
 		// Recog = 格子槽位；body 携带提供的物品。
@@ -2247,7 +2289,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 		}
 
 	case protocol.SMButch:
-		h.playScene.AddChatMessage("屠宰成功")
+		// Delphi（ClMain.pas:4059-4071）：他人屠宰播放坐下动画。
+		if h.playScene != nil && h.playScene.State.MySelf != nil &&
+			msg.Recog != h.playScene.State.MySelf.RecogID {
+			if actor := h.playScene.State.Actors.Get(msg.Recog); actor != nil {
+				actor.SendMsg(protocol.SMSitdown, int(msg.Param), int(msg.Tag), int(msg.Series)&0xFF, 0, 0)
+			}
+		}
+		log.Logf(log.LevelInfo, "Client", "butch performed by %d", msg.Recog)
 
 	case protocol.SMReadMinimapOK:
 		// Param 携带小地图图像号（1-based）；客户端减 1 作为 mmap.wil 索引

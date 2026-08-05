@@ -132,23 +132,55 @@ func (p *PlayObject) isGroupMember(other *PlayObject) bool {
 }
 
 func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer) {
+	// Delphi ClientDropItem（ObjBase.pas:16213-16277）。
+	dropFail := func() {
+		resp := protocol.MakeDefaultMsg(protocol.SMDropItemFail, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, "")
+		// 客户端手持丢弃时物品已离手，失败补发全量背包恢复显示。
+		p.SendBagItemsFull(server)
+	}
 	// Param1 = MakeIndex（实例 ID；客户端布局由客户端维护）。
 	bagIdx := p.findBagItem(int32(msg.Param1))
 	if bagIdx < 0 {
-		resp := protocol.MakeDefaultMsg(protocol.SMDropItemFail, 0, 0, 0, 0)
-		server.Send(p.Session.ID, resp, "")
+		dropFail()
+		return
+	}
+	// 安全区/NOTHROWITEM 地图禁丢。
+	if p.envir != nil && (p.envir.Flag.NoThrowItem || IsSafeZone(p.envir, p.CurrX, p.CurrY)) {
+		p.sysMsg(server, "这里不能丢弃物品")
+		dropFail()
+		return
+	}
+	// 3000ms 节流（与交易共用 m_DealLastTick，ObjBase.pas:16244）。
+	now := time.Now().UnixMilli()
+	if now-p.lastDealTick < 3000 {
+		dropFail()
 		return
 	}
 	item := p.ItemList[bagIdx]
-	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 
 	name := "Item"
 	looks := 0
+	price := uint32(0)
 	if p.ItemDB != nil {
 		if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil {
 			name = def.Name
 			looks = int(def.Looks)
+			price = def.Price
 		}
+	}
+	p.lastDealTick = now
+	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
+
+	// 廉价物品管控（Delphi boControlDropItem，ObjBase.pas:16256-16262）：
+	// Price<500 直接删除不落地。
+	if p.Engine.Config.GetControlDropItem() && price < 500 {
+		resp := protocol.MakeDefaultMsg(protocol.SMDropItemSuccess, 0, 0, 0, 0)
+		server.Send(p.Session.ID, resp, protocol.EncodeString(name))
+		p.RecalcAbilitys()
+		p.SendBagItemsFull(server)
+		p.sendWeightChanged(server)
+		return
 	}
 
 	p.Engine.mu.Lock()
@@ -162,11 +194,19 @@ func (p *PlayObject) HandleDropItem(msg SendMessage, server *netserver.TCPServer
 		Looks:    looks,
 		X:        p.CurrX,
 		Y:        p.CurrY + 1,
-		DropTick: time.Now().UnixMilli(),
+		DropTick: now,
 		UserItem: item,
 	}
 	if p.envir != nil {
-		p.envir.AddGroundItem(gi)
+		if p.envir.AddGroundItem(gi) == nil {
+			// 格子已满无法落地：物品放回背包（Delphi 会直接丢失，
+			// Go 闭环选择对玩家更安全的归还）。
+			p.ItemList = append(p.ItemList, item)
+			resp := protocol.MakeDefaultMsg(protocol.SMDropItemFail, 0, 0, 0, 0)
+			server.Send(p.Session.ID, resp, "")
+			p.SendBagItemsFull(server)
+			return
+		}
 	}
 
 	resp := protocol.MakeDefaultMsg(protocol.SMDropItemSuccess, gi.ID, uint16(gi.X), uint16(gi.Y), 0)
@@ -191,30 +231,61 @@ func (p *PlayObject) HandleDropGold(msg SendMessage, server *netserver.TCPServer
 	if amount <= 0 || amount > p.Gold {
 		return
 	}
-	p.Gold -= amount
+	// Delphi（ObjBase.pas:16207）：禁止把金币全部丢光。
+	if amount >= p.Gold {
+		p.sysMsg(server, "不能丢弃全部金币")
+		return
+	}
+	// Delphi ClientDropGold（ObjBase.pas:16187-16212）：安全区禁丢。
+	if p.envir != nil && IsSafeZone(p.envir, p.CurrX, p.CurrY) {
+		p.sysMsg(server, "这里不能丢弃金币")
+		return
+	}
+	// 廉价金币管控：<1000 禁丢（boControlDropItem）。
+	if p.Engine.Config.GetControlDropItem() && amount < 1000 {
+		return
+	}
+	// 3000ms 节流（与丢弃物品共用）。
+	now := time.Now().UnixMilli()
+	if now-p.lastDealTick < 3000 {
+		return
+	}
+	p.lastDealTick = now
 
 	p.Engine.mu.Lock()
 	id := p.Engine.nextItemID
 	p.Engine.nextItemID++
 	p.Engine.mu.Unlock()
 
+	// 金币散开范围 3（Delphi DropGoldDown，ObjBase.pas:2316）。
+	x, y := p.CurrX, p.CurrY+1
+	if p.envir != nil {
+		x, y = getDropPosition(p.envir, p.CurrX, p.CurrY, 3)
+	}
 	gi := &GroundItem{
 		ID:       id,
 		Name:     "金币",
-		X:        p.CurrX,
-		Y:        p.CurrY + 1,
+		X:        x,
+		Y:        y,
 		Gold:     amount,
-		DropTick: time.Now().UnixMilli(),
+		DropTick: now,
 	}
 	if p.envir != nil {
-		p.envir.AddGroundItem(gi)
+		placed := p.envir.AddGroundItem(gi)
+		if placed == nil {
+			return // 落地失败（格满）：金币不扣除
+		}
+		if placed != gi {
+			gi = placed // 与已有金堆合并：广播合并后的堆
+		}
 	}
+	p.Gold -= amount
 
 	goldResp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, goldResp, "")
 
 	if p.envir != nil {
-		showResp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), 0)
+		showResp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))
 		objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
 		for _, obj := range objs {
 			if other, ok := obj.(*PlayObject); ok && !other.Ghost {

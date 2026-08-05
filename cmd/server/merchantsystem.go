@@ -240,21 +240,37 @@ func (p *PlayObject) sendGoodsListFromDB(server *netserver.TCPServer, npc *NpcOb
 
 // sendMakeDrugList 发送制药配方列表（消息ID 712）。
 // Delphi ClientGetSendMakeDrugList（ClMain.pas:5586-5619）与商品列表同一文本格式。
+// 列表来自 make_items.jsonc 配方表（Delphi m_MakeDrugList 语义）。
 func (p *PlayObject) sendMakeDrugList(server *netserver.TCPServer, npc *NpcObject) {
 	if p.ItemDB == nil {
 		return
 	}
+	names := make([]string, 0, len(drugRecipes))
+	for name := range drugRecipes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var sb strings.Builder
 	count := 0
-	for i := range p.ItemDB.Items {
-		item := &p.ItemDB.Items[i]
-		// StdMode 0-3 为药水类
-		if item.StdMode <= 3 && item.Price > 0 {
-			sb.WriteString(item.Name + "/0/" + strconv.Itoa(int(item.Price)) + "/9999/")
-			count++
+	for _, name := range names {
+		def := p.ItemDB.GetByName(name)
+		if def == nil {
+			continue
 		}
-		if count >= 50 {
-			break
+		sb.WriteString(def.Name + "/0/" + strconv.Itoa(int(def.Price)) + "/9999/")
+		count++
+	}
+	// 无配方表时回退物品库前 50 个药水（金币制药模式），避免空列表。
+	if count == 0 {
+		for i := range p.ItemDB.Items {
+			item := &p.ItemDB.Items[i]
+			if item.StdMode <= 3 && item.Price > 0 {
+				sb.WriteString(item.Name + "/0/" + strconv.Itoa(int(item.Price)) + "/9999/")
+				count++
+			}
+			if count >= 50 {
+				break
+			}
 		}
 	}
 	resp := protocol.MakeDefaultMsg(protocol.SMSendUserMakeDrugItemList, npc.ID, uint16(count), 0, 0)
@@ -563,12 +579,19 @@ func (p *PlayObject) HandleSellItem(msg SendMessage, server *netserver.TCPServer
 		}
 	}
 
+	// 金币超上限则出售失败（Delphi ObjNpc.pas:2160 IncGold 门禁）。
+	if !p.incGold(price) {
+		p.sysMsg(server, "金币已达到上限，无法出售")
+		p.sendSellFail(server)
+		return
+	}
+
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
-	p.Gold += price
 
 	// 将物品添加到 NPC 商品列表（深拷贝，修复 Delphi 原始 bug；
 	// 保留 MakeIndex 以便详细列表/按实例购买能匹配）。
-	if p.CurrentNpc != nil && p.CurrentNpc.IsMerchant {
+	// Dura=0 的物品不进货架（Delphi ObjNpc.pas:2246）。
+	if p.CurrentNpc != nil && p.CurrentNpc.IsMerchant && item.Dura > 0 {
 		npc := p.CurrentNpc
 		itemCopy := &protocol.UserItem{
 			MakeIndex: item.MakeIndex,

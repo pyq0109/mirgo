@@ -278,7 +278,15 @@ func (p *PlayObject) HandleGuildUpdateRankInfo(msg SendMessage, server *netserve
 	for _, line := range strings.Split(msg.Msg, "\n") {
 		parts := strings.SplitN(strings.TrimSpace(line), "/", 2)
 		if len(parts) == 2 && parts[0] != "" && guild.IsMember(parts[0]) {
+			oldRank := guild.Ranks[parts[0]]
 			guild.Ranks[parts[0]] = parts[1]
+			// 职务变化（掌门→成员）可能使 Need 60/70 装备失效。
+			if oldRank != parts[1] {
+				if member := p.Engine.GetPlayerByName(parts[0]); member != nil {
+					member.GuildRank = parts[1]
+					member.checkAutoTakeOff(server)
+				}
+			}
 		}
 	}
 	confirm := protocol.MakeDefaultMsg(protocol.SMDlgMsg, 0, 0, 0, 0)
@@ -425,6 +433,8 @@ func (p *PlayObject) HandleGuildDelMember(msg SendMessage, server *netserver.TCP
 		target.GuildRank = ""
 		notifyResp := protocol.MakeDefaultMsg(protocol.SMChangeGuildName, 0, 0, 0, 0)
 		server.Send(target.Session.ID, notifyResp, protocol.EncodeString(""))
+		// 行会类装备需求失效自动脱下（Delphi CheckItemsNeed 链路）。
+		target.checkAutoTakeOff(server)
 	}
 
 	resp := protocol.MakeDefaultMsg(protocol.SMGuildDelMemberOK, 0, 0, 0, 0)

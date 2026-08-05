@@ -64,7 +64,21 @@ func (s *PlayScene) buildBag() {
 		gold.Width, gold.Height = 40, 30
 	}
 	gold.OnClick = func(c *UIControl, x, y int) {
-		if s.itemMove.Moving || s.State.Gold <= 0 {
+		// 手持交易金币点背包金币按钮 = 交易金币归零
+		//（Delphi DGoldClick → DealZeroGold，FState:4673-4681/5820-5826）。
+		if s.itemMove.Moving && s.itemMove.Index == moveIdxDealGold {
+			if s.sendDealChgGold != nil {
+				s.sendDealChgGold(0)
+			}
+			s.itemMove.End()
+			return
+		}
+		// 手持其他物品时点击 = 取消手持（Delphi 二次点击取消）。
+		if s.itemMove.Moving {
+			s.itemMove.Cancel(s.State)
+			return
+		}
+		if s.State.Gold <= 0 {
 			return
 		}
 		gSound.PlaySound(sMoney)
@@ -207,8 +221,9 @@ func (s *PlayScene) bagGridSelect(col, row int) {
 	mi := s.itemMove.Index
 	switch {
 	case mi >= -13 && mi < 0:
-		// 装备 → 背包: 服务端脱装备 (FState:4577-4582)。
-		if st.BagItems[idx] == nil && s.sendTakeOff != nil {
+		// 装备 → 背包: 服务端脱装备。Delphi 无空格限制，
+		// 直接发包（FState:4577-4582），服务端放入首个空位。
+		if s.sendTakeOff != nil {
 			s.sendTakeOff(moveEquipSlot(mi))
 			s.itemMove.End()
 		}

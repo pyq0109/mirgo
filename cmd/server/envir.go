@@ -265,9 +265,13 @@ func (e *Environment) AddObject(x, y int, objType byte, obj interface{}) bool {
 	idx := y*e.Width + x
 	cell := &e.Cells[idx]
 	base := objectBase(obj)
-	for _, o := range cell.ObjList {
-		if o.Type == objType && objectBase(o.Obj) == base {
-			return true
+	// 去重仅对可取 BaseObject 的对象生效；地面物品等 base 为 nil，
+	// 若参与比较会把同格后续物品全部误判为重复。
+	if base != nil {
+		for _, o := range cell.ObjList {
+			if o.Type == objType && objectBase(o.Obj) == base {
+				return true
+			}
 		}
 	}
 	cell.ObjList = append(cell.ObjList, OSObject{
@@ -434,9 +438,55 @@ func (e *Environment) broadcastDeathMsg(center *BaseObject, sourceID int32, x, y
 	}
 }
 
-func (e *Environment) AddGroundItem(item *GroundItem) {
+// maxGoldPile 单堆金币上限（Delphi Envir.pas:205-228 合并阈值 2000）。
+const maxGoldPile = 2000
+
+// maxGroundItemsPerCell 每格地面物品上限（Delphi Envir.pas:230-234）。
+const maxGroundItemsPerCell = 5
+
+// goldShape 金币堆外观（Delphi GetGoldShape，M2Share.pas:3568-3576）。
+func goldShape(gold int) int {
+	switch {
+	case gold >= 1000:
+		return 116
+	case gold >= 300:
+		return 115
+	case gold >= 70:
+		return 114
+	case gold >= 30:
+		return 113
+	default:
+		return 112
+	}
+}
+
+// AddGroundItem 放置地面物品（Delphi AddToMap，Envir.pas:181-245）：
+//   - 金币与同格已有金堆合并（合并后 ≤2000），返回已有堆；
+//   - 每格超过 5 件时拒绝落地，返回 nil。
+//
+// 返回实际落地的堆/物品（合并时为已有堆），调用方据此广播。
+func (e *Environment) AddGroundItem(item *GroundItem) *GroundItem {
+	if item.Gold > 0 {
+		item.Looks = goldShape(item.Gold)
+		for _, it := range e.GroundItems {
+			if it.X == item.X && it.Y == item.Y && it.Gold > 0 &&
+				it.Gold+item.Gold <= maxGoldPile {
+				it.Gold += item.Gold
+				it.Looks = goldShape(it.Gold)
+				it.DropTick = item.DropTick
+				return it
+			}
+		}
+	}
+	// Delphi（Envir.pas:230-234）：上限统计格内全部对象（含怪物/NPC）。
+	if item.X >= 0 && item.X < e.Width && item.Y >= 0 && item.Y < e.Height {
+		if len(e.Cells[item.Y*e.Width+item.X].ObjList) >= maxGroundItemsPerCell {
+			return nil
+		}
+	}
 	e.GroundItems = append(e.GroundItems, item)
 	e.AddObject(item.X, item.Y, OS_ITEMOBJECT, item)
+	return item
 }
 
 func (e *Environment) RemoveGroundItem(id int32) {

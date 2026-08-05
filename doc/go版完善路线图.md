@@ -6,13 +6,20 @@
 
 ---
 
-## 修复进度（2026-08-04，批次 1-7 全部完成）
+## 修复进度（2026-08-05，物品系统第二轮审查 + 批次 1-7 全部完成）
 
 > 本文档为活文档：批次 1-7 按"玩法优先"顺序实施完毕，每项附落点。
 > 剩余长尾（特化怪物渲染类、UI 邮件/设置/二级密码、客户端反作弊、GME 副本、
 > 攻城器械、付费体系持久化等）见文末 backlog，按需立项。
 
 **已完成 ✅**
+
+| 项 | 内容 | 落点 |
+|----|------|------|
+| 物品二轮-Bug | 交易改金币失败清零（回包携带当前值）+ OK u16 截断（Param/Tag 32 位拆分）；使用/丢弃失败补发全量背包防物品视觉丢失；仓库 BtValue 存取补齐（数据丢失 bug） | tradesystem.go / main.go(client) / itemsystem.go / attackmode.go / main.go |
+| 物品二轮-高 | tooltip 全 StdMode 分支（含 (*) 前缀/需求红字/银行家舍入）；StdMode 31 解包（UnbindList）+@StdModeFunc；Reserved &2/&4 禁脱 + &8 死亡销毁 + &10 保护；TAKECHECKITEM/PARAM1-4；Need 全 22 分支 | uitooltip.go / itemsystem.go / itemdb.go / npcscript.go |
+| 物品二轮-中 | 地面金币合并≤2000 + 每格≤5 件 + GetGoldShape；火把/蜡烛耐久 tick+655；SMAbility 扩展抗性/恢复五属性；交易校验（相邻/金币上限/1000ms 反连点）；仓库距离/负重/密码流程；动态价格对齐 Delphi（首次入表×1.1 不再涨）；死亡掉落对齐（PvP 不掉/槽 0..8/红名全掉背包）；CheckItemsNeed 自动脱下；丢弃节流/安全区/廉价管控/禁丢全金 | envir.go / playobject.go / tradesystem.go / storagesystem.go / npcobject.go / guildsystem.go / castle.go |
+| 物品二轮-低 | 肉落地扣 2000 耐久 + 矿石随机外观；割肉 MeatQuality 联动；贩卖限制（Dura=0 不进货架）；饥饿度字段（食物 +=DuraMax/10，708 下发）；特效码 139/140/143/144/145/170/171/172；地面物品像素命中 + 同格聚合 + 随机闪光相位 + 自动捡物（Ctrl+P）；客户端失败文案族；获得金币提示；SMButch 坐下动画 | drops.go / butchsystem.go / merchantsystem.go / itemsystem.go / sceneplay.go / main.go(client) |
 
 | 项 | 内容 | 落点 |
 |----|------|------|
@@ -142,12 +149,12 @@ Go 已有：move/search/recall/slave/dearrecall/masterrecall/nomob/make/level/mo
 | 行为偏好 | btAllowGroup/btAttatckMode | ✅ 已修复（入 meta） |
 | 状态效果 | wStatusTimeArr | ✅ 已修复（入 charMeta，上线恢复含隐身标志+状态广播） |
 | 回城点 | sHomeMap/wHomeX/wHomeY | 设计决策：用全局安全区替代（playobject.go:1739） |
-| 仓库密码 | sStoragePwd | 待实现（无设置/解锁流程） |
+| 仓库密码 | sStoragePwd | ✅ 已实现（@setstoragepwd/@chgstoragepwd/@unlockstorage，4-7 位、错 >3 锁定、登录自动上锁、入 charMeta；storagesystem.go） |
 | 元宝/游戏点/充值点 | nGameGold/nGamePoint/nPayMentPoint | 待实现（只有 Gold） |
-| 贡献/饥饿/身体幸运 | wContribution/nHungerStatus/dBodyLuck | 系统本身未实现 |
+| 贡献/饥饿/身体幸运 | wContribution/nHungerStatus/dBodyLuck | 饥饿度字段已实现（食物 +=DuraMax/10 上限 5000，入 charMeta，708 下发）；贡献/身体幸运未实现 |
 
 #### 其他服务端缺口
-- **仓库格数**：~~Go 默认 39 格 vs Delphi 50 格~~ ✅ 已修复（config.go GetMaxStorageSlots 现为 50，对齐 Delphi TStorageItems[0..49]）
+- **仓库格数**：✅ 已修复并对齐 Delphi 真值。初版按"Delphi 50 格"理解有误——Delphi 运行时上限为 **39**（ObjBase.pas:24720 `Count<39`），存档数组 `TStorageItems[0..49]` 只是序列化容量。现 GetMaxStorageSlots 默认 **39**（config.go）。
 - **城堡战**：~~缺预约战日期 WarDate、联盟行会判定~~ ✅ 已修复（WarDate 预约制+IsAttackAllyGuild/IsDefenseAllyGuild+状态持久化）；余 TechLevel 效果（castle.go 仅字段，需先调研 Delphi 语义）与皇宫/密道独立地图管理（backlog）
 - **商人行为**：Delphi 商人移动/招揽（TMerchant.Run，UsrEngn.pas:1028-1092 ProcessMerchants）——经查 m_boCanMove 所有赋值点在 Delphi 中被注释（ConfigMerchant.pas:975/LocalDB.pas:1140,3418,3447），属死功能 → backlog（保留开关位）；攻城隐藏城堡商人已实现（usrengine.go ProcessNpcIdle）
 - **行会 Run 语义**：~~Delphi g_GuildManager.Run 每 10s；Go 仅周期存档~~ ✅ 已修复（ProcessGuilds 每 10s：到期行会战移除+成员通知+落盘；wars/allies 持久化）

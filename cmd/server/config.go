@@ -28,6 +28,11 @@ type ServerConfig struct {
 		HomeMap          string         `json:"homeMap"`
 		HomeX            int            `json:"homeX"`
 		HomeY            int            `json:"homeY"`
+		// 红名回城点（Delphi sRedHomeMap/nRedHomeX/nRedHomeY，
+		// PKLevel>=2 时使用回城卷的目的地）。
+		RedHomeMap       string         `json:"redHomeMap"`
+		RedHomeX         int            `json:"redHomeX"`
+		RedHomeY         int            `json:"redHomeY"`
 		GroupMembersMax  int            `json:"groupMembersMax"`
 		BuildGuild       int            `json:"buildGuild"`
 		GuildWarFee      int            `json:"guildWarFee"`
@@ -78,6 +83,8 @@ type ServerConfig struct {
 	Player struct {
 		MaxBagSlots        int   `json:"maxBagSlots"`
 		MaxStorageSlots    int   `json:"maxStorageSlots"`
+		// 金币上限（Delphi nHumanMaxGold=10,000,000，M2Share.pas:1763）。
+		MaxGold            int   `json:"maxGold"`
 		MaxTradeItems      int   `json:"maxTradeItems"`
 		MaxFriends         int   `json:"maxFriends"`
 		MaxApprentices     int   `json:"maxApprentices"`
@@ -111,8 +118,6 @@ type ServerConfig struct {
 		RedPoisonBonus    int   `json:"redPoisonBonus"`
 		ParalysisDenom    int   `json:"paralysisDenom"`
 		ParalysisDuration int64 `json:"paralysisDuration"`
-		DuraWearDivisor   int   `json:"duraWearDivisor"`
-		EquipWearChance   int   `json:"equipWearChance"`
 		MapEnterProtect   int64 `json:"mapEnterProtect"`
 		PKProtectLevel    int   `json:"pkProtectLevel"`
 		PKProtectDiff     int   `json:"pkProtectDiff"`
@@ -234,6 +239,11 @@ type ServerConfig struct {
 		FallbackGoldRate int   `json:"fallbackGoldRate"`
 		FallbackItemRate int   `json:"fallbackItemRate"`
 		FallbackExp      int   `json:"fallbackExp"`
+		// 廉价物品管控（Delphi boControlDropItem）：开启后丢弃/掉落
+		// Price<500 的物品直接删除不落地、<1000 金币禁丢。
+		ControlDropItem bool  `json:"controlDropItem"`
+		// 地面物品消失时间 ms（Delphi dwClearDropOnFloorItemTime=3600000）。
+		GroundItemDespawnMs int64 `json:"groundItemDespawnMs"`
 	} `json:"drop"`
 	Mining struct {
 		StoneRate int `json:"stoneRate"`
@@ -312,6 +322,29 @@ func (c *ServerConfig) GetHomeY() int {
 		return c.Game.HomeY
 	}
 	return 618
+}
+
+// GetRedHomeMap/GetRedHomeX/GetRedHomeY 红名回城点（Delphi
+// g_Config.sRedHomeMap）；未配置时回退普通回城点。
+func (c *ServerConfig) GetRedHomeMap() string {
+	if c.Game.RedHomeMap != "" {
+		return c.Game.RedHomeMap
+	}
+	return c.GetHomeMap()
+}
+
+func (c *ServerConfig) GetRedHomeX() int {
+	if c.Game.RedHomeMap != "" {
+		return c.Game.RedHomeX
+	}
+	return c.GetHomeX()
+}
+
+func (c *ServerConfig) GetRedHomeY() int {
+	if c.Game.RedHomeMap != "" {
+		return c.Game.RedHomeY
+	}
+	return c.GetHomeY()
 }
 
 func (c *ServerConfig) GetWalkInterval() int64 {
@@ -605,7 +638,16 @@ func (c *ServerConfig) GetMaxStorageSlots() int {
 	if c.Player.MaxStorageSlots > 0 {
 		return c.Player.MaxStorageSlots
 	}
-	return 50 // Delphi TStorageItems=array[0..49]（Grobal2.pas:811）
+	// Delphi 运行时上限 39（ObjBase.pas:24720 Count<39）；
+	// 存档数组 TStorageItems[0..49]（Grobal2.pas:811）只是序列化容量。
+	return 39
+}
+
+func (c *ServerConfig) GetMaxGold() int {
+	if c.Player.MaxGold > 0 {
+		return c.Player.MaxGold
+	}
+	return 10000000 // Delphi nHumanMaxGold（M2Share.pas:1763）
 }
 
 func (c *ServerConfig) GetMaxTradeItems() int {
@@ -825,20 +867,6 @@ func (c *ServerConfig) GetParalysisDuration() int64 {
 		return c.Combat.ParalysisDuration
 	}
 	return 50
-}
-
-func (c *ServerConfig) GetDuraWearDivisor() int {
-	if c.Combat.DuraWearDivisor > 0 {
-		return c.Combat.DuraWearDivisor
-	}
-	return 5
-}
-
-func (c *ServerConfig) GetEquipWearChance() int {
-	if c.Combat.EquipWearChance > 0 {
-		return c.Combat.EquipWearChance
-	}
-	return 8
 }
 
 func (c *ServerConfig) GetMapEnterProtect() int64 {
@@ -1595,6 +1623,17 @@ func (c *ServerConfig) GetMaxGoldPerPile() int {
 		return c.Drop.MaxGoldPerPile
 	}
 	return 2000
+}
+
+func (c *ServerConfig) GetControlDropItem() bool {
+	return c.Drop.ControlDropItem
+}
+
+func (c *ServerConfig) GetGroundItemDespawnMs() int64 {
+	if c.Drop.GroundItemDespawnMs > 0 {
+		return c.Drop.GroundItemDespawnMs
+	}
+	return 3600000 // Delphi dwClearDropOnFloorItemTime（M2Share.pas:1797）
 }
 
 func (c *ServerConfig) GetFallbackGoldRate() int {

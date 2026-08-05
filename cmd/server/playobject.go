@@ -103,6 +103,12 @@ type PlayObject struct {
 	EnterMapTick  int64 // 进入地图时间（切图保护）
 
 	Deal         *DealState
+	// lastDealTick 交易/丢弃共用节流（Delphi m_DealLastTick）：
+	// 丢弃需间隔 3000ms（ObjBase.pas:16244）；DealEnd 双方最近
+	// 交易动作 <1000ms 判连点作弊（ObjBase.pas:17844-17849）。
+	lastDealTick int64
+	tryDealTick  int64 // DealTry 冷却（dwTryDealTime=3000ms）
+	lastLampTick int64 // 光源耐久 tick（500ms，Delphi dwDecLightItemDrugTime）
 	GuildName    string
 	GuildRank    string
 	StorageItems []*protocol.UserItem
@@ -134,6 +140,14 @@ type PlayObject struct {
 	HasMuscle      bool
 	HasRecallSuite bool
 	HongMoSuite    int // 虹魔套装吸血百分比 (Delphi m_nHongMoSuite)
+	// 特效码扩展（Delphi ObjBase.pas:2960-3060）。
+	HasUnParalysis   bool // 139 麻痹免疫
+	HasSuperman      bool // 140 超人（Delphi 设置后无消费点，仅标记）
+	HasUnMagicShield bool // 143 攻击无视对方魔法盾
+	HasUnRevival     bool // 144 攻击禁止对方复活戒指
+	HasGuildMove     bool // 145 行会传送（待行会传送功能实装）
+	HasNoDropItem    bool // 171 死亡不掉背包
+	HasNoDropUseItem bool // 172 死亡不掉装备
 
 	// 临时 Buff（StdMode 3, Shape 12 神水/精酿）。
 	BuffDC         int
@@ -159,10 +173,26 @@ type PlayObject struct {
 	ScriptVarsD [10]int  // 动态变量 D0-D9
 	ScriptVarsM [100]int // 持久变量 M0-M99
 
+	// CHECKITEM/CHECKDURA 等条件命中的物品实例（Delphi 脚本执行局部
+	// 变量 UserItem，ObjNpc.pas:7074-7098），供 TAKECHECKITEM 收取。
+	CheckedItemMakeIndex int32
+
+	// PARAM1-4 暂存参数（Delphi nSC_PARAM1..4 局部变量，
+	// ObjNpc.pas:7808-7827）。
+	ScriptParamN [4]int
+	ScriptParamS [4]string
+
 	CreditPoint    int    // 声望点（Delphi m_nCreditPoint）
 	ReNewLevel     int    // 转生等级（Delphi m_nReNewLevel）
 	StoragePassword string // 仓库密码
 	AutoGetExp     int    // 自动获取经验点数
+
+	// 解锁药效果（StdMode 0 Shape 2，Delphi m_boUserUnLockDurg，
+	// ObjBase.pas:23344-23348）：绕过 Reserved&2 与首饰封印的禁脱。
+	UserUnLockDurg bool
+	HungerStatus   int   // 饥饿度（Delphi m_nHungerStatus，上限 5000）
+	StoragePwdLocked bool // 仓库密码锁定（错 >3 次，Delphi m_boPasswordLocked）
+	storagePwdFail   int  // 连续输错次数（Delphi m_btPwdFailCount）
 
 	// Delphi: 自动获取经验 (ObjBase.pas:7100-7105)
 	AutoGetExpTime     int64  // 间隔（毫秒）
@@ -256,6 +286,7 @@ func (p *PlayObject) Operate(server *netserver.TCPServer) {
 	p.DecayPkPoint(now)
 	p.CheckPKStatus(now)
 	p.processPendingMagics(server, now)
+	p.processLampDura(server, now)
 
 	if p.Death {
 		cfg := p.Engine.Config
@@ -1358,8 +1389,10 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		return
 	}
 
-	// Delphi: 魔法盾 1.5x MP 消耗完全吸收 (ObjBase.pas:2455-2469)
-	if tp := p.envir.getPlayerByBase(target); tp != nil && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
+	// Delphi: 魔法盾 1.5x MP 消耗完全吸收 (ObjBase.pas:2455-2469)。
+	// 攻击者佩戴禁魔盾（143）时无视对方魔法盾（ObjBase.pas:2455
+	// m_LastHiter.m_boUnMagicShield 判定）。
+	if tp := p.envir.getPlayerByBase(target); tp != nil && !p.HasUnMagicShield && (tp.StatusTimeArr[STATE_BUBBLEDEFENCE] > 0 || tp.HasMagicShield) {
 		mpCost := damage + damage*cfg.GetMagicShieldRatio()/100
 		mp := int(tp.WAbil.MP)
 		if mp >= mpCost {
@@ -1390,18 +1423,25 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	hp := int(target.WAbil.HP)
 	hp -= damage
 
-	// Delphi: 麻痹戒指 Random(target.AntiPoison + nAttackPosionRate) == 0 (ObjBase.pas:22265)
+	// Delphi: 麻痹戒指 Random(target.AntiPoison + nAttackPosionRate) == 0 (ObjBase.pas:22265)。
+	// 目标佩戴防麻痹（139）时免疫（Magic.pas:1341 m_boUnParalysis）。
 	if p.HasParalysis && damage > 0 {
-		antiPoison := target.AntiPoison
-		if antiPoison < 0 {
-			antiPoison = 0
+		targetUnPara := false
+		if tp := p.envir.getPlayerByBase(target); tp != nil {
+			targetUnPara = tp.HasUnParalysis
 		}
-		if rand.Intn(antiPoison+cfg.GetParalysisDenom()) == 0 {
-			paraDuration := int16(cfg.GetParalysisDuration())
-			if tp := p.envir.getPlayerByBase(target); tp != nil {
-				tp.MakePoison(POISON_STONE, paraDuration, 0)
-			} else if mon := p.envir.getMonsterByBase(target); mon != nil {
-				mon.StatusTimeArr[POISON_STONE] = paraDuration
+		if !targetUnPara {
+			antiPoison := target.AntiPoison
+			if antiPoison < 0 {
+				antiPoison = 0
+			}
+			if rand.Intn(antiPoison+cfg.GetParalysisDenom()) == 0 {
+				paraDuration := int16(cfg.GetParalysisDuration())
+				if tp := p.envir.getPlayerByBase(target); tp != nil {
+					tp.MakePoison(POISON_STONE, paraDuration, 0)
+				} else if mon := p.envir.getMonsterByBase(target); mon != nil {
+					mon.StatusTimeArr[POISON_STONE] = paraDuration
+				}
 			}
 		}
 	}
@@ -1417,22 +1457,31 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		p.envir.broadcastRefMsg(target, RM_STRUCK, target.ID, damage, target.CurrY, dir)
 	}
 
-	// 攻击方武器磨损（Delphi: DoDamageWeapon, ObjBase.pas:18967）
+	// 攻击方武器磨损（Delphi ObjBase.pas:22255 + DoDamageWeapon:18967）：
+	// 损量 = Random(5)+2 − 自身衣服 Source（btWeaponStrong），≤0 不磨损。
 	if damage > 0 {
 		if wp := p.UseItems[protocol.UWeapon]; wp != nil && wp.Dura > 0 {
-			wear := damage / cfg.GetDuraWearDivisor()
-			if wear < 1 {
-				wear = 1
+			wear := rand.Intn(5) + 2
+			if dress := p.UseItems[protocol.UDress]; dress != nil && p.ItemDB != nil {
+				if def := p.ItemDB.GetByIdx(int(dress.WIndex)); def != nil && def.Source > 0 {
+					wear -= int(def.Source)
+				}
 			}
-			if int(wp.Dura) <= wear {
-				p.UseItems[protocol.UWeapon] = nil
-				p.RecalcAbilitys()
-				p.updateAppearance()
-				p.SendUseItemsFull(server)
-				log.Logf(log.LevelInfo, "Items", "%s weapon broke (Dura was %d)", p.Name, wp.Dura)
-			} else {
-				wp.Dura -= uint16(wear)
-				p.sendDuraChange(server, wp)
+			if wear > 0 {
+				oldUnit := int(wp.Dura) / 1000
+				if int(wp.Dura) <= wear {
+					p.UseItems[protocol.UWeapon] = nil
+					p.RecalcAbilitys()
+					p.updateAppearance()
+					p.SendUseItemsFull(server)
+					log.Logf(log.LevelInfo, "Items", "%s weapon broke (Dura was %d)", p.Name, wp.Dura)
+				} else {
+					wp.Dura -= uint16(wear)
+					// 显示粒度（Dura/1000）变化才下发（Delphi 18999-19007）。
+					if int(wp.Dura)/1000 != oldUnit {
+						p.sendDuraChange(server, wp)
+					}
+				}
 			}
 		}
 	}
@@ -1450,26 +1499,23 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 		// Delphi: 被玩家击中标记正当防卫旗 (ObjBase.pas:21220-21236)
 		tp.SetPKFlag(p)
 
-		equipChanged := false
-		if it := tp.UseItems[protocol.UDress]; it != nil && it.Dura > 0 {
-			it.Dura--
-			if it.Dura == 0 {
-				tp.UseItems[protocol.UDress] = nil
-				equipChanged = true
-			} else {
-				tp.sendDuraChange(server, it)
-			}
+		// 基础损量 5..14；红毒（POISON_DAMAGEARMOR）×1.2
+		//（Delphi StruckDamage，ObjBase.pas:22471-22476，nPosionDamagarmor=12）。
+		nDam := rand.Intn(10) + 5
+		if tp.StatusTimeArr[POISON_DAMAGEARMOR] > 0 {
+			nDam = nDam * 12 / 10
 		}
-		for i := 1; i < 13; i++ {
-			if it := tp.UseItems[i]; it != nil && it.Dura > 0 {
-				if rand.Intn(cfg.GetEquipWearChance()) == 0 {
-					it.Dura--
-					if it.Dura == 0 {
-						tp.UseItems[i] = nil
-						equipChanged = true
-					} else {
-						tp.sendDuraChange(server, it)
-					}
+		equipChanged := false
+		// 衣服每击必掉（ObjBase.pas:22478-22516）。
+		if tp.damageSlotDura(server, protocol.UDress, nDam) {
+			equipChanged = true
+		}
+		// 全部槽位（含衣服）各 1/8 概率再判定一次
+		//（ObjBase.pas:22517-22560：Low..High 无衣服豁免）。
+		for i := 0; i < 13; i++ {
+			if tp.UseItems[i] != nil && tp.UseItems[i].Dura > 0 && rand.Intn(8) == 0 {
+				if tp.damageSlotDura(server, i, nDam) {
+					equipChanged = true
 				}
 			}
 		}
@@ -1481,9 +1527,11 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 	}
 
 	if hp <= 0 {
-		if tp := p.envir.getPlayerByBase(target); tp != nil && tp.HasRevival {
+		// 攻击者佩戴禁复活（144）时对方复活戒指不生效。
+		if tp := p.envir.getPlayerByBase(target); tp != nil && tp.HasRevival && !p.HasUnRevival {
 			tp.HasRevival = false
 			tp.WAbil.HP = tp.WAbil.MaxHP / uint16(cfg.GetReviveHPRatio())
+			tp.damageRevivalRings(server)
 			tp.sendHealthSpell(server)
 		} else {
 			target.Death = true
@@ -1497,7 +1545,8 @@ func (p *PlayObject) applyDamage(server *netserver.TCPServer, target *BaseObject
 				tp.deathTick = time.Now().UnixMilli()
 				tp.Death = true
 				p.OnPlayerKilled(server, tp)
-				tp.DropDeathItems(server)
+				// 被玩家击杀：默认不掉装备（Delphi boKillByHumanDropUseItem=False）。
+				tp.DropDeathItems(server, false)
 			}
 		}
 	} else {
@@ -1712,6 +1761,108 @@ func (p *PlayObject) Regenerate(server *netserver.TCPServer, now int64) {
 	}
 }
 
+// processLampDura 右手光源耐久消耗（Delphi UseLamp，ObjBase.pas:15825-15871）：
+// 每 500ms 检查一次；仅 StdItem.Source=0 的物品掉耐久（Delphi 中
+// 火把类 Source≠0 跳过，实际只有蜡烛类消耗）；归零销毁并下发 655。
+func (p *PlayObject) processLampDura(server *netserver.TCPServer, now int64) {
+	if p.Death || p.ItemDB == nil {
+		return
+	}
+	if now-p.lastLampTick < 500 {
+		return
+	}
+	p.lastLampTick = now
+	item := p.UseItems[protocol.URightHand]
+	if item == nil || item.Dura == 0 {
+		return
+	}
+	def := p.ItemDB.GetByIdx(int(item.WIndex))
+	if def == nil || def.Source != 0 {
+		return
+	}
+	oldUnit := int(item.Dura) / 1000
+	item.Dura--
+	destroyed := item.Dura == 0
+	if destroyed {
+		p.UseItems[protocol.URightHand] = nil
+		p.RecalcAbilitys()
+		p.updateAppearance()
+		p.SendUseItemsFull(server)
+	} else if int(item.Dura)/1000 == oldUnit {
+		return // 显示粒度（Dura/1000）未变化不下发
+	}
+	resp := protocol.MakeDefaultMsg(protocol.SMLampChangeDura, int32(item.Dura), 0, 0, 0)
+	server.Send(p.Session.ID, resp, "")
+}
+
+// damageRevivalRings 复活戒指触发掉耐久（Delphi ItemDamageRevivalRing，
+// ObjBase.pas:3625-3670）：Shape∈{114,160,161,162} 的物品（或武器/
+// 右手 AniCount 命中）各扣 1000 耐久，归零销毁。
+func (p *PlayObject) damageRevivalRings(server *netserver.TCPServer) {
+	if p.ItemDB == nil {
+		return
+	}
+	changed := false
+	for i := 0; i < 13; i++ {
+		it := p.UseItems[i]
+		if it == nil || it.Dura == 0 {
+			continue
+		}
+		def := p.ItemDB.GetByIdx(int(it.WIndex))
+		if def == nil {
+			continue
+		}
+		isRevival := false
+		switch def.Shape {
+		case 114, 160, 161, 162:
+			isRevival = true
+		}
+		if !isRevival && (i == protocol.UWeapon || i == protocol.URightHand) {
+			switch def.AniCount {
+			case 114, 160, 161, 162:
+				isRevival = true
+			}
+		}
+		if !isRevival {
+			continue
+		}
+		oldUnit := int(it.Dura) / 1000
+		if int(it.Dura) <= 1000 {
+			p.UseItems[i] = nil
+			changed = true
+		} else {
+			it.Dura -= 1000
+			if int(it.Dura)/1000 != oldUnit {
+				p.sendDuraChange(server, it)
+			}
+		}
+	}
+	if changed {
+		p.RecalcAbilitys()
+		p.updateAppearance()
+		p.SendUseItemsFull(server)
+	}
+}
+
+// damageSlotDura 槽位装备扣耐久，返回物品是否破碎
+//（Delphi StruckDamage 内循环，ObjBase.pas:22478-22560）。
+func (p *PlayObject) damageSlotDura(server *netserver.TCPServer, slot, amount int) bool {
+	it := p.UseItems[slot]
+	if it == nil || it.Dura == 0 {
+		return false
+	}
+	oldUnit := int(it.Dura) / 1000
+	if int(it.Dura) <= amount {
+		p.UseItems[slot] = nil
+		return true
+	}
+	it.Dura -= uint16(amount)
+	if int(it.Dura)/1000 != oldUnit {
+		p.sendDuraChange(server, it)
+	}
+	return false
+}
+
 // processIncHealth 处理渐进回复池（Delphi: Run 循环, ObjBase.pas:3782-3855）。
 // 间隔 = 600 - min(400, Level*10) ms，每次回复 Level/10+5 点。
 func (p *PlayObject) processIncHealth(server *netserver.TCPServer, now int64) {
@@ -1784,47 +1935,98 @@ func (p *PlayObject) processIncHealth(server *netserver.TCPServer, now int64) {
 	}
 }
 
-func (p *PlayObject) DropDeathItems(server *netserver.TCPServer) {
-	if p.envir == nil {
+// DropDeathItems 死亡掉落（Delphi Die，ObjBase.pas:20983-21015）：
+// killedByMonster=false（被玩家杀）默认不掉装备
+//（boKillByHumanDropUseItem=False，M2Share.pas:2019-2026）；
+// 被怪物杀才掉（boKillByMonstDropUseItem=True）。
+// 背包：非红名每件 1/nDieScatterBagRate，红名全掉。金币不掉
+//（boDieDropGold=False）。FIGHT/FIGHT3 格斗区死亡不掉。
+func (p *PlayObject) DropDeathItems(server *netserver.TCPServer, killedByMonster bool) {
+	if p.envir == nil || p.HasAngry {
 		return
 	}
-	if p.HasAngry {
+	if p.envir.Flag.Fight || p.envir.Flag.Fight3 {
 		return
 	}
 	now := time.Now().UnixMilli()
-
-	// Delphi DropUseItems (ObjBase.pas:15487): 红名 1/15，普通 1/30。
 	cfg := p.Engine.Config
-	equipRate := cfg.GetDropEquipRate()
-	if p.PkPoint >= 200 {
-		equipRate = cfg.GetDropEquipRateRed()
-	}
-	equipChanged := false
-	for i := 0; i < 13; i++ {
-		if p.UseItems[i] == nil {
-			continue
+
+	// 特效码 171/172：死亡不掉背包/装备（Delphi m_boNoDropItem/
+	// m_boNoDropUseItem，ObjBase.pas:20690/20611）。
+	if killedByMonster && !p.HasNoDropUseItem {
+		equipRate := cfg.GetDropEquipRate()
+		if p.PKLevel() > 2 {
+			equipRate = cfg.GetDropEquipRateRed()
 		}
-		if rand.Intn(equipRate) == 0 {
-			p.dropItemToGround(p.UseItems[i], server, now)
-			p.UseItems[i] = nil
-			equipChanged = true
+		equipChanged := false
+		// Delphi DropUseItems（ObjBase.pas:20689-20763）：只扫槽 0..8，
+		// U_BUJUK 与腰带不参与死亡掉落。
+		for i := 0; i <= 8 && i < len(p.UseItems); i++ {
+			item := p.UseItems[i]
+			if item == nil {
+				continue
+			}
+			var def *ItemDef
+			if p.ItemDB != nil {
+				def = p.ItemDB.GetByIdx(int(item.WIndex))
+			}
+			// Reserved&8：死亡直接销毁。
+			if def != nil && def.Reserved&8 != 0 {
+				p.UseItems[i] = nil
+				equipChanged = true
+				continue
+			}
+			// Reserved&10：死亡保护，落地前拦截（修正 Delphi 原版
+			// "地上有副本+身上仍装备"的复制 bug）。
+			if def != nil && def.Reserved&10 != 0 {
+				continue
+			}
+			// 禁脱列表物品不参与死亡掉落（M2Share.pas:4642-4660）。
+			if def != nil && p.ItemDB.InDisableTakeOffList(item.WIndex) {
+				continue
+			}
+			if rand.Intn(equipRate) == 0 {
+				p.dropItemToGround(item, server, now)
+				p.UseItems[i] = nil
+				equipChanged = true
+			}
+		}
+		if equipChanged {
+			p.RecalcAbilitys()
+			p.updateAppearance()
+			p.SendUseItemsFull(server)
 		}
 	}
 
+	// 背包：Delphi ScatterBagItems（ObjBase.pas:26648-26698）——
+	// 红名（PKLevel>=2 且 boDieRedScatterBagAll）全掉，否则每件 1/3；
+	// 特效码 171（m_boNoDropItem）或地图 NODROPITEM 不掉背包。
+	if p.HasNoDropItem || p.envir.Flag.NoDropItem {
+		return
+	}
+	dropAll := p.PKLevel() >= 2
 	var remaining []*protocol.UserItem
 	for _, item := range p.ItemList {
-		if rand.Intn(cfg.GetDropBagRate()) == 0 {
+		var def *ItemDef
+		if p.ItemDB != nil {
+			def = p.ItemDB.GetByIdx(int(item.WIndex))
+		}
+		if def != nil && def.Reserved&8 != 0 {
+			continue // 死亡销毁
+		}
+		if def != nil && def.Reserved&10 != 0 {
+			remaining = append(remaining, item)
+			continue // 死亡保护
+		}
+		if dropAll || rand.Intn(cfg.GetDropBagRate()) == 0 {
 			p.dropItemToGround(item, server, now)
 		} else {
 			remaining = append(remaining, item)
 		}
 	}
 	p.ItemList = remaining
-
-	if equipChanged {
-		p.RecalcAbilitys()
-		p.updateAppearance()
-		p.SendUseItemsFull(server)
+	if len(remaining) == 0 {
+		p.ItemList = nil
 	}
 }
 
@@ -1835,6 +2037,19 @@ func (p *PlayObject) dropItemToGround(item *protocol.UserItem, server *netserver
 		if def := p.ItemDB.GetByIdx(int(item.WIndex)); def != nil {
 			name = def.Name
 			looks = int(def.Looks)
+			// Delphi DropItemDown（ObjBase.pas:1597-1603）：肉落地扣 2000 耐久。
+			if def.StdMode == 40 {
+				if int(item.Dura) > 2000 {
+					item.Dura -= 2000
+				} else {
+					item.Dura = 0
+				}
+			}
+			// 矿石随机外观（ObjBase.pas:1608-1611 GetRandomLook；
+			// Delphi 源码 StdMode=45，GEEM2 库矿石为 43，两者均适用）。
+			if (def.StdMode == 43 || def.StdMode == 45) && def.Shape > 0 {
+				looks += rand.Intn(int(def.Shape))
+			}
 		}
 	}
 	dropX := p.CurrX + rand.Intn(3) - 1
@@ -1852,7 +2067,10 @@ func (p *PlayObject) dropItemToGround(item *protocol.UserItem, server *netserver
 		DropTick: now,
 		UserItem: item,
 	}
-	p.envir.AddGroundItem(gi)
+	// 每格满 5 件拒绝落地（Delphi 同样丢失该物品）。
+	if p.envir.AddGroundItem(gi) == nil {
+		return
+	}
 	resp := protocol.MakeDefaultMsg(protocol.SMItemShow, gi.ID, uint16(gi.X), uint16(gi.Y), uint16(gi.Looks))
 	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, p.ViewRange)
 	for _, obj := range objs {
@@ -1907,8 +2125,29 @@ func recallAllowed(env *Environment) bool {
 	return env == nil || !env.Flag.NoRecall
 }
 
+// incGold 增加金币（Delphi IncGold，ObjBase.pas:1978-1987）：
+// 超过上限整体拒收（无部分收取），返回是否成功。
+func (p *PlayObject) incGold(amount int) bool {
+	if amount <= 0 {
+		return true
+	}
+	maxGold := 10000000
+	if p.Engine != nil {
+		maxGold = p.Engine.Config.GetMaxGold()
+	}
+	if p.Gold+amount > maxGold {
+		return false
+	}
+	p.Gold += amount
+	return true
+}
+
 func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) {
 	if p.envir == nil {
+		return
+	}
+	// Delphi（ObjBase.pas:1695）：交易中禁止拾取。
+	if p.Deal != nil {
 		return
 	}
 	var item *GroundItem
@@ -1942,7 +2181,11 @@ func (p *PlayObject) HandlePickup(msg SendMessage, server *netserver.TCPServer) 
 	}
 
 	if item.Gold > 0 {
-		p.Gold += item.Gold
+		// 超上限整堆拒收不拆分（Delphi ObjBase.pas:1712/1727-1728）。
+		if !p.incGold(item.Gold) {
+			p.sysMsg(server, "金币已达到上限")
+			return
+		}
 		resp := protocol.MakeDefaultMsg(protocol.SMGoldChanged, int32(p.Gold), 0, 0, 0)
 		server.Send(p.Session.ID, resp, "")
 		log.Logf(log.LevelInfo, "PlayObject", "%s picked up %d gold (total: %d)", p.Name, item.Gold, p.Gold)
@@ -2315,6 +2558,13 @@ func (p *PlayObject) encodeAbilityBody() string {
 	// HitSpeed（Delphi m_nHitSpeed，装备攻速修正，可为负）追加在 offset 60。
 	// 旧客户端只读前 60 字节，向后兼容；新客户端 ParseAbility 按需读取。
 	putU16(uint16(int16(p.HitSpeed)))
+	// offset 62 起：抗性/恢复五属性（Delphi SM_SUBABILITY 承载，
+	// Go 闭环并入 SMAbility body；客户端镜像见 GameState.ParseAbility）。
+	putU16(uint16(p.AntiMagic))
+	putU16(uint16(p.AntiPoison))
+	putU16(uint16(p.PoisonRecover))
+	putU16(uint16(p.HealthRecover))
+	putU16(uint16(p.SpellRecover))
 	return protocol.EncodeBuffer(buf)
 }
 
@@ -2334,9 +2584,10 @@ func (p *PlayObject) sendWeightChanged(server *netserver.TCPServer) {
 // encodeStdItemsBody 序列化物品定义数据库。布局：count u16，
 // 每个物品：Idx u16, Looks u16, StdMode/Shape/Weight/NeedLevel u8×4,
 // AC/ACMax/MAC/MACMax/DC/DCMax/MC/MCMax/SC/SCMax u16×10, Price u32,
+// Source u16(int16 位模式), Reserved/Need/AniCount u8×3,
 // NameLen u8 + Name (UTF-8)。客户端镜像见 GameState.ParseItemDefs。
 func encodeStdItemsBody(items []ItemDef) string {
-	buf := make([]byte, 2, 2+len(items)*40)
+	buf := make([]byte, 2, 2+len(items)*45)
 	binary.LittleEndian.PutUint16(buf, uint16(len(items)))
 	var tmp [4]byte
 	for i := range items {
@@ -2345,7 +2596,9 @@ func encodeStdItemsBody(items []ItemDef) string {
 		buf = append(buf, tmp[:2]...)
 		binary.LittleEndian.PutUint16(tmp[:2], def.Looks)
 		buf = append(buf, tmp[:2]...)
-		buf = append(buf, def.StdMode, def.Shape, def.Weight, def.NeedLevel)
+		// NeedLevel 线上仅传低字节（Go 物品库线格式；打包双条件分支
+		// 10-13/40-44 等仅服务端穿装备校验使用，客户端只显示等级需求）。
+		buf = append(buf, def.StdMode, def.Shape, def.Weight, byte(def.NeedLevel))
 		for _, v := range []uint16{
 			uint16(def.AC), uint16(def.ACMax), uint16(def.MAC), uint16(def.MACMax),
 			uint16(def.DC), uint16(def.DCMax), uint16(def.MC), uint16(def.MCMax),
@@ -2356,6 +2609,11 @@ func encodeStdItemsBody(items []ItemDef) string {
 		}
 		binary.LittleEndian.PutUint32(tmp[:4], def.Price)
 		buf = append(buf, tmp[:4]...)
+		// tooltip 需要 Source（强度/神圣/幸运诅咒显示）、Reserved
+		//（(*) 前缀）与 Need（需求行）。
+		binary.LittleEndian.PutUint16(tmp[:2], uint16(def.Source))
+		buf = append(buf, tmp[:2]...)
+		buf = append(buf, byte(def.Reserved), def.Need, def.AniCount)
 		name := []byte(def.Name)
 		if len(name) > 255 {
 			name = name[:255]

@@ -411,10 +411,14 @@ func (e *UserEngine) ProcessMonsters(server *netserver.TCPServer, now int64) {
 	e.despawnGroundItems(server, now)
 }
 
-const groundItemDespawnMs = 180000  // 3 分钟
 const pickupProtectMs = 120000     // 拾取保护 2 分钟
 
 func (e *UserEngine) despawnGroundItems(server *netserver.TCPServer, now int64) {
+	// Delphi dwClearDropOnFloorItemTime=1 小时（M2Share.pas:1797），可配置。
+	despawnMs := int64(3600000)
+	if e.Config != nil {
+		despawnMs = e.Config.GetGroundItemDespawnMs()
+	}
 	e.mapMgr.mu.RLock()
 	defer e.mapMgr.mu.RUnlock()
 	for _, env := range e.mapMgr.maps {
@@ -424,7 +428,7 @@ func (e *UserEngine) despawnGroundItems(server *netserver.TCPServer, now int64) 
 			if item.OwnerID != 0 && now-item.OwnerTick > pickupProtectMs {
 				item.OwnerID = 0
 			}
-			if now-item.DropTick > groundItemDespawnMs {
+			if now-item.DropTick > despawnMs {
 				env.RemoveGroundItem(item.ID)
 				resp := protocol.MakeDefaultMsg(protocol.SMItemHide, item.ID, 0, 0, 0)
 				objs := env.GetRangeObjects(item.X, item.Y, viewRange)
@@ -485,6 +489,7 @@ func (e *UserEngine) SpawnMonster(entry *MonGenEntry, server *netserver.TCPServe
 	mon.HomeY = entry.Y
 	mon.envir = env
 	e.initMonsterFromDef(mon, def, now)
+	initMeatQuality(mon)
 
 	env.AddObject(x, y, OS_MOVINGOBJECT, mon)
 	e.Monsters = append(e.Monsters, mon)

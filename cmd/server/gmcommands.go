@@ -55,6 +55,28 @@ func (p *PlayObject) HandleGMCommand(cmd string, server *netserver.TCPServer) bo
 	case "masterrecall":
 		p.MasterRecall(server)
 		return true
+	// 仓库密码（Delphi g_GameCommand UNLOCKSTORAGE 族，ObjBase.pas:7229-7323）
+	case "setstoragepwd":
+		if len(parts) >= 2 {
+			p.setStoragePassword(server, parts[1])
+		} else {
+			p.sysMsg(server, "用法: @setstoragepwd 密码(4-7位)")
+		}
+		return true
+	case "chgstoragepwd":
+		if len(parts) >= 3 {
+			p.changeStoragePassword(server, parts[1], parts[2])
+		} else {
+			p.sysMsg(server, "用法: @chgstoragepwd 旧密码 新密码")
+		}
+		return true
+	case "unlockstorage":
+		if len(parts) >= 2 {
+			p.unlockStorage(server, parts[1])
+		} else {
+			p.sysMsg(server, "用法: @unlockstorage 密码")
+		}
+		return true
 	case "nomob":
 		now := time.Now().UnixMilli()
 		p.Engine.NoMonGen = !p.Engine.NoMonGen

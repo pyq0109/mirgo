@@ -9,9 +9,11 @@ import (
 // newTestItemDB 构造最小物品库（单测用）。
 func newTestItemDB(defs ...ItemDef) *ItemDB {
 	db := &ItemDB{
-		Items:  defs,
-		byName: make(map[string]*ItemDef),
-		byIdx:  make(map[int]*ItemDef),
+		Items:          defs,
+		byName:         make(map[string]*ItemDef),
+		byIdx:          make(map[int]*ItemDef),
+		UnbindList:     make(map[int]string),
+		DisableTakeOff: make(map[int]bool),
 	}
 	for i := range db.Items {
 		item := &db.Items[i]

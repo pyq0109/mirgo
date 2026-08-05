@@ -480,7 +480,10 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		if len(parts) >= 3 {
 			count, _ = strconv.Atoi(parts[2])
 		}
-		return p.countItem(itemName) >= count
+		// Delphi QuestCheckItem（ObjBase.pas:24539）：清点并记录命中
+		// 实例供 TAKECHECKITEM 收取。
+		n, _ := p.questCheckItem(itemName)
+		return n >= count
 	case "CHECKBAGGAGE":
 		return len(p.ItemList) < p.Engine.Config.GetMaxBagSlots()
 	case "CHECKHP":
@@ -662,38 +665,25 @@ func (s *NpcScript) evalOneCondition(cond string, p *PlayObject) bool {
 		}
 		itemName := parts[1]
 		val, _ := strconv.Atoi(parts[2])
-		if p.ItemDB == nil {
+		// Delphi 同样经 QuestCheckItem：记录命中实例供 TAKECHECKITEM。
+		// 注：Delphi 原版按 Round(Dura/1000) 比较（ObjNpc.pas:7090），
+		// Go 沿用既有脚本约定的原始值比较，不做换算。
+		n, best := p.questCheckItem(itemName)
+		if n == 0 || best == nil {
 			return false
 		}
-		def := p.ItemDB.GetByName(itemName)
-		if def == nil {
-			return false
-		}
-		for _, item := range p.ItemList {
-			if item != nil && int(item.WIndex) == def.Idx {
-				return int(item.Dura) >= val
-			}
-		}
-		return false
+		return int(best.Dura) >= val
 	case "CHECKDURAMAX":
 		if len(parts) < 3 {
 			return true
 		}
 		itemName := parts[1]
 		val, _ := strconv.Atoi(parts[2])
-		if p.ItemDB == nil {
+		n, best := p.questCheckItem(itemName)
+		if n == 0 || best == nil {
 			return false
 		}
-		def := p.ItemDB.GetByName(itemName)
-		if def == nil {
-			return false
-		}
-		for _, item := range p.ItemList {
-			if item != nil && int(item.WIndex) == def.Idx {
-				return int(item.DuraMax) >= val
-			}
-		}
-		return false
+		return int(best.DuraMax) >= val
 	case "CHECKGAMEGOLD":
 		val, op := parseConditionValue(parts)
 		return compareOp(p.Gold, op, val)
@@ -1923,11 +1913,24 @@ func (s *NpcScript) execOneAction(act string, p *PlayObject, npc *NpcObject, ser
 		}
 		p.clearNameList(parts[1])
 	case "TAKECHECKITEM":
-		// 收取上次 CHECKITEM 检查的物品（简化：不做操作）
+		// 收取 CHECKITEM/CHECKDURA 记录的物品实例
+		//（Delphi QuestTakeCheckItem，ObjBase.pas:24588-24619）。
+		p.questTakeCheckItem(server)
 	case "PARAM1", "PARAM2", "PARAM3", "PARAM4":
-		// 临时参数（简化：不做操作）
+		// Delphi nSC_PARAM1..4（ObjNpc.pas:7808-7827）：暂存数值/字符串
+		// 参数供后续动作使用。Go 动作均为内联参数，此处仅保存状态。
+		idx := int(parts[0][len(parts[0])-1] - '1')
+		if idx >= 0 && idx < 4 {
+			if len(parts) >= 2 {
+				if v, err := strconv.Atoi(parts[1]); err == nil {
+					p.ScriptParamN[idx] = v
+				}
+				p.ScriptParamS[idx] = parts[1]
+			}
+		}
 	case "EXEACTION":
-		// 执行外部动作（简化：不做操作）
+		// Delphi nSC_EXEACTION：用 PARAM 暂存参数执行组合动作。
+		// Go 无对应组合动作体系，留空实现。
 	case "UPGRADEITEMS", "UPGRADEITEMSEX":
 		// Delphi: 随机强化当前装备武器 (ItmUnit.pas:179-226)
 		weapon := p.UseItems[protocol.UWeapon]

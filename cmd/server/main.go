@@ -97,6 +97,9 @@ func main() {
 	if err != nil {
 		log.Logf(log.LevelWarn, "Server", "failed to load ItemDB: %v (item system disabled)", err)
 		itemDB = nil
+	} else {
+		itemDB.LoadUnbindList(filepath.Join(*configDir, "items", "unbind_list.jsonc"))
+		itemDB.LoadDisableTakeOffList(filepath.Join(*configDir, "items", "disable_takeoff_list.jsonc"))
 	}
 
 	var magicDB *MagicDB
@@ -328,6 +331,8 @@ func main() {
 				ReNewLevel      int             `json:"reNewLevel"`
 				AttackMode      int             `json:"attackMode"`
 				AllowGroup      bool            `json:"allowGroup"`
+				HungerStatus    int             `json:"hungerStatus"`
+				StoragePassword string          `json:"storagePassword,omitempty"`
 				StatusTimeArr   [12]int16       `json:"statusTimeArr"`
 				Magics          []PlayerMagic   `json:"magics"`
 				Storage         []savedUserItem `json:"storage"`
@@ -349,6 +354,12 @@ func main() {
 				player.ReNewLevel = meta.ReNewLevel
 				player.AttackMode = byte(meta.AttackMode)
 				player.AllowGroup = meta.AllowGroup
+				player.HungerStatus = meta.HungerStatus
+				player.StoragePassword = meta.StoragePassword
+				// Delphi（UsrEngn.pas:2342-2344）：设过密码的仓库登录即上锁。
+				if meta.StoragePassword != "" {
+					player.StoragePwdLocked = true
+				}
 				// Delphi wStatusTimeArr 持久化：恢复毒/隐身等残留状态
 				player.StatusTimeArr = meta.StatusTimeArr
 				if meta.StatusTimeArr[STATE_TRANSPARENT] > 0 {
@@ -382,6 +393,7 @@ func main() {
 						WIndex:    it.WIndex,
 						Dura:      it.Dura,
 						DuraMax:   it.DuraMax,
+						BtValue:   it.BtValue,
 					})
 				}
 			}
@@ -1127,9 +1139,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 		player.SendDayChanging(server)
 		player.SendMapDescription(server)
 		player.SendAreaState(server)
-		// Delphi RefMyStatus（ObjBase.pas:6193-6196）：饥饿状态（Go 无饥饿系统恒 0）
-		statusResp := protocol.MakeDefaultMsg(protocol.SMMyStatus, 0, 0, 0, 0)
-		server.Send(player.Session.ID, statusResp, "")
+		// Delphi RefMyStatus（ObjBase.pas:6193-6196）：饥饿状态。
+		player.sendMyStatus(server)
 		player.SendSubAbility(server)
 		player.SendRefMsg(RM_TURN, player.Dir, player.CurrX, player.CurrY, player.Name)
 	case protocol.CMQueryBagItems:
@@ -1218,6 +1229,8 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		ReNewLevel      int             `json:"reNewLevel"`
 		AttackMode      int             `json:"attackMode"`
 		AllowGroup      bool            `json:"allowGroup"`
+		HungerStatus    int             `json:"hungerStatus"`
+		StoragePassword string          `json:"storagePassword,omitempty"`
 		StatusTimeArr   [12]int16       `json:"statusTimeArr"`
 		Magics          []PlayerMagic   `json:"magics"`
 		Storage         []savedUserItem `json:"storage"`
@@ -1237,6 +1250,8 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 		ReNewLevel:      player.ReNewLevel,
 		AttackMode:      int(player.AttackMode),
 		AllowGroup:      player.AllowGroup,
+		HungerStatus:    player.HungerStatus,
+		StoragePassword: player.StoragePassword,
 		StatusTimeArr:   player.StatusTimeArr,
 		Magics:          make([]PlayerMagic, 0, len(player.LearnedMagics)),
 		DearName:        player.DearName,
@@ -1259,6 +1274,7 @@ func saveCharacterData(db *storage.Database, player *PlayObject) {
 				WIndex:    item.WIndex,
 				Dura:      item.Dura,
 				DuraMax:   item.DuraMax,
+				BtValue:   item.BtValue,
 			})
 		}
 	}

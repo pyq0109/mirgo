@@ -377,16 +377,19 @@ func TestParseItemDefsAndRelink(t *testing.T) {
 		t.Errorf("Looks fallback = %d, want raw Idx 7", got)
 	}
 
-	// 构造一条记录：固定 32 字节 + 名称。
+	// 构造一条记录：固定 32 字节 + v2 扩展段 5 字节 + 名称。
 	raw := make([]byte, 2, 64)
 	binary.LittleEndian.PutUint16(raw, 1) // count
-	rec := make([]byte, 32)
+	rec := make([]byte, 37)
 	binary.LittleEndian.PutUint16(rec[0:2], 7)   // Idx
 	binary.LittleEndian.PutUint16(rec[2:4], 42)  // Looks
 	rec[4], rec[5], rec[6], rec[7] = 5, 1, 10, 2 // StdMode/Shape/Weight/NeedLevel
 	binary.LittleEndian.PutUint16(rec[16:18], 1) // DC
 	binary.LittleEndian.PutUint16(rec[18:20], 3) // DCMax
 	binary.LittleEndian.PutUint32(rec[28:32], 100) // Price
+	src := int16(-5)
+	binary.LittleEndian.PutUint16(rec[32:34], uint16(src)) // Source
+	rec[34], rec[35], rec[36] = 1, 1, 2                    // Reserved/Need/AniCount
 	raw = append(raw, rec...)
 	raw = append(raw, byte(len("WoodSword")))
 	raw = append(raw, "WoodSword"...)
@@ -400,6 +403,9 @@ func TestParseItemDefsAndRelink(t *testing.T) {
 	if def.Name != "WoodSword" || def.Looks != 42 || def.StdMode != 5 || def.NeedLevel != 2 ||
 		def.DC != 1 || def.DCMax != 3 || def.Price != 100 {
 		t.Errorf("def = %+v, fields mismatch", def)
+	}
+	if def.Source != -5 || def.Reserved != 1 || def.Need != 1 || def.AniCount != 2 {
+		t.Errorf("def ext = %+v, want Source=-5 Reserved=1 Need=1 AniCount=2", def)
 	}
 	// 已有背包物品已重新关联，现在通过 def 解析 Looks。
 	if gs.BagItems[0].Def != def {

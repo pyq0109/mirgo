@@ -257,14 +257,10 @@ func (o *NpcObject) RefillGoods(itemDB *ItemDB, engine *UserEngine) {
 			stock.Items = stock.Items[:cfg.MaxCount]
 		}
 
-		// Delphi ObjNpc.pas:798-823 CheckItemPrice：补货时价格 +10%
-		if ip, ok := o.PriceList[def.Idx]; ok {
-			newPrice := ip.Price * 11 / 10
-			if newPrice == ip.Price {
-				newPrice++
-			}
-			ip.Price = newPrice
-		} else {
+		// Delphi CheckItemPrice（ObjNpc.pas:798-823）：首次入表按
+		// StdItem.Price×1.1；已有条目计算 ×1.1 后不回写（原版
+		// 798-816 行 Exit 前未赋值），可观察行为即价格不再上涨。
+		if _, ok := o.PriceList[def.Idx]; !ok {
 			o.PriceList[def.Idx] = &ItemPrice{ItemIdx: def.Idx, Price: int(def.Price) * 11 / 10}
 		}
 	}

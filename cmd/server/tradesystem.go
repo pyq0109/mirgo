@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"time"
 
 	"github.com/pyq0109/mirgo/internal/log"
 	"github.com/pyq0109/mirgo/internal/netserver"
@@ -17,11 +18,20 @@ func absInt(v int) int {
 	return v
 }
 
+// dealGoldMsg 构造改金币回包（Delphi MakeLong 语义）：Recog=交易金币，
+// Param/Tag=Lo/Hi(钱包金币)，客户端按 Param|Tag<<16 组装 32 位
+//（ClMain.pas:4819/4824）。失败回包也必须携带当前值，否则客户端
+// 会把金币显示清零。
+func dealGoldMsg(ident uint16, dealGold, walletGold int) protocol.DefaultMessage {
+	return protocol.MakeDefaultMsg(ident, int32(dealGold), uint16(walletGold), uint16(uint32(walletGold)>>16), 0)
+}
+
 type DealState struct {
 	Partner   *PlayObject
 	Items     []*protocol.UserItem
 	Gold      int
-	Confirmed bool // CMDealEnd 后锁定，直到交易完成
+	Confirmed bool  // CMDealEnd 后锁定，直到交易完成
+	LastActionTick int64 // 最近一次加/减物/改金时间（反连点用）
 }
 
 // encodeDealItem 将交易物品序列化为客户端格式（与客户端交易栏
@@ -39,8 +49,13 @@ func (p *PlayObject) HandleDealTry(msg SendMessage, server *netserver.TCPServer)
 	if p.Deal != nil || p.envir == nil {
 		return
 	}
-	// 目标：范围内的指定玩家，未指定名字时取最近的相邻玩家
-	//（Delphi 的正前方角色选择也被注释掉了；相邻是可用默认值）。
+	// Delphi（ObjBase.pas:17647-17697）：dwTryDealTime=3000ms 冷却。
+	now := time.Now().UnixMilli()
+	if now-p.tryDealTick < 3000 {
+		return
+	}
+	p.tryDealTick = now
+	// 目标：必须相邻（Delphi 面对面判定；Go 用曼哈顿距离 ≤1 等价）。
 	var target *PlayObject
 	targetName := msg.Msg
 	objs := p.envir.GetRangeObjects(p.CurrX, p.CurrY, viewRange)
@@ -50,6 +65,10 @@ func (p *PlayObject) HandleDealTry(msg SendMessage, server *netserver.TCPServer)
 		if !ok || other.ID == p.ID || other.Deal != nil {
 			continue
 		}
+		d := absInt(other.CurrX-p.CurrX) + absInt(other.CurrY-p.CurrY)
+		if d > 1 {
+			continue
+		}
 		if targetName != "" {
 			if other.Name == targetName {
 				target = other
@@ -57,7 +76,6 @@ func (p *PlayObject) HandleDealTry(msg SendMessage, server *netserver.TCPServer)
 			}
 			continue
 		}
-		d := absInt(other.CurrX-p.CurrX) + absInt(other.CurrY-p.CurrY)
 		if d < bestDist {
 			bestDist = d
 			target = other
@@ -93,6 +111,7 @@ func (p *PlayObject) HandleDealAddItem(msg SendMessage, server *netserver.TCPSer
 	item := p.ItemList[bagIdx]
 	p.ItemList = append(p.ItemList[:bagIdx], p.ItemList[bagIdx+1:]...)
 	p.Deal.Items = append(p.Deal.Items, item)
+	p.Deal.LastActionTick = time.Now().UnixMilli()
 	// 本方客户端：确认消息携带物品信息以便放入交易栏；
 	// 背包另行同步。
 	resp := protocol.MakeDefaultMsg(protocol.SMDealAddItemOK, int32(len(p.Deal.Items)-1), 0, 0, 0)
@@ -125,6 +144,7 @@ func (p *PlayObject) HandleDealDelItem(msg SendMessage, server *netserver.TCPSer
 	item := p.Deal.Items[idx]
 	p.Deal.Items = append(p.Deal.Items[:idx], p.Deal.Items[idx+1:]...)
 	p.ItemList = append(p.ItemList, item)
+	p.Deal.LastActionTick = time.Now().UnixMilli()
 	resp := protocol.MakeDefaultMsg(protocol.SMDealDelItemOK, makeIndex, 0, 0, 0)
 	server.Send(p.Session.ID, resp, encodeDealItem(item))
 	p.SendBagItemsFull(server)
@@ -143,15 +163,15 @@ func (p *PlayObject) HandleDealChgGold(msg SendMessage, server *netserver.TCPSer
 		return
 	}
 	if p.Gold+p.Deal.Gold < gold {
-		resp := protocol.MakeDefaultMsg(protocol.SMDealChgGoldFail, 0, 0, 0, 0)
-		server.Send(p.Session.ID, resp, "")
+		// Delphi（ClMain:4824）：失败回包携带当前交易金币与钱包金币，
+		// 客户端按 MakeLong(Param,Tag) 恢复显示。发全 0 会把客户端金币清零。
+		server.Send(p.Session.ID, dealGoldMsg(protocol.SMDealChgGoldFail, p.Deal.Gold, p.Gold), "")
 		return
 	}
 	p.Gold = p.Gold + p.Deal.Gold - gold
 	p.Deal.Gold = gold
-	// Recog = 交易金币，Param = 剩余钱包金币。
-	resp := protocol.MakeDefaultMsg(protocol.SMDealChgGoldOK, int32(gold), uint16(p.Gold), 0, 0)
-	server.Send(p.Session.ID, resp, "")
+	p.Deal.LastActionTick = time.Now().UnixMilli()
+	server.Send(p.Session.ID, dealGoldMsg(protocol.SMDealChgGoldOK, gold, p.Gold), "")
 	remoteResp := protocol.MakeDefaultMsg(protocol.SMDealRemoteChgGold, int32(gold), 0, 0, 0)
 	server.Send(p.Deal.Partner.Session.ID, remoteResp, "")
 }
@@ -165,9 +185,28 @@ func (p *PlayObject) HandleDealEnd(server *netserver.TCPServer) {
 	if partner.Deal == nil || !partner.Deal.Confirmed {
 		return
 	}
+	// Delphi（ObjBase.pas:17844-17849）：双方确认前最近交易动作
+	// 间隔 <1000ms 判连点作弊，直接取消。
+	now := time.Now().UnixMilli()
+	if now-p.Deal.LastActionTick < 1000 || now-partner.Deal.LastActionTick < 1000 {
+		p.sysMsg(server, "交易确认过快，已取消")
+		p.CancelDeal(server)
+		return
+	}
 	maxBag := p.Engine.Config.GetMaxBagSlots()
 	if len(p.ItemList)+len(partner.Deal.Items) > maxBag ||
 		len(partner.ItemList)+len(p.Deal.Items) > maxBag {
+		p.CancelDeal(server)
+		return
+	}
+	// Delphi（ObjBase.pas:17858/17868）：金币上限双向校验。
+	maxGold := p.Engine.Config.GetMaxGold()
+	if p.Gold+partner.Deal.Gold > maxGold {
+		p.sysMsg(server, "金币已达到上限")
+		p.CancelDeal(server)
+		return
+	}
+	if partner.Gold+p.Deal.Gold > maxGold {
 		p.CancelDeal(server)
 		return
 	}

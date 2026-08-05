@@ -78,11 +78,24 @@ func createDropItem(itemDB *ItemDB, name string, nextItemID *int32, cfg *ServerC
 	if itemDB != nil {
 		if def := itemDB.GetByName(name); def != nil {
 			looks = int(def.Looks)
+			// 矿石随机外观（Delphi DropItemDown，ObjBase.pas:1608-1611；
+			// 源码 StdMode=45，GEEM2 库矿石为 43，两者均适用）。
+			if (def.StdMode == 43 || def.StdMode == 45) && def.Shape > 0 {
+				looks += rand.Intn(int(def.Shape))
+			}
 			ui = itemDB.CreateUserItem(def.Idx)
 			if ui != nil {
 				// 装备类随机耐久（Delphi: MonGetRandomItems, UsrEngn.pas:1576）
 				if def.StdMode >= 5 && ui.DuraMax > 0 {
 					ui.Dura = uint16(int(ui.DuraMax) * (cfg.GetEquipDuraMin() + rand.Intn(cfg.GetEquipDuraRand())) / 100)
+				}
+				// 肉落地扣 2000 耐久（ObjBase.pas:1597-1603）。
+				if def.StdMode == 40 {
+					if int(ui.Dura) > 2000 {
+						ui.Dura -= 2000
+					} else {
+						ui.Dura = 0
+					}
 				}
 				// 随机附加属性（Delphi: nMonRandomAddValue）
 				if def.StdMode >= 5 && rand.Intn(cfg.GetAddValueChance()) == 0 {
@@ -125,8 +138,10 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 				OwnerTick: now,
 			}
 			*nextItemID++
-			envir.AddGroundItem(item)
-			dropped = append(dropped, item)
+			// 可能与已有金堆合并（返回已有堆）；合并/拒绝时跳过广播重复堆。
+			if placed := envir.AddGroundItem(item); placed == item {
+				dropped = append(dropped, item)
+			}
 		}
 	}
 
@@ -145,8 +160,10 @@ func (m *MonsterObject) DropLootWithTable(envir *Environment, nextItemID *int32,
 			OwnerTick: now,
 		}
 		*nextItemID++
-		envir.AddGroundItem(gi)
-		dropped = append(dropped, gi)
+		// 每格满 5 件时拒绝落地（Delphi 同样丢弃该物品）。
+		if envir.AddGroundItem(gi) != nil {
+			dropped = append(dropped, gi)
+		}
 	}
 
 	if dt != nil {

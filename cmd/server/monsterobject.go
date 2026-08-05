@@ -32,6 +32,10 @@ type MonsterObject struct {
 	LootDropped    bool
 	lastSummonTick int64
 
+	// 可屠宰动物的肉质（Delphi m_nMeatQuality/m_nBodyLeathery，
+	// UsrEngn.pas:1839-1862）。
+	MeatQuality int
+
 	LastHiterID   int32
 	LastHiterTick int64
 	FocusTick     int64
@@ -828,6 +832,7 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 		if target.HasRevival {
 			target.HasRevival = false
 			target.WAbil.HP = target.WAbil.MaxHP / 2
+			target.damageRevivalRings(server)
 			target.sendHealthSpell(server)
 			return
 		}
@@ -836,7 +841,8 @@ func (o *MonsterObject) applyMonsterDamageToPlayer(server *netserver.TCPServer, 
 		if o.envir != nil {
 			o.envir.broadcastDeathMsg(target.BaseObject, target.ID, target.CurrX, target.CurrY, target.Dir, true)
 		}
-		target.DropDeathItems(server)
+		// 被怪物击杀：掉装备（Delphi boKillByMonstDropUseItem=True）。
+		target.DropDeathItems(server, true)
 		log.Logf(log.LevelInfo, "Combat", "%s killed %s", o.Name, target.Name)
 	} else {
 		target.sendHealthSpell(server)

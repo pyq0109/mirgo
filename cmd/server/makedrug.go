@@ -63,12 +63,12 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 	name := strings.TrimSpace(msg.Msg)
 	def := p.ItemDB.GetByName(name)
 	if def == nil {
-		p.sendMakeDrugFail(server)
+		p.sendMakeDrugFail(server, 1)
 		return
 	}
 
 	if len(p.ItemList) >= p.Engine.Config.GetMaxBagSlots() {
-		p.sendMakeDrugFail(server)
+		p.sendMakeDrugFail(server, 2)
 		return
 	}
 
@@ -77,7 +77,7 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 		// 无配方：金币模式
 		drugPrice := p.Engine.Config.GetDrugBasePrice()
 		if p.Gold < drugPrice {
-			p.sendMakeDrugFail(server)
+			p.sendMakeDrugFail(server, 3)
 			return
 		}
 		p.Gold -= drugPrice
@@ -91,12 +91,12 @@ func (p *PlayObject) HandleMakeDrugItem(msg SendMessage, server *netserver.TCPSe
 
 	// 有配方：检查材料
 	if p.Gold < recipe.GoldCost {
-		p.sendMakeDrugFail(server)
+		p.sendMakeDrugFail(server, 3)
 		return
 	}
 	for _, mat := range recipe.Materials {
 		if p.countBagItem(mat.Name) < mat.Count {
-			p.sendMakeDrugFail(server)
+			p.sendMakeDrugFail(server, 4)
 			return
 		}
 	}
@@ -146,11 +146,14 @@ func (p *PlayObject) removeBagItems(name string, count int) {
 }
 
 func (p *PlayObject) sendMakeDrugSuccess(server *netserver.TCPServer) {
-	resp := protocol.MakeDefaultMsg(protocol.SMMakeDrugSuccess, 0, 0, 0, 0)
+	// Delphi（ClMain.pas:4651-4656）：Recog=剩余金币。
+	resp := protocol.MakeDefaultMsg(protocol.SMMakeDrugSuccess, int32(p.Gold), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
 
-func (p *PlayObject) sendMakeDrugFail(server *netserver.TCPServer) {
-	resp := protocol.MakeDefaultMsg(protocol.SMMakeDrugFail, 0, 0, 0, 0)
+// sendMakeDrugFail Delphi 四档失败码（ClMain.pas:4657-4665）：
+// 1=研制失败 2=发生了错误 3=金币不足 4=缺乏必需物品。
+func (p *PlayObject) sendMakeDrugFail(server *netserver.TCPServer, code int) {
+	resp := protocol.MakeDefaultMsg(protocol.SMMakeDrugFail, int32(code), 0, 0, 0)
 	server.Send(p.Session.ID, resp, "")
 }
