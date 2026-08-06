@@ -14,6 +14,7 @@
 - [ ] ScenePlay 场景的 UI 问题: NPC 对话框
 - [ ] ScenePlay 场景的 UI 问题: 聊天框
 - [ ] ScenePlay 场景的 UI 问题: 右下角四个按钮
+- [ ] 进商店再出商店后, 场景渲染出错
 
 # server
 
