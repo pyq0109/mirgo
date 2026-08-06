@@ -8,16 +8,18 @@ import (
 // NoticeScene 是 stLoginNotice 公告场景。Delphi 的 TLoginNotice 场景本体
 // 是空壳（IntroScn.pas:1553-1561），公告内容由 ClientGetSendNotice 以
 // 模态对话框显示（DMessageDlg DialogSize:=2，ClMain.pas:5732-5749），
-// 用户点击 Ok 后才发送 CM_LOGINNOTICEOK。Go 在此场景中直接实现该模态。
+// 用户点击 Ok 后才发送 CM_LOGINNOTICEOK。Go 在此场景中用 UIManager
+// 控件树实现该模态，使 ui 调试命令在本场景同样可用。
 type NoticeScene struct {
 	gl        *engine.GLState
 	resources *engine.ResourceManager
 	text      *engine.TextRenderer
 
+	ui  *UIManager
+	dlg *UIControl // DMessageDlg 模态
+
 	noticeLines []string // 折行后的公告文本
 	hasNotice   bool
-	btnX, btnY  int // Ok 按钮绝对坐标（Render 时计算）
-	btnW, btnH  int
 	onConfirm   func()
 	confirmed   bool
 }
@@ -33,6 +35,9 @@ func (s *NoticeScene) SetNotice(msg string, onConfirm func()) {
 	s.hasNotice = true
 	s.confirmed = false
 	s.onConfirm = onConfirm
+	if s.ui != nil {
+		s.buildDlg()
+	}
 }
 
 func (s *NoticeScene) confirm() {
@@ -40,12 +45,20 @@ func (s *NoticeScene) confirm() {
 		return
 	}
 	s.confirmed = true
+	if s.ui != nil && s.dlg != nil {
+		s.ui.CloseModal(s.dlg)
+	}
 	if s.onConfirm != nil {
 		s.onConfirm()
 	}
 }
 
 func (s *NoticeScene) Open() {
+	s.ui = NewUIManager(s.gl, s.resources, s.text)
+	gActiveUI = s.ui
+	if s.hasNotice && s.dlg == nil {
+		s.buildDlg()
+	}
 	log.Logf(log.LevelInfo, "NoticeScene", "opened")
 }
 
@@ -54,6 +67,66 @@ func (s *NoticeScene) Close() {
 	s.hasNotice = false
 	s.confirmed = false
 	s.onConfirm = nil
+	s.dlg = nil
+	gActiveUI = nil
+}
+
+// buildDlg 构建 DMessageDlg 模态：Delphi DMessageDlg DialogSize:=2 →
+// DlgTall：背景 Prguse[380]，文本起点 (23,20)，Ok 按钮锚点 (105,305)
+//（FState.pas:2033,2010-2037,2060-2083）。
+func (s *NoticeScene) buildDlg() {
+	prg := s.resources.Prguse
+
+	win := NewUIControl("DMessageDlg", KindWindow)
+	win.Floating = true
+	if prg != nil {
+		win.SetImgIndex(prg, ImgModalTall)
+	} else {
+		win.Width, win.Height = 300, 340
+	}
+	win.Left = (ScreenWidth - win.Width) / 2
+	win.Top = (ScreenHeight - win.Height) / 2
+	win.OnDirectPaint = func(c *UIControl, proj [16]float32) {
+		if prg != nil {
+			s.ui.BlitImage(prg, ImgModalTall, c.AbsX(), c.AbsY(), proj)
+		}
+		if s.text == nil {
+			return
+		}
+		y := float32(c.AbsY()) + 20
+		for _, ln := range s.noticeLines {
+			s.text.DrawTextOutline(ln, float32(c.AbsX())+23, y, 1, 1, 1, 1, 0, 0, 0, 1, proj)
+			y += 14
+		}
+	}
+	win.OnKeyDown = func(c *UIControl, key int) {
+		if key == keyEnter || key == keyKPEnter {
+			s.confirm()
+		}
+	}
+
+	btn := NewUIControl("DMessageDlgBtn", KindButton)
+	if prg != nil {
+		btn.SetImgIndex(prg, ImgModalOk)
+	} else {
+		btn.Width, btn.Height = 66, 26
+	}
+	btn.Left = 105
+	btn.Top = 305
+	btn.OnDirectPaint = func(c *UIControl, proj [16]float32) {
+		idx := ImgModalOk
+		if c.Downed {
+			idx++ // 弹起/按下图片对惯例 (DWinCtl TDButton)
+		}
+		if prg != nil {
+			s.ui.BlitImage(prg, idx, c.AbsX(), c.AbsY(), proj)
+		}
+	}
+	btn.OnClick = func(c *UIControl, x, y int) { s.confirm() }
+	win.AddChild(btn)
+
+	s.dlg = win
+	s.ui.ShowModal(win)
 }
 
 func (s *NoticeScene) Update(dt float64) {}
@@ -61,63 +134,20 @@ func (s *NoticeScene) Update(dt float64) {}
 func (s *NoticeScene) Render(gl *engine.GLState, proj [16]float32) {
 	// 黑色底（过渡画面）
 	gl.DrawQuadColor(0, 0, float32(ScreenWidth), float32(ScreenHeight), 0, 0, 0, 1, proj)
-	if !s.hasNotice {
+	if s.ui == nil {
 		return
 	}
-
-	// Delphi DMessageDlg DialogSize:=2 → DlgTall：背景 Prguse[380]，
-	// 文本起点 (23,20)，Ok 按钮锚点 (105,305)（FState.pas:2033,2010-2037,2060-2083）。
-	winImg := ImgModalTall
-	winW, winH := 300, 340
-	if s.resources != nil && s.resources.Prguse != nil {
-		if img := s.resources.Prguse.GetImage(winImg); img != nil {
-			winW, winH = img.Width, img.Height
-		}
+	s.ui.Paint(proj)
+	if s.ui.ShowBounds {
+		s.ui.RenderDebugBounds(proj)
 	}
-	winX := (ScreenWidth - winW) / 2
-	winY := (ScreenHeight - winH) / 2
-	if s.resources != nil && s.resources.Prguse != nil {
-		s.blitPrguse(winImg, winX, winY, proj)
-	}
-	if s.text != nil {
-		y := winY + 20
-		for _, ln := range s.noticeLines {
-			s.text.DrawTextOutline(ln, float32(winX+23), float32(y),
-				1, 1, 1, 1, 0, 0, 0, 1, proj)
-			y += 14
-		}
-	}
-
-	// Ok 按钮（ImgModalOk=361）
-	btnW, btnH := 66, 26
-	if s.resources != nil && s.resources.Prguse != nil {
-		if img := s.resources.Prguse.GetImage(ImgModalOk); img != nil {
-			btnW, btnH = img.Width, img.Height
-		}
-	}
-	s.btnX = winX + 105
-	s.btnY = winY + 305
-	s.btnW, s.btnH = btnW, btnH
-	if s.resources != nil && s.resources.Prguse != nil {
-		s.blitPrguse(ImgModalOk, s.btnX, s.btnY, proj)
-	}
-}
-
-func (s *NoticeScene) blitPrguse(idx, x, y int, proj [16]float32) {
-	f := s.resources.Prguse
-	img := f.GetImage(idx)
-	if img == nil || img.RGBA == nil {
-		return
-	}
-	tex := s.resources.GetTexture(f, idx)
-	if tex == 0 {
-		return
-	}
-	s.gl.DrawQuad(tex, float32(x), float32(y), float32(img.Width), float32(img.Height), proj)
 }
 
 func (s *NoticeScene) OnKey(key int, action int) {
 	if action != 1 { // GLFW press
+		return
+	}
+	if s.ui != nil && s.ui.RouteKeyDown(key) {
 		return
 	}
 	if key == keyEnter || key == keyKPEnter {
@@ -126,12 +156,15 @@ func (s *NoticeScene) OnKey(key int, action int) {
 }
 
 func (s *NoticeScene) OnMouse(x, y float64, button int, action int, mods int) {
-	if !s.hasNotice || s.confirmed || action != 1 || button != 0 {
+	if s.ui == nil {
 		return
 	}
 	mx, my := int(x), int(y)
-	if mx >= s.btnX && mx < s.btnX+s.btnW && my >= s.btnY && my < s.btnY+s.btnH {
-		s.confirm()
+	switch action {
+	case 1: // GLFW press
+		s.ui.RouteMouseDown(mx, my, button)
+	case 0: // GLFW release
+		s.ui.RouteMouseUp(mx, my, button)
 	}
 }
 

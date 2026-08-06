@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"strings"
 	"time"
 
 	"github.com/pyq0109/mirgo/internal/engine"
@@ -134,11 +133,9 @@ func (s *SelectChrScene) Open() {
 	s.buildUI()
 	s.ui.Validate() // 建树后一次性审计布局一致性 (UIAudit 日志)
 	gActiveUI = s.ui
-	s.registerDebugCmds()
 }
 
 func (s *SelectChrScene) Close() {
-	s.unregisterDebugCmds()
 	gActiveUI = nil
 	gSound.SilenceSound()
 	log.Logf(log.LevelInfo, "SelectChrScene", "closed")
@@ -409,6 +406,9 @@ func (s *SelectChrScene) Render(gl *engine.GLState, proj [16]float32) {
 	s.syncUI()
 	if s.ui != nil {
 		s.ui.Paint(proj)
+		if s.ui.ShowBounds {
+			s.ui.RenderDebugBounds(proj)
+		}
 	}
 }
 
@@ -872,122 +872,4 @@ func (s *SelectChrScene) getPrguseSize(index int) (int, int) {
 		return 0, 0
 	}
 	return img.Width, img.Height
-}
-
-// ---------------------------------------------------------------------------
-// 调试命令
-// ---------------------------------------------------------------------------
-
-func (s *SelectChrScene) registerDebugCmds() {
-	dc := gDebug
-	if dc == nil {
-		return
-	}
-	dc.Register("cstate", "dump character select state", func(args []string) {
-		dc.Printf("selected=%d createMode=%v deleteConfirm=%v error=%q",
-			s.Selected, s.createMode, s.deleteConfirm, s.errorMsg)
-		for i := range s.Characters {
-			ch := &s.Characters[i]
-			if !ch.Valid {
-				dc.Printf("  slot%d: empty", i)
-				continue
-			}
-			dc.Printf("  slot%d: %s lv%d %s/%s freeze=%v unfrz=%v frz=%v ani=%d dark=%d",
-				i, ch.Name, ch.Level, jobNames[ch.Job],
-				map[byte]string{0: "M", 1: "F"}[ch.Sex],
-				ch.FreezeState, ch.Unfreezing, ch.Freezing, ch.AniIndex, ch.DarkLevel)
-		}
-		if s.createMode {
-			name := ""
-			if s.editName != nil {
-				name = s.editName.Text
-			}
-			dc.Printf("  create: name=%q job=%d sex=%d index=%d",
-				name, s.createJob, s.createSex, s.createIndex)
-		}
-		if s.ui != nil {
-			dc.Printf("  ui: focus=%s", debugCtlName(s.ui.Focused))
-		}
-	})
-	dc.Register("csel", "csel <0|1> — force select character slot", func(args []string) {
-		if len(args) == 0 {
-			dc.Printf("usage: csel <0|1>")
-			return
-		}
-		idx := 0
-		fmt.Sscanf(args[0], "%d", &idx)
-		if idx < 0 || idx > 1 {
-			dc.Printf("slot must be 0 or 1")
-			return
-		}
-		if !s.Characters[idx].Valid {
-			dc.Printf("slot %d is empty", idx)
-			return
-		}
-		s.selectChar(idx)
-		dc.Printf("selected slot %d: %s", idx, s.Characters[idx].Name)
-	})
-	dc.Register("ccreate", "ccreate [on|off] — toggle create dialog", func(args []string) {
-		if len(args) >= 1 {
-			switch strings.ToLower(args[0]) {
-			case "on":
-				s.createMode = true
-			case "off":
-				s.createMode = false
-			}
-		} else {
-			s.createMode = !s.createMode
-		}
-		if s.createMode {
-			s.createIndex = 0
-			if s.Characters[0].Valid {
-				s.createIndex = 1
-			}
-			s.createName = ""
-			s.createJob = 0
-			s.createSex = 0
-			if s.editName != nil {
-				s.editName.Clear()
-			}
-		}
-		dc.Printf("createMode=%v (index=%d)", s.createMode, s.createIndex)
-	})
-	dc.Register("cdel", "cdel [on|off] — toggle delete confirm", func(args []string) {
-		if len(args) >= 1 {
-			switch strings.ToLower(args[0]) {
-			case "on":
-				if s.Selected >= 0 && s.Characters[s.Selected].Valid {
-					s.deleteConfirm = true
-					s.deleteName = s.Characters[s.Selected].Name
-				} else {
-					dc.Printf("no valid character selected")
-					return
-				}
-			case "off":
-				s.deleteConfirm = false
-			}
-		} else {
-			if !s.deleteConfirm {
-				if s.Selected >= 0 && s.Characters[s.Selected].Valid {
-					s.deleteConfirm = true
-					s.deleteName = s.Characters[s.Selected].Name
-				} else {
-					dc.Printf("no valid character selected")
-					return
-				}
-			} else {
-				s.deleteConfirm = false
-			}
-		}
-		dc.Printf("deleteConfirm=%v name=%q", s.deleteConfirm, s.deleteName)
-	})
-}
-
-func (s *SelectChrScene) unregisterDebugCmds() {
-	if gDebug == nil {
-		return
-	}
-	for _, name := range []string{"cstate", "csel", "ccreate", "cdel"} {
-		gDebug.Unregister(name)
-	}
 }

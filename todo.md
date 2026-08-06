@@ -9,6 +9,7 @@
 - [ ] 小地图显示错误, 怪物红点和玩家白点不停闪烁
 - [x] 被攻击后的动画朝向问题
 - [x] 走路卡脚问题 (跑步会卡 1 秒左右?)
+- [x] 从 切换场景：PlayGame → SelectChr, 再从选角场景无法开始游戏
 - [ ] SceneSelectChr 场景的 UI 微调, 新建角色的名字输入框
 - [ ] NPC 购买物品功能
 - [ ] ScenePlay 场景的 UI 问题: NPC 对话框
@@ -46,4 +47,4 @@
 - [x] 封包拆包逻辑是否和 Delphi 完全一致
 - [x] doc 目录文档整理
 - [x] 恢复提交 go.sum（当前被 gitignore）
-
+- [ ] 检查 internal\protocol\message.go 与 Delphi 版是否完全一致, 不要有遗漏

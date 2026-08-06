@@ -269,13 +269,6 @@ type PlayScene struct {
 	events  *EventManager
 
 	dbg *DebugConsole // 全局调试控制台 (由 main.go 注入)
-
-	// PlayScene 专有的调试开关 (由控制台命令切换, 经 StatusExtra 汇报)
-	ShowGrid     bool
-	ShowLabel    bool
-	ShowPath     bool
-	DisableLight bool
-	DisableHPBar bool
 }
 
 func NewPlayScene(gl *engine.GLState, resources *engine.ResourceManager, mapDir string, dbg *DebugConsole) *PlayScene {
@@ -890,11 +883,6 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	// 地图渲染到全窗口；底栏上浮覆盖底部。
 	fbW, fbH := s.gl.ViewW, s.gl.ViewH
 	s.gl.SetViewport(0, 0, fbW, fbH)
-	if s.dbg.WireMode > 0 {
-		s.gl.WireBounds = s.gl.WireBounds[:0]
-		s.gl.WireRecording = true
-		s.gl.WireRecord = false
-	}
 	if verbose {
 		log.Logf(log.LevelInfo, "Render", "frame=%d fb=%dx%d viewport=(0,0,%d,%d) blend=SRC_ALPHA,ONE_MINUS_SRC_ALPHA",
 			s.renderFrame, fbW, fbH, fbW, fbH)
@@ -932,29 +920,12 @@ func (s *PlayScene) Render(glState *engine.GLState, proj [16]float32) {
 	}
 
 	// 光照/迷雾：死亡时跳过（Delphi PlayScn.pas:1032-1034）。
-	if s.lighting != nil && !s.deathGray && !s.DisableLight {
+	if s.lighting != nil && !s.deathGray {
 		darkness := s.calcDarkness()
 		if darkness > 0.01 {
 			lights := s.collectLightSources()
 			s.lighting.Render(proj, s.cam.X, s.cam.Y, s.cam.ViewW, s.cam.ViewH, s.cam.Zoom, darkness, lights)
 		}
-	}
-
-	if s.dbg.WireMode > 0 {
-		s.gl.WireRecording = false
-		s.updateHover()
-		s.renderWireframes(proj)
-		s.renderHoverInfo(proj)
-		s.dbg.wireHandled = true
-	}
-	if s.ShowGrid {
-		s.renderDebugGrid(proj)
-	}
-	if s.ShowLabel {
-		s.renderDebugInfo(proj)
-	}
-	if s.ShowPath {
-		s.renderDebugPath(proj)
 	}
 
 	// UI 层使用完整窗口逻辑视口。
@@ -1040,11 +1011,7 @@ func (s *PlayScene) renderWorld(proj [16]float32) {
 		}
 	}
 
-	if s.dbg.WireMode > 0 {
-		s.gl.WireRecord = true
-	}
 	s.renderFrontWithActors(fStartX, fStartY, fEndX, fEndY, proj)
-	s.gl.WireCategory = 3
 	// 晚层特效（爆炸类，Delphi m_EffectList.DrawEff，PlayScn.pas:1328-1335）。
 	s.effects.Render(s.gl, s.resources, proj)
 
@@ -1061,7 +1028,6 @@ func (s *PlayScene) renderWorld(proj [16]float32) {
 func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, proj [16]float32) {
 	// 阶段 A：先绘制 48×32 地面层前景物件——它们始终在所有角色后面
 	// （PlayScn.pas:1064-1108）。
-	s.gl.WireCategory = 1
 	for y := fStartY; y <= fEndY; y++ {
 		for x := fStartX; x <= fEndX; x++ {
 			info := s.mapData.InfoAt(x, y)
@@ -1079,7 +1045,6 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 	actorIdx := 0
 
 	for y := fStartY; y <= fEndY; y++ {
-		s.gl.WireCategory = 1
 		for x := fStartX; x <= fEndX; x++ {
 			info := s.mapData.InfoAt(x, y)
 			s.drawFrontLarge(info, x, y, proj)
@@ -1087,14 +1052,12 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 
 		s.events.RenderRow(s.gl, s.resources, proj, y)
 
-		s.gl.WireCategory = 4
 		for _, gi := range s.groundItems {
 			if gi.Y == y && gi.X >= fStartX && gi.X <= fEndX {
 				s.drawGroundItemIcon(gi, proj)
 			}
 		}
 
-		s.gl.WireCategory = 2
 		for actorIdx < len(actors) && actors[actorIdx].Ry <= y {
 			a := actors[actorIdx]
 			worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
@@ -1110,7 +1073,6 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 		s.effects.RenderFlyRow(s.gl, s.resources, proj, y)
 	}
 
-	s.gl.WireCategory = 2
 	for ; actorIdx < len(actors); actorIdx++ {
 		a := actors[actorIdx]
 		worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
@@ -1121,7 +1083,6 @@ func (s *PlayScene) renderFrontWithActors(fStartX, fStartY, fEndX, fEndY int, pr
 	}
 
 	// NPC 特效覆盖层（Delphi PlayScn.pas:1321-1326 DrawEff pass）
-	s.gl.WireCategory = 2
 	for _, a := range actors {
 		if a.Type == ActorNPC && a.NpcUseEffect {
 			worldX := float32(float64(a.Rx*engine.TileWidth) + a.ShiftX)
@@ -1289,7 +1250,7 @@ func (s *PlayScene) drawActorLabel(a *Actor, worldX, worldY float32, proj [16]fl
 	// 所有可见角色的血条（DrawScrn.pas:280-301），位于 SayY - 10。
 	// 注意：十周年版 Prguse2.wil 的 index 0/1 不是 HP 条图像（80x51 散布暗像素），
 	// 因此直接使用彩色矩形绘制，不使用 Prguse2 纹理。
-	if !a.Death && !s.DisableHPBar && a.Type != ActorNPC {
+	if !a.Death && a.Type != ActorNPC {
 		hpBarY := sayY - 10
 		s.gl.DrawQuadColor(worldX+4, hpBarY, 40, 4, 0.1, 0.0, 0.0, 0.8, proj)
 		ratio := float32(1.0)
@@ -2144,17 +2105,7 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		return
 	}
 	if s.ui.RouteMouseDown(ix, iy, button) {
-		if debugClickLog {
-			if hit := s.ui.DebugHitTest(ix, iy); hit != "" {
-				clickLogf("[click] UI consumed (%d,%d): %s", ix, iy, strings.Split(hit, "\n")[0])
-			}
-		}
 		return
-	}
-	if button == 0 && s.dbg.WireMode > 0 {
-		if s.clickInspect(x, y) {
-			return
-		}
 	}
 	if y >= MapSurfaceH {
 		return
@@ -2232,7 +2183,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			if target != nil {
 				// NPC 对话（ClMain:2292-2298）：商人 + 静止 1.5 秒
 				if target.Type == ActorNPC || target.Race == 50 {
-					clickLogf("[click] NPC #%d %q tile=(%d,%d)", target.RecogID, target.UserName, tx, ty)
 					if now-s.lastMoveActionTick > 1500 && s.sendNpcClick != nil {
 						s.sendNpcClick(int(target.RecogID))
 					}
@@ -2240,7 +2190,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 				}
 
 				if !target.Death && !my.OnHorse {
-					clickLogf("[click] attack type=%d #%d %q tile=(%d,%d)", target.Type, target.RecogID, target.UserName, tx, ty)
 					s.targetCret = target
 					if s.shouldAttack(target) {
 						s.attackTarget(target)
@@ -2250,7 +2199,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			}
 
 			// Shift+无目标 → 空砍（ClMain.pas:2316-2334）
-			clickLogf("[click] swing (no target) tile=(%d,%d)", tx, ty)
 			tdir := dirToward(my.CurrX, my.CurrY, tx, ty)
 			// Delphi：g_dwLastAttackTick 无条件更新（ClMain.pas:2335）。
 			s.lastAttackTick = now
@@ -2267,7 +2215,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 		// 4. 无目标无 Shift：拾取或移动（ClMain:2336-2353）
 		if tx == my.CurrX && ty == my.CurrY {
 			// 点击自己格子 → 拾取
-			clickLogf("[click] pickup tile=(%d,%d)", tx, ty)
 			if s.sendPickup != nil {
 				s.clearAutoPath()
 				s.sendPickup()
@@ -2280,7 +2227,6 @@ func (s *PlayScene) OnMouse(x, y float64, button int, action int, mods int) {
 			return
 		}
 
-		clickLogf("[click] move to tile=(%d,%d)", tx, ty)
 		s.targetCret = nil
 		s.startAutoPath(tx, ty)
 	}

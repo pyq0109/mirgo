@@ -12,39 +12,24 @@
 
 人眼只用于最初对问题分类一次；验证与防回归全部由机器完成。
 
+命令集刻意保持精简：只保留"观察 → 审计 → 模拟操作"工作流必需的命令。
+
 ---
 
 ## 一、调试控制台
 
-按 `` ` ``（反引号键）打开/关闭。控制台跨场景存在，命令动态注册（场景进入时注册自己的命令，离开时注销）。
+按 `` ` ``（反引号键）打开/关闭。控制台跨场景存在，命令动态注册（PlayScene 进入时注册 `panel`/`key`，离开时注销）。
 
-- 输入命令直接回车执行；`↑`/`↓` 浏览历史
-- 输出区支持鼠标选择文本、拖拽调节面板高度
+- 输入命令直接回车执行；`↑`/`↓` 浏览历史；`Tab` 补全命令名
+- 输出区支持鼠标选择文本（Ctrl+C 复制）、拖拽调节面板高度
 - `help` 列出当前场景下所有可用命令
-
-### 通用命令
+- **UI 调试命令自动落日志**：`ui`/`click`/`panel`/`key` 的每次调用（命令行 `> ...`）与全部输出，除显示在控制台外，还按行写入日志（tag `UIDebug`，stderr），便于事后回溯与粘贴归档
 
 | 命令 | 说明 |
 |------|------|
 | `help` | 列出所有命令 |
 | `clear` | 清空输出 |
-| `scene` | 显示当前场景 |
-| `fps` | 切换 FPS 显示 |
-| `hud` | 切换调试状态栏（底部，含场景扩展信息） |
-| `res 1-4` / `res <W> <H>` | 切换分辨率 |
-| `dump` | 把控制台输出写入日志文件 |
-
-### wire 线框录制（世界空间）
-
-引擎在每个 DrawQuad 调用时自动记录绘制矩形（`engine.WireBounds`），按类别着色：OBJ=青、ACTOR=红、FX=品红、ITEM=白。
-
-| 命令 | 说明 |
-|------|------|
-| `wire` | 悬停高亮模式：鼠标悬停哪个绘制矩形就高亮哪个 |
-| `wire all` | 全部绘制矩形都画出来 |
-| `wire 0` / `wire off` | 关闭 |
-
-悬停模式下点击可**锁定**矩形并 dump 其来源（哪个 actor 的哪一层、WIL 索引、HotX/HotY、纹理 ID，见日志 `=== BOUND ===` 段）。用途：排查"这个地方画的是什么、从哪个图素来的"。
+| `click <x> <y> [right]` | 按坐标模拟点击 |
 
 ---
 
@@ -52,38 +37,26 @@
 
 UI 控件是一棵树：根节点 `DBackground`（全屏），下挂各面板（`DBottom` 底栏、`DItemBag` 背包、`DStateWin` 状态等）。以下命令全部作用于当前场景的控件树（`gActiveUI`）。
 
+**所有场景统一用这一套命令**：登录 / 选角 / 公告 / 游戏四个场景都用 UIManager 构建控件树并在进入时挂到 `gActiveUI`，`ui`/`click` 命令与 `ui bounds` overlay 在哪个场景都同样工作（公告场景的 DMessageDlg 也是真控件树，可审计、可模拟点击）。
+
 ### 观察类
 
 | 命令 | 说明 |
 |------|------|
 | `ui tree [深度]` | 控件树 dump：名字、类型、**绝对坐标**、尺寸、可见性（默认深度 3） |
-| `ui list [类型]` | 平铺表格，可按 button/window/grid/control 过滤 |
-| `ui find <名字>` | 子串查找（不区分大小写），列出绝对/相对坐标与回调 |
 | `ui inspect <名字>` | 单个控件完整属性 dump（含 grid 单元格、回调列表） |
-| `ui state` | 模态/捕获/焦点状态 + 可见控件统计 |
-| `ui focus` | 焦点/捕获/模态详情 |
 | `ui hit` | **当前鼠标位置**的命中链（自底向上）+ 路由状态——排查"这个点被谁吃了" |
-| `ui hover` | 切换悬停信息面板：鼠标下的控件名、矩形、图片尺寸、`[hit≠img]` 标记 |
+| `ui state` | 模态/捕获/焦点状态 + 可见控件统计 |
+| `ui bounds` | 切换包围盒 overlay（见第三节） |
+| `ui audit [名字\|err]` | 一致性审计清单（可过滤，见第四节） |
 
 ### 操作类
 
 | 命令 | 说明 |
 |------|------|
-| `ui show <名字>` | 显示控件（连同祖先一起置可见） |
-| `ui hide <名字>` | 隐藏控件 |
 | `ui move <名字> <x> <y>` | 实时挪动控件，现场试位置 |
 | `ui click <名字>` | 按名字模拟点击（命中控件中心） |
-| `click <x> <y> [right]` | 按坐标模拟点击 |
-| `clicklog` | 切换详细点击命中日志 |
 | `ui events` | 切换 UI 输入事件日志（每次 down/up/click/move 都记录——排查"事件被谁吃掉"） |
-
-### 审计与可视化（见第三、四节）
-
-| 命令 | 说明 |
-|------|------|
-| `ui audit [名字\|err]` | 一致性审计清单（可过滤） |
-| `ui bounds` | 切换包围盒 overlay |
-| `ui bounds img` | 切换图片绘制矩形叠加 |
 
 ---
 
@@ -94,21 +67,9 @@ UI 控件是一棵树：根节点 `DBackground`（全屏），下挂各面板（
 对所有可见控件画类型着色的命中矩形：
 
 - **绿**=button，**蓝**=window，**黄**=grid，**灰**=普通 control
-- 名字密度自动管理：默认仅悬停控件及其祖先显示名字（避免标签成团）；`wire all` 时显示全部名字（带底条+去重避让）
+- 名字密度自动管理：默认仅悬停控件及其祖先显示名字（避免标签成团）
 
-### `ui bounds img` 图片绘制矩形（"图片与点击范围不符"专用）
-
-在包围盒基础上，对带 WIL 图片的控件叠加：
-
-- **绿框** = 命中矩形（Left/Top/Width/Height）
-- **红框** = 图片默认绘制位置（BlitImage 语义：画在 AbsX/AbsY，取图片自身宽高）；与绿框重合时不画
-- **橙框** = 叠加 HotX/HotY 后的位置（uistate.go 等自定义 OnDirectPaint 实际落图处），仅偏移非零时画
-
-**绿≠红 = 命中尺寸与图片尺寸不符；红≠橙 = 偏移语义分裂。** 有差异的控件标签自动附摘要：`名字 hit=48x22 img=50x24 off=(2,1)`。
-
-### `ui hover` 悬停信息面板
-
-鼠标悬停时在光标旁浮动显示：控件名、类型、绝对坐标、尺寸、`img=宽x高 off=(x,y)`，不一致时标 `[hit≠img]`。与 `ui bounds` 独立开关，可单独使用。
+命中框与图片是否一致不由 overlay 判定，交给 `ui audit` 的 `size-override`/`img-offset` 规则机器化给出（见第四节）。
 
 ---
 
@@ -153,12 +114,11 @@ var auditWhitelist = map[string]string{
 
 ### 症状 A：按钮图片与可点击范围不符
 
-1. `ui bounds img` —— 找到绿红框不重合的控件，标签直接给出 hit/img/off 数值
-2. `ui audit <控件名>` —— 确认是 `size-override` 还是 `img-offset`
-3. 定位代码：
+1. `ui audit <控件名>` —— `size-override` / `img-offset` 直接指出是哪种失配
+2. 定位代码：
    - `size-override` → 找 `SetImgIndex` 之后手工赋 Width/Height 的地方（`grep <控件名> cmd/client/`）
    - `img-offset` → 核对该控件的绘制路径：默认 BlitImage 忽略偏移，自定义 OnDirectPaint 是否叠加了 HotX/HotY，两边语义必须统一
-4. 修复后：在 `uilayout_test.go` 补一条命中断言固化（见第七节）
+3. 修复后：在 `uilayout_test.go` 补一条命中断言固化（见第七节）
 
 ### 症状 B：面板上的子控件位置不对
 
@@ -183,35 +143,22 @@ var auditWhitelist = map[string]string{
 `                    # 打开控制台
 panel npc on         # 强制打开 NPC 对话框（不依赖服务端/NPC）
 ui audit DMerchant   # 审计该面板子树
-ui bounds img        # 看命中框与图片绘制位
+ui bounds            # 看命中框
 ui hit               # 鼠标移到可疑位置查命中链
 ui inspect DMerchantDlgClose   # 看关闭按钮运行时覆盖后的实际值
 ui click DMerchantDlgClose     # 模拟点击验证
 ```
 
-注意 NPC 面板有三处**树外手写命中**（`ui bounds` 画不出来，是 bug 高发区）：富文本链接命中（uinpc.go 链接注册/命中段）、商品行点击 menuRowClick、对话文本滚动区（sceneplay.go）。调试它们用 `click <x> <y>` + `ui events` 观察行为，配合 `wire` 比对实际绘制位置。
+注意 NPC 面板有三处**树外手写命中**（`ui bounds` 画不出来，是 bug 高发区）：富文本链接命中（uinpc.go 链接注册/命中段）、商品行点击 menuRowClick、对话文本滚动区（sceneplay.go）。调试它们用 `click <x> <y>` + `ui events` 观察行为。
 
 ---
 
-## 六、场景专有命令
-
-### 游戏场景（PlayScene）
+## 六、场景专有命令（PlayScene）
 
 | 命令 | 说明 |
 |------|------|
 | `panel <名字> [on\|off]` | 强制开关面板：bag state guild group friend abil npc shop deal minimap（**调试面板 UI 的入口，不依赖服务端**） |
 | `key <名字>` | 模拟快捷键：b c e g m n s v w enter esc f1-f12 1-6 |
-| `itemmove [reset]` | 查看/重置物品拖拽状态 |
-| `grid` / `label` / `path` / `light` / `hpbar` | 瓦片网格 / actor 标签 / 寻路可视化 / 关光照 / 关血条 |
-| `kill all` / `nomob` | 清怪（客户端）/ 停止刷怪+清怪（发给服务端） |
-
-### 登录场景
-
-`lstate`（状态 dump）、`lmode <login|reg|chgpw|server>`（强制切换模式）、`ldoor [skip]`（触发/跳过开门动画）、`ldlg [msg]`（模态对话框）。
-
-### 选角场景
-
-`cstate`（状态 dump）、`csel <0|1>`（强制选中槽位）、`ccreate [on|off]`（创角对话框）、`cdel [on|off]`（删角确认）。
 
 ---
 
@@ -273,8 +220,8 @@ PlayScene / LoginScene / SelectChrScene 三棵控件树以 nil 资源 headless �
 
 | 文件 | 内容 |
 |------|------|
-| cmd/client/debugconsole.go | 控制台本体、通用命令、wire 录制渲染 |
-| cmd/client/debugplay.go | PlayScene 专有命令（panel/key/grid 等） |
+| cmd/client/debugconsole.go | 控制台本体、通用命令（help/clear/ui/click） |
+| cmd/client/debugplay.go | PlayScene 专有命令（panel/key） |
 | cmd/client/uiaudit.go | 一致性审计 + 白名单 |
 | cmd/client/uimanager.go | 控件树路由/绘制、Debug* 函数、bounds overlay |
 | cmd/client/uicontrol.go | 控件定义、InRange 命中、SetImgIndex |

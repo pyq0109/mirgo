@@ -240,7 +240,7 @@ func main() {
 		log.Logf(log.LevelInfo, "Server", "[**RunLogin] user=%s character=%s cert=%d version=%s code=%s",
 			loginID, charName, cert, parts[3], parts[4])
 		log.Logf(log.LevelInfo, "Server", "[**RunLogin] session=%d session cert=%d account ID=%d",
-			session.ID, session.Certification, session.CharacterID)
+			session.ID, session.Certification, session.AccountID)
 
 		// 验证证书与会话匹配
 		if session.Certification != 0 && session.Certification != cert {
@@ -251,11 +251,11 @@ func main() {
 		}
 
 		// 加载角色并进入游戏
-		log.Logf(log.LevelInfo, "Server", "[**RunLoading] loading character %q, account %d...", charName, session.CharacterID)
-		charData, err := db.GetCharacterByName(session.CharacterID, charName)
+		log.Logf(log.LevelInfo, "Server", "[**RunLoading] loading character %q, account %d...", charName, session.AccountID)
+		charData, err := db.GetCharacterByName(session.AccountID, charName)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[**RunLogin] character %q not found, account %d: %v",
-				charName, session.CharacterID, err)
+				charName, session.AccountID, err)
 			return true
 		}
 		log.Logf(log.LevelInfo, "Server", "[**RunLogin] character loaded: %s id=%d map=%s(%d,%d)",
@@ -754,7 +754,7 @@ func handleConnectedMessage(server *netserver.TCPServer, session *netserver.Sess
 
 		session.State = netserver.StateAuthenticated
 		session.AccountName = username
-		session.CharacterID = accountID
+		session.AccountID = accountID
 		log.Logf(log.LevelInfo, "Server", "session %d: connected -> authenticated (account=%s ID=%d)",
 			session.ID, username, accountID)
 
@@ -838,7 +838,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 		chrThrottleOK(session.ID, 0) // 刷新共享 dwChrTick
-		log.Logf(log.LevelInfo, "Server", "[CMQueryChr] accountID=%d", session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMQueryChr] accountID=%d", session.AccountID)
 		if sendCharacterList(server, session, db) {
 			setChrQueried(session.ID, true) // Delphi: boChrQueryed:=True
 		}
@@ -865,7 +865,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		fmt.Sscanf(parts[4], "%d", &sex)
 
 		log.Logf(log.LevelInfo, "Server", "[CMNewChr] name=%q job=%d sex=%d hair=%d account=%d",
-			charName, job, sex, hair, session.CharacterID)
+			charName, job, sex, hair, session.AccountID)
 
 		// Delphi 校验顺序（UsrSoc.pas:750-796）：
 		// 1) 最小长度——原版按字节 length(sChrName) < 3 拒绝（UsrSoc.pas:751）。
@@ -886,7 +886,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 
-		chars, err := db.GetCharactersByAccount(session.CharacterID)
+		chars, err := db.GetCharactersByAccount(session.AccountID)
 		if err == nil && len(chars) >= config.GetMaxCharsPerAcct() {
 			resp := protocol.MakeDefaultMsg(protocol.SMNewChrFail, 3, 0, 0, 0)
 			server.Send(session.ID, resp, "")
@@ -907,7 +907,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 
-		_, err = db.CreateCharacter(session.CharacterID, charName, job, sex, hair)
+		_, err = db.CreateCharacter(session.AccountID, charName, job, sex, hair)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[CMNewChr] creation failed: %v", err)
 			// Delphi 写库失败 Recog=4（UsrSoc.pas:833）。
@@ -916,7 +916,7 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 
-		log.Logf(log.LevelInfo, "Server", "[CMNewChr] created character %q, account %d", charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMNewChr] created character %q, account %d", charName, session.AccountID)
 		setChrQueried(session.ID, false) // Delphi: 建角后须重新查角 (UsrSoc.pas:552)
 		resp := protocol.MakeDefaultMsg(protocol.SMNewChrSuccess, 0, 0, 0, 0)
 		server.Send(session.ID, resp, "")
@@ -928,9 +928,9 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 			return
 		}
 		charName := body
-		log.Logf(log.LevelInfo, "Server", "[CMDelChr] name=%q account=%d", charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMDelChr] name=%q account=%d", charName, session.AccountID)
 
-		charData, err := db.GetCharacterByName(session.CharacterID, charName)
+		charData, err := db.GetCharacterByName(session.AccountID, charName)
 		if err != nil {
 			log.Logf(log.LevelWarn, "Server", "[CMDelChr] character %q not found: %v", charName, err)
 			resp := protocol.MakeDefaultMsg(protocol.SMDelChrFail, 0, 0, 0, 0)
@@ -951,8 +951,14 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		server.Send(session.ID, resp, "")
 
 	case protocol.CMSelChr:
-		// Delphi 要求选角前必须先查角（boChrQueryed），防止重复提交
-		//（DBServer/UsrSoc.pas:576-590，原码条件写反，这里按合理语义实现）。
+		// 选角前必须先查角（boChrQueryed），防止重复提交。
+		// Delphi 字面条件写反（未查过才放行，UsrSoc.pas:577）且 QueryChr
+		// 无返回 True 的路径（:597-669，反编译残缺），该门在原版中实际不
+		// 生效；原版真正的防重复机制是架构级的——登出=断开重连=全新会话
+		//（boChrQueryed 重置，UsrSoc.pas:491-505）。Go 单端口持久连接下
+		// 按合理语义实现: 查角成功置 true、选角成功消费置 false，等价于
+		// 原版"新会话"。原版唯一确定语义"建/删角后须重新查角"
+		//（:552, :567）同样保留。
 		if !getChrQueried(session.ID) {
 			log.Logf(log.LevelWarn, "Server", "Double send _SELCHR (session %d)", session.ID)
 			return
@@ -963,14 +969,14 @@ func handleAuthenticatedMessage(server *netserver.TCPServer, session *netserver.
 		if idx := strings.Index(body, "/"); idx >= 0 {
 			charName = body[idx+1:]
 		}
-		log.Logf(log.LevelInfo, "Server", "[CMSelChr] body=%q character=%q account ID=%d", body, charName, session.CharacterID)
+		log.Logf(log.LevelInfo, "Server", "[CMSelChr] body=%q character=%q account ID=%d", body, charName, session.AccountID)
 
-		// 验证该账号下角色存在（不要覆盖 session.CharacterID ——
-		// 它仍保存着 **runlogin 处理器所需的账号 ID）
-		_, err := db.GetCharacterByName(session.CharacterID, charName)
+		// 验证该账号下角色存在（用 AccountID —— CharacterID 是游戏内
+		// 角色 ID，登出后为 0）
+		_, err := db.GetCharacterByName(session.AccountID, charName)
 		if err != nil {
 			log.Logf(log.LevelError, "Server", "[CMSelChr] character %q not found, account %d: %v",
-				charName, session.CharacterID, err)
+				charName, session.AccountID, err)
 			return
 		}
 		log.Logf(log.LevelInfo, "Server", "[CMSelChr] character %q validated", charName)
@@ -1153,8 +1159,8 @@ func handleGameMessage(server *netserver.TCPServer, session *netserver.Session, 
 // sendCharacterList 向客户端发送角色列表。
 // Fix 3: 使用文本格式 "*name/job/hair/level/sex/..." 代替二进制。
 func sendCharacterList(server *netserver.TCPServer, session *netserver.Session, db *storage.Database) bool {
-	log.Logf(log.LevelInfo, "Server", "[sendCharacterList] loading characters for account %d...", session.CharacterID)
-	chars, err := db.GetCharactersByAccount(session.CharacterID)
+	log.Logf(log.LevelInfo, "Server", "[sendCharacterList] loading characters for account %d...", session.AccountID)
+	chars, err := db.GetCharactersByAccount(session.AccountID)
 	if err != nil {
 		log.Logf(log.LevelError, "Server", "[sendCharacterList] failed: %v", err)
 		resp := protocol.MakeDefaultMsg(protocol.SMQueryChrFail, 0, 0, 0, 0)

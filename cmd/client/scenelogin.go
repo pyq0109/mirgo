@@ -343,7 +343,6 @@ func (s *LoginScene) Open() {
 	s.connecting = false
 	s.updateMode = false
 	s.servers = nil
-	s.registerDebugCmds()
 	if s.editID != nil {
 		s.ui.SetFocus(s.editID.Ctrl)
 	}
@@ -351,7 +350,6 @@ func (s *LoginScene) Open() {
 
 // Close 在场景失活时调用。
 func (s *LoginScene) Close() {
-	s.unregisterDebugCmds()
 	gActiveUI = nil
 	gSound.SilenceSound()
 	log.Logf(log.LevelInfo, "LoginScene", "closed")
@@ -390,6 +388,9 @@ func (s *LoginScene) Render(gl *engine.GLState, proj [16]float32) {
 	s.syncUI()
 	if s.ui != nil {
 		s.ui.Paint(proj)
+		if s.ui.ShowBounds {
+			s.ui.RenderDebugBounds(proj)
+		}
 	}
 }
 
@@ -1404,81 +1405,4 @@ func (s *LoginScene) getPrguseSize(index int) (int, int) {
 // hitTest 检查 (x, y) 是否在区域内。
 func hitTest(x, y float32, a loginArea) bool {
 	return x >= a.X && x <= a.X+a.W && y >= a.Y && y <= a.Y+a.H
-}
-
-// ---------------------------------------------------------------------------
-// 调试命令
-// ---------------------------------------------------------------------------
-
-var loginModeNames = [...]string{"login", "register", "chgpw", "serverselect"}
-
-func (s *LoginScene) registerDebugCmds() {
-	dc := gDebug
-	if dc == nil {
-		return
-	}
-	dc.Register("lstate", "dump login scene state", func(args []string) {
-		dc.Printf("mode=%s showUI=%v connecting=%v",
-			loginModeNames[s.mode], s.showLoginUI, s.connecting)
-		dc.Printf("door: opening=%v fading=%v frame=%d/%d",
-			s.doorOpening, s.doorFading, s.doorFrame, doorFrameCount)
-		dc.Printf("servers: %d", len(s.servers))
-		if s.ui != nil {
-			dc.Printf("ui: focus=%s modal=%s", debugCtlName(s.ui.Focused), debugCtlName(s.ui.Modal))
-		}
-	})
-	dc.Register("lmode", "lmode <login|reg|chgpw|server> — force mode", func(args []string) {
-		if len(args) == 0 {
-			dc.Printf("usage: lmode <login|reg|chgpw|server>")
-			return
-		}
-		switch strings.ToLower(args[0]) {
-		case "login":
-			s.mode = modeLogin
-		case "reg", "register":
-			s.mode = modeRegister
-		case "chgpw":
-			s.mode = modeChgPw
-		case "server", "serverselect":
-			s.mode = modeServerSelect
-		default:
-			dc.Printf("unknown mode: %s", args[0])
-			return
-		}
-		s.showLoginUI = true
-		s.doorOpening = false
-		dc.Printf("mode -> %s", loginModeNames[s.mode])
-	})
-	dc.Register("ldoor", "ldoor [skip] — trigger/skip door animation", func(args []string) {
-		if len(args) >= 1 && args[0] == "skip" {
-			s.doorOpening = false
-			s.doorFading = false
-			s.doorFrame = doorFrameCount - 1
-			s.showLoginUI = true
-			dc.Printf("door skipped")
-			return
-		}
-		s.OpenLoginDoor()
-		dc.Printf("door animation started")
-	})
-	dc.Register("ldlg", "ldlg [msg] — show/dismiss modal dialog", func(args []string) {
-		if len(args) == 0 {
-			if s.ui != nil && s.ui.Modal != nil {
-				s.ui.CloseModal(s.ui.Modal)
-			}
-			dc.Printf("dialog dismissed")
-			return
-		}
-		s.ShowMessage(strings.Join(args, " "))
-		dc.Printf("dialog shown")
-	})
-}
-
-func (s *LoginScene) unregisterDebugCmds() {
-	if gDebug == nil {
-		return
-	}
-	for _, name := range []string{"lstate", "lmode", "ldoor", "ldlg"} {
-		gDebug.Unregister(name)
-	}
 }

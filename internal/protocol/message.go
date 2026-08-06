@@ -429,6 +429,10 @@ func MsgName(ident uint16) string {
 		return "CM_CLICKNPC"
 	case CMLoginNoticeOK:
 		return "CM_LOGINNOTICEOK"
+	case CMLogout:
+		return "CM_LOGOUT"
+	case CMExitGame:
+		return "CM_EXITGAME"
 	// CM - 战斗/移动
 	case CMThrow:
 		return "CM_THROW"
@@ -598,6 +602,10 @@ func MsgName(ident uint16) string {
 		return "SM_QUERYCHRFAIL"
 	case SMOutOfConnection:
 		return "SM_OUTOFCONNECTION"
+	case SMLogoutOK:
+		return "SM_LOGOUTOK"
+	case SMExitOK:
+		return "SM_EXITOK"
 	case SMPassOKSelectServer:
 		return "SM_PASSOKSELECTSERVER"
 	case SMSelectServerOK:
@@ -885,6 +893,14 @@ const (
 	SMInstanceHealGuage = 1103
 	SMChangeFace        = 1104
 	SMVersionFail    = 1106
+	// SMLogoutOK/SMExitOK 为 Go 自创常量, Delphi 协议中不存在 (Grobal2.pas
+	// 全树无 SM_LOGOUT*; 原版 1100-1106 段只有 OPENHEALTH~VERSION_FAIL,
+	// 1107/1108 为空位, 无线格式冲突)。
+	// Delphi 原版登出/退出是纯客户端驱动: 发 CM_SOFTCLOSE/CM_EXITGAME 后
+	// 定时器到期直接关连接, 不等任何服务端响应 (ClMain.pas:1167-1185,
+	// 2535-2540)。Go 单端口持久连接无法"断连重来", 改为同步确认消息:
+	// 客户端以它为回选角并重新查角的时机, 等价于原版"断开→重连 SelGate→
+	// 连接建立即查角" (ClMain.pas:2561-2568, 2745-2748)。
 	SMLogoutOK       = 1107
 	SMExitOK         = 1108
 	SMFriendList     = 1109

@@ -12,22 +12,20 @@ import (
 	"github.com/pyq0109/mirgo/internal/log"
 )
 
-const (
-	wireOff   = 0
-	wireHover = 1
-	wireAll   = 2
-)
-
 // gDebug 是全局控制台引用。由 main.go 在创建后设置,
 // 供 UI 事件日志等无法直接持有控制台引用的代码使用。
 var gDebug *DebugConsole
 
-// debugClickLog 开关: 为 true 时鼠标点击命中信息输出到控制台。
-var debugClickLog bool
+// uiLogTag 是 UI 调试命令在日志中的标签。
+const uiLogTag = "UIDebug"
 
-func clickLogf(format string, args ...interface{}) {
-	if debugClickLog && gDebug != nil {
-		gDebug.Printf(format, args...)
+// uiLogf 把 UI 调试命令的输出打印到控制台, 并按行写入日志 (tag UIDebug),
+// 使每次 ui 调试的命令与结果可在日志中回溯。
+func (dc *DebugConsole) uiLogf(format string, args ...interface{}) {
+	line := fmt.Sprintf(format, args...)
+	dc.Print(line)
+	for _, l := range strings.Split(line, "\n") {
+		log.Logf(log.LevelInfo, uiLogTag, "%s", l)
 	}
 }
 
@@ -40,8 +38,7 @@ type DebugCmd struct {
 
 // DebugConsole 是跨场景的全局调试叠加层。它由 main.go 持有,
 // 在 GLFW 回调层拦截输入、在场景渲染之后绘制自身。场景相关的
-// 命令通过 Register/Unregister 动态增删, 场景专有状态 (网格、
-// 标签、光照等) 由场景自行保存并通过 StatusExtra 汇报。
+// 命令通过 Register/Unregister 动态增删。
 type DebugConsole struct {
 	Visible   bool
 	Lines     []string
@@ -49,18 +46,6 @@ type DebugConsole struct {
 	Input     string
 	History   []string // 命令历史 (↑↓ 浏览)
 	HistIdx   int
-
-	// 全局调试状态
-	WireMode int // 0=off, 1=hover, 2=all
-	HoverIdx int // 悬停的 WireBounds 下标 (-1=无)
-	LockIdx  int // 锁定的 WireBounds 下标 (-1=无)
-	ShowFPS  bool
-	ShowHUD  bool
-
-	// 场景扩展: 当前场景 (如 PlayScene) 设置, 用于状态栏补充信息
-	// 以及标记线框是否已由场景在世界空间渲染。
-	StatusExtra func() string
-	wireHandled bool // 场景已渲染线框时置 true, 避免屏幕空间重复渲染
 
 	// 每帧由 main.go 更新的鼠标逻辑坐标 (800x600 空间)
 	mouseX, mouseY float64
@@ -83,40 +68,9 @@ type DebugConsole struct {
 	sbAlpha    float32 // 当前透明度 0..1
 	sbLastTick int64   // 上次滚动/悬停的时间戳
 
-	cmds    map[string]DebugCmd
-	gl      *engine.GLState
-	text    *engine.TextRenderer
-	sceneMgr *engine.SceneManager
-
-	fps      float64
-	lastFrame time.Time
-}
-
-// --- 分类颜色 ---
-
-var categoryColors = map[float32][4]float32{
-	1: {0, 0.8, 0.8, 0.8}, // OBJ  — cyan
-	2: {1, 0, 0, 0.8},     // ACTOR — red
-	3: {1, 0, 1, 0.8},     // FX   — magenta
-	4: {1, 1, 1, 0.8},     // ITEM — white
-}
-
-var categoryNames = map[float32]string{
-	0: "?", 1: "OBJ", 2: "ACTOR", 3: "FX", 4: "ITEM",
-}
-
-func catColor(cat float32) [4]float32 {
-	if c, ok := categoryColors[cat]; ok {
-		return c
-	}
-	return [4]float32{0.5, 0.5, 0.5, 0.6}
-}
-
-func catName(cat float32) string {
-	if n, ok := categoryNames[cat]; ok {
-		return n
-	}
-	return "?"
+	cmds map[string]DebugCmd
+	gl   *engine.GLState
+	text *engine.TextRenderer
 }
 
 func onOff(v bool) string {
@@ -127,28 +81,19 @@ func onOff(v bool) string {
 }
 
 // NewDebugConsole 创建控制台并注册所有场景通用的核心命令。
-func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer, sceneMgr *engine.SceneManager) *DebugConsole {
+func NewDebugConsole(gl *engine.GLState, text *engine.TextRenderer) *DebugConsole {
 	dc := &DebugConsole{
-		HoverIdx: -1,
-		LockIdx:  -1,
 		HistIdx:  0,
 		selStart: -1,
 		panelH:   320,
 		cmds:     make(map[string]DebugCmd),
 		gl:       gl,
 		text:     text,
-		sceneMgr: sceneMgr,
 	}
 	dc.Register("help", "list all commands", dc.cmdHelp)
 	dc.Register("clear", "clear console output", dc.cmdClear)
-	dc.Register("scene", "show current scene", dc.cmdScene)
-	dc.Register("wire", "wireframe: wire | wire all | wire 0", dc.cmdWire)
-	dc.Register("fps", "toggle FPS display", dc.cmdFPS)
-	dc.Register("hud", "toggle debug status bar", dc.cmdHUD)
-	dc.Register("ui", "ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list|audit", dc.cmdUI)
+	dc.Register("ui", "ui tree|bounds|hit|events|state|inspect|move|click|audit", dc.cmdUI)
 	dc.Register("click", "click <x> <y> [right] — simulate click", dc.cmdClick)
-	dc.Register("clicklog", "toggle verbose click hit logging", dc.cmdClickLog)
-	dc.Register("dump", "dump console output to log", dc.cmdDump)
 	return dc
 }
 
@@ -574,105 +519,43 @@ func (dc *DebugConsole) cmdClear(args []string) {
 	dc.ScrollOff = 0
 }
 
-func (dc *DebugConsole) cmdScene(args []string) {
-	if dc.sceneMgr != nil {
-		dc.Printf("scene: %s", dc.sceneMgr.CurrentType())
-	}
-}
-
-func (dc *DebugConsole) cmdWire(args []string) {
-	if len(args) == 0 {
-		if dc.WireMode == wireHover {
-			dc.WireMode = wireOff
-		} else {
-			dc.WireMode = wireHover
-		}
-		dc.LockIdx = -1
-	} else {
-		switch args[0] {
-		case "all":
-			dc.WireMode = wireAll
-		case "0", "off":
-			dc.WireMode = wireOff
-			dc.LockIdx = -1
-		default:
-			dc.Printf("usage: wire | wire all | wire 0")
-			return
-		}
-	}
-	dc.Printf("wire: %s", []string{"off", "hover", "all"}[dc.WireMode])
-	if gActiveUI != nil {
-		gActiveUI.ShowBounds = dc.WireMode > 0
-		if dc.WireMode == wireAll {
-			gActiveUI.BoundsNames = 2
-		} else {
-			gActiveUI.BoundsNames = 1
-		}
-	}
-}
-
-func (dc *DebugConsole) cmdFPS(args []string) {
-	dc.ShowFPS = !dc.ShowFPS
-	dc.Printf("fps %s", onOff(dc.ShowFPS))
-}
-
-func (dc *DebugConsole) cmdHUD(args []string) {
-	dc.ShowHUD = !dc.ShowHUD
-	dc.Printf("hud %s", onOff(dc.ShowHUD))
-}
-
 func (dc *DebugConsole) cmdUI(args []string) {
 	ui := gActiveUI
 	if ui == nil {
-		dc.Printf("no UI in current scene")
+		dc.uiLogf("no UI in current scene")
 		return
 	}
 	if len(args) == 0 {
-		dc.Printf("usage: ui tree|bounds|hit|find|events|state|inspect|show|hide|move|click|hover|list|audit")
+		dc.Printf("usage: ui tree|bounds|hit|events|state|inspect|move|click|audit")
 		return
 	}
+	log.Logf(log.LevelInfo, uiLogTag, "> ui %s", strings.Join(args, " "))
 	switch args[0] {
 	case "audit":
 		filter := ""
 		if len(args) > 1 {
 			filter = args[1]
 		}
-		dc.Print(ui.DebugAudit(filter))
+		dc.uiLogf("%s", ui.DebugAudit(filter))
 	case "tree":
 		depth := 3
 		if len(args) > 1 {
 			fmt.Sscanf(args[1], "%d", &depth)
 		}
-		dc.Print(ui.DebugTree(depth))
+		dc.uiLogf("%s", ui.DebugTree(depth))
 	case "bounds":
-		if len(args) > 1 && args[1] == "img" {
-			ui.ShowImageRects = !ui.ShowImageRects
-			if ui.ShowImageRects {
-				ui.ShowBounds = true // 图片矩形需与命中框同屏对比才有意义
-			}
-			dc.Printf("ui bounds img %s (红=图片绘制位 橙=HotX/HotY 偏移位)", onOff(ui.ShowImageRects))
-			return
-		}
 		ui.ShowBounds = !ui.ShowBounds
 		if ui.ShowBounds {
 			ui.BoundsNames = 1 // 默认可读模式: 框+仅光标下名字
 		}
-		dc.Printf("ui bounds %s", onOff(ui.ShowBounds))
+		dc.uiLogf("ui bounds %s", onOff(ui.ShowBounds))
 	case "hit":
-		dc.Print(ui.DebugHitTest(int(dc.mouseX), int(dc.mouseY)))
-	case "focus":
-		dc.Print(ui.DebugFocus())
-	case "find":
-		if len(args) < 2 {
-			dc.Printf("usage: ui find <name>")
-			return
-		}
-		dc.Print(ui.DebugFind(strings.Join(args[1:], " ")))
+		dc.uiLogf("%s", ui.DebugHitTest(int(dc.mouseX), int(dc.mouseY)))
 	case "events":
 		debugUIEvents = !debugUIEvents
-		dc.Printf("ui events %s", onOff(debugUIEvents))
+		dc.uiLogf("ui events %s", onOff(debugUIEvents))
 	case "state":
-		dc.Printf("modal=%s capture=%s focus=%s",
+		dc.uiLogf("modal=%s capture=%s focus=%s",
 			debugCtlName(ui.Modal), debugCtlName(ui.Capture), debugCtlName(ui.Focused))
 		vis := 0
 		var countVis func(c *UIControl)
@@ -685,93 +568,57 @@ func (dc *DebugConsole) cmdUI(args []string) {
 			}
 		}
 		countVis(ui.Root)
-		dc.Printf("root children=%d visible controls=%d", len(ui.Root.Children), vis)
+		dc.uiLogf("root children=%d visible controls=%d", len(ui.Root.Children), vis)
 	case "inspect":
 		if len(args) < 2 {
-			dc.Printf("usage: ui inspect <name>")
+			dc.uiLogf("usage: ui inspect <name>")
 			return
 		}
-		dc.Print(ui.DebugInspect(strings.Join(args[1:], " ")))
-	case "show":
-		if len(args) < 2 {
-			dc.Printf("usage: ui show <name>")
-			return
-		}
-		c := ui.FindControl(strings.Join(args[1:], " "))
-		if c == nil {
-			dc.Printf("control %q not found", strings.Join(args[1:], " "))
-			return
-		}
-		for p := c; p != nil; p = p.Parent {
-			p.Visible = true
-		}
-		dc.Printf("%s -> visible (ancestors unhidden)", c.Name)
-	case "hide":
-		if len(args) < 2 {
-			dc.Printf("usage: ui hide <name>")
-			return
-		}
-		c := ui.FindControl(strings.Join(args[1:], " "))
-		if c == nil {
-			dc.Printf("control %q not found", strings.Join(args[1:], " "))
-			return
-		}
-		c.Visible = false
-		dc.Printf("%s -> hidden", c.Name)
+		dc.uiLogf("%s", ui.DebugInspect(strings.Join(args[1:], " ")))
 	case "move":
 		if len(args) < 4 {
-			dc.Printf("usage: ui move <name> <x> <y>")
+			dc.uiLogf("usage: ui move <name> <x> <y>")
 			return
 		}
 		name := strings.Join(args[1:len(args)-2], " ")
 		x, err1 := strconv.Atoi(args[len(args)-2])
 		y, err2 := strconv.Atoi(args[len(args)-1])
 		if err1 != nil || err2 != nil {
-			dc.Printf("usage: ui move <name> <x> <y>  (x,y must be integers)")
+			dc.uiLogf("usage: ui move <name> <x> <y>  (x,y must be integers)")
 			return
 		}
 		c := ui.FindControl(name)
 		if c == nil {
-			dc.Printf("control %q not found", name)
+			dc.uiLogf("control %q not found", name)
 			return
 		}
 		oldX, oldY := c.Left, c.Top
 		c.Left, c.Top = x, y
-		dc.Printf("%s moved (%d,%d) -> (%d,%d)", c.Name, oldX, oldY, x, y)
+		dc.uiLogf("%s moved (%d,%d) -> (%d,%d)", c.Name, oldX, oldY, x, y)
 	case "click":
 		if len(args) < 2 {
-			dc.Printf("usage: ui click <name>")
+			dc.uiLogf("usage: ui click <name>")
 			return
 		}
 		c := ui.FindControl(strings.Join(args[1:], " "))
 		if c == nil {
-			dc.Printf("control %q not found", strings.Join(args[1:], " "))
+			dc.uiLogf("control %q not found", strings.Join(args[1:], " "))
 			return
 		}
 		w, h := c.effectiveSize()
 		cx, cy := c.AbsX()+w/2, c.AbsY()+h/2
 		ui.RouteMouseDown(cx, cy, 0)
 		ui.RouteMouseUp(cx, cy, 0)
-		dc.Printf("clicked %s at (%d,%d)", c.Name, cx, cy)
-	case "hover":
-		ui.ShowHoverInfo = !ui.ShowHoverInfo
-		// 与 ShowBounds 解耦: hover 只开悬停检查器, 不再顺带打开全量包围盒(那是标签成团的根因)。
-		dc.Printf("ui hover %s (包围盒独立, 用 ui bounds / wire 切换)", onOff(ui.ShowHoverInfo))
-	case "list":
-		filter := ""
-		if len(args) > 1 {
-			filter = args[1]
-		}
-		dc.Print(ui.DebugList(filter))
+		dc.uiLogf("clicked %s at (%d,%d)", c.Name, cx, cy)
 	default:
-		dc.Printf("unknown ui subcommand: %s", args[0])
+		dc.uiLogf("unknown ui subcommand: %s", args[0])
 	}
 }
 
 func (dc *DebugConsole) cmdClick(args []string) {
 	ui := gActiveUI
 	if ui == nil {
-		dc.Printf("no UI in current scene")
+		dc.uiLogf("no UI in current scene")
 		return
 	}
 	if len(args) < 2 {
@@ -788,46 +635,16 @@ func (dc *DebugConsole) cmdClick(args []string) {
 	if len(args) >= 3 && args[2] == "right" {
 		button = 1
 	}
+	log.Logf(log.LevelInfo, uiLogTag, "> click %s", strings.Join(args, " "))
 	consumed := ui.RouteMouseDown(x, y, button)
 	ui.RouteMouseUp(x, y, button)
-	dc.Printf("click (%d,%d) btn=%d consumed=%v", x, y, button, consumed)
-}
-
-func (dc *DebugConsole) cmdClickLog(args []string) {
-	debugClickLog = !debugClickLog
-	dc.Printf("clicklog %s", onOff(debugClickLog))
-}
-
-func (dc *DebugConsole) cmdDump(args []string) {
-	log.Logf(log.LevelInfo, "ConsoleDump", "=== console output (%d lines) ===", len(dc.Lines))
-	for _, line := range dc.Lines {
-		log.Logf(log.LevelInfo, "ConsoleDump", "%s", line)
-	}
-	dc.Printf("dumped %d lines to log", len(dc.Lines))
-}
-
-// --- FPS 统计 ---
-
-func (dc *DebugConsole) updateFPS() {
-	now := time.Now()
-	if !dc.lastFrame.IsZero() {
-		if dt := now.Sub(dc.lastFrame).Seconds(); dt > 0 {
-			inst := 1 / dt
-			if dc.fps == 0 {
-				dc.fps = inst
-			} else {
-				dc.fps = dc.fps*0.9 + inst*0.1
-			}
-		}
-	}
-	dc.lastFrame = now
+	dc.uiLogf("click (%d,%d) btn=%d consumed=%v", x, y, button, consumed)
 }
 
 // --- 渲染 ---
 
-// Render 在场景之后绘制控制台 (面板或状态栏)。
+// Render 在场景之后绘制控制台面板。
 func (dc *DebugConsole) Render(proj [16]float32) {
-	dc.updateFPS()
 	if gActiveUI != nil {
 		gActiveUI.SetHoverPos(int(dc.mouseX), int(dc.mouseY))
 	}
@@ -836,54 +653,7 @@ func (dc *DebugConsole) Render(proj [16]float32) {
 	}
 	if dc.Visible {
 		dc.renderPanel(proj)
-	} else if dc.ShowHUD || dc.WireMode > 0 {
-		dc.renderStatusBar(proj)
 	}
-	if gActiveUI != nil && gActiveUI.ShowHoverInfo {
-		dc.renderHoverInfo(proj)
-	}
-}
-
-func (dc *DebugConsole) renderHoverInfo(proj [16]float32) {
-	gActiveUI.RenderInteractiveOverlay(proj)
-	c := gActiveUI.HoveredControl(int(dc.mouseX), int(dc.mouseY))
-	if c == nil {
-		return
-	}
-	// 高亮悬停组件
-	w, h := c.effectiveSize()
-	cx, cy := float32(c.AbsX()), float32(c.AbsY())
-	cw, ch := float32(w), float32(h)
-	dc.gl.DrawQuadColor(cx, cy, cw, ch, 0.3, 0.6, 1.0, 0.12, proj)
-	drawWireRect(dc.gl, cx-1, cy-1, cw+2, ch+2, 0.3, 0.7, 1.0, 1.0, proj)
-	// 高亮父级 panel
-	if c.Parent != nil && c.Parent.Kind == KindWindow && c.Parent.Visible {
-		pw, ph := c.Parent.effectiveSize()
-		px, py := float32(c.Parent.AbsX()), float32(c.Parent.AbsY())
-		drawWireRect(dc.gl, px-1, py-1, float32(pw)+2, float32(ph)+2, 0.3, 0.7, 1.0, 1.0, proj)
-	}
-	info := fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d", c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h)
-	dc.drawHoverLabel(proj, info)
-}
-
-func (dc *DebugConsole) drawHoverLabel(proj [16]float32, info string) {
-	gl := dc.gl
-	text := dc.text
-	x := float32(dc.mouseX) + 12
-	y := float32(dc.mouseY) + 12
-	w := float32(text.MeasureText(info)) + 8
-	lineH := float32(text.LineHeight())
-	if lineH <= 0 {
-		lineH = 14
-	}
-	if x+w > 800 {
-		x = 800 - w
-	}
-	if y+lineH+4 > 600 {
-		y = float32(dc.mouseY) - lineH - 8
-	}
-	gl.DrawQuadColor(x, y, w, lineH+4, 0, 0, 0, 0.8, proj)
-	text.DrawText(info, x+4, y+2, 1, 1, 0, 1, proj)
 }
 
 func (dc *DebugConsole) renderPanel(proj [16]float32) {
@@ -995,118 +765,6 @@ func (dc *DebugConsole) renderPanel(proj [16]float32) {
 		cursorX := 8 + float32(text.MeasureText(beforePrompt))
 		gl.DrawQuadColor(cursorX+1, inputY, 2, lineH, 0, 1, 0, 1, proj)
 	}
-}
-
-func (dc *DebugConsole) renderStatusBar(proj [16]float32) {
-	gl := dc.gl
-	text := dc.text
-	gl.DrawQuadColor(0, 0, 800, 14, 0, 0, 0, 0.6, proj)
-
-	wireNames := []string{"-", "HOVER", "ALL"}
-	parts := []string{fmt.Sprintf("WIRE:%s", wireNames[dc.WireMode])}
-	if dc.ShowFPS {
-		parts = append(parts, fmt.Sprintf("FPS:%.0f", dc.fps))
-	}
-	if dc.sceneMgr != nil {
-		parts = append(parts, dc.sceneMgr.CurrentType().String())
-	}
-	if dc.HoverIdx >= 0 {
-		parts = append(parts, fmt.Sprintf("hover:#%d", dc.HoverIdx))
-	}
-	if dc.LockIdx >= 0 {
-		parts = append(parts, fmt.Sprintf("lock:#%d", dc.LockIdx))
-	}
-	if dc.StatusExtra != nil {
-		if extra := dc.StatusExtra(); extra != "" {
-			parts = append(parts, extra)
-		}
-	}
-	status := strings.Join(parts, "  ")
-	text.DrawText(status, 4, 1, 0.6, 0.8, 0.6, 1, proj)
-}
-
-// --- 屏幕空间线框 (非 PlayScene 场景) ---
-
-// wireNoise 过滤全屏背景 (>90% 屏) 与细碎文字 quad (<8x8)。
-func wireNoise(b [5]float32) bool {
-	if b[2] > 720 && b[3] > 540 {
-		return true
-	}
-	if b[2] < 8 || b[3] < 8 {
-		return true
-	}
-	return false
-}
-
-// RenderWireOverlay 在屏幕空间 (OrthoProj 800x600) 绘制线框。
-// 仅当场景未自行渲染线框 (wireHandled=false) 时由 main.go 调用。
-func (dc *DebugConsole) RenderWireOverlay(proj [16]float32) {
-	gl := dc.gl
-	if dc.WireMode == wireOff {
-		return
-	}
-	dc.updateHoverScreen()
-	switch dc.WireMode {
-	case wireHover:
-		if dc.LockIdx >= 0 && dc.LockIdx < len(gl.WireBounds) {
-			wb := gl.WireBounds[dc.LockIdx]
-			c := catColor(wb[4])
-			drawWireRect(gl, wb[0], wb[1], wb[2], wb[3], c[0]*1.5, c[1]*1.5, c[2]*1.5, 1, proj)
-		}
-		if dc.HoverIdx >= 0 && dc.HoverIdx < len(gl.WireBounds) && dc.HoverIdx != dc.LockIdx {
-			wb := gl.WireBounds[dc.HoverIdx]
-			c := catColor(wb[4])
-			drawWireRect(gl, wb[0], wb[1], wb[2], wb[3], c[0], c[1], c[2], c[3], proj)
-		}
-	case wireAll:
-		for _, wb := range gl.WireBounds {
-			if wireNoise(wb) {
-				continue
-			}
-			c := catColor(wb[4])
-			drawWireRect(gl, wb[0], wb[1], wb[2], wb[3], c[0], c[1], c[2], c[3], proj)
-		}
-	}
-}
-
-func (dc *DebugConsole) updateHoverScreen() {
-	dc.HoverIdx = -1
-	if dc.WireMode == wireOff {
-		return
-	}
-	mx, my := float32(dc.mouseX), float32(dc.mouseY)
-	wb := dc.gl.WireBounds
-	for i := len(wb) - 1; i >= 0; i-- {
-		b := wb[i]
-		if wireNoise(b) {
-			continue
-		}
-		if mx >= b[0] && mx <= b[0]+b[2] && my >= b[1] && my <= b[1]+b[3] {
-			dc.HoverIdx = i
-			return
-		}
-	}
-}
-
-// ClickInspectScreen 处理屏幕空间的线框点击锁定。消费事件时返回 true。
-func (dc *DebugConsole) ClickInspectScreen() bool {
-	if dc.WireMode == wireOff {
-		return false
-	}
-	if dc.HoverIdx >= 0 {
-		if dc.LockIdx == dc.HoverIdx {
-			dc.LockIdx = -1
-			dc.Printf("unlocked")
-		} else {
-			dc.LockIdx = dc.HoverIdx
-			wb := dc.gl.WireBounds[dc.LockIdx]
-			dc.Printf("locked #%d %s (%.0f,%.0f) %.0fx%.0f",
-				dc.LockIdx, catName(wb[4]), wb[0], wb[1], wb[2], wb[3])
-		}
-		return true
-	}
-	dc.LockIdx = -1
-	return false
 }
 
 // --- 线框绘制辅助 ---

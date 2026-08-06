@@ -177,7 +177,7 @@ func main() {
 			consoleText = textRenderer
 		}
 	}
-	dbgConsole := NewDebugConsole(glState, consoleText, sceneMgr)
+	dbgConsole := NewDebugConsole(glState, consoleText)
 	gDebug = dbgConsole
 
 	playScene := NewPlayScene(glState, resources, *mapDir, dbgConsole)
@@ -201,33 +201,6 @@ func main() {
 	dbgConsole.GetClipboard = glfwWindow.GetClipboardString
 
 	winW, winH = glfwWindow.GetSize()
-
-	dbgConsole.Register("res", "切换分辨率: /res 1-4 或 /res <W> <H>", func(args []string) {
-		if len(args) == 1 {
-			idx, _ := strconv.Atoi(args[0])
-			if idx >= 1 && idx <= len(resolutions) {
-				applyResolution(glfwWindow, idx-1)
-				scaleTextRenderers()
-				dbgConsole.Printf("分辨率: %dx%d", resolutions[resIdx][0], resolutions[resIdx][1])
-				return
-			}
-		}
-		if len(args) == 2 {
-			w, _ := strconv.Atoi(args[0])
-			h, _ := strconv.Atoi(args[1])
-			for i, r := range resolutions {
-				if r[0] == w && r[1] == h {
-					applyResolution(glfwWindow, i)
-					scaleTextRenderers()
-					dbgConsole.Printf("分辨率: %dx%d", w, h)
-					return
-				}
-			}
-			dbgConsole.Printf("不支持的分辨率 %dx%d", w, h)
-			return
-		}
-		dbgConsole.Printf("当前: %dx%d (预设: 800x600, 1024x768, 1400x1050, 1600x1200)", winW, winH)
-	})
 
 	// 连接登录场景回调。
 	loginScene.SetLoginFunc(func(id, password string) {
@@ -414,10 +387,6 @@ func main() {
 					return
 				}
 			}
-			if button == glfw.MouseButtonLeft && dbgConsole.WireMode > 0 &&
-				sceneMgr.CurrentType() != engine.ScenePlayGame && dbgConsole.ClickInspectScreen() {
-				return
-			}
 			sceneMgr.OnMouse(x, y, int(button), 1, int(mods))
 		case glfw.Release:
 			wx, wy := w.GetCursorPos()
@@ -465,19 +434,7 @@ func main() {
 		glState.SetViewport(0, 0, int32(w), int32(h))
 		proj := engine.OrthoProj(ScreenWidth, ScreenHeight)
 
-		// 统一线框录制: 对所有场景 blanket 录制 (分类 0)。PlayScene 在
-		// 内部做分段录制并置 wireHandled=true, 从而覆盖这里的设置。
-		dbgConsole.wireHandled = false
-		if dbgConsole.WireMode > 0 {
-			glState.WireBounds = glState.WireBounds[:0]
-			glState.WireRecording = true
-			glState.WireRecord = true
-			glState.WireCategory = 0
-		}
 		sceneMgr.Render(glState, proj)
-		if dbgConsole.WireMode > 0 {
-			glState.WireRecording = false
-		}
 
 		if a := globalFade.alpha(); a > 0 {
 			glState.DrawQuadColor(0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, a, proj)
@@ -485,9 +442,6 @@ func main() {
 
 		// 调试控制台叠加层 (场景之后渲染, 重置为完整 800×600 视口)。
 		glState.SetViewport(0, 0, int32(w), int32(h))
-		if dbgConsole.WireMode > 0 && !dbgConsole.wireHandled {
-			dbgConsole.RenderWireOverlay(proj)
-		}
 		dbgConsole.Render(proj)
 	})
 
@@ -757,30 +711,35 @@ func (h *NetHandler) ReadLoop() {
 				return
 			}
 			for _, payload := range payloads {
-				if len(payload) > 0 && payload[0] == '+' {
-					h.enqueue(netEvent{isCtrl: true, ctrl: payload})
-					continue
-				}
-				// 短消息（<16 字符）：仅处理 '=' 前缀（Delphi ClMain.pas:3656-3663）
-				if len(payload) > 0 && payload[0] == '=' {
-					if payload == "=DIG" {
-						h.enqueue(netEvent{isCtrl: true, ctrl: payload})
-					}
-					continue
-				}
-				if len(payload) >= protocol.DefBlockSize {
-					msg := protocol.DecodeMessage(payload[:protocol.DefBlockSize])
-					body := ""
-					rawBody := ""
-					if len(payload) > protocol.DefBlockSize {
-						rawBody = payload[protocol.DefBlockSize:]
-						body = protocol.DecodeString(rawBody)
-					}
-					h.enqueue(netEvent{msg: msg, body: body, rawBody: rawBody})
+				if e, ok := classifyPayload(payload); ok {
+					h.enqueue(e)
 				}
 			}
 		}
 	}
+}
+
+// classifyPayload 把一帧 payload 转为待入站事件, ok=false 表示丢弃。
+// '+' 不在 6Bit 编码字符集 (0x3C..0x7B) 内, 作控制消息前缀无歧义;
+// '=' (0x3D) 在编码字符集内, 必须先按长度 (<DefBlockSize) 判定短消息,
+// 否则首字符恰编码为 '=' 的标准消息会被误丢 (如 SM_NEWMAP,
+// Recog=x 坐标, x∈4..7 时首字符即 '=', 曾导致进游戏黑屏)。
+func classifyPayload(payload string) (netEvent, bool) {
+	if len(payload) > 0 && payload[0] == '+' {
+		return netEvent{isCtrl: true, ctrl: payload}, true
+	}
+	if len(payload) < protocol.DefBlockSize {
+		if payload == "=DIG" {
+			return netEvent{isCtrl: true, ctrl: payload}, true
+		}
+		return netEvent{}, false
+	}
+	e := netEvent{msg: protocol.DecodeMessage(payload[:protocol.DefBlockSize])}
+	if len(payload) > protocol.DefBlockSize {
+		e.rawBody = payload[protocol.DefBlockSize:]
+		e.body = protocol.DecodeString(e.rawBody)
+	}
+	return e, true
 }
 
 // signalError 向主线程报告 ReadLoop 异常退出（非阻塞，最多保留一个错误）。
@@ -1209,6 +1168,14 @@ func (h *NetHandler) HandleMessage(msg protocol.DefaultMessage, body, rawBody st
 	case protocol.SMLogoutOK:
 		log.Logf(log.LevelInfo, "Client", "logout OK, returning to char select")
 		h.sceneMgr.ChangeScene(engine.SceneSelectChr)
+		// 重新查角: 服务端要求每次选角前必须先查角 (boChrQueryed,
+		// UsrSoc.pas:536-590), 上次选角已把它消费掉; 不查则 CM_SELCHR
+		// 被 "Double send _SELCHR" 拒绝, 无法再次开始游戏。
+		// Delphi 原版该查角由"断开重连 SelGate 连接建立"事件触发
+		// (tcFastQueryChr, ClMain.pas:2745-2748, 2578-2581); Go 单端口
+		// 不断连, 改由 SM_LOGOUTOK 触发 (Go 自创消息, 见 message.go
+		// SMLogoutOK 注释)。
+		h.SendQueryChr()
 
 	case protocol.SMOutOfConnection:
 		// Delphi ClMain.pas:3795,4162：被服务端踢下线，清理并回选角

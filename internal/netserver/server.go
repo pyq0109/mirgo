@@ -34,10 +34,19 @@ const (
 
 // Session 表示一个已连接的客户端。
 type Session struct {
-	ID            int64
-	Conn          net.Conn
-	State         SessionState
-	AccountName   string
+	ID          int64
+	Conn        net.Conn
+	State       SessionState
+	AccountName string
+	// AccountID 是账号 ID, 登录成功时设置, 整个连接生命周期不变
+	// (登出回选角后仍用于账号域查询)。CharacterID 则是当前游戏内
+	// 角色 ID, 进游戏时设置、登出清零, 不可用于账号域查询。
+	// 两者分离是 Go 单端口持久连接架构的必要适配: Delphi 原版登出=断开
+	// 重连 SelGate, DBServer 为新连接建全新会话, 账号身份由下一次
+	// CM_QUERYCHR body 的 LoginId/Certification 经 LoginSrv CheckSession
+	// 重新验证写入 (UsrSoc.pas:491-505, 617-624), 账号 ID 无需跨登出
+	// 保留。Go 连接常驻, AccountID 必须常驻才能支撑登出后的查角/选角。
+	AccountID     int64
 	CharacterID   int64
 	Certification int32
 	SendChan      chan []byte

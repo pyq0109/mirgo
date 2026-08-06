@@ -23,9 +23,7 @@ type UIManager struct {
 	Capture *UIControl
 	Focused *UIControl
 
-	ShowBounds     bool // 调试: 绘制所有可见控件的包围盒
-	ShowImageRects bool // 调试: bounds 时叠加图片实际绘制矩形 (红=BlitImage 位, 橙=+HotX/HotY 位)
-	ShowHoverInfo  bool // 调试: 鼠标悬停时浮动显示控件信息
+	ShowBounds bool // 调试: 绘制所有可见控件的包围盒
 	// 调试: 包围盒名字模式 0=仅框 1=框+仅光标悬停控件及其祖先的名字 2=框+全部名字(带底条+去重)。
 	// 与 ShowBounds 解耦: ShowBounds 只决定是否画框, BoundsNames 决定名字密度。
 	BoundsNames    int
@@ -546,14 +544,6 @@ func (m *UIManager) BlitImage(f *wil.File, idx, x, y int, proj [16]float32) bool
 // 调试检查 (debugconsole "ui" 命令使用)
 // ---------------------------------------------------------------------------
 
-func debugCtlDesc(c *UIControl) string {
-	if c == nil {
-		return "none"
-	}
-	w, h := c.effectiveSize()
-	return fmt.Sprintf("%s (%s) [%d,%d %dx%d]", c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h)
-}
-
 // DebugTree 返回缩进的控件树文本, maxDepth 限制展开深度。
 func (m *UIManager) DebugTree(maxDepth int) string {
 	var sb strings.Builder
@@ -629,46 +619,6 @@ func (m *UIManager) debugCollectHits(c *UIControl, x, y int, hits *[]*UIControl)
 	}
 }
 
-// DebugFocus 返回焦点/捕获/模态三个路由状态。
-func (m *UIManager) DebugFocus() string {
-	return fmt.Sprintf("focus: %s\ncapture: %s\nmodal: %s",
-		debugCtlDesc(m.Focused), debugCtlDesc(m.Capture), debugCtlDesc(m.Modal))
-}
-
-// DebugFind 按名称子串 (不区分大小写) 查找控件并返回详细信息。
-func (m *UIManager) DebugFind(substr string) string {
-	lower := strings.ToLower(substr)
-	var found []*UIControl
-	m.debugFindWalk(m.Root, lower, &found)
-	if m.Modal != nil {
-		m.debugFindWalk(m.Modal, lower, &found)
-	}
-	if len(found) == 0 {
-		return fmt.Sprintf("no control matching %q", substr)
-	}
-	var sb strings.Builder
-	for _, c := range found {
-		w, h := c.effectiveSize()
-		vis := "vis"
-		if !c.Visible {
-			vis = "HID"
-		}
-		fmt.Fprintf(&sb, "%s (%s) [%d,%d %dx%d] %s\n",
-			c.DebugPath(), c.Kind, c.AbsX(), c.AbsY(), w, h, vis)
-		fmt.Fprintf(&sb, "  rel=(%d,%d)%s\n", c.Left, c.Top, debugCallbacks(c))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-func (m *UIManager) debugFindWalk(c *UIControl, lower string, found *[]*UIControl) {
-	if strings.Contains(strings.ToLower(c.Name), lower) {
-		*found = append(*found, c)
-	}
-	for _, ch := range c.Children {
-		m.debugFindWalk(ch, lower, found)
-	}
-}
-
 // FindControl 按名称精确查找控件（不区分大小写），DFS 遍历整棵树含 Modal。
 func (m *UIManager) FindControl(name string) *UIControl {
 	var find func(c *UIControl) *UIControl
@@ -717,52 +667,6 @@ func (m *UIManager) DebugInspect(name string) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// DebugList 返回所有控件的平铺表格，可按 kind 过滤。
-func (m *UIManager) DebugList(kindFilter string) string {
-	var sb strings.Builder
-	sb.WriteString("  Name                 Kind     Abs(x,y)   Size     Vis\n")
-	sb.WriteString("  -------------------- -------- ---------- -------- ---\n")
-	var walk func(c *UIControl)
-	walk = func(c *UIControl) {
-		if kindFilter == "" || strings.EqualFold(c.Kind.String(), kindFilter) {
-			w, h := c.effectiveSize()
-			vis := "Y"
-			if !c.Visible {
-				vis = "N"
-			}
-			fmt.Fprintf(&sb, "  %-20s %-8s (%4d,%4d) %4dx%-4d %s\n",
-				c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, vis)
-		}
-		for _, ch := range c.Children {
-			walk(ch)
-		}
-	}
-	walk(m.Root)
-	if m.Modal != nil {
-		walk(m.Modal)
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
-
-// DebugHoverInfo 返回鼠标坐标处最顶层控件的简要信息。
-// ShowImageRects 开启时附带图片绘制矩形对照 (hit≠img 即命中/绘制错位)。
-func (m *UIManager) DebugHoverInfo(x, y int) string {
-	c := m.HoveredControl(x, y)
-	if c == nil {
-		return ""
-	}
-	w, h := c.effectiveSize()
-	s := fmt.Sprintf("%s (%s) abs=(%d,%d) %dx%d vis=%v",
-		c.Name, c.Kind, c.AbsX(), c.AbsY(), w, h, c.Visible)
-	if _, _, iw, ih, hotX, hotY, ok := c.imageRect(); ok {
-		s += fmt.Sprintf(" | img=%dx%d off=(%d,%d)", iw, ih, hotX, hotY)
-		if iw != w || ih != h || hotX != 0 || hotY != 0 {
-			s += " [hit≠img]"
-		}
-	}
-	return s
-}
-
 // HoveredControl 返回鼠标坐标处最顶层的可交互控件 (Button/Grid/EnableFocus)。
 func (m *UIManager) HoveredControl(x, y int) *UIControl {
 	var hits []*UIControl
@@ -777,35 +681,6 @@ func (m *UIManager) HoveredControl(x, y int) *UIControl {
 		}
 	}
 	return nil
-}
-
-// RenderInteractiveOverlay 在所有可见可交互控件上画类型着色边框。
-func (m *UIManager) RenderInteractiveOverlay(proj [16]float32) {
-	m.overlayWalk(m.Root, proj)
-	if m.Modal != nil && m.Modal.Visible {
-		m.overlayWalk(m.Modal, proj)
-	}
-}
-
-func (m *UIManager) overlayWalk(c *UIControl, proj [16]float32) {
-	if !c.Visible {
-		return
-	}
-	// 网格子格不画淡框: 父 KindGrid 的格子由网格容器代表, 逐个画框会在背包等密集区成团。
-	parentIsGrid := c.Parent != nil && c.Parent.Kind == KindGrid
-	if !c.Background && !parentIsGrid {
-		isInteractive := c.Kind == KindWindow || c.Kind == KindButton || c.Kind == KindGrid || c.EnableFocus
-		if isInteractive {
-			w, h := c.effectiveSize()
-			if w > 0 && h > 0 {
-				x, y := float32(c.AbsX()), float32(c.AbsY())
-				drawWireRect(m.gl, x, y, float32(w), float32(h), 0.2, 0.8, 0.2, 0.4, proj)
-			}
-		}
-	}
-	for _, ch := range c.Children {
-		m.overlayWalk(ch, proj)
-	}
 }
 
 func debugCallbacks(c *UIControl) string {
@@ -883,53 +758,44 @@ func (ctx *boundsCtx) walk(c *UIControl, proj [16]float32) {
 		return
 	}
 	if !c.Background {
-		w, h := c.effectiveSize()
-		if w > 0 && h > 0 {
-			var r, g, b float32
-			switch c.Kind {
-			case KindButton:
-				r, g, b = 0, 1, 0
-			case KindWindow:
-				r, g, b = 0.3, 0.6, 1
-			case KindGrid:
-				r, g, b = 1, 0.9, 0
-			default:
-				r, g, b = 0.7, 0.7, 0.7
-			}
-			x, y := float32(c.AbsX()), float32(c.AbsY())
-			drawWireRect(ctx.m.gl, x, y, float32(w), float32(h), r, g, b, 0.9, proj)
-			// 图片绘制矩形对照 (ui bounds img): 红=BlitImage 实际落图位,
-			// 橙=自定义绘制叠加 HotX/HotY 后的位置; 与绿框(命中)不重合即 bug 现场。
-			label := c.Name
-			if ctx.m.ShowImageRects {
-				if _, _, iw, ih, hotX, hotY, ok := c.imageRect(); ok {
-					fw, fh := float32(iw), float32(ih)
-					if iw != w || ih != h {
-						drawWireRect(ctx.m.gl, x, y, fw, fh, 1, 0.25, 0.25, 0.9, proj)
-					}
-					if hotX != 0 || hotY != 0 {
-						drawWireRect(ctx.m.gl, x+float32(hotX), y+float32(hotY), fw, fh, 1, 0.6, 0, 0.9, proj)
-					}
-					if iw != w || ih != h || hotX != 0 || hotY != 0 {
-						label = fmt.Sprintf("%s hit=%dx%d img=%dx%d off=(%d,%d)", c.Name, w, h, iw, ih, hotX, hotY)
-					}
-				}
-			}
-			parentIsGrid := c.Parent != nil && c.Parent.Kind == KindGrid
-			drawName := false
-			switch ctx.mode {
-			case 2:
-				drawName = !parentIsGrid
-			case 1:
-				drawName = ctx.hot[c]
-			}
-			if drawName {
-				ctx.drawLabel(label, x, y, float32(w), float32(h), r, g, b, proj)
-			}
-		}
+		ctx.drawOne(c, proj)
 	}
 	for _, ch := range c.Children {
 		ctx.walk(ch, proj)
+	}
+}
+
+// drawOne 绘制单个控件的类型着色包围盒, 名字密度由 mode 决定。
+func (ctx *boundsCtx) drawOne(c *UIControl, proj [16]float32) {
+	w, h := c.effectiveSize()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	x, y := float32(c.AbsX()), float32(c.AbsY())
+
+	var r, g, b float32
+	switch c.Kind {
+	case KindButton:
+		r, g, b = 0, 1, 0
+	case KindWindow:
+		r, g, b = 0.3, 0.6, 1
+	case KindGrid:
+		r, g, b = 1, 0.9, 0
+	default:
+		r, g, b = 0.7, 0.7, 0.7
+	}
+	drawWireRect(ctx.m.gl, x, y, float32(w), float32(h), r, g, b, 0.9, proj)
+
+	parentIsGrid := c.Parent != nil && c.Parent.Kind == KindGrid
+	drawName := false
+	switch ctx.mode {
+	case 2:
+		drawName = !parentIsGrid
+	case 1:
+		drawName = ctx.hot[c]
+	}
+	if drawName {
+		ctx.drawLabel(c.Name, x, y, float32(w), float32(h), r, g, b, proj)
 	}
 }
 

@@ -610,3 +610,51 @@ func TestStruckAnimation(t *testing.T) {
 		}
 	})
 }
+
+// ============================================================================
+// 入站 payload 分类测试
+// ============================================================================
+
+// TestClassifyPayloadEqPrefixStandardMsg 回归: '=' (0x3D) 在 6Bit 编码字符集
+// 内, 标准消息首字符可能恰为 '=' (Recog 低字节 ∈ 4..7, 如 SM_NEWMAP 的
+// Recog=x 坐标)。旧实现按首字符 '=' 一律当短消息丢弃, 导致 SM_NEWMAP
+// 丢失、进游戏黑屏。标准消息必须先按长度 (≥DefBlockSize) 判定。
+func TestClassifyPayloadEqPrefixStandardMsg(t *testing.T) {
+	for recog := int32(0); recog < 16; recog++ {
+		msg := protocol.MakeDefaultMsg(protocol.SMNewMap, recog, 13, 0, 0)
+		payload := protocol.EncodeMessage(msg) + protocol.EncodeString("0141")
+		e, ok := classifyPayload(payload)
+		if !ok {
+			t.Fatalf("Recog=%d: 标准消息被丢弃 (首字符 %q)", recog, payload[0])
+		}
+		if e.isCtrl {
+			t.Fatalf("Recog=%d: 标准消息被误判为控制消息", recog)
+		}
+		if e.msg.Ident != protocol.SMNewMap || e.msg.Recog != recog || e.msg.Param != 13 {
+			t.Fatalf("Recog=%d: 解码错误 %+v", recog, e.msg)
+		}
+		if e.body != "0141" {
+			t.Fatalf("Recog=%d: body=%q, want 0141", recog, e.body)
+		}
+	}
+	// 锚定 '=' 首字符场景确实存在 (Recog=6 → 首字符 '=')。
+	payload := protocol.EncodeMessage(protocol.MakeDefaultMsg(protocol.SMNewMap, 6, 13, 0, 0))
+	if payload[0] != '=' {
+		t.Fatalf("预期编码首字符 '=', 实际 %q", payload[0])
+	}
+}
+
+func TestClassifyPayloadControlAndShort(t *testing.T) {
+	if e, ok := classifyPayload("+GOOD"); !ok || !e.isCtrl || e.ctrl != "+GOOD" {
+		t.Fatal("+GOOD 应分类为控制消息")
+	}
+	if e, ok := classifyPayload("=DIG"); !ok || !e.isCtrl || e.ctrl != "=DIG" {
+		t.Fatal("=DIG 应分类为控制消息")
+	}
+	if _, ok := classifyPayload("=XX"); ok {
+		t.Fatal("未知 '=' 短消息应丢弃")
+	}
+	if _, ok := classifyPayload("noise"); ok {
+		t.Fatal("短噪声应丢弃")
+	}
+}

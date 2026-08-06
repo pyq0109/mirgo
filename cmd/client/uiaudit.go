@@ -48,7 +48,7 @@ var auditWhitelist = map[string]string{}
 // imageRect 返回带图控件的默认绘制矩形与图片偏移。
 // BlitImage 语义 (uimanager.go): 画在 AbsX/AbsY, 取图片自身宽高,
 // 不叠加 HotX/HotY; 而部分自定义 OnDirectPaint (如 uistate.go) 会
-// 叠加 HotX/HotY — 两者同时返回供审计与 overlay 对照。
+// 叠加 HotX/HotY — 两者同时返回供审计对照。
 func (c *UIControl) imageRect() (x, y, w, h, hotX, hotY int, ok bool) {
 	if c.WLib == nil {
 		return 0, 0, 0, 0, 0, 0, false
